@@ -80,6 +80,11 @@ IDs and issue names, so removing the extra selector parser preserves that API.
 
 ## Remaining
 
+- [October 8 demo](remote-task-demo.md): Jack Heart required the worktree-built
+  CLI. Five captured scenarios pass, including public issue-name adoption,
+  reuse and dirty-target preservation. SSH/providers are simulated; real-machine
+  acceptance and Jack's experiential judgment remain unobserved. The
+  [PR walkthrough](pr-review.html) pairs captured results with pinned source.
 - Gate owns affected suites and preservation checks with an existing target
   Workflow, Session history and legacy Task/PR IDs. Current fixtures preserve an
   origin legacy ID and reuse a newly adopted target; they do not exercise two
@@ -90,7 +95,7 @@ IDs and issue names, so removing the extra selector parser preserves that API.
   evidence. The code retains these boundaries; focused preservation proofs remain.
 - Real two-machine SSH acceptance remains unobserved. A capable gate/CI environment
   owns that check; simulated transport and providers establish no installed result.
-- Republish #1491 for Jack Heart's review after verification. No landing or later
-  remote-work slice is authorized.
+- PR #1491 is published at `0cd8e7f14`, matching the reviewed checkout on October 8.
+  Jack Heart's review remains; no landing or later remote-work slice is authorized.
 
 Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated `task_remote_tests` (5), `global_commands` (7 passed; 2 installation cases deferred to disposable-account CI), and `test_loopflow_skill_alignment.py` (4) pass; full affected suites and real SSH acceptance remain with gate.

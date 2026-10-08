@@ -1,0 +1,87 @@
+--- task_remote_tests.rs
++++ task_remote_demo_capture.rs
+@@ -94,6 +94,8 @@
+             target.path().join(".lf/loopflow.db"),
+         )))
+         .unwrap();
++    assert!(runtime.block_on(target_store.list_tasks(None)).unwrap().is_empty());
++    println!("BEFORE: target Tasks = 0; clone predates the implementation branch");
+     let account_home = target.path().join(".lf/accounts/claude/fixture");
+     fs::create_dir_all(&account_home).unwrap();
+     let credential = json!({"claudeAiOauth": {
+@@ -167,7 +169,7 @@
+         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+     }
+     let command = |args: &[&str]| {
+-        Command::new(env!("CARGO_BIN_EXE_lf"))
++        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+             .current_dir(repo.path())
+             .env_clear()
+             .env("HOME", origin_home.path())
+@@ -180,7 +182,11 @@
+             .env("GIT_CONFIG_GLOBAL", "/dev/null")
+             .args(args)
+             .output()
+-            .unwrap()
++            .unwrap();
++        println!("\n$ {} {}\nexit: {}\nstdout:\n{}\nstderr:\n{}",
++            env!("CARGO_BIN_EXE_lf"), args.join(" "), output.status,
++            String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
++        output
+     };
+     let added = command(&["machine", "add", "fixture", "--repo", "repo", "--json"]);
+     assert!(
+@@ -202,7 +208,7 @@
+         ])
+     };
+     for selector in ["fixture", machine["id"].as_str().unwrap()] {
+-        let output = invoke(selector, fixture.task.id.as_str());
++        let output = invoke(selector, "INF-123");
+         assert!(
+             output.status.success(),
+             "stdout: {}\nstderr: {}",
+@@ -241,6 +247,12 @@
+         Some(branch)
+     );
+ 
++    println!("AFTER TWO LAUNCHES: {}", json!({
++        "tasks": tasks.len(), "task_id": task.id, "source_legacy_id": fixture.task.id,
++        "checkout": task.worktree, "branch": branch, "head": repo.head_sha(),
++        "skill_observed": fs::read_to_string(target.path().join(".lf/seen-implementation")).unwrap(),
++        "skill_checkouts": seen, "prs": 1, "worktrees_including_main": 2
++    }));
+     // A later source commit must not reset a retained, dirty target checkout.
+     fs::write(task.worktree.join("local-notes"), "keep local work").unwrap();
+     let retained_head = loopflow::engine::git::rev_parse(&task.worktree, "HEAD").unwrap();
+@@ -263,6 +275,7 @@
+         fs::read_to_string(task.worktree.join("local-notes")).unwrap(),
+         "keep local work"
+     );
++    println!("PRESERVED AFTER REJECTION: HEAD = {}; local-notes = keep local work", retained_head);
+ }
+ 
+ #[test]
+@@ -328,6 +341,7 @@
+             .unwrap()
+             .unwrap();
+         assert_eq!(task.id, expected_id);
++        println!("COLD MACHINE {}: Task {} at {}; observed_at = {}", name, task.id, head, task.plan.pm_snapshot_synced_at);
+         assert_eq!(task.plan.pm_snapshot_synced_at, 1791360000);
+         assert_eq!(first.cwd, task.worktree);
+         assert_eq!(
+@@ -459,6 +473,7 @@
+             .to_string()
+     };
+     let dirty = invoke();
++    println!("SOURCE UNCOMMITTED (transport operation): {dirty}");
+     assert!(
+         dirty.contains(branch) && dirty.contains("uncommitted"),
+         "{dirty}"
+@@ -467,6 +482,7 @@
+     repo.commit("Unpushed implementation");
+     let head = repo.head_sha();
+     let missing = invoke();
++    println!("SOURCE UNPUSHED (transport operation): {missing}");
+     assert!(
+         missing.contains(branch) && missing.contains(&head),
+         "{missing}"

@@ -49,7 +49,11 @@ LOO-418's larger contract.
 
 ## Inventory and findings
 
-Inspected base: `626789dcd0382c6754ba3b7c61ea2448b57658ce`.
+Initial inventory: `626789dcd0382c6754ba3b7c61ea2448b57658ce`. Reconciled
+October 7 after integrating `35e759aaf`: #1492 supplies the FlowProcess API and
+`flow list --processes`; #1495 simplifies completion readiness and keeps
+terminal Task actions inert. The milestone preserves those changes. Ship still
+runs `gate → pr land -c`; neither waited landing nor follow-through exists yet.
 
 | Existing mechanism | Finding and treatment |
 | --- | --- |
@@ -341,7 +345,10 @@ graphs and their invocation binaries remain historical execution inputs; do not
 rewrite a running graph to remove an old flag. Newly compiled Flows and documented
 commands must use the new command contract.
 
-Delete together:
+### Delete — do not maintain (remaining lifecycle slices)
+
+These cuts belong to slices 2–4, beyond the current launch/alias milestone.
+Delete each predecessor with its consumer cutover:
 
 - `PrCommand::Next`, next-slug CLI fields, `AfterMerge` runtime branching,
   rotation-only helpers listed above, and serial-only tests/copy/fixtures.
@@ -395,8 +402,10 @@ implemented locally; slices 2–4 remain, apart from that alias.
 
 **Current milestone:** slice 1 and the `task complete` alias from slice 3,
 through focused verification and demo. The alias shares today's end operation;
-the stronger post-merge follow-through checks arrive with slice 3. Preserve the
-remaining scope below, and do not present the milestone as the complete Task.
+it still rejects dirty checkouts and unpublished commits. The empty research
+edge can retain dirty files, but committed findings still encounter the working
+PR placeholder. Optional PR placement arrives with slice 2; mandatory post-merge
+follow-through checks arrive with slice 3. This milestone is not the complete Task.
 Jack has not settled the remaining product choices under Remaining review
 boundary; this milestone does not require them.
 
@@ -418,8 +427,8 @@ boundary; this milestone does not require them.
 3. **Finish delivery through linked Tasks.** Replace keep-open obligations,
    implement durable filing/retry and due-date projection, update land waiting,
    ship/finish Flows, operator guidance and shared pending/done presentation.
-   Restore `task complete` as the end-move alias, used by follow-through and the
-   Task operator; keep the existing completion operation as the single owner.
+   Use the restored `task complete` alias from follow-through and the Task
+   operator; extend the shared end checks without restoring execution blockers.
    A stopped post-land Flow must be finishable without rerunning delivery.
 4. **Carry design into dependent work.** Add explicit checkout handoff and
    update decomposition guidance. Exercise two children with distinct designs,
@@ -474,8 +483,14 @@ rows and shared membership predicates, avoiding a scan of all Process history
 for each Task. Completion adds no authority or state. The suspected combined
 `--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
 no extra guard remains. Fixture corrections selected an authored workflow edge,
-used `flow list --sessions`, and decoded the actual flattened inventory DTO.
+used `flow list --processes`, and decoded the actual flattened inventory DTO.
 Full lifecycle checks remain with later slices and gate; rendered judgment is
 the demo boundary.
 
-Check (2026-10-07): `cargo test -p loopflow --test task_flow_launch_tests` 17 passed; focused store/graph/CLI tests 14 passed; `cargo test -p loopflow --test documented_commands` 3 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `uv run python scripts/check_architecture.py` passed. Gate owns the affected suite plan; demo owns Jack's review.
+Compression keeps placement as a returned binding and the driver as the sole
+holder of its Task during execution. Flow registration takes its name from the
+captured graph, removing a second input that could disagree. Historical fixtures
+retain their test-only Started writer because they distinguish retained Flow
+history from admission; production writes Flow and Started together.
+
+Check (2026-10-07): `cargo test -p loopflow --test task_flow_launch_tests` 19 passed; `cargo test -p loopflow --lib store::sqlite::flow_inventory` 2 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Earlier post-sync `cargo test -p loopflow --lib task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership` passed (1 test); pre-sync graph/CLI/docs/architecture checks remain at `a7492b78e:scratch/make-a-task-up-to.md`. Realign: `git diff --check` passed; `lf context --skill realign` fits all limits (memory 15,999/16,000 tokens); no code changed or tests rerun. Gate owns affected suites; demo owns Jack's review.

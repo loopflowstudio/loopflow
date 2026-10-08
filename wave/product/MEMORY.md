@@ -60,6 +60,13 @@ per request. Current placements copy inheritance once; delegation is unimplement
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
+October 7: `task_checkouts` takes its Machine from `work_placements`; inheritance
+changes would falsely move existing execution. Separate delegation from observed
+location. WorkRef lacks a repository root. LOO-412 (`0cd8e7f14`) retains independent
+Workflows/legacy IDs; LOO-406 excludes synchronization. Jack's Git leaning and
+Linear-owned plans (`f929c7f5`, `25b3eede`) leave the shared-source contract open.
+LOO-427 remains unimplemented pending reconciliation.
+
 ## Live Home reconciliation (2026-10-05)
 
 Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
@@ -949,16 +956,10 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
   reads. A view that builds its own model reopens the blocking path.
 - Jack's delivery contract (2026-10-04): land on autonomous checks and honest
   benchmark evidence; rendered startup is post-merge validation, not a gate.
-- Receipts: `scripts/benchmarks/desktop-performance/`. First frame went
-  850 → 617 ms under heavy load (20261005-first-render). Profile before
-  guessing: the cost was getters re-normalizing paths per render, not drawing.
-- A benchmark that reopens one bundle hides the launch Jack gets. Both recorded
-  real launches were first runs of a new version: 625–790 ms before `main`.
-  20261005-first-launch: the system charges a new binary about 390 ms, partly
-  by file size, so no post-update launch meets 400 ms through app work.
-  Stripping local symbols saves 40–100 ms but unnames crash-report frames;
-  shipping it with a retained dSYM is Jack's open choice. Reopened: 430 ms
-  first frame (4 samples, loaded host).
+- Measurements: `77c9f9273:wave/product/MEMORY.md`, this heading, and
+  `scripts/benchmarks/desktop-performance/`. Path normalization dominated drawing;
+  reopening hid first-update launch cost. Stripping with a retained dSYM remains
+  Jack's open choice; its measured gain traded away crash-frame names.
 - October 7: Jack retired LOO-376's performance acceptance; LOO-408 owns its
   installed settlement. Prior cold-cache/refresh and duplicate-read observations
   remain evidence, not new optimization obligations.

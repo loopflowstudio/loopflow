@@ -8,7 +8,7 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use crate::engine::config::{default_agent, parse_agent};
 use crate::engine::error::CoreError;
 use crate::engine::platform::kill_process;
+use crate::engine::process::wait_for_exit;
 use crate::engine::stream::{format_event, ParseResult, StreamFormat, StreamParser};
 use crate::engine::structured_reply::{render_structured_reply_guidance, StructuredReply};
 use crate::provider_account::{
@@ -1828,6 +1829,15 @@ fn _run_agent_once(
     tracing::debug!(program, "spawning agent command");
 
     let mut cmd = Command::new(program);
+    for name in EXECUTION_IDENTITY_ENV {
+        cmd.env_remove(name);
+    }
+    cmd.envs(&launch.env);
+    let title = if process.auto {
+        None
+    } else {
+        crate::engine::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
+    };
     cmd.args(args);
     if harness == "claude" && process.auto {
         // Claude's text stdin carries large assembled context without
@@ -1874,16 +1884,11 @@ fn _run_agent_once(
         cmd.current_dir(cwd);
     }
 
-    let scoped_env = launch.env.clone();
     let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_process(cwd, &scoped_env)
+        crate::ops::git_operation::prepare_agent_process(cwd, &launch.env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    for name in EXECUTION_IDENTITY_ENV {
-        cmd.env_remove(name);
-    }
-    cmd.envs(&scoped_env);
     cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
@@ -1977,7 +1982,7 @@ fn _run_agent_once(
         run_batch(&mut cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(&mut cmd, process.timeout, capture, activation)
+        run_interactive(&mut cmd, process.timeout, capture, activation, title)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2073,7 +2078,7 @@ fn run_batch(
         Ok(bytes)
     });
 
-    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
+    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -2124,6 +2129,7 @@ fn run_interactive(
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
+    mut title: Option<crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let mut child = spawn_agent_child(cmd, capture, activation)?;
@@ -2132,7 +2138,11 @@ fn run_interactive(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
-    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
+    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
+        if let Some(title) = title.as_mut() {
+            title.refresh();
+        }
+    })?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -2307,26 +2317,6 @@ fn run_streaming(
         provider_session_id: None,
         failure: None,
     })
-}
-
-fn wait_for_exit(
-    child: &mut Child,
-    timeout: Option<Duration>,
-) -> Result<(ExitStatus, bool), CoreError> {
-    let timeout_at = timeout.map(|value| Instant::now() + value);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return Ok((status, false));
-        }
-
-        if timeout_at.is_some_and(|value| Instant::now() >= value) {
-            let _ = child.kill();
-            let status = child.wait()?;
-            return Ok((status, true));
-        }
-
-        thread::sleep(Duration::from_millis(50));
-    }
 }
 
 fn format_timeout(timeout: Option<Duration>) -> String {

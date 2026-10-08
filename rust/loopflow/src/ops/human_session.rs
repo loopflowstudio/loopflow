@@ -995,7 +995,7 @@ pub(crate) async fn rename(
     let session = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::session_record::validate_session_title(title)
+    let title = crate::engine::naming::validate_session_title(title)
         .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,

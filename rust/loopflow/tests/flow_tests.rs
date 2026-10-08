@@ -1000,6 +1000,27 @@ fn authored_flow_records_each_skill_as_one_session() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
+    let sessions = lf_json(
+        repo.path(),
+        home.path(),
+        &[
+            "session",
+            "list",
+            "--all",
+            "--interactive",
+            "false",
+            "--history",
+            "--json",
+        ],
+    );
+    let mut titles = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|session| session["title"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    titles.sort_unstable();
+    assert_eq!(titles, ["compress", "implement"]);
 }
 
 #[test]

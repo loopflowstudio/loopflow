@@ -669,6 +669,14 @@ fn session_command_status_with_env(
         .flatten();
 
     let mut process = Command::new(&command.program);
+    process
+        .env_remove("LOOPFLOW_DIRECTIVE_FILE")
+        .envs(environment);
+    let mut title = crate::engine::terminal_title::TerminalTitle::prepare(
+        environment,
+        &command.program,
+        &mut process,
+    );
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
@@ -679,10 +687,7 @@ fn session_command_status_with_env(
         process.args(["--print-logs", "--log-level", "INFO"]);
         process.stderr(Stdio::piped());
     }
-    process
-        .current_dir(&command.cwd)
-        .env_remove("LOOPFLOW_DIRECTIVE_FILE")
-        .envs(environment);
+    process.current_dir(&command.cwd);
     crate::provider_auth::apply_provider_env_to_command(&command.program, &mut process);
     let mut activation = None;
     if let Some(route) = &account_route {
@@ -774,7 +779,11 @@ fn session_command_status_with_env(
             .expect("piped OpenCode stderr is available");
         std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
-    let status = child.wait()?;
+    let status = if let Some(title) = &mut title {
+        crate::engine::process::wait_for_exit(&mut child, None, || title.refresh())?.0
+    } else {
+        child.wait()?
+    };
     if let Some((store, session, driver)) = &owned {
         store.record_native_provider_exit(session, driver, true)?;
     }

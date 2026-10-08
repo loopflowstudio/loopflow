@@ -1,0 +1,46 @@
+{
+  "upstream": "https://github.com/herdrdev/herdr",
+  "revision": "4dc23bb15d4a2fd2c093abfb509f903c3015bf56",
+  "binary_sha256": "7a294cc0d6ac7f62d700408ca20431fc466879d7f96c0dd71c472cf7a8151f26",
+  "command": [
+    "cargo",
+    "build",
+    "--locked",
+    "--release",
+    "--bin",
+    "herdr",
+    "-j",
+    "4"
+  ],
+  "attempts": [
+    {
+      "id": "build.json",
+      "revision": "4dc23bb15d4a2fd2c093abfb509f903c3015bf56",
+      "build_seconds": 26.177,
+      "returncode": 101
+    },
+    {
+      "id": "build-zig016.json",
+      "revision": "4dc23bb15d4a2fd2c093abfb509f903c3015bf56",
+      "zig": "0.16.0",
+      "build_seconds": 600.009,
+      "returncode": 124
+    },
+    {
+      "id": "build-continued.json",
+      "revision": "4dc23bb15d4a2fd2c093abfb509f903c3015bf56",
+      "zig": "0.16.0",
+      "build_seconds": 148.504,
+      "returncode": 0
+    }
+  ],
+  "zig_url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+  "zig_archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+  "notes": [
+    "First attempt used incompatible Zig 0.15.2.",
+    "Zig archive transfer initially ended short; resumed transfer matched pinned SHA256.",
+    "600-second timeout retained. Owned remaining compiler processes stopped.",
+    "Continued same source/cache under an 1800-second bound, adding compiler diagnostics. Observed dependency connections/cache growth; dependency fetching inferred to contribute to delay.",
+    "Success at 148.504 seconds. No integrations installed, provider tests run or host source incorporated."
+  ]
+}

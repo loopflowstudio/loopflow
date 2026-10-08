@@ -48,6 +48,9 @@ and landing. Transfer over stdin only to added machines. Preserve received login
 across registration failure; remote preferences cannot relax selected identity.
 Retain the encryption key atomically in a private file. An unreadable Keychain
 permits a new key only without existing encrypted tokens.
+LOO-411's `72f062211` selector is integrated. Reuse local argument reordering
+before remote account selection: flags after a skill otherwise bypass the
+restriction. Preserve `--` prompt literals and target-owned command resolution.
 Independent refresh chains, one-approval login, rebooted Mac
 access and installed acceptance remain unproved; fixtures cannot establish them.
 

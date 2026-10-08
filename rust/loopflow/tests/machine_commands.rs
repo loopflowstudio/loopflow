@@ -478,42 +478,58 @@ esac
         "--account=other@",
         "--shared",
     ];
-    let output = fixture.run(&args);
-    assert_success(&output);
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let selection = stdout
-        .lines()
-        .find_map(|line| line.strip_prefix("selection: "))
+    let after_skill = [
+        "--machine",
+        "mini",
+        "implement",
+        "--account",
+        "codex=person@",
+        "--shared",
+        "--",
+        "--account=other@",
+        "--shared",
+    ];
+    for args in [args.as_slice(), after_skill.as_slice()] {
+        fs::write(remote.join("connected"), "true").unwrap();
+        let output = fixture.run(args);
+        assert_success(&output);
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let selection = stdout
+            .lines()
+            .find_map(|line| line.strip_prefix("selection: "))
+            .unwrap();
+        let selection: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(selection)
+                .unwrap(),
+        )
         .unwrap();
-    let selection: Value = serde_json::from_slice(
-        &base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(selection)
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        selection,
-        serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
-    );
-    assert!(stdout.contains("isolation: isolated\n"), "{stdout}");
-    assert!(stdout.contains("argument: --isolate\n"), "{stdout}");
-    assert!(
-        stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
-        "{stdout}"
-    );
-    assert!(!stdout.contains("argument: codex=person@"), "{stdout}");
+        assert_eq!(
+            selection,
+            serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
+        );
+        assert!(stdout.contains("isolation: isolated\n"), "{stdout}");
+        assert!(stdout.contains("argument: --isolate\n"), "{stdout}");
+        assert!(
+            stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
+            "{stdout}"
+        );
+        assert!(!stdout.contains("argument: codex=person@"), "{stdout}");
 
-    fs::write(remote.join("connected"), "false").unwrap();
-    let output = fixture.run(&args);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("foreground terminal"), "{stderr}");
-    assert!(stderr.contains("lf machine connect"), "{stderr}");
+        fs::write(remote.join("connected"), "false").unwrap();
+        let output = fixture.run(args);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("foreground terminal"), "{stderr}");
+        assert!(stderr.contains("lf machine connect"), "{stderr}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("argument:"));
+    }
 }
 
 #[test]
 fn transport_options_require_machine_and_retired_commands_are_gone() {
     let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
     for args in [
         vec!["--secret", "EXAMPLE", "status"],
         vec!["--machine", "mini", "--secret", "EXAMPLE", "status"],
@@ -521,7 +537,12 @@ fn transport_options_require_machine_and_retired_commands_are_gone() {
         vec!["machine", "ssh", "mini", "status"],
         vec!["ssh", "mini", "status"],
     ] {
-        assert!(!fixture.run(&args).status.success(), "{args:?}");
+        let output = fixture.run(&args);
+        assert!(!output.status.success(), "{args:?}");
+        if args.contains(&"--secret") {
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains("unexpected argument '--secret'"), "{error}");
+        }
     }
     let help = fixture.run(&["--help"]);
     assert_success(&help);

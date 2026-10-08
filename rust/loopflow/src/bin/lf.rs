@@ -1286,13 +1286,14 @@ fn run() -> anyhow::Result<()> {
             .expect("failed to set Ctrl+C handler");
         journal::admit_process(&std::env::current_dir()?, &raw_args);
         loopflow::lf::commands::machine::validate_expected_machine_process()?;
+        let command = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         return loopflow::lf::commands::ssh::run(
             remote
                 .machine
                 .as_deref()
                 .expect("remote invocation has a machine"),
             remote.forward_agent,
-            &command,
+            &command[1..],
         );
     }
 

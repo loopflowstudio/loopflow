@@ -26,12 +26,13 @@ lf task comment <id> "Keep quoted input"
 lf checkout <id>
 ```
 
-Explicit creation without a Wave provisions `personal:inbox` and its Project.
-Personal plans bind a canonical repository in SQLite. Their Waves, nested definitions,
-goals, memory, workflows and comments remain there; reads provision nothing and no
-personal definition is written into the code checkout. Explicitly connected Waves
-retain Linear authority and repository-owned definitions. Authority follows stored
-Wave ownership, never the presence of an external alias.
+LOO-406 is replacing split planning ownership with one local plan and optional
+repository-wide Linear synchronization. The remaining Wave path still provisions
+`personal:inbox` for creation without a Wave. Personal Wave definitions live in
+SQLite; other Wave definitions remain repository-owned. Membership, rotation,
+deletion and refiling still branch on stored Wave ownership. These are unfinished
+cutover paths; Task and Project creation/editing already share local writers.
+Reads provision nothing, and personal definitions do not write the code checkout.
 
 Task and Project rows own identity for both paths. Random UUIDs are minted before
 placement; provider UUIDs and ticket aliases remain optional mappings. Accepted

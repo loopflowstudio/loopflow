@@ -41,7 +41,6 @@ at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updat
 Extra reads and matching readback cannot prove preserved concurrent changes.
 October 8's iteration direction authorizes the ownership cut and provider-guarantee
 investigation. Weakening preservation or automatic propagation remains unselected.
-The schema accepts UUIDs for issue/Project creation.
 
 `b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
 local creates one retry-stable UUID without overwriting the provider comment or
@@ -62,12 +61,12 @@ and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project sele
 Original input/Project, foreign-key owners, pending values, first conflicts and
 retry identity survive; provider-first creation/edit is deleted.
 
-`764e90ae3` shares Project creation/binding/activation without provider I/O.
-Creation/selection and original name commit together; reservations retain UUIDs
-and mappings. Status receipts preserve conflicts/later edits. Binding/import resolve exact IDs in SQLite. Workflow selection owns definitions;
-unchanged saves retain receipts/revisions. Terminal/invalid facts cannot replace selection.
-Active Workflow state proves started work for rotation without inventing Started.
-Offline proofs establish no delivery.
+`764e90ae3` shares Project creation/binding/activation: atomic name/selection,
+retained UUIDs/mappings and status conflicts/later edits. `6570ee0f7` centralizes
+exact-ID binding/import. Workflow selection owns definitions; unchanged saves retain
+receipts/revisions. Terminal/invalid facts retain selection. Active Workflow proves
+started work without inventing Started. Reusing resolved Task identity fixes duplicate
+unmapped rows; Work and plan share abbreviation SQL. Offline proofs establish no delivery.
 
 Wave schema/provisioning/definitions, membership, rotation and deletion/refiling
 still block LOO-412's coherent boundary. Export, safe field delivery/resolution,

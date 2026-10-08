@@ -619,3 +619,5 @@ or Swift code. Publication preparation adds the composed recovery regression and
 architecture map; production behavior is unchanged.
 
 Check (2026-10-08): `uv run python scripts/test.py --rust --swift --loopflow --e2e` — PASS, six suites (2,293 Rust tests, 402 headless Swift tests, 76 website tests, CLI smoke, app/UI-runner build; 17 ignored Rust tests); `uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history` — PASS, disposable Linux migration and adoption; mixed rotation's ten failure points passed in the matrix; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. Optional display diagnostics and live/installed acceptance are not claimed.
+
+Sync check (2026-10-08): merged main at `f72bc3ab9`; retained resident machine credentials and concrete Linear APIs, restoring `viewer_id` for the new machine-login caller. `cargo test -p loopflow --lib -- ops::pm::oauth_tests lf::commands::ssh::tests linear_retains_an_independent_encrypted_refresh_grant` — PASS (21 passed, one intentionally ignored tracing entry point); `cargo fmt` — PASS.

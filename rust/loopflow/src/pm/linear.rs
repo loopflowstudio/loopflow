@@ -326,6 +326,12 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
   }
 }"#;
 
+const VIEWER_QUERY: &str = r#"query Viewer {
+  viewer {
+    id
+  }
+}"#;
+
 const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $body: String!) {
   commentUpdate(id: $id, input: { body: $body }) {
     comment {
@@ -1623,6 +1629,12 @@ impl LinearClient {
         Ok(())
     }
 
+    /// Identify the authenticated Linear user for machine login transfers.
+    pub async fn viewer_id(&self) -> PmResult<String> {
+        let response: ViewerData = self.graphql(VIEWER_QUERY, json!({})).await?;
+        Ok(response.viewer.id)
+    }
+
     /// Read one issue's title, description, comments, and revision marker.
     pub async fn observe_issue(&self, issue_id: &str) -> PmResult<IssueObservation> {
         let response: IssueObservationData = self
@@ -1809,6 +1821,11 @@ struct AttachmentPayload {
 #[derive(Deserialize)]
 struct IdNode {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct ViewerData {
+    viewer: IdNode,
 }
 
 #[derive(Deserialize)]

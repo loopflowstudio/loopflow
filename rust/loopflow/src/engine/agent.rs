@@ -1828,6 +1828,15 @@ fn _run_agent_once(
     tracing::debug!(program, args = ?args, "spawning agent command");
 
     let mut cmd = Command::new(program);
+    for name in EXECUTION_IDENTITY_ENV {
+        cmd.env_remove(name);
+    }
+    cmd.envs(&launch.env);
+    let mut title = (!process.auto)
+        .then(|| {
+            crate::engine::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
+        })
+        .flatten();
     cmd.args(args);
     if harness == "claude" && process.auto {
         // Claude's text stdin carries large assembled context without
@@ -1880,10 +1889,6 @@ fn _run_agent_once(
         crate::ops::git_operation::prepare_agent_process(cwd, &scoped_env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
-    for name in EXECUTION_IDENTITY_ENV {
-        cmd.env_remove(name);
-    }
-    cmd.envs(&scoped_env);
     cmd.env_remove(crate::engine::process::DISCORD_TOKEN_ENV);
 
     // Shell integration sets LOOPFLOW_DIRECTIVE_FILE so top-level `lf` commands
@@ -1977,7 +1982,13 @@ fn _run_agent_once(
         run_batch(&mut cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(&mut cmd, process.timeout, capture, activation)
+        run_interactive(
+            &mut cmd,
+            process.timeout,
+            capture,
+            activation,
+            title.as_mut(),
+        )
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2073,7 +2084,7 @@ fn run_batch(
         Ok(bytes)
     });
 
-    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
+    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -2124,6 +2135,7 @@ fn run_interactive(
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
+    mut title: Option<&mut crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let mut child = spawn_agent_child(cmd, capture, activation)?;
@@ -2132,7 +2144,11 @@ fn run_interactive(
         elapsed_ms = start.elapsed().as_millis(),
         "agent spawned (interactive)"
     );
-    let (status, timed_out) = wait_for_exit(&mut child, timeout)?;
+    let (status, timed_out) = wait_for_exit(&mut child, timeout, || {
+        if let Some(title) = title.as_mut() {
+            title.refresh();
+        }
+    })?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -2312,6 +2328,7 @@ fn run_streaming(
 fn wait_for_exit(
     child: &mut Child,
     timeout: Option<Duration>,
+    mut on_tick: impl FnMut(),
 ) -> Result<(ExitStatus, bool), CoreError> {
     let timeout_at = timeout.map(|value| Instant::now() + value);
     loop {
@@ -2325,6 +2342,7 @@ fn wait_for_exit(
             return Ok((status, true));
         }
 
+        on_tick();
         thread::sleep(Duration::from_millis(50));
     }
 }

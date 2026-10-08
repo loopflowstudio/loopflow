@@ -1,5 +1,15 @@
 # infrastructure wave memory
 
+## Session titles (LOO-439, 2026-10-08)
+
+Jack Heart authorized work through demo, without provider accounts or driving his
+cmux windows; no landing. The cmux 0.65.0 CLI denied this non-cmux process access,
+so no workspace was created. LOO-429's system-file change is already on main.
+Cover native Session launch/reconnect and `run_agent`. Initialize OSC before output;
+cmux renames
+use its control channel. Plain-native naming and visible host agreement remain
+unproved; prompt guidance cannot guarantee them. Plan: `scratch/every-lf-session-in-cmux.md`.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
@@ -188,21 +198,12 @@ can establish old-provider death. No successful continuation is claimed.
 
 ## Release follow-through (reconciled 2026-10-05)
 
-Jack Heart directed Infrastructure to take responsibility for finishing every
-release. Release owns the release-specific execution and evidence; Infrastructure
-retains responsibility through verified publication and installed acceptance.
-A merged bump or queued build is not completion.
-Resume interrupted releases through the supported release operation, preserve
-exact publication evidence, and surface any unresolved blocker and next action
-without requiring Jack to rediscover the gap. Keep progress updates in the
-ongoing conversation while recovery is active.
-
-Release memory records v0.13.5 publication and installation on October 6,
-including historical-Exec acceptance, boot-witness recovery and PR-base repair.
-The normal installed release controller completed publication, then installation
-recognized the existing database without migration. Manual release success
-establishes neither a scheduled receipt nor two unattended settlements. Exact
-release evidence belongs in [Release memory](release/MEMORY.md).
+Jack Heart assigned Infrastructure responsibility through verified publication and
+installed acceptance. Release owns execution/evidence; recover through its supported
+operation and report blockers/next actions in the ongoing conversation. Merge or a
+queued build is unfinished. Manual publication proves no unattended settlement.
+Exact v0.13.5 installation/recovery evidence: [Release memory](release/MEMORY.md);
+prior parent account: `86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
@@ -930,14 +931,11 @@ commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart closed LOO-292 on actual machine evidence: published 0.13.0 preserved
-its Home; isolated Ubuntu repaired a missing entry; checkout sync preserved caller
-bytes. Details: `32607f1d2:wave/infrastructure/MEMORY.md` under this heading and
-`6448e3c9e` there. Install owns artifacts, sync owns checkouts. Cadence is opt-in
-login plus Monday 09:00 local, with daily/hourly/5min options. No Monday firing,
-sleep-coalesced wake or interactive app acceptance was proved. Redundant download
-under load remains unexplained; reload stopped it without damaging installation.
-Reinstall does not heal a hand-truncated entry gate.
+Jack Heart closed LOO-292 on machine evidence; exact proofs and cadence:
+`86d0e5e6a2:wave/infrastructure/MEMORY.md`, this heading. Install owns artifacts,
+sync owns checkouts. Monday firing, coalesced wake and app acceptance remain
+unproved. Redundant download under load remains unexplained; reload stopped it
+without damage. Reinstall does not heal a truncated entry gate.
 
 ## Shipped history
 

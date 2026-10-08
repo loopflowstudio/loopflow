@@ -797,6 +797,224 @@ fn session_names_are_shared_and_human_names_win() {
 
 #[cfg(unix)]
 #[test]
+fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts() {
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    for (provider, host) in [
+        ("claude", "cmux"),
+        ("codex", "cmux"),
+        ("claude", "absent"),
+        ("codex", "failure"),
+        ("claude", "timeout"),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let (id, _, _) = prepare_conversation(home.path(), home.path(), provider, "Plan store");
+        let native = uuid::Uuid::new_v4().to_string();
+        let transcript = if provider == "codex" {
+            home.path()
+                .join("codex/sessions")
+                .join(format!("rollout-{native}.jsonl"))
+        } else {
+            home.path()
+                .join("claude/projects/test")
+                .join(format!("{native}.jsonl"))
+        };
+        fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        fs::write(
+            transcript,
+            serde_json::json!({"cwd": home.path()}).to_string(),
+        )
+        .unwrap();
+        let inspect = |args: &[&str]| {
+            let output = command(home.path(), args)
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("RUST_LOG", "off")
+                .env("HOME", home.path())
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .env("CODEX_HOME", home.path().join("codex"))
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{provider}/{host}: {output:?}");
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        let write_script = |name: &str, script: &str| {
+            let path = bin.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write_script(
+            provider,
+            r#"#!/bin/sh
+printf '%s\n' "$@" > "$LF_HOME/args"
+printf '%s' "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" > "$LF_HOME/title-disabled"
+touch "$LF_HOME/ready"
+IFS= read -r answer
+printf 'latest agent message: %s\n' "$answer"
+"#,
+        );
+        write_script(
+            "cmux",
+            r#"#!/bin/sh
+case "$TITLE_HOST" in failure) exit 2;; timeout) exec /bin/sleep 10;; esac
+kind=$1
+shift
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --workspace) [ "$2" = fixture-workspace ] || exit 3; shift 2;;
+        --surface) [ "$2" = fixture-surface ] || exit 4; shift 2;;
+        --) shift; break;;
+        *) exit 5;;
+    esac
+done
+printf '%s' "$1" > "$LF_HOME/$kind.tmp"
+mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
+"#,
+        );
+
+        for expected in ["Plan store", "Release notes"] {
+            let mut master = -1;
+            let mut slave = -1;
+            // SAFETY: valid output pointers, null selects default PTY settings.
+            assert_eq!(
+                unsafe {
+                    libc::openpty(
+                        &mut master,
+                        &mut slave,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            // SAFETY: openpty returned two independently owned descriptors.
+            let mut master = unsafe { fs::File::from_raw_fd(master) };
+            // SAFETY: the fresh slave descriptor is owned only by this File.
+            let slave = unsafe { fs::File::from_raw_fd(slave) };
+            let mut launch = Command::new(env!("CARGO_BIN_EXE_lf"));
+            launch
+                .env_clear()
+                .args(["session", "connect", &id])
+                .current_dir(home.path())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("HOME", home.path())
+                .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .env("CODEX_HOME", home.path().join("codex"))
+                .env("RUST_LOG", "off")
+                .env("TITLE_HOST", host)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::from(slave));
+            if host != "absent" {
+                launch
+                    .env("CMUX_WORKSPACE_ID", "fixture-workspace")
+                    .env("CMUX_SURFACE_ID", "fixture-surface");
+            }
+            let _ = fs::remove_file(home.path().join("ready"));
+            let mut child = launch.spawn().unwrap();
+            drop(launch);
+            let output_reader = std::thread::spawn(move || {
+                let mut output = Vec::new();
+                // Linux reports EIO when the last PTY slave closes; retain bytes.
+                let _ = master.read_to_end(&mut output);
+                String::from_utf8_lossy(&output).into_owned()
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !home.path().join("ready").exists()
+                && Instant::now() < deadline
+                && child.try_wait().unwrap().is_none()
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let started = home.path().join("ready").exists();
+            if !started {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "{provider}/{host} failed to start: {}",
+                    output_reader.join().unwrap()
+                );
+            }
+            let args = fs::read_to_string(home.path().join("args")).unwrap();
+            if provider == "claude" {
+                assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
+                assert_eq!(
+                    fs::read_to_string(home.path().join("title-disabled")).unwrap(),
+                    "1"
+                );
+            } else {
+                assert!(args.contains("tui.terminal_title=[]"), "{args}");
+            }
+            if expected == "Plan store" {
+                let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
+                assert_eq!(renamed["title"], "Release notes");
+            } else {
+                assert!(
+                    args.lines().any(|arg| matches!(arg, "resume" | "--resume")),
+                    "{args}"
+                );
+            }
+            let host_named = || {
+                ["rename-workspace", "rename-tab"].iter().all(|path| {
+                    fs::read_to_string(home.path().join(path)).unwrap_or_default()
+                        == "Release notes"
+                })
+            };
+            if host == "cmux" {
+                while !host_named() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            if expected == "Plan store" {
+                let store =
+                    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+                        .unwrap();
+                let input = store.session(&id).unwrap().unwrap().artifact_key;
+                record_native(home.path(), &id, &input, &native);
+            }
+            child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+            let result = child.wait_with_output().unwrap();
+            let terminal = output_reader.join().unwrap();
+            assert!(result.status.success(), "{provider}/{host}: {terminal}");
+            assert!(
+                terminal.contains(&format!("\x1b]0;{expected}\x07")),
+                "{terminal:?}"
+            );
+            assert_eq!(
+                terminal.matches("\x1b]0;").count(),
+                1,
+                "no OSC writer alongside native output"
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("latest agent message: done"));
+            assert!(host != "cmux" || host_named());
+            let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
+            assert_eq!(
+                listed
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == id)
+                    .unwrap()["title"],
+                "Release notes"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn session_names_survive_capture_replacement() {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;

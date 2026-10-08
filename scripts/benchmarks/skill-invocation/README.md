@@ -69,9 +69,11 @@ decoded events directly. Run the offline checks with
 
 On 2026-10-07, Codex 0.160.1 and Claude 2.1.293 passed these transport checks.
 **This is not a fidelity pass:** Claude records `hook_additional_context` with
-`renderedRole: "system"`. This contradicts the design's requirement to keep
-repository reference material out of system instructions. The output retains
-that role rather than treating marker delivery as sufficient. Cross-session hook
+`renderedRole: "system"`. This rendering field does not establish the role sent
+to the model. [Claude's glossary](https://code.claude.com/docs/en/glossary#system-reminder)
+describes reminders inside user messages or, for some models, system-role messages.
+The earlier claim of a proven authority conflict is withdrawn; preserving
+user-level reference authority still needs request-mapping evidence. Cross-session hook
 isolation, active-turn steering, GUI handoff, third-party controls and Loopflow's
 own capture/dispatch remain unproved. The probe does not use Codex's experimental
 `additionalContext` field; its context is a separate user text block.

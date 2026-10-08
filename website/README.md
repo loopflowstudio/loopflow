@@ -2,7 +2,7 @@
 
 ```bash
 uv run python dev.py serve
-uv run pytest tests/
+uv run python dev.py test
 ```
 
 Run from `website/`. Preview at `http://localhost:5001`.
@@ -12,9 +12,9 @@ ownership strip, terminal Flow, organizing rows, Mac capture, purpose, and insta
 `static/style.css` controls their layout. Homepage navigation points to each section;
 Flows navigation on other pages returns to `/#flows`.
 
-The terminal capture uses `static/cmux-flow.png`. Its space and reference remain
-when the image has not yet been supplied. The Mac capture is `static/wave-surface.png`;
-its adjacent JSON file retains capture provenance. Both images reserve their dimensions.
+The terminal section ships without a capture. The Mac capture is
+`static/wave-surface.png`; its adjacent JSON file retains capture provenance,
+and the image reserves its dimensions.
 
 Edit documentation in the repository's `docs/` directory. The dev commands
 sync it into the website; `website/docs/` is generated.

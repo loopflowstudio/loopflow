@@ -139,8 +139,13 @@ class TestMobileHeroSection:
 class TestMobileTouchTargets:
     """Test touch targets meet accessibility guidelines."""
 
-    def test_buttons_touch_target_size(self, mobile_page: Page):
+    @pytest.mark.parametrize(
+        "font_family", [None, "Arial, sans-serif"], ids=["default", "fallback"]
+    )
+    def test_buttons_touch_target_size(self, mobile_page: Page, font_family: str | None) -> None:
         """Buttons should be at least 44x44px for touch."""
+        if font_family:
+            mobile_page.add_style_tag(content=f".home-page {{ font-family: {font_family}; }}")
         buttons = mobile_page.locator("a.button, a.btn, button")
         count = buttons.count()
 

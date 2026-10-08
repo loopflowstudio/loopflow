@@ -202,9 +202,11 @@ animation, Discord room, and separate autonomy comparison are removed. No Linear
 name, review UI, testimonials, or invented captures belong on the page. The Mac
 download remains available and body mentions of `lf` use monospace.
 
-The terminal image is `website/static/cmux-flow.png`, captioned "A Flow running
-in cmux." It was not supplied at implementation: keep the reference with reserved
-space and disclose its absence in the PR. No cmux sidebar behavior is claimed.
+The approved prototype reserved `website/static/cmux-flow.png`, captioned
+"A Flow running in cmux." The later October 7 change (`ff4483fd7`) removed that
+reference and its reserved space: the homepage now ships without a terminal
+capture. That commit records that interactive launch and presentable Flow output
+in cmux remain unresolved. No cmux sidebar behavior is claimed.
 The Mac image remains the unedited October 1 capture with its provenance sidecar.
 Browser layout and CLI help were checked; this does not establish a fresh-machine
 install journey or an observed cmux Flow run. LOO-425's directive ends at PR
@@ -214,6 +216,10 @@ Implementation review on October 7 found that Pico's inherited heading margins
 and inline-code boxes changed the approved layout. Homepage resets are scoped
 under `.home-page` because docs and download pages share the stylesheet;
 `docs/architecture.html` embeds it and needs regeneration when it changes.
+CI then exposed fallback-font differences: the hero buttons were 43px tall on
+Linux despite passing on macOS. An explicit 44px minimum and fallback-font
+coverage preserve the touch target across platforms; run the website suite
+after the final layout edit.
 
 ## Earlier copy decisions (2026-09-26)
 

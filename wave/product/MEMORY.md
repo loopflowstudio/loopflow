@@ -956,9 +956,8 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
 The older Ask/Ready/Complete and Task-review control contract is superseded by
-October 4's Task conversation correction. Its dated implementation and proof
-notes remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
-under this heading. Retain these independent constraints:
+October 4's Task conversation correction. Details remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
+under this heading. Retain:
 
 - `lf session list --json` owns the shared Session projection; Desktop owns no
   second queue, title store, liveness model or resolution state.

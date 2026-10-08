@@ -122,7 +122,13 @@ were already removed. `engine::naming`, `TerminalTitle` and `harness::native_tit
 retain their separate naming, projection and native-hook responsibilities. No
 wrapper, terminal registry, schema change or second naming algorithm remains.
 
-Checks: `cargo build`, isolated `native_titles` units (2), native TUI/headless probes, fmt, all-target Clippy, Ruff and `git diff --check` pass; Codex exec records the unnamed/no-socket gap; prior lf presentation proofs reused; host/installation acceptance remains demo/gate-owned.
+Compression removes the probe's second Codex API client and WebSockets dependency;
+native OSC output proves live adoption, while headless probes retain native-history
+readback. Hooks derive one title before provider work; empty requests need no
+database or socket. The interactive runner owns its observer directly. Review
+also fixed an outside-repository assertion previously masked by the generic trigger.
+
+Checks: `cargo build -p loopflow --bin lf`, isolated `native_titles` units (2), public CLI title/rename/reconnect fixture (12 launches), Claude/Codex TUI probes, fmt, all-target Clippy, Ruff and `git diff --check` pass; TUI captures: `/tmp/lf-title-compress-{claude,codex}-20261008/`; prior headless proofs retained at `b1feca0eb:scratch/every-lf-session-in-cmux.md`; host/installation acceptance remains demo/gate-owned.
 
 Earlier request/Goal and Task-primary proof: `91c4d07f9:scratch/every-lf-session-in-cmux.md`.
 Earlier transport/demo plan: `04027f096:scratch/every-lf-session-in-cmux.md`.

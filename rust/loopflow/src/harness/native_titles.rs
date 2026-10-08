@@ -23,14 +23,19 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
     {
         return Ok(None);
     }
-    let event = input["hook_event_name"].as_str().unwrap_or_default();
-    if event != "UserPromptSubmit" {
+    if input["hook_event_name"] != "UserPromptSubmit" {
         return Ok(None);
     }
+    let Some(prompt) = input["prompt"].as_str() else {
+        return Ok(None);
+    };
     // lf's assembled context has its own attributed name and title transport.
-    if input["prompt"].as_str() == Some(crate::engine::prompt::INITIAL_TURN_PROMPT) {
+    if prompt == crate::engine::prompt::INITIAL_TURN_PROMPT {
         return Ok(None);
     }
+    let Some(title) = crate::engine::naming::request_title(prompt) else {
+        return Ok(None);
+    };
     if let Some(thread) = input["session_id"].as_str() {
         let database = crate::store::database_path_from_env()?;
         if database.exists()
@@ -49,16 +54,19 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
             {
                 return Ok(None);
             }
-            Ok(input["prompt"].as_str().and_then(crate::engine::naming::request_title).map(|title| {
-                json!({"hookSpecificOutput": {"hookEventName": event, "sessionTitle": title}})
-            }))
+            Ok(Some(json!({"hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit", "sessionTitle": title
+            }})))
         }
         "codex" => {
+            let id = input["session_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("hook has no session_id"))?;
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?
                 .block_on(async {
-                    tokio::time::timeout(Duration::from_secs(3), name_codex_session(input))
+                    tokio::time::timeout(Duration::from_secs(3), name_codex_session(id, &title))
                         .await
                         .context("native naming timed out")?
                 })?;
@@ -68,10 +76,7 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
     }
 }
 
-async fn name_codex_session(input: &Value) -> anyhow::Result<()> {
-    let id = input["session_id"]
-        .as_str()
-        .ok_or_else(|| anyhow!("hook has no session_id"))?;
+async fn name_codex_session(id: &str, title: &str) -> anyhow::Result<()> {
     let home = std::env::var_os("CODEX_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))
@@ -99,17 +104,12 @@ async fn name_codex_session(input: &Value) -> anyhow::Result<()> {
     if thread["name"].as_str().is_some_and(|name| !name.is_empty()) {
         return Ok(());
     }
-    if let Some(title) = input["prompt"]
-        .as_str()
-        .and_then(crate::engine::naming::request_title)
-    {
-        rpc_request(
-            &mut connection,
-            "thread/name/set",
-            json!({"threadId": id, "name": title}),
-        )
-        .await?;
-    }
+    rpc_request(
+        &mut connection,
+        "thread/name/set",
+        json!({"threadId": id, "name": title}),
+    )
+    .await?;
     Ok(())
 }
 
@@ -173,10 +173,10 @@ pub(crate) fn install_native_hooks(home: &Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{install_native_hooks, name_native_session};
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     #[test]
-    fn native_claude_names_requests_preserving_custom_names() {
+    fn native_hooks_name_requests_preserving_custom_names() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".lf")).unwrap();
         let mut input = json!({"cwd":root.path(), "hook_event_name":"UserPromptSubmit",
@@ -189,9 +189,18 @@ mod tests {
         input["session_title"] = json!("Jack's hand name");
         assert!(name_native_session("claude", &input).unwrap().is_none());
         input.as_object_mut().unwrap().remove("session_title");
-        input["prompt"] = json!(crate::engine::prompt::INITIAL_TURN_PROMPT);
-        assert!(name_native_session("claude", &input).unwrap().is_none());
+        for prompt in [
+            json!(crate::engine::prompt::INITIAL_TURN_PROMPT),
+            json!("..."),
+            Value::Null,
+        ] {
+            input["prompt"] = prompt;
+            for provider in ["claude", "codex"] {
+                assert!(name_native_session(provider, &input).unwrap().is_none());
+            }
+        }
         std::fs::remove_dir(root.path().join(".lf")).unwrap();
+        input["prompt"] = json!("Plan store migration");
         assert!(name_native_session("claude", &input).unwrap().is_none());
     }
 

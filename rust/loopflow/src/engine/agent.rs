@@ -1833,7 +1833,7 @@ fn _run_agent_once(
         cmd.env_remove(name);
     }
     cmd.envs(&launch.env);
-    let mut title = if process.auto {
+    let title = if process.auto {
         None
     } else {
         crate::engine::terminal_title::TerminalTitle::prepare(&launch.env, &harness, &mut cmd)
@@ -1982,13 +1982,7 @@ fn _run_agent_once(
         run_batch(&mut cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(
-            &mut cmd,
-            process.timeout,
-            capture,
-            activation,
-            title.as_mut(),
-        )
+        run_interactive(&mut cmd, process.timeout, capture, activation, title)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2135,7 +2129,7 @@ fn run_interactive(
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
-    mut title: Option<&mut crate::engine::terminal_title::TerminalTitle>,
+    mut title: Option<crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let mut child = spawn_agent_child(cmd, capture, activation)?;

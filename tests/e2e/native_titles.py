@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["websockets>=15,<16", "pyte>=0.8,<0.9"]
+# dependencies = ["pyte>=0.8,<0.9"]
 # ///
 """Probe titles of new native sessions with private homes and a local fake API."""
 
@@ -24,7 +24,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pyte
-from websockets.sync.client import unix_connect
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -171,15 +170,6 @@ class _Tui:
         os.close(self.master)
 
 
-def _rpc(connection: object, method: str, params: dict) -> dict:
-    connection.send(json.dumps({"id": method, "method": method, "params": params}))
-    while True:
-        reply = json.loads(connection.recv(timeout=5))
-        if reply.get("id") == method:
-            assert "error" not in reply, reply
-            return reply["result"]
-
-
 def _probe(
     lf: Path,
     executable: Path,
@@ -257,7 +247,6 @@ trust_level="trusted"
 ''')
         command = [str(executable), "--no-alt-screen"]
     tui = None
-    connection = None
     passed = False
     try:
         if headless:
@@ -308,22 +297,6 @@ trust_level="trusted"
         tui.ready()
         tui.enter("Plan store migration for archived tasks")
         tui.drain(5)
-        if provider == "codex":
-            connection = unix_connect(str(native / "app-server-control/app-server-control.sock"))
-            _rpc(
-                connection, "initialize", {"clientInfo": {"name": "lf_title_probe", "version": "1"}}
-            )
-            threads = _rpc(
-                connection,
-                "thread/list",
-                {"cwd": str(work.resolve()), "modelProviders": ["fixture"]},
-            )["data"]
-            thread = next(
-                item
-                for item in threads
-                if item["preview"] == "Plan store migration for archived tasks"
-            )
-            assert thread["name"] == "Plan store migration", thread["name"]
         assert tui.has_title("Plan store migration"), "first request did not reach OSC"
         tui.enter("/rename Manual release notes")
         tui.drain(2)
@@ -343,8 +316,6 @@ trust_level="trusted"
         if tui:
             (root / "last.ansi").write_bytes(tui.raw)
             tui.close()
-        if connection:
-            connection.close()
         if provider == "codex" and not headless:
             subprocess.run(
                 [str(executable), "app-server", "daemon", "stop"],

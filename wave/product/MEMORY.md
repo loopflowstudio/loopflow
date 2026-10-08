@@ -20,8 +20,7 @@ failed on an unbound Initiative.
   in the LOO-427 conversation. Open/focus by repository; closed repos need no
   window. Tasks/worktrees and machine placements stay inside it, with machine
   identity, execution authority and freshness retained. This is design direction,
-  not implemented window behavior. Repository correspondence across paths remains
-  to design; do not equate repos solely by name or remote URL.
+  not implemented window behavior. Shared Work supplies repository identity; paths and remote URLs do not.
 - Jack specified macOS-only Desktop launching/control, with actionable Linux
   errors and a terminal alternative before launch or Work mutation (LOO-426/427).
   Ordinary lf remains cross-platform; the displaying Mac and execution machine
@@ -35,8 +34,9 @@ failed on an unbound Initiative.
 - LOO-418: a Task has zero or one PR; follow-through is another Task. Serial PR
   chains below describe the implementation being replaced. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
-  replacement. Desktop's native snapshot is separate. LOO-406's plan-store
-  exploration does not change planning authority yet.
+  replacement. Desktop's native snapshot is separate. LOO-406 now owns the accepted local
+  planning lifecycle, preserving connected Linear repositories; cross-machine
+  plan authority remains separate from that Task.
 - LOO-428 retains argument delivery in its launch/output repair. LOO-429's later
   decision puts all assembled context in the system file: no split, fallback or
   lf-side interactive error wording. LOO-420 uses native invocation for native
@@ -50,15 +50,15 @@ LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review. The owned cmux probe proved arrangement, output and draft retention,
 then cleaned up; no provider, herdr-pane or Desktop parity proof.
 
-Source at `7e852defe` (October 7): `CanonicalRepo` is Machine-local;
-`RepoId` derives owner/repo without the host; `Machine.repo` is one saved directory,
-not a correspondence. Re-registering replaces that directory. Rust-owned repository
-groups remain a proposal. LOO-411's no-per-call-repository-override decision means
-grouping alone cannot route multiple repositories. Resolve this with LOO-426;
-never switch the saved default per request.
-Root `lf open` is implemented, but Work targeting and a Linux terminal alternative
-remain. LOO-427 has no production implementation. Exact pane targets prevent
-redirection, not unsent-draft conflicts; LOO-387's UX choice remains open.
+Jack Heart clarified in LOO-427: the repo window is built on one shared Work
+model, “all fromone place”; its subtrees can be delegated to Machines. Machines
+execute that Work, not independent trees Desktop pairs later. The repository-group
+proposal is withdrawn. Extend Work placement/routing; physical source/protocol,
+inheritance and live reassignment remain to design. LOO-411's SSH override removal
+is not a general veto on Work-directed routing. Never rewrite a Machine default
+per request. Current placements copy inheritance once; delegation is unimplemented.
+Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
+Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
 ## Live Home reconciliation (2026-10-05)
 

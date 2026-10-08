@@ -68,8 +68,9 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   Reopen/focus by repository; worktrees stay inside it. Closed repositories need
   no window. Keep every machine's work identity, authority and observation age
   explicit. This changes presentation, not LOO-394/417's separate execution state.
-  The implementation design must resolve corresponding repositories at different
-  paths; basename or Git remote alone must not silently merge unrelated clones.
+  Jack clarified that the window reads one shared Work model, whose subtrees
+  can be delegated to Machines. Work identity supplies the relationship; a
+  separate repository-pairing registry is withdrawn. Execution stays machine-local.
 - **macOS-only Desktop operations:** Jack requested useful Linux errors for
   Desktop launching. Opening/control must report the unsupported platform before
   launching anything or changing Work, and offer the ordinary terminal path.
@@ -193,7 +194,7 @@ The `vm`/`cloud` disposition covers every leaf advertised in top-level help:
 | Observe changing Work | `events` | `lf monitor work --json --watch`; `lf activity --json` | `api snapshot`; waits for pane/agent conditions | **have** — Work events already feed Desktop; a visual layout snapshot belongs in LOO-427 arrangement. |
 | Schedule/run automation | `automation list/show/test/enable/disable/logs/reload`, `set-hook` | `lf wave cron`, `lf run FLOW`, `lf task run` | Shell tooling; integration lifecycle hooks | **have** — existing Work automation suffices; no second host automation engine. |
 | Use a host-specific automation service | `glaeda request/observe` | No Glaeda-specific equivalent | — | **no** — run lf inside the host; no integration need was demonstrated. |
-| Keep an ad hoc host todo list | `todo add/list/check/uncheck/start/rm/clear` | `lf task create`, Task Workflow and Project plan | No todo group found | **no** — preserve Work planning; LOO-406 explores its store, not a terminal-local backlog. |
+| Keep an ad hoc host todo list | `todo add/list/check/uncheck/start/rm/clear` | `lf task create`, Task Workflow and Project plan | No todo group found | **no** — preserve Work planning; LOO-406 owns the local planning lifecycle, not a terminal-local backlog. |
 | Customize terminal appearance | `themes list/set/clear`, `import`, `reload-config`, `shortcuts`, `bind-key`, `unbind-key` | Desktop Settings and fixed workspace composition; no general terminal configuration CLI | `config`, `server reload-config`, `channel`, `completion` | **no** to a host config clone — LOO-403 already owns discoverable Desktop shortcuts and palette actions. |
 | Replace host sidebars | `right-sidebar`, `sidebar templates/try/new/validate/reload/select/open` | Work outline, Files and Flow log panes | Workspaces/tabs/panes | **no** — expose existing Work views rather than build a sidebar extension platform. |
 | Host settings/onboarding/feedback | `welcome`, `settings`, `config doctor/check/validate/path/paths/docs/documentation/reload`, `feedback`, `feed tui/clear` | Settings, `lf doctor`, repository onboarding | `config`, `update`, `channel`, server lifecycle | **no** to host administration parity; Loopflow keeps its own installation/diagnostics. |
@@ -241,8 +242,8 @@ screen and command receipts do not meet the chapter's sustained-use KRs.
 
 LOO-427 delivers the identity → arrange → observe/input path in one PR;
 premature LOO-430/431/432 are folded back. Jack Heart authorized advancement
-through the demo review boundary. Transport, command spelling, repository
-correspondence and draft-conflict UX remain in the working design at
+through the demo review boundary. Transport, command spelling, subtree
+delegation details and draft-conflict UX remain in the working design at
 `scratch/compare-cmux-s-command-line.md`. Browser, cloud, checkpoint vault,
 custom sidebars and host terminal administration remain outside this diff.
 

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-420 · Native skills, either harness</title><style>
+:root{color-scheme:light;--paper:#faf9f6;--ink:#232826;--muted:#59625e;--line:#d5dad4;--accent:#1d6555;--code:#edf0eb}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1120px;margin:auto;padding:60px 44px 80px}a{color:var(--accent);text-underline-offset:4px}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid var(--accent);outline-offset:4px}.skip{position:absolute;left:20px;top:-100px}.skip:focus{top:12px}header{padding-bottom:24px;border-bottom:1px solid var(--line)}.eyebrow,figcaption,.meta{font-size:13px;line-height:1.65;color:var(--muted)}.eyebrow{letter-spacing:.12em;text-transform:uppercase}h1{font-size:clamp(34px,5vw,55px);line-height:1.13;letter-spacing:-.04em;margin:16px 0 22px;font-weight:650}h2{font-size:29px;line-height:1.25;letter-spacing:-.025em;margin:0 0 20px}h3{font-size:20px;margin:32px 0 12px}p{max-width:850px;margin:14px 0}.lead{font-size:21px;line-height:1.55;max-width:830px}.meta{overflow-wrap:anywhere}nav{display:flex;gap:12px 26px;flex-wrap:wrap;margin:24px 0 0;font-size:14px}section{padding-top:48px;margin-top:12px}section+section{border-top:1px solid var(--line);margin-top:48px}figure{margin:24px 0 30px;min-width:0}figcaption{margin:0 0 9px;overflow-wrap:anywhere}pre{background:var(--code);border-left:3px solid #a1b8aa;padding:22px 24px;margin:0;overflow:auto;font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:4}p code,td code,li code{font: .89em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;margin:24px 0;text-align:left}th{font-size:13px;color:var(--muted);font-weight:600}th,td{padding:17px 16px 17px 0;vertical-align:top;border-bottom:1px solid var(--line)}th:first-child,td:first-child{width:23%}th:nth-child(2){width:34%}.note{border-left:3px solid var(--accent);padding:2px 0 2px 20px;margin:24px 0}.note p{margin:8px 0}.label{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}.number{color:var(--accent);font-size:14px;display:block;margin-bottom:8px}details{margin:22px 0;padding:16px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}summary{cursor:pointer;font-size:15px;font-weight:600}details p,details li{font-size:15px}li{margin:10px 0}footer{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}.terminal{background:#25342e;color:#eef3ed;border-left-color:#6fa087}.choices{padding-left:22px}.choices strong{display:block}button{font:inherit;background:none;color:var(--accent);border:1px solid var(--line);padding:7px 13px;cursor:pointer}
+@media(max-width:650px){main{padding:34px 20px 55px}body{font-size:16px}.lead{font-size:19px}h2{font-size:25px}pre{padding:16px;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}table,tbody,tr,td{display:block}thead{display:none}tr{padding:10px 0;border-bottom:1px solid var(--line)}td,td:first-child{width:auto;padding:7px 0;border:0}td:before{content:attr(data-label);display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}section{padding-top:34px}section+section{margin-top:34px}}
+@media print{body{background:white;font-size:10pt}main{max-width:none;padding:0}nav,.skip,button{display:none}h1{font-size:28pt}h2{font-size:19pt}section{padding-top:20px}section+section{margin-top:20px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:8pt;background:#f3f3f3;border-color:#bbb}figcaption{font-size:8pt}h2,h3,figcaption{break-after:avoid}tr{break-inside:avoid}a{color:inherit}details{display:block}}
+</style></head>
+<body><a class="skip" href="#review">Skip to review</a><main id="review">
+<header><div class="eyebrow">LOO-420 / Design &amp; branch review / 7 October 2026</div>
+<h1>Native skills,<br>either harness.</h1>
+<p class="lead">Type <code>lf audit</code> and run the skill already on disk. Keep its native behavior on its own harness; translate it when crossing to the other.</p>
+<p><strong>This branch delivers probes, a design, the agent-selector rename, and app-launch removal.</strong> Native skill discovery and dispatch remain unchanged. The candidate now uses <code>--agent</code> / <code>-a</code> for <code>harness[:model]</code>; installed 0.13.9 still uses <code>--model</code>. Jack Heart selected native invocation, translated ports, and inlined Loopflow builtins. Jack Heart also directed removal of <code>--ide</code>; execution stays terminal or headless. The same-conversation skill interface remains a proposal.</p>
+<div class="meta">Local comparison · base 626789dcd → head 13a4f73dc + local design updates.<br>Published PR state was not queried. Source links pin the stated revision; availability on GitHub is unverified.</div>
+<nav aria-label="Review sections"><a href="#source">01 / Find the skill</a><a href="#transport">02 / Preserve the invocation</a><a href="#session">03 / Keep the conversation</a><a href="#surface">04 / Keep terminal ownership</a><a href="#decision">Decision &amp; proof</a></nav></header>
+<table aria-label="Experience map"><thead><tr><th>When someone…</th><th>Intended result</th><th>Where the behavior lives</th></tr></thead><tbody>
+<tr><td data-label="When someone…">Runs a skill already on disk</td><td data-label="Intended result">Help and execution select the same file, without manual conversion.</td><td data-label="Where the behavior lives"><a href="#source">The proposed catalog</a> replaces overlapping source resolvers. It is not implemented.</td></tr>
+<tr><td data-label="When someone…">Adds arguments and Loopflow context</td><td data-label="Intended result">The harness parses the skill; context does not become part of its arguments.</td><td data-label="Where the behavior lives"><a href="#transport">The continuity probe</a> separates Codex input items and inspects Claude attachments.</td></tr>
+<tr><td data-label="When someone…">Uses a saved conversation</td><td data-label="Intended result">History and Work attribution survive a new skill invocation.</td><td data-label="Where the behavior lives"><a href="#session">Existing Session resume and input reservation</a> supply continuity; selecting another skill still needs design.</td></tr>
+<tr><td data-label="When someone…">Starts an interactive skill</td><td data-label="Intended result">The terminal provider retains its Process receipts and Session identity.</td><td data-label="Where the behavior lives"><a href="#surface">The simplified terminal launcher</a> replaces the app URL path. <code>--ide</code> is removed.</td></tr>
+</tbody></table>
+<section id="source"><span class="number">01 / Proposed behavior</span><h2>One selected file, from help to execution.</h2>
+<p class="label">Illustrative commands — desired behavior, not captured output</p>
+<pre class="terminal"><code>lf audit "src/payment"
+lf --agent codex audit "src/payment"
+lf help</code></pre>
+<p>Given only <code>.claude/skills/audit/SKILL.md</code>, the first command should invoke Claude natively; the second should run a translated port of the same source. Both are pending implementation.</p>
+<figure><figcaption><a href="run-any-claude-or-codex.md">scratch/run-any-claude-or-codex.md</a> · Catalog and precedence proposal<br>working copy · SHA-256 6a24224ce481 · line 90</figcaption><pre tabindex="0"><code>One engine skill catalog owns roots, names, precedence, source paths and format.
+Repository definitions precede personal definitions, then embedded builtins.
+Within each scope: `.lf/skills`, `.claude/skills`, `.claude/commands`,
+`.agents/skills`, `.codex/skills`, `.codex/prompts`. Explicit provider home
+overrides must select the same files as their harness. Generated Loopflow exports
+never override current embedded instructions. Bundled Markdown is not a second
+skill. Namespaces and filesystem cycles need deterministic handling.
+
+This ordering is proposed, not a recorded decision from Jack. Native dispatch
+must resolve the catalog&#x27;s selected file, including same-name collisions; a
+matching slash-command name alone does not establish source agreement. Export
+reuses catalog discovery while retaining its personal/builtin scope: repository
+skills remain local, and discovering a third-party source does not authorize
+overwriting it or exporting it to another harness unchanged.</code></pre></figure>
+<div class="note"><p><strong>Source agreement is part of fidelity.</strong> Invoking a same-named slash command is insufficient when the harness selects a different file. The proposed ordering is not a recorded decision from Jack Heart.</p></div>
+<details><summary>What the replacement must delete</summary><p>The external catalog in <code>lf/discovery.rs</code>, the rams alias, fuzzy npx lookup/fetch, recursive Markdown name scanning, and the separate Markdown resolver and late fallback in <code>engine/flow.rs</code>. Installed npx skills remain ordinary folders. The builtin app path and its dependency on stale exported text are now deleted.</p></details></section>
+<section id="transport"><span class="number">02 / Implemented probes</span><h2>Preserve the invocation; inspect what arrived.</h2>
+<p class="label">Reproduction command — previously recorded results, not rerun for this page</p>
+<pre class="terminal"><code>uv run python scripts/benchmarks/skill-invocation/continuity.py \
+  --provider codex --executable /path/to/codex</code></pre>
+<p>The probe starts or resumes a native thread, submits a selected skill beside separate user context, then checks that exact turn’s input and history. Its emitted observations distinguish receipt checks from answer markers.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/9364ab288ddc4bc68c767b8b3b49cf04c3bba520/scripts/benchmarks/skill-invocation/continuity.py#L159-L232">scripts/benchmarks/skill-invocation/continuity.py</a> · _codex · resume, invoke, inspect<br>9364ab288 · lines 159–232</figcaption><pre tabindex="0"><code>params = {&quot;cwd&quot;: str(root), &quot;approvalPolicy&quot;: &quot;never&quot;, &quot;sandbox&quot;: &quot;read-only&quot;}
+if thread_id:
+    params[&quot;threadId&quot;] = thread_id
+response = await _request(
+    process, &quot;thread/resume&quot; if thread_id else &quot;thread/start&quot;, params
+)
+resumed_id = response[&quot;thread&quot;][&quot;id&quot;]
+same_thread = thread_id is None or resumed_id == thread_id
+thread_id = resumed_id
+invocation = f&quot;${name} {argument}&quot;
+inputs = [
+    {&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: invocation},
+    {&quot;type&quot;: &quot;skill&quot;, &quot;name&quot;: name, &quot;path&quot;: str(skill)},
+    {&quot;type&quot;: &quot;text&quot;, &quot;text&quot;: f&quot;&lt;lf:context&gt;Context marker: {context}&lt;/lf:context&gt;&quot;},
+]
+turn = await _request(
+    process,
+    &quot;turn/start&quot;,
+    {
+        &quot;threadId&quot;: thread_id,
+        &quot;input&quot;: inputs,
+    },
+)
+turn_id = turn[&quot;turn&quot;][&quot;id&quot;]
+completed = await _until(
+    process,
+    lambda event: (
+        event.get(&quot;method&quot;) == &quot;turn/completed&quot;
+        and event[&quot;params&quot;][&quot;turn&quot;][&quot;id&quot;] == turn_id
+    ),
+)
+history = await _request(
+    process,
+    &quot;thread/read&quot;,
+    {
+        &quot;threadId&quot;: thread_id,
+        &quot;includeTurns&quot;: True,
+    },
+)
+turns = history[&quot;thread&quot;][&quot;turns&quot;]
+native_path = Path(history[&quot;thread&quot;][&quot;path&quot;])
+native = _codex_receipts(
+    [json.loads(line) for line in native_path.read_text().splitlines()],
+    turn_id,
+    skill,
+    inputs,
+)
+current = next(value for value in turns if value[&quot;id&quot;] == turn_id)
+users = [item for item in current[&quot;items&quot;] if item[&quot;type&quot;] == &quot;userMessage&quot;]
+content = [item for user in users for item in user[&quot;content&quot;]]
+answer = &quot;\n&quot;.join(
+    item.get(&quot;text&quot;, &quot;&quot;) for item in current[&quot;items&quot;] if item[&quot;type&quot;] == &quot;agentMessage&quot;
+)
+# A returned skill item proves selection; a model marker alone does not.
+passed &amp;= _emit(
+    &quot;codex_app_server_&quot; + argument,
+    completed=completed[&quot;params&quot;][&quot;turn&quot;][&quot;status&quot;] == &quot;completed&quot;,
+    same_thread=same_thread,
+    retained_turns=len(turns) == (1 if argument == &quot;alpha&quot; else 2),
+    prior_turn_unchanged=first_turn is None or turns[0] == first_turn,
+    invocation_receipt=_input_receipt(inputs[0], content),
+    skill_receipt=_input_receipt(inputs[1], content),
+    separate_context_receipt=_input_receipt(inputs[2], content),
+    **native,
+    answer_skill=marker in answer,
+    answer_argument=argument in answer,
+    answer_context=context in answer,
+    evidence={
+        &quot;thread_id&quot;: thread_id,
+        &quot;turn_id&quot;: turn_id,
+        &quot;skill&quot;: str(skill),
+        &quot;transcript&quot;: str(native_path),
+    },
+)</code></pre></figure>
+<p><strong>Recorded evidence:</strong> Codex 0.160.1 retained the same thread, selected-file expansion, and separate user context across a process restart. Context is supplied again, so the second answer does not prove recall without resupply. Loopflow’s production transport still accepts strings.</p>
+<h3>Claude preserves arguments, but the context role needs another check.</h3>
+<p>Claude 2.1.293 retained native arguments and hook context after the hook file was removed. This parser reads transcript rendering metadata; it does not inspect the final model request.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/9364ab288ddc4bc68c767b8b3b49cf04c3bba520/scripts/benchmarks/skill-invocation/continuity.py#L96-L120">scripts/benchmarks/skill-invocation/continuity.py</a> · _claude_receipts<br>9364ab288 · lines 96–120</figcaption><pre tabindex="0"><code>def _claude_receipts(history: list[dict], skill: Path, argument: str, context: str) -&gt; dict:
+    users = [event[&quot;message&quot;][&quot;content&quot;] for event in history if event.get(&quot;type&quot;) == &quot;user&quot;]
+    expanded = [
+        block.get(&quot;text&quot;, &quot;&quot;)
+        for content in users
+        if isinstance(content, list)
+        for block in content
+        if block.get(&quot;type&quot;) == &quot;text&quot;
+    ]
+    attachments = [
+        event
+        for event in history
+        if event.get(&quot;type&quot;) == &quot;attachment&quot;
+        and event.get(&quot;attachment&quot;, {}).get(&quot;type&quot;) == &quot;hook_additional_context&quot;
+        and context in &quot;\n&quot;.join(event[&quot;attachment&quot;][&quot;content&quot;])
+    ]
+    return {
+        &quot;selected_source&quot;: any(
+            f&quot;Base directory for this skill: {skill.parent}\n&quot; in text and f&quot;|{argument}|&quot; in text
+            for text in expanded
+        ),
+        &quot;separate_context&quot;: bool(attachments),
+        &quot;context_roles&quot;: [event.get(&quot;renderedRole&quot;) for event in attachments],
+        &quot;context_attachment_ids&quot;: [event[&quot;uuid&quot;] for event in attachments],
+    }</code></pre></figure>
+<div class="note"><p><strong>Corrected finding.</strong> <code>renderedRole: "system"</code> does not establish model authority. The earlier rejection of the hook on that evidence was withdrawn. <a href="https://code.claude.com/docs/en/glossary#system-reminder">Claude’s documentation</a> describes reminders inside user messages or, for some models, system-role messages. Request mapping remains unproved.</p></div>
+<details><summary>Counterexamples and recorded checks</summary><ul><li>Prefixing context or supplying two Claude text blocks bypassed native expansion. Suffixing context contaminated the native arguments.</li><li>The retained Claude probe prevented the first answer and reasoning from repeating the context marker; the resumed answer recovered it without the hook file.</li><li>The design records eight offline tests and Ruff passing for unchanged probe code. Those checks were not rerun for this HTML.</li><li>Probe scripts use synthetic fixtures. Real third-party skill controls, bundled files, translated ports and Loopflow capture are still unproved.</li></ul></details></section>
+<section id="session"><span class="number">03 / Existing production code + proposed interface</span><h2>Keep the conversation, including its unfinished work.</h2>
+<p class="label">Existing command, shown from source — not executed here</p>
+<pre class="terminal"><code>lf -b session resume ID "continue the audit"</code></pre>
+<p>Today, resume loads the Session’s stored skill and provider/model. A new skill selector would need to flow through that same conversation’s admission and capture machinery.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/9364ab288ddc4bc68c767b8b3b49cf04c3bba520/rust/loopflow/src/lf/commands/run.rs#L53-L69">rust/loopflow/src/lf/commands/run.rs</a> · resume · candidate source<br>9364ab288 · lines 53–69</figcaption><pre tabindex="0"><code>/// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
+/// run as its skill with `message` and the provider&#x27;s own history.
+pub fn resume(id: &amp;str, message: &amp;str, cli: &amp;Cli) -&gt; Result&lt;()&gt; {
+    let store = crate::store::sqlite::SqliteStore::new(&amp;crate::store::database_path_from_env()?)?;
+    let session = store
+        .session(id)?
+        .ok_or_else(|| anyhow!(&quot;session {id:?} was not found&quot;))?;
+    let mut turn = cli.process_options();
+    if turn.agent.is_none() {
+        turn.agent = match (&amp;session.provider, &amp;session.model) {
+            (Some(provider), Some(model)) =&gt; Some(format!(&quot;{provider}:{model}&quot;)),
+            (provider, _) =&gt; provider.clone(),
+        };
+    }
+    turn.resume = Some(session.id);
+    run(session.skill.as_deref(), Some(message), &amp;turn)
+}</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/9364ab288ddc4bc68c767b8b3b49cf04c3bba520/rust/loopflow/src/ops/human_session.rs#L259-L274">rust/loopflow/src/ops/human_session.rs</a> · continue_conversation · candidate source<br>9364ab288 · lines 259–274</figcaption><pre tabindex="0"><code>/// Add one headless input to an open conversation and return it prepared; the
+/// launch that takes it resumes the conversation&#x27;s native history.
+pub(crate) fn continue_conversation(id: &amp;str) -&gt; Result&lt;String&gt; {
+    let store = crate::store::sqlite::SqliteStore::new(&amp;crate::store::database_path_from_env()?)?;
+    let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
+    anyhow::ensure!(
+        next.completed_at.is_none(),
+        &quot;session {id:?} is already complete&quot;
+    );
+    let replaced = next.captured;
+    next.artifact_key = crate::session_record::new_artifact_key();
+    next.input_published = false;
+    let next = store.replace_session_input(replaced, next)?;
+    let flow = crate::session_record::SessionFlowMembership::Independent;
+    Ok(publish_prepared_input(&amp;store, &amp;next, flow)?.artifact_key)
+}</code></pre></figure>
+<div class="note"><p><strong>Proposal:</strong> <code>lf --session ID audit "src/payment"</code> explicitly selects an existing conversation. This syntax is not implemented or accepted. The current driver would admit the input; an active turn would finish before the new skill starts unless native skill steering is proved.</p><p>If delivery acknowledgement is lost, recovery must inspect retained input/provider evidence before submitting again. A new conversation or another writer would not preserve the intended contract.</p></div></section>
+<section id="surface"><span class="number">04 / Jack Heart’s selected cut</span><h2>Run in the terminal. Keep the provider identity.</h2>
+<p>Jack Heart directed removal of <code>--ide</code> after the installed probe. The flag, <code>session.launch</code> selector, app URL builders, automatic skill export, shortened skill seed and app handoff writer are deleted. Interactive execution has one terminal command path; batch execution remains headless.</p>
+<div class="note"><p><strong>Why remove it:</strong> installed 0.13.9 Claude and Codex app launches returned zero and created a Session plus a launcher Process, but neither recorded a native thread, endpoint, provider PID or birth time. Both actual <code>session connect</code> attempts failed. Visible app execution was not verified.</p></div>
+<figure><figcaption>rust/loopflow/src/lf/commands/util.rs · terminal launch<br>working copy · SHA-256 d146df3d557b · line 65</figcaption><pre tabindex="0"><code>pub(crate) fn launch_session_with_env(
+    harness: &amp;str,
+    model: Option&lt;&amp;str&gt;,
+    worktree: &amp;Path,
+    prompt: &amp;str,
+    environment: &amp;BTreeMap&lt;String, String&gt;,
+    provider_session_id: Option&lt;&amp;str&gt;,
+) -&gt; Result&lt;()&gt; {
+    let worktree = absolute_path(worktree);
+    let command = build_session_command(harness, model, &amp;worktree, prompt, provider_session_id)?;
+    spawn_session_command_with_env(&amp;command, environment, provider_session_id, None, None)
+}</code></pre></figure>
+<p>The terminal launcher passes the capture environment and provider Session ID into the existing spawn path. That path records provider process evidence and observed exit. Existing historical app records remain readable; this removal does not repair their missing identity.</p></section>
+<section id="decision"><span class="number">Remaining design and proof</span><h2>Native skills on terminal and headless harnesses.</h2>
+<p>App execution and headless-to-app handoff are out of scope under Jack Heart’s October 7 decision. The remaining design must deliver the selected source and exact arguments, separate Loopflow context, and same-conversation admission through the existing driver.</p>
+<h3>What is verified locally</h3><p>The app-launch removal passes the build, Clippy, formatting, and 176 focused Rust tests with external network access denied. Tests cover rejecting <code>--ide</code>, terminal launch, native Session IDs, provider exit evidence, history preservation, CLI parsing and configuration. The earlier <code>--agent</code> / <code>-a</code> rename also passed its focused checks. The generated CLI reference and examples are updated. No installation or landing was performed.</p>
+<h3>What remains before claiming the full skill outcome</h3><ul><li>Establish Claude’s request-role mapping and faithful terminal/headless context delivery.</li><li>Replace discovery end to end; carry exact source, arguments and context through capture and retained Flow instructions.</li><li>Prove unchanged third-party skills on both harnesses, including declared controls and bundled assets.</li><li>Measure matched plain-versus-lf startup and whole-turn context costs, including existing conversations.</li></ul>
+<p><a href="run-any-claude-or-codex.md">Read the working design</a> · <a href="../scripts/benchmarks/skill-invocation/README.md">Read the probe instructions and limits</a></p></section><footer>Local review artifact. The agent-selector rename and app-launch removal are implemented locally; native skill dispatch remains unfinished. No merge decision recorded.<br>Unchanged source excerpts pin 9364ab288; the terminal excerpt and design are the unpublished working copy. Generated 7 October 2026.</footer>
+</main></body></html>

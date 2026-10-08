@@ -2,27 +2,27 @@
 
 ## Plan ownership exploration (LOO-406, 2026-10-07)
 
-Jack Heart selected the local lifecycle, Linear-compatible fields and stable IDs,
-then pursuit through review, not landing. Existing identities/history survive;
+Jack Heart selected the complete local lifecycle, Linear-compatible fields and
+stable IDs, through publication for review, not landing. Preserve IDs/history;
 UUID, selector and provider mapping remain distinct. Callback, Git and export
-are separate follow-ups. Draft: `scratch/explore-loopflow-s-own-store.md`.
+are follow-ups. Design: `scratch/explore-loopflow-s-own-store.md`.
 
-Jack leans toward a Git plan ref outside code branches, permitting pending local
-data; the laptop authors and workers remain disposable. Cover personal machines,
-shared Linear and independent company developers. Ref namespaces separate writes,
-not access; personal definitions must not leak into shared files. Jack's callback
-proposal interprets host as origin and retains execution on X. Connected Linear
-authority goes through the online host; disconnect/direct fallback remain open.
-No resident or automatic work retry is selected. Callbacks provide no laptop-loss
-recovery; write-once mappings provide no concurrent-export uniqueness.
+Jack leans toward Git refs outside code branches with pending local data; the
+laptop authors and workers remain disposable. Cover personal machines, shared
+Linear and independent company developers. Namespaces provide no privacy; personal
+definitions stay out of shared files. The callback draft interprets host as origin,
+retains execution on X and routes Linear through the online host; disconnect/direct
+fallback remain open. No resident or automatic work retry. Callbacks provide no
+laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-Implementation inspection at `e7f8c4922` found the planned alias-table deletion
-loses provider recovery evidence. `task_issue_identities` can survive a lost
-deletion response without any Task, Project or cached issue. An in-memory released
-schema proof passes FK checks; the existing lost-response operation fixture was
-inspected, not rerun. Proposed amendment retains that table solely for deletion
-recovery, never ordinary Task resolution or mutation authority. Design returned
-to review before production edits; local lifecycle remains unimplemented.
+Rechecked at `bc6d11661`: retain `task_issue_identities` solely for deletion recovery,
+never ordinary resolution or mutation authority. It survives without a Task,
+Project or cached issue; the earlier released-schema orphan/FK proof remains valid,
+and the recovery fixture is unchanged, not rerun. Retention is an engineering
+correction within Jack's preservation constraint. The claimed deterministic import
+mapper is absent: reuse mappings, otherwise persist UUID v4 once. Local lifecycle
+remains unimplemented. Release's entry-point lesson applies: strict stubs and
+public CLI recovery readback; headless view behavior needs more than an app build.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
@@ -1001,7 +1001,7 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 
 ## Gotchas
 
-- **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
+- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.

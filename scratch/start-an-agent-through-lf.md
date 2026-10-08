@@ -1,9 +1,9 @@
 # Agent startup — LOO-436
 
-Jack Heart requested autonomous profiling and optimization. October 8 memory
-records later landing approval for PR #1505; the latest supplied iteration
-direction requires publication through delivery while keeping the PR unmerged
-and the Task open. This reconciliation follows that narrower boundary.
+After reviewing the HTML flamegraphs and overhead explanation, Jack Heart
+requested "ok land this i guess" on October 8.
+This supersedes the earlier review-only Flow feedback. Land PR #1505 and keep
+the Task open for outstanding cold-cache verification.
 
 ## Reconciled design and evidence
 
@@ -66,9 +66,9 @@ Rendered SVG readability belongs to Jack Heart's review; hosted checks to CI.
 Neither gap is waived. Managed accounts, installed gains and cold login remain
 unproved. Release's child memory was read; its distinct-proof lesson still applies.
 
-Delivery still owns publication of the cleanup, third deletion, evidence and
-HTML viewer under the current unmerged-PR boundary. Earlier landing approval is
-retained as history, not exercised here. Claude reconnect's contrary result and
+Publication includes the cleanup, third deletion, evidence and HTML viewer.
+Jack Heart's October 8 landing request authorizes delivery, keeping the Task
+open. Claude reconnect's contrary result and
 the excluded probes' unaudited provider-home effects remain in the durable report.
 
 Check: `summarize.py` recomputation matches both follow-up datasets; `git diff --check` and `lf context --skill realign` — PASS; prior build/tests retained without rerun. Cold readiness: isolated macOS gate; rendered SVGs: review; hosted checks: CI.

@@ -1243,7 +1243,6 @@ async fn snapshot_task_detail(
         Some(task) => store.active_task_pr(&task.id).await?,
         None => None,
     };
-    let latest = pr.as_ref();
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
     let (runtime, execution, flow_record) = match task {
@@ -1254,8 +1253,8 @@ async fn snapshot_task_detail(
             let pending = crate::ops::task::completion_pending(store, task)?;
             let started = store.task_started(&task.id).await?
                 || pr
-                    .iter()
-                    .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
+                    .as_ref()
+                    .is_some_and(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
                 Some(snapshot_task_runtime(
                     &execution, task, status, pending, started,
@@ -1366,9 +1365,10 @@ async fn snapshot_task_detail(
             Some(TaskActionEvidence {
                 status: runtime.status.work_status(),
                 execution: execution.as_ref(),
-                latest_pr_phase: latest.map(TaskPr::phase),
-                latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
-                latest_pr_presentation_current: latest
+                latest_pr_phase: pr.as_ref().map(TaskPr::phase),
+                latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
+                latest_pr_presentation_current: pr
+                    .as_ref()
                     .filter(|pr| pr.phase() == PrPhase::Open)
                     .map(|pr| pr.presentation().is_some()),
                 completion_refusal: completion_refusal.as_deref(),
@@ -1440,12 +1440,9 @@ async fn snapshot_task_detail(
             // PR emptiness is an execution-plane fact (`lf wave status`); it costs
             // an additional Git comparison, so `lf roadmap` opts out. The
             // Task condition already carries the progress evidence it needs.
-            let empty = match (task, active) {
-                (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
-                    task_pr_empty(task, pr)
-                }
-                _ => None,
-            };
+            let empty = task
+                .filter(|_| probe_pr_empty && pr.is_active())
+                .and_then(|task| task_pr_empty(task, pr));
             PrSnapshot::new(pr, empty)
         }),
     })

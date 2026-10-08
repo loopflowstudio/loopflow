@@ -49,15 +49,36 @@ The current follow-through and completion implementations still call Linear
 directly; merging DTOs alone will not make either path work without Linear. Verify unplaced,
 PR-less and merged-with-follow-up Tasks through both CLI and Desktop, including
 local filing/completion without provider calls. No second filing or completion
-implementation should survive. LOO-406 was rechecked read-only on October 8: status is active, PR #1503, code
-at `bd8d0191a`, with uncommitted design updates. Its current plan says completion
-and reopening save locally before provider I/O, while the coherent common-writer
-cut remains unavailable. It explicitly deletes `complete_planning_task`,
+implementation should survive. LOO-406 was rechecked read-only on October 8 at
+`cbdb9a43b`, with uncommitted design updates; no live Task/PR state was refreshed.
+Saved Tasks now share offline checkout preparation. Completion and reopening save
+locally before provider I/O, while the coherent common-writer cut remains
+unavailable. It deletes `complete_planning_task`,
 `task_pm::complete_task`, `reconcile_pm_writeback`, the completion arm of
 `PmTaskUpdate`, and direct writeback updates. These are integration deletion
 targets here; do not ship the current provider-first completion path beside them.
 No changes were made in that checkout. The ongoing plan is evidence of unfinished
 work, not a stable integration commit or new authorization.
+
+Two integration conflicts are now explicit. LOO-406's `ops/task.rs::reach_end`
+still couples completion to Workflow movement, including the old planning-conflict
+and dirty-checkout refusals. Integration must retain LOO-418's independent status,
+durable end request and retained-artifact behavior while adopting the local save
+and optional delivery receipt. Replacing this branch's operation wholesale would
+restore the behavior Jack superseded.
+
+LOO-406 records an enabled failing regression,
+`task_completion_preserves_linear_reopening_during_delivery`: a provider reopening
+between ownership read and completion mutation is overwritten, and matching
+readback falsely settles the receipt. Its test and unconditional writer were
+inspected; the recorded failure was not rerun here. This branch also checks its
+request before an unconditional provider update, so its passing observation tests
+do not prove preservation of a reopening during that write interval. Carry the
+regression into composed acceptance. Extra reads and matching readback do not
+establish a conditional-write guarantee. Provider-guarantee investigation remains
+with LOO-406; neither automatic propagation nor concurrent-change preservation
+has been relaxed. If no sufficient guarantee exists, that exact product tradeoff
+remains unresolved. Common local ownership can progress independently.
 
 ## Demo
 
@@ -426,36 +447,25 @@ commands must use the new command contract.
 
 ### Delete — do not maintain
 
-Slices 2–4 implemented the serial-PR cuts below. The completion-trigger revision
-adds a new deletion cut on the same PR; historical readers remain the explicit
-migration exception:
+Remaining integration cut: replace `ops/pm.rs::complete_planning_task`,
+`task_pm::complete_task`, `ops/task.rs::reconcile_pm_writeback`, the completion
+arm of `PmTaskUpdate`, and direct completion writeback updates with LOO-406's
+common local planning writer. Route follow-up filing through that same planning
+owner. Do not refactor or extend these predecessor paths while that boundary is
+unfinished; no parallel local/Linear completion or filing owner may survive.
 
-- Delete Workflow-derived done in `store/sqlite/durable.rs::task_state_sql`,
-  the Move/Complete alias in `bin/lf.rs`, and completion moving Workflow in
-  `store/sqlite/children.rs::complete_task` and `ops/task.rs::task_end/reach_end`.
-- Delete `planning_conflict_of`'s Linear-completed/Workflow-active refusal and
-  its forced-end recovery instructions. Preserve provider revision validation.
-- Replace exclusive alias/end-equivalence fixtures with independent completion,
-  crash-safe trigger, and live-Process tests. Update AGENTS.md, architecture,
-  CLI/help, skills/operators, Rust/Swift DTOs and Desktop together. No mirrored
-  status or second completion controller may remain.
+Implemented cuts: serial PR rotation and its CLI flags, placeholder PR creation,
+PR-owned placement, keep-open follow-up writers, ordinal PR projections,
+Workflow-derived completion, the Move/Complete alias, planning conflicts and
+forced-end recovery. Independent completion, durable end requests and real
+Process history replace their exclusive fixtures. Rust/Swift wire types, Desktop,
+operators and docs use the surviving contract. Detailed deleted symbols and the
+earlier alias design remain at `5c240c89a:scratch/make-a-task-up-to.md`.
 
-- `PrCommand::Next`, next-slug CLI fields, `AfterMerge` runtime branching,
-  rotation-only helpers listed above, and serial-only tests/copy/fixtures.
-- The live `TaskFollowUp` keep-open writer, `task_follow_up_resolved`, deadline
-  blockers and `--clear`; keep deserialization of immutable historical events.
-- Placeholder creation on checkout, PR-dependent file/restore paths, and
-  `CompletionGate.discardable_successor` once no working placeholder can arise.
-- `TaskSnapshot.prs/active_pr`, ordinal PR chips and “PR 1” launch copy. Update
-  Rust/Swift DTO fixtures together, including explicit null for no PR.
-- `land -c`/serial guidance in LOOPFLOW.md, landing/capture/ship-decomposed and
-  operator skills, `docs/lf*.md`, delivery architecture and affected READMEs.
-
-The compression review also removed the surviving Swift `startNextPr` action,
-keep-open summary/reader, and disposition-aware repair-command helper. Writers
-leave retired disposition columns untouched; historical events still feed the
-shared follow-through projection. The new completion deletion targets above
-supersede the earlier alias implementation.
+Compression also removes the successor-suffix slug helper and action branch
+matching the retired “Remaining work” summary. Historical events and PR rows
+remain the explicit migration exception; writers leave retired disposition
+columns untouched and the shared projection retains unresolved scope.
 
 Retain exact-head landing generations, CI repair deduplication, Git mutation
 locks, safe cleanup, Task history, shared status/monitor reads, symlink-safe file
@@ -516,8 +526,8 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    caller ancestry, and finish successfully. Passive inspection leaves Started
    absent; failed placement remains an observed failed Process. Store tests
    prove atomic refusal and explicit Session membership after checkout removal.
-   The original completion-alias tests describe superseded behavior; replace
-   their coupling assertions while preserving retained input and idempotent retry.
+   Independent completion tests replace the original alias assertions while
+   preserving retained input and idempotent retry.
    No provider or native Desktop acceptance follows from these fixtures.
 2. **Optional PR and Task-owned placement.** Rotation and placeholders are
    removed; CLI/Swift expose one optional PR and migration retains historical
@@ -559,7 +569,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | `task complete` changes status without moving Workflow; move/arrival at end triggers the same operation; completion inside follow-through followed by driver arrival records one completion and actual movement | Task launch, authority and command-tree tests; shared Rust/Swift DTO/view population |
 | Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
 | End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
-| Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state | PM revision/writeback and completion trigger tests |
+| Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state; reopening between outbound read and mutation survives | PM revision/writeback and completion trigger tests, including LOO-406's enabled failing concurrent-reopening regression |
 | Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | New lifecycle case in existing Task launch suite; serialize its resulting wire fixture for both Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
 | Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
@@ -648,6 +658,8 @@ holder of its Task during execution. Flow registration takes its name from the
 captured graph, removing a second input that could disagree. Historical fixtures
 retain their test-only Started writer because they distinguish retained Flow
 history from admission; production writes Flow and Started together.
+Workflow moves now share one Task lookup and omit the unused repository argument.
+The single-PR projection no longer selects a “latest” PR or compares it with itself.
 
 Synced main at `812d8cc55`, retaining placement before Process admission and
 applying main's `cli.agent` rename there. Earlier focused lifecycle, Rust/Swift DTO,
@@ -708,11 +720,21 @@ clears superseded intent; PM delivery checks the request after fresh acquisition
 Migration seeds historical completion and retains pending provider writebacks.
 No new Task type, watcher or worker was introduced.
 
+The historical `scratch/pr-review.html` retains revision-pinned excerpts from the
+superseded alias model. Its notice now distinguishes the implemented trigger from
+remaining integration; it is not a walkthrough of the current contract. A current
+walkthrough remains part of the complete demo preparation.
+
 The current public offline fixture deliberately cannot write Linear: it verifies
 pending completion, then ingests accepted provider status through the normal
 store writer. Stateful provider fixtures independently prove successful completion,
 lost responses and reopening. Together with the live held Process and atomic
-arrival/store-reopen cases, these prove the trigger contract; they do not yet
-compose post-merge filing, local-only planning, monitor and Desktop in one population.
+arrival/store-reopen cases, these cover local trigger and observed-revision behavior;
+they do not establish concurrent provider-write safety or compose post-merge filing,
+local-only planning, monitor and Desktop in one population.
 
-Check (2026-10-08): Task/Flow public suite 23 passed; Swift DTO/headless delivery and action checks 26 passed; focused atomic store, released-frontier migration, provider (6), Rust wire and Flow graph (10) checks passed; formatting and all-target Clippy passed. Review repaired execution-condition and historical-reader expectations plus the stale-arrival retry boundary; focused reruns pass. Full affected gate, LOO-406 integration, unified lifecycle proof and configured demo remain.
+Earlier completion-trigger checks and repaired expectations are retained at
+`5c240c89a:scratch/make-a-task-up-to.md`. They do not prove the unfinished local
+planning integration or unified lifecycle.
+
+Check (2026-10-08): reused the unchanged-code result with inherited `LF_*` cleared, `cargo nextest run -p loopflow --lib --test task_flow_launch_tests --test task_initialization_tests -E 'binary(task_flow_launch_tests) | binary(task_initialization_tests) | test(ops::task_actions::) | test(lf::commands::waves::)' --no-fail-fast` — 53 passed, formatting/Clippy passed; prose-only realign: `git diff --check` and `lf context --skill realign --json` passed within budgets. Full affected gate, LOO-406 integration, unified lifecycle proof and configured demo remain; LOO-406's recorded failing regression was not rerun.

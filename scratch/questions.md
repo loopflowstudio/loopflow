@@ -60,9 +60,12 @@ Jack Heart (October 8) requested no duplicate Task data types and explicit
 optional placement/identity and local follow-up filing/completion, not DTO merging
 alone. Existing LOO-406 types are reused; its active checkout is unchanged.
 
-October 8 integration recheck: LOO-406 is active on PR #1503, code `bd8d0191a`,
-with an uncommitted revised design. Its common planning writer remains unfinished.
-That design saves completion locally before optional Linear sync and deletes the
-provider-first completion/writeback APIs still used here. Finish the coherent
-integration before delivery; do not preserve parallel completion owners. The
-checkout was inspected read-only. Current focused proofs do not settle this gap.
+October 8 source recheck: LOO-406 at `cbdb9a43b` still lacks the coherent common
+writer. Its local-save path retains the old end/completion coupling; integration
+must preserve LOO-418's independent trigger. Its recorded failing concurrent
+reopening regression exposes an outbound read/write race, not covered by this
+branch's passing observation tests. The design records the precise integration
+cut and evidence limits. Provider-guarantee research remains with LOO-406; neither
+automatic propagation nor preservation of concurrent edits may be silently
+relaxed. If both cannot be guaranteed, that product choice remains unresolved.
+The checkout was read only; no live Task/PR status or test result was refreshed.

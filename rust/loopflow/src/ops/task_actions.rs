@@ -53,12 +53,6 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if evidence.abandon_intent {
         return action(TaskAction::NoAction, "Task is being abandoned");
     }
-    if let Some(remaining) = evidence
-        .completion_refusal
-        .filter(|reason| reason.contains("Remaining work:"))
-    {
-        return action(TaskAction::NoAction, remaining);
-    }
     if evidence.latest_pr_phase != Some(PrPhase::Merged) {
         if let Some(execution) = evidence
             .execution
@@ -138,8 +132,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
             TaskAction::Resume,
             "parent PR was abandoned; sync or abandon this stack",
         ),
-        Some(PrPhase::Merged) | None => model,
-        Some(_) => model,
+        _ => model,
     }
 }
 

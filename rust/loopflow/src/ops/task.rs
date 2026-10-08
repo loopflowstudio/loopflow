@@ -666,32 +666,19 @@ pub fn workflow_show(issue: &str) -> OpsResult<Option<crate::ops::workflow::Work
 /// skip ahead, or record work that finished elsewhere. A Flow still running
 /// on an edge is left alone and no longer moves the Task when it ends.
 /// `end` records a durable completion request after moving.
-pub fn workflow_set(
-    _repo: &Path,
-    issue: &str,
-    node: &str,
-    note: Option<&str>,
-) -> OpsResult<String> {
-    if node == END {
-        return block_on_task(async {
-            let store = task_store().await?;
-            let mut task = store
-                .get_task_by_issue(issue)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-            reach_end(&store, &mut task, EndMove::Set, note).await?;
-            Ok(format!("Task {} is at end", task.plan.identifier))
-        });
-    }
-    let note = note.map(str::trim).filter(|note| !note.is_empty());
+pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
-        let task = store
+        let mut task = store
             .get_task_by_issue(issue)
             .await
             .map_err(|error| task_error(format!("failed to resolve task: {error}")))?
             .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+        if node == END {
+            reach_end(&store, &mut task, EndMove::Set, note).await?;
+            return Ok(format!("Task {} is at end", task.plan.identifier));
+        }
+        let note = note.map(str::trim).filter(|note| !note.is_empty());
         let issue = &task.plan.identifier;
         let none = || {
             task_error(format!(
@@ -1604,17 +1591,11 @@ fn parse_workspace_slug(value: &str) -> OpsResult<WorktreeSegment> {
 }
 
 fn derive_workspace_slug(title: &str) -> OpsResult<WorktreeSegment> {
-    derive_workspace_slug_with_cap(title, 5)
-}
-
-/// Derive a workspace slug, keeping the kebab-word count at or below `max_words`
-/// so a caller that appends a suffix word still fits the 2-5 word limit.
-fn derive_workspace_slug_with_cap(title: &str, max_words: usize) -> OpsResult<WorktreeSegment> {
     let sanitized = sanitize_for_branch(title);
     let mut words = sanitized
         .split('-')
         .filter(|word| !word.is_empty())
-        .take(max_words)
+        .take(5)
         .collect::<Vec<_>>();
     if words.len() == 1 {
         words.push("task");
@@ -3189,9 +3170,7 @@ async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -
     result
 }
 
-/// The concise publication-state label carried by a PR's Linear linkage. Derived
-/// purely from the PR model — its phase and after-merge disposition — so the label
-/// is a projection of the source of truth, not a second state.
+/// Publication-state label carried by the PR's Linear linkage.
 fn pr_link_state_label(pr: &TaskPr) -> String {
     match pr.phase() {
         PrPhase::Merged => "Merged".to_string(),

@@ -960,12 +960,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             loopflow::lf::TaskWorkflowCommand::Restart { issue } => {
                 println!(
                     "{}",
-                    loopflow::ops::task::workflow_set(
-                        repo,
-                        issue,
-                        "start",
-                        Some("Restart Workflow"),
-                    )?
+                    loopflow::ops::task::workflow_set(issue, "start", Some("Restart Workflow"),)?
                 );
                 Ok(())
             }
@@ -978,7 +973,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         } => {
             println!(
                 "{}",
-                loopflow::ops::task::workflow_set(repo, issue, node, reason.as_deref())?
+                loopflow::ops::task::workflow_set(issue, node, reason.as_deref())?
             );
             Ok(())
         }

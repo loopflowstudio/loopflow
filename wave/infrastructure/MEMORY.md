@@ -1062,9 +1062,10 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
 
-LOO-420: Jack Heart selected native invocation for same-harness skills, translated
-ports otherwise, and inlined builtins. Claude 2.1.293 stream-json replay proves
-trailing context becomes skill arguments; prefixes and multiple blocks bypassed
-dispatch. UserPromptSubmit context preserved arguments. Codex 0.160.1 exec loaded
-a native skill. These probes prove neither IDE continuity nor third-party
-fidelity; implementation remains open.
+LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
+translated ports otherwise, and inlined builtins. Claude 2.1.293 replay:
+suffix context contaminating arguments; prefixes/multiple blocks bypassed dispatch.
+UserPromptSubmit preserved arguments; Codex 0.160.1 exec loaded a native skill.
+Require provider receipts, not answers or exits. IDE/context
+handoff, existing-conversation dispatch, third-party fidelity and implementation
+remain open.

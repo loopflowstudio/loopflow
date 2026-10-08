@@ -1,8 +1,8 @@
 # Run existing skills on either harness
 
-LOO-420. Draft returned for design review, 2026-10-07. Jack Heart selected native
-invocation for skills belonging to the selected harness, translated ports for
-the other harness, and inlined Loopflow builtins. Jack requested the first
+LOO-420. Draft returned for design review; reconciled 2026-10-07. Jack Heart
+selected native invocation for skills belonging to the selected harness,
+translated ports for the other harness, and inlined Loopflow builtins. Jack requested the first
 workflow step and no landing. No production implementation is retained.
 
 ## Required behavior
@@ -13,7 +13,7 @@ and help identify the same selected source as execution. User skill files and
 their bundled assets remain unchanged. Unfamiliar declarations become visible
 limitations with runnable instructions, not silent omissions or load failures.
 
-## Owners and cut
+## Proposed owners and cut
 
 One engine skill catalog owns roots, names, precedence, source paths and format.
 Repository definitions precede personal definitions, then embedded builtins.
@@ -22,6 +22,13 @@ Within each scope: `.lf/skills`, `.claude/skills`, `.claude/commands`,
 overrides must select the same files as their harness. Generated Loopflow exports
 never override current embedded instructions. Bundled Markdown is not a second
 skill. Namespaces and filesystem cycles need deterministic handling.
+
+This ordering is proposed, not a recorded decision from Jack. Native dispatch
+must resolve the catalog's selected file, including same-name collisions; a
+matching slash-command name alone does not establish source agreement. Export
+reuses catalog discovery while retaining its personal/builtin scope: repository
+skills remain local, and discovering a third-party source does not authorize
+overwriting it or exporting it to another harness unchanged.
 
 Canonical Process prompt preparation owns native versus ported selection after
 agent resolution. Captured skill provenance must survive Flow serialization;
@@ -39,10 +46,11 @@ is selected. Storage changes must follow the final captured-input representation
 
 ## Architectural counterexample and unresolved boundary
 
-`run_prompt` passes `AgentConfig` to the headless harness, but terminal/IDE
-`launch_session_with_env` receives only a prompt string. Claude native dispatch
-recognizes one command text block. Prefixing context or sending two text blocks
-bypassed native expansion. Appending context expanded the skill but placed that
+`run_prompt` passes `AgentConfig` to the headless harness. Terminal/IDE
+`launch_session_with_env` receives model, environment and provider Session ID
+separately, but skill invocation and context share one prompt string. Claude
+native dispatch recognizes one command text block. Prefixing context or sending
+two text blocks bypassed native expansion. Appending context expanded the skill but placed that
 context in the native `<command-args>` replay receipt. The model sometimes hid
 this contamination in its answer; marker-only assertions gave a false pass.
 
@@ -67,6 +75,9 @@ hidden model turn. Creating a provider Session and opening its existing native
 conversation is a candidate to investigate, not an accepted implementation.
 Existing-conversation invocation also needs an explicit dispatch path through its
 current driver; a new Session or copied transcript cannot establish continuity.
+Codex's current `turn/start` and `turn/steer` both send text-only input; the
+standalone `codex exec` probe exercises neither path. The one-turn Claude hook
+probe does not establish context lifetime or hook scoping across resume.
 Jack has not waived either requirement. This is a design-review return, not a
 claim that unavailable GUI testing blocks ordinary implementation.
 
@@ -94,7 +105,10 @@ of them. Keep the production cut together after resolving the boundary above.
 4. Prove unchanged third-party skill fixtures on both providers, including
    bundled references, arguments and declared controls. Keep configured provider
    evidence separate from deterministic transport fixtures.
-5. Compare plain and lf startup/context costs and same-conversation use. Remove
+5. Compare plain and lf startup/context costs and same-conversation use with
+   repeated, matched baselines. Count context fetched during the turn as well
+   as launch tokens: Intelligence's context-ablation pilot found that omitted
+   material gets read from disk, and did not measure resumed history. Remove
    regressions before claiming the strict replacement outcome.
 6. Build changed code and run focused tests; affected suites and full
    headless acceptance remain gate-owned. The probe does not satisfy them.
@@ -122,8 +136,11 @@ Review finding: a successful provider exit and a plausible final answer cannot
 prove native dispatch or faithful argument delivery. Provider input receipts are
 the required evidence at that boundary. The probe now reads answers and receipts
 in one pass, keeping them separate in its observations and acceptance checks.
+Release's child memory records the same distinction between an operation's
+outcome and its reporting process's success. Current production source still
+matches the inventory above.
 
-Check: `uv run ruff check scripts/benchmarks/skill-invocation/probe.py` and `uv run python` offline equivalence checks passed (72 cases against `1f6e744c3`: receipts, answer-only output, contaminated arguments, exit failures, timeouts and acceptance); live providers not rerun; product implementation and gate remain open.
+Check: prior `uv run ruff check scripts/benchmarks/skill-invocation/probe.py` and `uv run python` offline equivalence passes retained (72 cases against `1f6e744c3`); prose reconciliation passes `git diff --check`; live providers not rerun, product implementation and gate remain open.
 
 Protocol references: [Codex skill input](https://learn.chatgpt.com/docs/app-server#skills),
 [Claude skill declarations](https://code.claude.com/docs/en/skills),

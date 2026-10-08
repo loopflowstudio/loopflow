@@ -29,3 +29,43 @@ frontmatter/tool/model fidelity, bundled-file behavior, IDE handoff, Session
 continuation, nor Loopflow capture. The one-shot timings are diagnostic samples,
 not an lf-versus-slash-command latency comparison. App-server's explicit skill
 input is documented but has not been exercised by this script.
+
+## Native continuity
+
+```sh
+uv run python scripts/benchmarks/skill-invocation/continuity.py \
+  --provider codex --executable /path/to/codex
+uv run python scripts/benchmarks/skill-invocation/continuity.py \
+  --provider claude --executable /path/to/claude
+```
+
+Use the provider binary directly to avoid terminal wrappers. Each run creates
+synthetic skills in a temporary ordinary directory and uses native authentication.
+Claude disables model tools and MCP; Codex uses read-only sandboxing, disables
+MCP/apps/plugins through launch overrides, and asks for no tools. Existing skills,
+settings and conversations are not edited. These calls consume provider usage and
+leave their new native conversations available for receipt inspection after the
+temporary fixtures are removed. Output names those conversations and transcripts.
+Each protocol wait is bounded to 55 seconds; cleanup waits five seconds before
+killing only the probe's process group.
+
+Codex sends an explicit `skill` item beside the invocation and a separate text
+context item through `turn/start`. After restarting app-server, it resumes the
+same thread and repeats with a new argument. Checks require returned skill/path
+and text items, unchanged first-turn history, and native user-role expansion of
+the selected file for each turn. Claude checks native command replay, source
+directory and substituted arguments across three processes. Before its second
+turn, the probe deletes the hook program and omits hook settings; the original
+context attachment must survive. The first answer and reasoning cannot echo the
+context marker, preventing answer recall from masquerading as context retention.
+The third process explicitly reinstalls the hook. Receipt parsing has offline
+tests for wrong sources, altered arguments, assistant echoes and stale turns.
+
+On 2026-10-07, Codex 0.160.1 and Claude 2.1.293 passed these transport checks.
+**This is not a fidelity pass:** Claude records `hook_additional_context` with
+`renderedRole: "system"`. This contradicts the design's requirement to keep
+repository reference material out of system instructions. The output retains
+that role rather than treating marker delivery as sufficient. Cross-session hook
+isolation, active-turn steering, GUI handoff, third-party controls and Loopflow's
+own capture/dispatch remain unproved. The probe does not use Codex's experimental
+`additionalContext` field; its context is a separate user text block.

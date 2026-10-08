@@ -986,9 +986,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
-- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
-  origin/<own branch>` made that tip #1456's base; land refused its own commits
-  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
@@ -1063,9 +1060,12 @@ checkpointing, common invocation loading and Claude's file-backed stdin. Rejecte
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
-translated ports otherwise, and inlined builtins. Claude 2.1.293 replay:
-suffix context contaminating arguments; prefixes/multiple blocks bypassed dispatch.
-UserPromptSubmit preserved arguments; Codex 0.160.1 exec loaded a native skill.
-Require provider receipts, not answers or exits. IDE/context
-handoff, existing-conversation dispatch, third-party fidelity and implementation
-remain open.
+translated ports otherwise, and inlined builtins. Codex 0.160.1 app-server
+receipts prove selected-file expansion, separate user context and same-thread
+resume. Claude 2.1.293 preserves arguments and hook context across resume after
+hook-file deletion, but records that context with system authority, contradicting
+the design's reference constraint. Require native receipts, including role and
+source, not answers or exits; exclude answer leakage in recall probes.
+Resume links do not prove context-settings handoff. IDE delivery, existing-driver
+dispatch, third-party fidelity and implementation remain open. Reproduction and
+limits: [skill probes](../../scripts/benchmarks/skill-invocation/README.md).

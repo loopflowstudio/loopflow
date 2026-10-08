@@ -53,24 +53,25 @@ saves abandonment and cancellation identity atomically in both modes, deleting
 provider-first decision writers. Cleanup checks execution separately and cannot
 reverse the decision. Safe cancellation delivery remains unimplemented and pending.
 
-Placement now consumes saved Task planning state and deletion evidence without
-provider inventory. The obsolete registration writer and provider-plan rewrite are
-deleted; admission fixtures use `place_task`. The single draft and inbound writer
-retain state/completion and removal without moving Workflow or cleaning checkouts.
-Wave/checkout locks and winning PR/path survive cancellation. Common definitions,
-creation/edit, membership conflicts and rotation remain; LOO-412 has no coherent
-writer boundary. Public resolution, composed reconnect and installed acceptance
-remain unproved.
+Placement and Flow admission consume saved Task planning without provider inventory.
+The obsolete registration writer, provider-plan rewrite and launch ownership dispatch
+are deleted. One SQLite admission reader preserves state/completion, removal,
+invalidation and Project/Team mismatch evidence; no observation moves Workflow or
+cleans checkouts. Known issue changes remain invalid even without inventory rows.
+Wave/checkout locks and winning PR/path survive cancellation. Public paired offline
+checkout/Flow fixtures preserve saved edits; existing CLI proofs retain active work
+after remote completion and prevent unstarted work. Common schema, definitions,
+creation/edit, membership reconciliation and
+rotation remain; LOO-412 still has no coherent writer boundary. Public resolution
+and composed reconnect remain unproved. The enabled reopening regression still
+fails after this admission cut; its propagation/preservation requirements remain.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
 Identity, creation receipts, mapping and placement stay distinct. Publication is
 for review only; no landing or installation. Design: `scratch/explore-loopflow-s-own-store.md`.
 
-PR #1503 at `dfe18ab60` passed six suites and disposable Linux adoption for the
-superseded split, proving no unified path or live/installed continuity. Implementation,
-deletion recovery, selection-race repair and ten mixed-rotation failure points remain at
-`dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
+Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
 The laptop authors; workers are disposable. Namespaces prove no privacy, callbacks
 no laptop-loss recovery, and mappings no concurrent-export uniqueness.

@@ -580,5 +580,36 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
             [task.id.as_str()], |row| row.get(0),
         ).unwrap();
         assert_eq!(executions, 0);
+        fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
+        fs::write(
+            worktree.join(".lf/flows/offline.yaml"),
+            "- cmd: task sync --plan\n",
+        )
+        .unwrap();
+        let output = unbound_command(
+            Path::new(env!("CARGO_BIN_EXE_lf")),
+            worktree,
+            &["-b", "--task", task.id.as_str(), "run", "offline"],
+        )
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let flows = support::recorded_flows(home.path());
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.get_task(&task.id))
+                .unwrap()
+                .unwrap()
+                .plan,
+            saved.plan
+        );
     }
 }

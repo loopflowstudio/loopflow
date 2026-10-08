@@ -417,16 +417,19 @@ pub(super) fn pm_task_observation_in(
         )));
     }
     let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
-        let removed = conn.query_row(
+        let (removed, changed) = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
                  OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
-                params![selector, provider, repo], |row| row.get::<_, bool>(0),
+                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
+                 EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND ?2='linear')",
+                params![selector, provider, repo], |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
             )?;
         return Ok(PmTaskObservation {
             record: None,
             state: if removed {
                 PlanningState::Removed
+            } else if changed {
+                PlanningState::Invalid
             } else {
                 PlanningState::Unavailable
             },

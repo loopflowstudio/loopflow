@@ -58,7 +58,12 @@ the full Task UUID; default checkout names use up to four title words and an ID
 suffix. Retained provider branch names take precedence.
 Placement records the first PR and checkout before filesystem creation, without rewriting
 planning fields. Accepted state and completion are retained on the Task, so terminal
-planning prevents first placement even without provider inventory. Incoming removal
+planning prevents first placement even without provider inventory. Task and Flow entry
+use the same SQLite admission reader as placement, without a provider resolver.
+It reads one snapshot of saved planning, Workflow state and retained invalidation,
+removal and membership evidence. Missing provider inventory alone does not prevent
+a saved Task from running; a retained invalidation still does. Remote completion
+prevents new work but does not stop an already active Workflow. Incoming removal
 retains the Task and marks its planning deleted; neither observation moves a Workflow
 or cleans a checkout. Competing reservations return the saved allocation; restoration
 uses that checkout and PR. The queued writer retains the Wave lock through commit,
@@ -74,7 +79,7 @@ transaction cannot make the external provider effects atomic.
 LOO-406's accepted replacement is one locally owned plan with repository-wide
 optional Linear synchronization. That cutover remains unfinished. Creation, edits,
 definitions and rotation retain separate planning authorities;
-the common offline checkout path does not establish common planning ownership.
+the common offline checkout and launch paths do not establish common planning ownership.
 
 ## Connected Project selection
 

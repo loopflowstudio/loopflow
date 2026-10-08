@@ -463,29 +463,10 @@ pub fn task_place(
             .as_deref()
             .map(str::trim)
             .filter(|reason| !reason.is_empty());
-        // Linear ending a Task that never left `start` withdraws it before
-        // any move is written.
-        if store
+        store
             .sqlite
-            .project_planning_authority(&task.project_id)
-            .map_err(task_error)?
-            == crate::planning::PlanningAuthority::Linear
-            && !matches!(
-                store.task_state(&task.id).await.map_err(task_error)?,
-                TaskState::Active
-            )
-        {
-            let wave = owning_wave(&store, &task).await?;
-            if let Ok(record) = crate::ops::pm::read_task_planning_async(
-                Path::new(wave.repo()),
-                task.plan.linear_id()?.as_str(),
-                crate::ops::pm::PmRefresh::Never,
-            )
-            .await
-            {
-                require_startable_issue(&record.item)?;
-            }
-        }
+            .require_task_launch(&task.id)
+            .map_err(task_error)?;
         let flow = traverse_workflow(
             &store,
             &task,
@@ -1613,79 +1594,14 @@ pub(crate) fn task_event_process_refusal(
     }
 }
 
-fn require_startable_issue(item: &crate::pm::PmItem) -> OpsResult<()> {
-    if item.terminal_reason().is_some() {
-        return Err(task_error(format!(
-            "Task {} is terminal and cannot start execution",
-            item.identifier
-        )));
-    }
-    Ok(())
-}
-
-/// Existing work consumes validated local facts; refresh and provider writes own acquisition.
-/// What a Flow launch for a Task must hold, however the Task was named: ready
-/// Work in its Wave's current chapter whose planning still matches.
+/// Every Task launch consumes the same saved planning and execution facts.
 pub(crate) async fn require_task_flow_launch(
     store: &SharedStore,
     task_id: &crate::work::task::TaskId,
 ) -> OpsResult<()> {
-    let task = store
-        .get_task(task_id)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error(format!("Task {task_id} is not registered")))?;
-    if task_work_status(store, &task).await? != WorkStatus::Ready {
-        return Err(task_error(format!(
-            "Task {} is terminal and cannot launch a Flow",
-            task.plan.identifier
-        )));
-    }
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        return store
-            .sqlite
-            .require_task_launch(&task.id)
-            .map_err(task_error);
-    }
-    let resolved = crate::ops::task_pm::resolve_task_async(
-        task.worktree()?,
-        task.plan.linear_id()?.as_str(),
-        crate::ops::pm::PmRefresh::Never,
-    )
-    .await?;
-    // Linear completing an active Task is shown on the Task; its work goes on.
-    if planning_conflict_of(
-        store.task_state(&task.id).await.map_err(task_error)?,
-        &resolved.item,
-        "",
-    )
-    .is_none()
-    {
-        require_startable_issue(&resolved.item)?;
-    }
-    let project = store
-        .get_project(&task.project_id)
-        .await
-        .map_err(task_error)?
-        .ok_or_else(|| task_error("Task Project is missing"))?;
-    let wave = owning_wave(store, &task).await?;
-    if resolved.item.id != task.plan.linear_id()?.as_str()
-        || resolved.project.id != project.plan.linear_id()?.as_str()
-        || resolved.wave != wave.slug()
-    {
-        return Err(task_error(format!(
-            "Task {} planning no longer matches its registered Work; its Flow history is preserved",
-            task.plan.identifier
-        )));
-    }
     store
         .sqlite
-        .require_task_launch(&task.id)
+        .require_task_launch(task_id)
         .map_err(task_error)
 }
 

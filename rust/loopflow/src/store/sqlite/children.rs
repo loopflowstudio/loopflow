@@ -54,17 +54,7 @@ impl SqliteStore {
             ));
         }
         super::durable::require_selected_project(&tx, &task.project_id)?;
-        require_task_not_deleted(&tx, &task)?;
-        let (state, completed): (Option<String>, bool) = tx.query_row(
-            "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
-            [task_id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        if crate::pm::terminal_reason(state.as_deref(), completed).is_some() {
-            return Err(StoreError::InvalidAuthority(
-                "terminal planning state cannot allocate a checkout".into(),
-            ));
-        }
+        require_task_planning(&tx, &task)?;
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
         validate_initial_task_pr(&task, pr)?;
@@ -1096,6 +1086,65 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
             "Task {} was deleted; create a new Task",
             task.plan.identifier
         )));
+    }
+    Ok(())
+}
+
+/// Saved planning admits work without acquisition. Retained contrary provider
+/// evidence still applies; missing inventory cannot erase the saved Task.
+pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
+    require_task_not_deleted(conn, task)?;
+    let (state, completed): (Option<String>, bool) = conn.query_row(
+        "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+        [task.id.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
+        && crate::pm::terminal_reason(state.as_deref(), completed).is_some()
+    {
+        return Err(StoreError::InvalidAuthority(
+            "terminal planning state cannot start work; its execution history is preserved".into(),
+        ));
+    }
+    let Some(issue) = &task.plan.linear_id else {
+        return Ok(());
+    };
+    let (repo, project): (String, Option<String>) = conn.query_row(
+        "SELECT w.repo,p.external_project_id FROM projects p
+         JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+        [task.project_id.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let observation =
+        super::planning::pm_task_observation_in(conn, &repo, "linear", issue.as_str())?;
+    if matches!(
+        observation.state,
+        crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+    ) {
+        return Err(StoreError::InvalidAuthority(
+            "Task planning has invalidation or removal evidence; refresh its planning".into(),
+        ));
+    }
+    if let Some(record) = observation.record {
+        if record.item.project_id != project {
+            return Err(StoreError::InvalidAuthority(
+                "Task planning no longer matches its owning Project; its history is preserved"
+                    .into(),
+            ));
+        }
+        if let Some(project) = record.project {
+            if !record
+                .item
+                .team_id
+                .as_ref()
+                .is_some_and(|team| project.team_ids.contains(team))
+            {
+                return Err(StoreError::InvalidAuthority(
+                    "Task planning no longer matches its Project's Team; its history is preserved"
+                        .into(),
+                ));
+            }
+        }
     }
     Ok(())
 }

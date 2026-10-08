@@ -18,9 +18,10 @@ impl SqliteStore {
     /// A Task may launch a Flow while it is ready, not being abandoned, and
     /// planned in its Wave's current chapter.
     pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.transaction()?;
         let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
-        super::children::require_task_not_deleted(&conn, &task)?;
+        super::children::require_task_planning(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
         require_ready_work(&conn, &work)?;
         let abandoning: bool = conn.query_row(

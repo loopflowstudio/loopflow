@@ -542,4 +542,14 @@ captured graph, removing a second input that could disagree. Historical fixtures
 retain their test-only Started writer because they distinguish retained Flow
 history from admission; production writes Flow and Started together.
 
-Check (2026-10-07): focused Rust lifecycle/filing/placement/stack/migration tests passed; `cargo test -p loopflow --test task_follow_through_tests --test dto_fixtures` 25 passed; `swift test --package-path swift --filter 'DTOFixtureTests|TaskFlowTests/deliveryEvidence'` 24 passed; documented commands/goldens 4 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; gate owns the `scripts/test.py` plan and Docker installation, demo owns Jack's judgment.
+Synced main at `812d8cc55`, retaining placement before Process admission and
+applying main's `cli.agent` rename there. Earlier focused lifecycle, Rust/Swift DTO,
+filing, placement, stack and migration evidence is retained at
+`89e1198c5:scratch/make-a-task-up-to.md`.
+
+Review (2026-10-08): confirmed follow-up links incorrectly copied the immutable
+filing date instead of Linear's observed due date. Confirmation now records the
+provider date, including removal; the retry receipt retains its original payload.
+The lost-response/changed-chapter regression covers both date edits and removal.
+
+Check (2026-10-08): `cargo test -p loopflow --lib ops::task::follow_through::tests::operation_retries_pinned_filing_after_lost_responses_and_chapter_change -- --exact` passed (1); post-sync `task_flow_launch_tests::running_flows_belong_to_the_target_checkout_and_retain_their_caller` passed (1, five paths); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.

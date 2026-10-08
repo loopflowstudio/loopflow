@@ -2355,14 +2355,6 @@ impl CaptureHandle {
         self.with_capture(SessionCapture::start_attempt);
     }
 
-    pub(crate) fn mark_handoff(&self, surface: &str) {
-        self.with_capture(|capture| {
-            capture.append_event(CaptureEvent::Handoff {
-                surface: surface.to_string(),
-            })
-        });
-    }
-
     pub(crate) fn record_raw(&self, stream: &str, line: &str) {
         self.with_capture(|capture| capture.record_raw(stream, line));
     }

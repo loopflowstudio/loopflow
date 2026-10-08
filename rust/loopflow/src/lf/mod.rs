@@ -93,13 +93,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
-    #[arg(long, conflicts_with_all = ["ide", "batch"])]
-    pub tui: bool,
-
-    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
+    /// Hand off Claude, Codex, or OpenCode to the terminal
     #[arg(long, conflicts_with = "batch")]
-    pub ide: bool,
+    pub tui: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -241,7 +237,6 @@ impl Cli {
             interactive: self.interactive,
             batch: self.batch,
             tui: self.tui,
-            ide: self.ide,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -1720,6 +1715,13 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
+        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert!(error.to_string().contains("--ide"));
+    }
 
     #[test]
     fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {

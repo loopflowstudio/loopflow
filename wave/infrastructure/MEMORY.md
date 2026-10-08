@@ -1062,8 +1062,9 @@ Codex `turn/start` remaining waiting is unresolved; Claude success proves no rep
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
 separate context and same-thread resume, not recall without resupply. Claude hook
-context survives deletion; rendering metadata cannot establish model authority. Exclude
-answer leakage. Installed 0.13.9 IDE launches succeed but record no native thread,
-endpoint or provider PID; both `session connect` attempts fail. Launcher exit
-proves no engine exit. Native identity, settings handoff, app execution, ports
-and fidelity remain unproved. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).
+context survives deletion; rendering metadata cannot establish model authority.
+Exclude answer leakage. Installed 0.13.9 app launches recorded no native identity;
+both reconnects failed. Jack then directed removal of `--ide` and its app-launch
+path. Keep terminal/headless execution and historical records. Launcher success
+proves no engine exit. Native dispatch, ports and fidelity remain unproved.
+[Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

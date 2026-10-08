@@ -981,7 +981,7 @@ model.
 ## Appendix: historical-only vocabulary
 
 The scanner matches exact phrases, not overloaded words. Provider resume
-sessions, tmux sessions, and `session.launch` are current. The authored chat
+sessions and tmux sessions are current. The authored chat
 reference `project:<slug>` is also current; it is not the old Linear-label PM
 model.
 

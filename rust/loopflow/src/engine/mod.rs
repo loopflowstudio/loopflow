@@ -38,8 +38,7 @@ pub use agent::{
 };
 pub use command::{run_command, CommandError};
 pub use config::{
-    default_agent, load_config, load_config_or_default, parse_agent, Config, ProcessTarget,
-    SessionConfig,
+    default_agent, load_config, load_config_or_default, parse_agent, Config, SessionConfig,
 };
 pub use error::{CoreError, GitError, LoadError};
 pub use execution::{

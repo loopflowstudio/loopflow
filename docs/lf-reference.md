@@ -58,8 +58,7 @@ Open Loopflow or run its CLI
 | `--yolo` | Skip permission prompts Default: false. |
 | `--interactive / -i` | Run interactively Default: false. |
 | `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
-| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch) Default: false. |
-| `--ide` | Hand off Claude or Codex to the vendor app (overrides session.launch) Default: false. |
+| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal Default: false. |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
 | `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
 | `--__cron-lock-fd` | cron lock fd Internal. |

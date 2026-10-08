@@ -623,9 +623,9 @@ to the public code remote is selected. Publication remains for review, never lan
 Portable fields retain mutation IDs and superseded IDs: observed reopening
 survives delayed completion; concurrent values remain conflicts. Equal concurrent
 values retain both causes. Membership moves as a Wave/Project pair; comment IDs
-deduplicate replay. Fourteen pure/Git fixtures prove reconciliation and transport,
+deduplicate replay. Fourteen isolated fixtures prove reconciliation and transport,
 not SQLite import, semi-live arrival, hosted policy or public machine dispatch.
-LOO-406 `bd8d0191a` retains Local/Linear splitting; causal peer import/export and
+LOO-406 `a3324396b` retains Local/Linear splitting; causal peer import/export and
 checkpoints remain absent. Persist causality atomically; export reuses IDs.
 Fetch never acknowledges import. Callback design survives in Git; replace adoption.
 Acceptance:

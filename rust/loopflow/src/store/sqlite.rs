@@ -2458,7 +2458,7 @@ mod frontier_tests {
     }
 
     /// Opening the shared store reads its schema, never its rows: a dangling
-    /// reference is installation preflight's and `lf machine doctor`'s to report.
+    /// reference is installation preflight's and `lf doctor`'s to report.
     #[test]
     fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
         let shared = SharedMachine::new();

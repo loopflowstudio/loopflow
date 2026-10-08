@@ -286,7 +286,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
 }
 
 /// Observe an early command without creating a Machine, migrating, or requiring Git.
-/// Failure to observe never prevents help, installation recovery or screenshot cleanup.
+/// Failure to observe never prevents help or installation recovery.
 pub fn observe_process(command: &[String]) {
     if current_context().is_some() {
         return;

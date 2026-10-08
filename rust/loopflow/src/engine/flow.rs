@@ -121,8 +121,8 @@ impl Command {
             self.command = self.args.remove(0);
         }
         let owner = match self.command.as_str() {
-            "doctor" | "screenshot" | "ssh" | "desktop" => Some("machine"),
-            "install" => Some("installation"),
+            "ssh" => Some("machine"),
+            "doctor" | "install" => Some("self"),
             "usage" | "ps" | "top" | "activity" => Some("monitor"),
             "release" | "tokens" | "ci" => Some("repo"),
             "cron" => Some("wave"),

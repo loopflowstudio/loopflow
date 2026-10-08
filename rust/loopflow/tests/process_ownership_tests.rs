@@ -330,7 +330,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 
 #[tokio::test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
+async fn early_observation_records_preflight() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -340,18 +340,8 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["installation", "install", "preflight", "--json"],
+        &["self", "install", "preflight", "--json"],
     )
-    .output()
-    .unwrap();
-    assert!(!output.status.success(), "{output:?}");
-    // No browser executable is available; both actual lf processes still exist.
-    let output = command(
-        home.path(),
-        home.path(),
-        &["machine", "screenshot", "missing.html", "-o", "missing.png"],
-    )
-    .env("PATH", "")
     .output()
     .unwrap();
     assert!(!output.status.success(), "{output:?}");
@@ -363,12 +353,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!((count, completed), (3, 3));
-    let (child, parent): (String,String) = conn.query_row(
-        "SELECT c.lfid,p.lfid FROM processes c JOIN processes p ON c.parent_process_lfid=p.lfid WHERE c.command LIKE '%__screenshot-supervisor%'",
-        [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-    assert_ne!(child, parent);
-    assert!(!home.path().join("missing.png").exists());
+    assert_eq!((count, completed), (1, 1));
 }
 
 #[test]

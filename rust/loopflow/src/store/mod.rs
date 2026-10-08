@@ -1303,7 +1303,7 @@ pub async fn open_existing_store() -> Option<Store> {
     match open_store(&cfg).await {
         Ok(store) => Some(store),
         Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf machine doctor");
+            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
             None
         }
     }
@@ -1324,7 +1324,7 @@ pub enum RegistryUnavailable {
     /// development guard, or an IO failure before the file is even opened.
     Unresolved { error: String },
     /// The registry file exists but could not be opened: inaccessible, locked,
-    /// or schema-incompatible. Actionable via `lf machine doctor`.
+    /// or schema-incompatible. Actionable via `lf doctor`.
     Incompatible { path: PathBuf, error: String },
 }
 

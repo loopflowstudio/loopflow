@@ -319,8 +319,8 @@ mod tests {
     #[test]
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
-        assert!(LOOPFLOW_DOC.contains("lf screenshot SOURCE -o OUTPUT"));
-        assert!(LOOPFLOW_DOC.contains("never launch a GUI browser executable"));
+        assert!(!LOOPFLOW_DOC.contains("lf screenshot"));
+        assert!(LOOPFLOW_DOC.contains("Never launch a GUI browser executable"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 

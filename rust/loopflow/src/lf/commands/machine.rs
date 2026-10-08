@@ -5,20 +5,8 @@ use anyhow::anyhow;
 
 pub fn run(cmd: &MachineCommand) -> anyhow::Result<()> {
     match cmd {
-        MachineCommand::Desktop
-        | MachineCommand::Screenshot { .. }
-        | MachineCommand::Doctor { .. }
-        | MachineCommand::Ssh { .. } => {
-            unreachable!("startup and operation commands dispatch separately")
-        }
-        MachineCommand::User { json } => {
-            let name = crate::engine::config::load_user_name()?;
-            if *json {
-                println!("{}", serde_json::to_string(&name)?);
-            } else if let Some(name) = name {
-                println!("{name}");
-            }
-            Ok(())
+        MachineCommand::Ssh { .. } => {
+            unreachable!("SSH dispatches separately")
         }
         MachineCommand::Id { json } => id_cmd(*json),
         MachineCommand::Observe {

@@ -1358,14 +1358,13 @@ fn run() -> anyhow::Result<()> {
     // read-only candidate preflight must work before a first install settles.
     let bypasses_installation_startup_gate = matches!(
         &cli.command,
-        Some(Commands::Installation {
-            cmd: loopflow::lf::InstallationCommand::Install { .. }
-        }) | Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Doctor {
-                planning: false,
-                ..
-            } | loopflow::lf::MachineCommand::Screenshot { .. }
-        }) | Some(Commands::ScreenshotSupervisor { .. })
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. }
+                | loopflow::lf::SelfCommand::Doctor {
+                    planning: false,
+                    ..
+                }
+        })
     );
     if !bypasses_installation_startup_gate {
         loopflow::installation::dispatch_default_cli()?;
@@ -1377,26 +1376,11 @@ fn run() -> anyhow::Result<()> {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Machine, repository, account, or Session state. Its
-    // hidden supervisor must also be able to clean up after its public parent
-    // dies, so both forms dispatch before those unrelated boundaries.
-    match &cli.command {
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Screenshot { screenshot },
-        }) => {
-            return loopflow::lf::commands::screenshot::run(screenshot);
-        }
-        Some(Commands::ScreenshotSupervisor { screenshot }) => {
-            return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
-        }
-        _ => {}
-    }
-
     // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
-    if let Some(Commands::Machine {
+    if let Some(Commands::Self_ {
         cmd:
-            loopflow::lf::MachineCommand::Doctor {
+            loopflow::lf::SelfCommand::Doctor {
                 json,
                 planning: false,
             },
@@ -1410,8 +1394,8 @@ fn run() -> anyhow::Result<()> {
     // migration frontier must reach the preflight refusal, not fail in
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
-    if let Some(Commands::Installation {
-        cmd: loopflow::lf::InstallationCommand::Install { cmd },
+    if let Some(Commands::Self_ {
+        cmd: loopflow::lf::SelfCommand::Install { cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
@@ -1662,9 +1646,8 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(None, Some(&text), cli),
             })
         }
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Desktop,
-        }) => loopflow::lf::commands::desktop::run(),
+        Some(Commands::Open) => loopflow::lf::commands::open::run(),
+        Some(Commands::Config { cmd }) => loopflow::lf::commands::config::run(cmd),
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
@@ -1725,12 +1708,11 @@ fn execute_command(
         },
         Some(Commands::Machine {
             cmd:
-                cmd @ (loopflow::lf::MachineCommand::User { .. }
-                | loopflow::lf::MachineCommand::Id { .. }
+                cmd @ (loopflow::lf::MachineCommand::Id { .. }
                 | loopflow::lf::MachineCommand::Observe { .. }),
         }) => loopflow::lf::commands::machine::run(cmd),
-        Some(Commands::Installation {
-            cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
         Some(Commands::Wave {
             cmd:
@@ -1819,8 +1801,8 @@ fn execute_command(
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),
-        Some(Commands::Machine {
-            cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Doctor { json, planning },
         }) => {
             if *planning {
                 let repo = loopflow::repo::working_directory()?;
@@ -1848,18 +1830,10 @@ fn execute_command(
         }) => in_repo_runtime(args, |repo| {
             loopflow::lf::commands::discord::serve(repo, wave)
         }),
-        Some(Commands::Installation {
-            cmd: loopflow::lf::InstallationCommand::Install { .. },
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. },
         }) => {
             unreachable!("install dispatches before home routing")
-        }
-        Some(
-            Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Screenshot { .. },
-            }
-            | Commands::ScreenshotSupervisor { .. },
-        ) => {
-            unreachable!("screenshot dispatches before home routing")
         }
         Some(Commands::Machine {
             cmd:
@@ -2083,14 +2057,9 @@ mod tests {
     }
 
     #[test]
-    fn desktop_remains_an_explicit_app_command() {
-        let cli = Cli::try_parse_from(["lf", "machine", "desktop"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Machine {
-                cmd: loopflow::lf::MachineCommand::Desktop
-            })
-        ));
+    fn open_remains_an_explicit_app_command() {
+        let cli = Cli::try_parse_from(["lf", "open"]).unwrap();
+        assert!(matches!(cli.command, Some(Commands::Open)));
     }
 
     #[test]

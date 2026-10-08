@@ -99,7 +99,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
     let home = tempfile::tempdir().unwrap();
     for args in [
         vec![
-            "installation",
+            "self",
             "install",
             "local-preflight",
             "--store",
@@ -107,7 +107,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "--json",
         ],
         vec![
-            "installation",
+            "self",
             "install",
             "promote",
             "--from-build",
@@ -116,7 +116,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "installation",
+            "self",
             "install",
             "promote",
             "--fresh",
@@ -124,7 +124,7 @@ fn local_promotion_and_retained_home_commands_are_removed() {
             "/unused",
         ],
         vec![
-            "installation",
+            "self",
             "install",
             "promote",
             "--reuse-home",

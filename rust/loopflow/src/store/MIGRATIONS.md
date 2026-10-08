@@ -69,7 +69,7 @@ migration that leaves a dangling reference rolls back as one unit.
 
 That is the only place stored rows are scanned for dangling references during
 ordinary use. Opening a store validates its migration ledger and schema and
-relies on per-connection enforcement; `lf machine doctor` and installation
+relies on per-connection enforcement; `lf doctor` and installation
 preflight run the full `PRAGMA foreign_key_check`, which reads the whole database.
 
 Persisted JSON is schema too. Changing a required field, enum variant, or wire

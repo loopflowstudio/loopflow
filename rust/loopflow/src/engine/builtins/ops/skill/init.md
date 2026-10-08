@@ -309,7 +309,7 @@ If something remains unavailable, say exactly which authority is missing and
 the command that would establish it. Never hide a missing account, Machine,
 Wave/PM binding, or agent behind "setup complete."
 
-On macOS, offer `lf desktop` as an optional interactive control surface after the
+On macOS, offer `lf open` as an optional interactive control surface after the
 selected path is proved. Do not launch it automatically.
 
 ## Conversation style

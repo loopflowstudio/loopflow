@@ -2299,7 +2299,7 @@ mod tests {
             &cron.wave,
             &cron.flow,
             CronSource::Scheduled,
-            "registry schema is incompatible; run `lf machine doctor`",
+            "registry schema is incompatible; run `lf doctor`",
         )
         .unwrap();
         assert_eq!(receipt.outcome, CronOutcome::Failed);

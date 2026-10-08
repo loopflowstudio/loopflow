@@ -1682,16 +1682,16 @@ fn task_registry_error(err: RegistryUnavailable) -> OpsError {
     task_error(match err {
         RegistryUnavailable::MissingFile { path } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is missing. \
-             Start the owning Wave (it creates the registry) or run `lf machine doctor`.",
+             Start the owning Wave (it creates the registry) or run `lf doctor`.",
             path.display()
         ),
         RegistryUnavailable::Unresolved { error } => format!(
             "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_HOME or run `lf machine doctor`."
+             Fix LF_HOME or run `lf doctor`."
         ),
         RegistryUnavailable::Incompatible { path, error } => format!(
             "Task PR authority refused: the shared Loopflow registry {} is present but \
-             inaccessible or schema-incompatible: {error}. Run `lf machine doctor`.",
+             inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
             path.display()
         ),
     })

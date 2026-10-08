@@ -341,6 +341,12 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
+    /// Native provider naming callback.
+    #[command(name = "__session-title", hide = true)]
+    SessionTitle {
+        #[arg(value_parser = ["claude", "codex"])]
+        provider: String,
+    },
     /// Inspect and continue Sessions
     Session {
         #[command(subcommand)]

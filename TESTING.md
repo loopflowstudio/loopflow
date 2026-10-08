@@ -104,6 +104,15 @@ to reproduce a matrix failure or when release guidance requires it.
 
 ## External network isolation
 
+`tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake
+API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
+and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
+it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
+OSC titles, native manual rename and resume. `--unnamed-resume` checks an older
+unnamed conversation: Claude passes; Codex currently reproduces the missing
+SessionStart callback when its daemon still has the thread loaded. No installed
+accounts, host shims, or cmux windows participate.
+
 ```bash
 uv sync
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/

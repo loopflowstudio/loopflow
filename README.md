@@ -174,6 +174,13 @@ Interactive terminal titles use the Session name, with the Task identifier first
 and a short purpose for Task work. In cmux, the attached workspace and tab follow
 `lf session rename`; other terminals pick up a changed name on reconnect.
 
+Published installs also add native naming hooks, preserving existing hooks. In
+repositories with `.lf`, plain Claude and Codex use the first request as a short
+name and preserve custom names. Review the installed hooks with Codex's `/hooks`.
+Codex naming requires its shared app-server; embedded launches and reconnecting
+to already-loaded unnamed threads are not covered. Claude can name an unnamed
+resume from its original request. Native providers own their terminal output.
+
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed

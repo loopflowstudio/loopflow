@@ -2566,6 +2566,11 @@ fn promote_published_from_installation(
                 "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
             );
         }
+        if let Err(error) = crate::installation::account_home()
+            .and_then(|home| crate::engine::terminal_title::install_native_hooks(&home))
+        {
+            eprintln!("warning: native title hook installation failed ({error:#})");
+        }
     }
     drop(lock);
     Ok(())

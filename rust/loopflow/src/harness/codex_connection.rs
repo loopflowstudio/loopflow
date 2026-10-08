@@ -317,7 +317,7 @@ impl CodexConnection {
     }
 }
 
-async fn read_rpc(
+pub(crate) async fn read_rpc(
     upstream: &mut WebSocketStream<UnixStream>,
     method: &str,
     params: Value,

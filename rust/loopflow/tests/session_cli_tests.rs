@@ -433,6 +433,52 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
 const CALLER: &str = "run_00000000000000000000000000000002";
 
+#[test]
+fn native_title_callback_keeps_lf_as_the_naming_owner() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let (id, _, _) = prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='native-owned' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    for thread in ["native-owned", "native-plain"] {
+        let mut child = command(home.path(), &["__session-title", "claude"])
+            .env("HOME", home.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        write!(
+            child.stdin.take().unwrap(),
+            "{}",
+            serde_json::json!({
+                "cwd": home.path(), "session_id": thread, "hook_event_name":"UserPromptSubmit",
+                "prompt":"A different request entirely"
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        if thread == "native-owned" {
+            assert!(output.stdout.is_empty(), "{output:?}");
+        } else {
+            let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                title["hookSpecificOutput"]["sessionTitle"],
+                "different request entirely"
+            );
+        }
+    }
+}
+
 /// A prepared conversation, before a provider has started.
 fn prepare_conversation(
     home: &std::path::Path,

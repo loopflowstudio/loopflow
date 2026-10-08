@@ -1680,27 +1680,29 @@ pub(crate) fn generated_session_title(
     ]
     .into_iter()
     .flatten()
-    .find_map(|source| {
-        let title = source
-            .split_whitespace()
-            .map(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()))
-            .filter(|word| {
-                !word.is_empty()
-                    && !matches!(
-                        word.to_ascii_lowercase().as_str(),
-                        "please" | "the" | "a" | "an"
-                    )
-            })
-            .take(3)
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .filter(|ch| !ch.is_control())
-            .take(SESSION_TITLE_MAX_CHARS)
-            .collect::<String>();
-        (!title.is_empty()).then_some(title)
-    })
+    .find_map(request_title)
     .unwrap_or_else(|| "Session".to_string())
+}
+
+pub(crate) fn request_title(source: &str) -> Option<String> {
+    let title = source
+        .split_whitespace()
+        .map(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()))
+        .filter(|word| {
+            !word.is_empty()
+                && !matches!(
+                    word.to_ascii_lowercase().as_str(),
+                    "please" | "the" | "a" | "an"
+                )
+        })
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(SESSION_TITLE_MAX_CHARS)
+        .collect::<String>();
+    (!title.is_empty()).then_some(title)
 }
 
 fn session_request(context: &crate::trace::PreparedTurnContext) -> Option<&str> {

@@ -595,7 +595,7 @@ membership; usage and control authority do not change. Every Flow naming the
 Task is equally its work. LOO-408 separates Task decisions from execution and
 retains conservative cleanup. Earlier details:
 `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-under this heading. Current contracts: architecture reference.
+Current contracts: architecture reference.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 

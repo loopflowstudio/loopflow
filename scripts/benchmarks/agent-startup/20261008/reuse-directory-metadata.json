@@ -1,0 +1,40 @@
+{
+  "source_head": "a475b5fb7692e8adde155541cc89cfec02328ab6",
+  "build": "CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p loopflow --bin lf",
+  "candidate": "Pass the resolved CLI launch directory to prompt construction; remove one repeated Git repository lookup.",
+  "fixture": {
+    "counts": {
+      "agent_sessions": 1920,
+      "processes": 281135,
+      "session_events": 1336487,
+      "provider_accounts": 0
+    },
+    "drafts": [],
+    "credential_files_copied": false,
+    "managed_account_routes_removed": true
+  },
+  "binaries": {
+    "baseline": {
+      "sha256": "4b4f1304b8b849cdc13b50c797cc3f79e8663b6a63293ce64eab8527626ba266",
+      "bytes": 51939376
+    },
+    "candidate": {
+      "sha256": "9b90c28e80d0a300acc6c3420e97ac1201b3f8c22649893480d4be95bd46cdd1",
+      "bytes": 51939808
+    }
+  },
+  "samples_per_path_variant": 30,
+  "boundary": "command start to stand-in provider marker",
+  "network": "scripts/test_network.py: external egress denied, local IPC permitted",
+  "decision": "retain: paired bare improvement 7.5 ms, 95% bootstrap interval 3.5 to 14.2 ms",
+  "preparation_failure": "Blanket deny network* also denied required local IPC; no timed samples collected. Repeated preparation using the ordinary network-isolation wrapper.",
+  "load_note": "Own builds completed before measurements; unrelated cargo-clippy was observed during the shared-host run. No samples excluded; load1 retained.",
+  "rejected_followup": {
+    "change": "Defer ancestor .git metadata probes until Git discovery fails",
+    "baseline_sha256": "9b90c28e80d0a300acc6c3420e97ac1201b3f8c22649893480d4be95bd46cdd1",
+    "candidate_sha256": "b77324d2534b8e7d60a8ff40e250cffc8a45a4668e3ea84f9cef4a8b076ae78a",
+    "samples_per_path_variant": 30,
+    "decision": "remove: bare paired improvement -3.1 ms (95% interval -9.0 to 4.8); connect 6.5 ms (-2.8 to 12.8)",
+    "patch": "rejected-defer-git-probes.patch"
+  }
+}

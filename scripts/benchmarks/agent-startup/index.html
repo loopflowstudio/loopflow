@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loopflow startup flamegraphs</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f5f3ef; color: #242321; font: 16px/1.5 system-ui, sans-serif; }
+    header { padding: 28px 32px 20px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { margin: 8px 0; max-width: 850px; }
+    label { display: block; margin-top: 20px; font-weight: 600; }
+    select { margin-top: 6px; padding: 10px; font: inherit; max-width: 100%; }
+    main { padding: 0 20px 24px; }
+    section { margin: 16px 0; padding: 16px; background: white; border: 1px solid #dedbd4; border-radius: 8px; }
+    h2 { margin: 0 0 12px; font-size: 20px; }
+    a { color: #315b80; }
+    iframe { display: block; width: 100%; height: 930px; border: 0; }
+    .note { color: #625f58; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Loopflow startup flamegraphs</h1>
+    <p>Click a frame to zoom. Hover for its symbol and sample count. Each graph has its own Search and Reset Zoom controls.</p>
+    <p class="note">Symbolized release builds; main-thread wall-stack samples include waits and shutdown. Width shows a share of sampled stacks, not a directly comparable startup duration. Git and provider child CPU are excluded.</p>
+    <label for="comparison">Comparison</label>
+    <select id="comparison">
+      <option value="provider-probe-bare">Remove provider version probe · bare lf</option>
+      <option value="provider-probe-connect">Remove provider version probe · session connect</option>
+      <option value="no-ambient-wave-bare">Skip absent Wave resolution · bare lf</option>
+      <option value="no-ambient-wave-connect">Skip absent Wave resolution · session connect</option>
+      <option value="reuse-directory-bare">Reuse resolved directory · bare lf</option>
+      <option value="reuse-directory-connect">Reuse resolved directory · session connect</option>
+    </select>
+  </header>
+  <main>
+    <section>
+      <h2>Before · <a id="before-link" href="20261008/provider-probe-bare-baseline.svg" target="_blank" rel="noopener">open graph alone</a></h2>
+      <iframe id="before" title="Before optimization flamegraph" src="20261008/provider-probe-bare-baseline.svg"></iframe>
+    </section>
+    <section>
+      <h2>After · <a id="after-link" href="20261008/provider-probe-bare-candidate.svg" target="_blank" rel="noopener">open graph alone</a></h2>
+      <iframe id="after" title="After optimization flamegraph" src="20261008/provider-probe-bare-candidate.svg"></iframe>
+    </section>
+  </main>
+  <script>
+    document.getElementById('comparison').addEventListener('change', (event) => {
+      for (const [id, variant] of [['before', 'baseline'], ['after', 'candidate']]) {
+        const source = `20261008/${event.target.value}-${variant}.svg`;
+        document.getElementById(id).src = source;
+        document.getElementById(`${id}-link`).href = source;
+      }
+    });
+  </script>
+</body>
+</html>

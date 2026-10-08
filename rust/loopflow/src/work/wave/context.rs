@@ -18,6 +18,9 @@ pub const WAVE_ID_ENV: &str = "LF_WAVE_ID";
 
 /// Resolve this process's ambient Wave name through the durable Wave id.
 pub fn resolve_ambient_wave_name() -> Option<String> {
+    std::env::var(WAVE_ID_ENV)
+        .ok()
+        .filter(|id| !id.trim().is_empty())?;
     let repo = crate::repo::find_repo_root().ok();
     resolve_managed_wave_sync(repo.as_deref(), None)
         .ok()
@@ -261,6 +264,9 @@ pub fn resolve_managed_wave_sync(
     let repo = repo.map(Path::to_path_buf);
     let explicit = explicit.map(str::to_string);
     let env_wave_id = std::env::var(WAVE_ID_ENV).ok();
+    if explicit.is_none() && env_wave_id.as_deref().is_none_or(|id| id.trim().is_empty()) {
+        return Err(WaveResolveError::NoContext);
+    }
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()

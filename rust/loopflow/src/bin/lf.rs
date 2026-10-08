@@ -361,11 +361,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(Some("default"), None, cli)
+                loopflow::lf::commands::run::run(&worktree.path, Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some("default"), None, cli)
+            loopflow::lf::commands::run::run(&repo_root, Some("default"), None, cli)
         }),
     }
 }
@@ -499,7 +499,9 @@ fn execute_target(
                             cli,
                             binding,
                         )?,
-                        None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
+                        None => {
+                            loopflow::lf::commands::run::run(&repo_root, Some(name), message, cli)?
+                        }
                     }
                     // Shared contributions leave checkpoint composition to the caller.
                     if !shared
@@ -1609,11 +1611,11 @@ fn execute_command(
     match &parsed.command {
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            in_directory_runtime(args, |_| match binding {
+            in_directory_runtime(args, |repo| match binding {
                 Some(binding) => {
                     loopflow::lf::commands::run::run_bound(None, Some(&text), cli, binding)
                 }
-                None => loopflow::lf::commands::run::run(None, Some(&text), cli),
+                None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
         Some(Commands::Open) => loopflow::lf::commands::open::run(),

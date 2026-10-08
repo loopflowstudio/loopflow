@@ -141,7 +141,7 @@ class _Terminal:
             start_new_session=True,
         )
         os.close(slave)
-        self.output = bytearray()
+        self._query_tail = b""
 
     def pump(self, seconds: float) -> None:
         deadline = time.monotonic() + seconds
@@ -156,9 +156,11 @@ class _Terminal:
                     raise
                 if not data:
                     return
-                self.output.extend(data)
-                if b"\x1b[6n" in self.output[-20:]:
+                # Answer each cursor query once, including queries split across reads.
+                data = self._query_tail + data
+                for _ in range(data.count(b"\x1b[6n")):
                     self.write(b"\x1b[1;1R")
+                self._query_tail = data[-3:]
             if self.process.poll() is not None:
                 return
 
@@ -170,18 +172,16 @@ class _Terminal:
             value = value[written:]
 
     def close(self) -> bool:
-        clean = False
         try:
             if self.process.poll() is None:
                 self.write(b"\x15/exit\r")
                 self.pump(3)
-            clean = self.process.poll() == 0
+            return self.process.poll() == 0
         finally:
             if self.process.poll() is None:
                 os.killpg(self.process.pid, signal.SIGKILL)
             self.process.wait(timeout=5)
             os.close(self.master)
-        return clean
 
 
 def _await_request(terminal: _Terminal, requests: list[dict], count: int) -> None:
@@ -240,45 +240,44 @@ def _terminal_mapping(
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(config))
-    terminal = None
-    try:
-        hook = {
-            "type": "command",
-            "async": True,
-            "command": shlex.join(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve()),
-                    "--inbox-message",
-                    str(inbox_message),
-                ]
-            ),
-        }
-        settings = {"hooks": {"SessionStart": [{"hooks": [hook]}]}}
-        terminal = _Terminal(
+    hook = {
+        "type": "command",
+        "async": True,
+        "command": shlex.join(
             [
-                claude,
-                "--setting-sources",
-                "project",
-                "--strict-mcp-config",
-                "--mcp-config",
-                '{"mcpServers":{}}',
-                "--tools",
-                "",
-                "--model",
-                model,
-                "--resume",
-                session,
-                "--messaging-socket-path",
-                str(socket_path),
-                "--settings",
-                json.dumps(settings),
-                "--",
-                "/lf-mapping alpha",
-            ],
-            workspace,
-            env,
-        )
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--inbox-message",
+                str(inbox_message),
+            ]
+        ),
+    }
+    settings = {"hooks": {"SessionStart": [{"hooks": [hook]}]}}
+    terminal = _Terminal(
+        [
+            claude,
+            "--setting-sources",
+            "project",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--tools",
+            "",
+            "--model",
+            model,
+            "--resume",
+            session,
+            "--messaging-socket-path",
+            str(socket_path),
+            "--settings",
+            json.dumps(settings),
+            "--",
+            "/lf-mapping alpha",
+        ],
+        workspace,
+        env,
+    )
+    try:
         _await_request(terminal, requests, 1)
         # A person has a draft in the native editor when an external writer
         # injects its command. Only this probe's own PTY receives input.
@@ -287,29 +286,30 @@ def _terminal_mapping(
         terminal.write(b"/lf-mapping beta\r")
         _await_request(terminal, requests, 2)
         draft_users = _user_texts(requests[-1])
-        if socket_path.exists():
+        inbox_bound = socket_path.exists()
+        if inbox_bound:
             inbox_message.write_text("/lf-mapping gamma")
             _await_request(terminal, requests, 3)
         inbox_users = _user_texts(requests[-1])
-        checks = {
+    finally:
+        clean_exit = terminal.close()
+    return {
+        "requests": len(requests),
+        "checks": {
             "draft_was_submitted": any(draft + "/lf-mapping beta" in text for text in draft_users),
             "injected_skill_not_expanded": not any(
                 marker + "|beta|" in text for text in draft_users
             ),
+            "inbox_bound": inbox_bound,
             "inbox_delivered_text": any("/lf-mapping gamma" in text for text in inbox_users),
             "inbox_skill_not_expanded": not any(marker + "|gamma|" in text for text in inbox_users),
             "exact_request_count": len(requests) == 3,
             "same_native_session": all(
                 session in json.dumps(body.get("metadata", {})) for body in requests
             ),
-        }
-        checks["inbox_bound"] = socket_path.exists()
-        checks["clean_terminal_exit"] = terminal.close()
-        terminal = None
-        return {"requests": len(requests), "checks": checks}
-    finally:
-        if terminal is not None:
-            terminal.close()
+            "clean_terminal_exit": clean_exit,
+        },
+    }
 
 
 def _probe(claude: str, model: str, channel: str) -> bool:

@@ -1065,20 +1065,23 @@ checkpointing, common invocation loading and Claude's file-backed stdin. Rejecte
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
-translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
-separate context and same-thread resume, not recall without resupply. Claude hook
-context survives deletion; rendering metadata alone proves no request role.
-Credential-free 2.1.294 API capture now shows hook context in `system` for
-Sonnet/Opus. A `shouldQuery: false` user message followed by a native command
-preserves exact arguments and user context in one request, also after restart
-without resupply. A separate seed process saves context without a model call.
-These prove client mapping, not live-model or Loopflow behavior. Exclude answer leakage.
-Claude's live inbox delivers slash text without expansion; PTY injection submits
-an unfinished draft. Three fake-API requests share one native Session and exit
-cleanly. A stream-owned terminal is proposed, not an approved UI replacement.
-Resume still replaces capture before driver claim; no narrower scope is approved.
-Installed 0.13.9 app launches recorded no native identity;
-both reconnects failed. Jack then directed removal of `--ide` and its app-launch
-path. Keep terminal/headless execution and historical records. Launcher success
-proves no engine exit. Native dispatch, ports and fidelity remain unproved.
+translated ports, inlined builtins and `--agent`/`-a`. His recovery steer retains
+same-conversation use through review, without landing. String-only APIs and
+missing admission are implementation work, not authority to narrow scope.
+Codex receipts prove source, separate context and same-thread resume, not recall
+without resupply. Claude 2.1.294 fake-API capture places hook context in `system`
+for Sonnet/Opus; rendering metadata alone had proved no role. Queued
+`shouldQuery: false` user context preserves exact native arguments in one request
+and after restart without resupply; separate seeding makes no model call.
+These prove client mapping, not live-model or LF behavior. Exclude answer leakage.
+Three requests in one native Session show startup expansion, PTY submission of
+an unfinished draft and inbox slash text without expansion, then clean exit.
+They reject those paths, not every native transport. A stream-owned terminal
+remains an unapproved UI replacement; catalog and structured dispatch need not
+wait for it. Resume replaces capture before driver claim; owner-mediated admission
+remains required. Release's entry-point lesson applies: provider probes cannot
+prove LF dispatch or admission. Native dispatch, ports and fidelity remain unproved.
+Installed 0.13.9 app launches lacked native identity; both reconnects failed.
+Jack removed `--ide`. Retain terminal/headless execution and historical records;
+launcher success proves no engine exit.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

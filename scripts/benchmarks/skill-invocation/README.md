@@ -111,7 +111,9 @@ cross-harness translation or startup-cost improvement.
 The production resume path replaces the captured input before claiming a new
 driver. It cannot deliver through a surviving native terminal's current driver.
 A saved native Session and a live input queue require different admission;
-the design keeps that boundary unresolved rather than starting a second writer.
+admission through the current owner remains implementation work. The current
+string-only harness API also needs separate context and native invocation input;
+the provider probes do not implement either boundary.
 
 ## Native terminal admission
 
@@ -127,7 +129,7 @@ environment without recording it. External egress is denied; no real credentials
 or model are used. Exit zero means the counterexamples reproduced, not that live
 skill delivery works. A missing inbox or changed provider behavior fails the probe.
 
-Claude 2.1.294 (the digest above) produced three requests under one native Session
+Claude 2.1.294 produced three requests under one native Session
 ID: startup `/lf-mapping alpha` expanded the exact source and arguments with
 user-role context; PTY injection appended `/lf-mapping beta` to an unfinished
 draft and submitted both without expansion; the authenticated inbox delivered
@@ -140,8 +142,10 @@ The tested binary's inbox handler deliberately skips slash parsing. The document
 [background-resume path](https://code.claude.com/docs/en/sessions#resume-a-running-background-session)
 also refuses slash-prefixed prompts. An LF terminal over the persistent stream
 driver is a concrete alternative, but replaces native interactive controls and
-requires a product decision. These findings establish neither Loopflow admission,
-third-party fidelity nor the impossibility of a future provider transport.
+requires a product decision. These findings reject the tested injection paths;
+they do not establish that replacing the terminal is unavoidable or prevent
+catalog and structured dispatch implementation. Loopflow admission and third-party
+fidelity still require proofs through Loopflow's own entry points.
 
 
 ## Decisions and remaining work

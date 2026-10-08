@@ -161,10 +161,9 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-LOO-370's opaque-root decision, source delivery and remaining preservation
-constraints are retained under Capture cutover below. Earlier detail:
-`6448e3c9e:wave/infrastructure/MEMORY.md`. Installed conversion and live
-interruption remain unauthorized.
+LOO-370's decision and preservation limits live under Capture cutover below.
+PR #1450 (`1af81fe03`) is integrated. Delegation and the exact Task steer remain
+at `2d333d18c:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -377,13 +376,12 @@ unproved. The branch’s prior memory curation remains in Git history at
 
 ## Operator acceptance and account direction (2026-10-04)
 
-Jack Heart accepted LOO-295/342 on actual machine usage; both read `done`.
-LOO-367/285's four-return Flows reached demo, completing LOO-295's continuation
-proof alongside merged #1283. Its unrelated viewer/assessment survive at
-`~/.lf-retired/20261004-loo295/scratch`. LOO-342's installed routing and main-Home
-usage establish acceptance; Jack declined retired Ask work. Legacy handles and
-later retirement remain history, not completion blockers. Detailed evidence:
-`ee592479c59018a53eaeb89094b31f9ca0e4d770:wave/infrastructure/MEMORY.md`.
+Jack Heart closed LOO-295 and LOO-342 on actual machine usage; both read `done`.
+LOO-367/285's retained Flow progress and PR #1283 established continuation;
+installed routing established the one-Home outcome. Jack declined retired Ask
+work. Exact acceptance and preserved viewer artifacts:
+`35e759aaf4:wave/infrastructure/MEMORY.md` under this heading. Legacy retirement
+below supersedes the then-live process handles.
 
 LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
 cross-binary history means discovering native Session records across folders,
@@ -1063,6 +1061,8 @@ transport and combined oversized-launch acceptance. Recorded Claude interactive
 readback proves neither plan mode, cmux tracking nor the combined candidate.
 Jack later authorized 429's landing after queued preparation despite these gaps;
 Jack separately authorized 428's queue and landing on October 8.
+Shared context-file transport proves no native resume. Earlier screenshot and
+Codex bypass-flag failure evidence: `4e6770cbf5:wave/infrastructure/MEMORY.md`.
 
 Jack approved setup-free Codex coexistence: a temporary native capture profile
 and bounded parser probe for wrapper-supplied trust. Saved config/trust stays

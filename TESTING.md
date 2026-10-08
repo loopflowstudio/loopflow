@@ -76,6 +76,10 @@ skill must preserve their distinct launch modes. Prompt fixtures read the harnes
 actual inputs, including context files and stdin, rather than assuming everything
 remains in argv.
 
+Provider fixtures must read the launch's actual context channel. When a final
+sync adds fixtures that inspect a changed transport, run those focused tests
+before arming; the earlier gate did not cover the newly combined behavior.
+
 ## Quick Reference
 
 ```bash

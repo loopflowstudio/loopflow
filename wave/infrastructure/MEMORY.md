@@ -1077,18 +1077,20 @@ No catalog mount or second resolver is required. Single-file custom prompts keep
 one-based positions and named assignments; valid metadata does not make them skill
 bundles. Unfamiliar native declarations are reported, not silently discarded.
 
-Ordinary unbound third-party launches omit LOOPFLOW.md; attributed Work and captured
-Flow steps retain it. This reversible scope choice removes 6.6–6.7 KB of request
-JSON in the measured matching cases. In-memory invocation presence cannot identify
-a Flow: ordinary selection retains one too. The captured input supplies that distinction.
+Ordinary unbound third-party launches omit operating/conversation guidance;
+attributed Work and captured Flows retain it. Budget checks remain; notices accompany
+managed context or excerpts. Captured input identifies a Flow; ordinary selection
+also retains an in-memory invocation. PATH discovery replaces availability's
+`--version` subprocess/cache without changing actual launch failure handling.
 
 Ordinary lf fixtures prove native terminal model/argument/context fidelity,
 single-file collisions, out-of-catalog Codex expansion, custom-prompt translation,
-and provider asset reads against local fake APIs. Plain baselines now assert the
-same source, arguments and returned asset contents before cost comparison.
-They establish neither live model compliance nor native terminal UI. Residual cost
-remains: about 2.3–3.1 KB of request JSON and 1.1 seconds in a serial fresh-machine
-sample; concurrent samples add 3.4–3.5 seconds. Neither is a production latency or
-blanket performance claim. Full acceptance and review remain in the plan.
+and provider asset reads against fake APIs. Serial plain baselines now use equal
+context and fresh provider homes, asserting source, arguments and asset contents.
+Remaining request JSON overhead: 875 bytes Claude terminal, 122 Codex headless;
+elapsed overhead: 0.71–0.75 s initialized Machine, 1.01–1.11 s fresh. Most precedes
+provider startup. Version-probe removal reduces measured native preparation;
+remaining costs/limits live in the plan. These debug/local samples prove neither
+production speedup, live model compliance nor terminal UI. Prior costs: `966af16fd`.
 Release was the only immediate child found; its goal and complete memory were read.
 Its operation-entry lesson applies. No landing or Task completion occurred.

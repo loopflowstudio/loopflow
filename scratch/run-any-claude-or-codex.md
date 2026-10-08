@@ -32,8 +32,10 @@ model, tool, hook and subagent semantics. Cross-harness permission/model/subagen
 controls remain reported instructions; model equivalence is not guessed.
 
 Ordinary third-party launches without Work attribution or a captured Flow omit
-LOOPFLOW.md. Attributed Work and Flow steps keep it. This reversible scope choice
-removes the unrelated operating manual from the drop-in path. Captured Flow input,
+Loopflow operating and conversation guidance. Budget enforcement remains; notices
+appear for managed memory, scratch or bounded excerpts. Attributed Work and Flow
+steps keep their guidance. This reversible scope choice removes unrelated
+instructions from the drop-in path. Captured Flow input,
 not the in-memory resolved invocation, distinguishes a Flow: ordinary CLI selection
 also retains a resolved invocation.
 
@@ -56,6 +58,9 @@ Compression also removes the unused replay-argument parser and its exclusive
 tests; argument fidelity is asserted on actual model requests. Codex owns its
 text-input JSON in the harness. Claude writes each complete snapshot once, and
 catalog selection skips file reads for names already supplied by a higher source.
+Provider discovery now uses the existing executable PATH resolver, deleting the
+`--version` subprocess and its availability cache. Launch failures remain failures;
+an installed executable no longer needs a successful version command.
 
 Previously removed queue, engine-restart, dispatch receipt and PTY/inbox machinery
 remains at `1e4ae02a5` and `7dd9819b2`; provider-only probes at `31e0640eb`;
@@ -81,14 +86,41 @@ fixtures and baseline Session continuity. Do not restore any of those paths.
   unknown declarations, native Codex outside its catalog, cross-harness custom
   prompt arguments and captured Flow removal. Provider print/exec substitutes
   for terminal UI; rendered interaction and live model compliance are unproved.
-- The plain baseline now asserts the same source expansion, exact arguments and
-  provider-returned asset contents as lf before comparing costs. Omitting the
-  operating manual removes 6.6–6.7 KB from matched request JSON, leaving about
-  2.3 KB (Codex) / 3.1 KB (Claude terminal) over plain. Both use two API requests.
-  Concurrent fresh-machine fixtures add roughly 3.4–3.5 seconds; a serial trace
-  adds 1.1 seconds, with 191 ms in prompt preparation. Startup attribution and
-  remaining regressions need resolution before claiming “strictly better.”
-  JSON bytes are not tokens, and fake-API latency is not live model latency.
+- Serial comparisons give both launches the same context text and restore the
+  provider home before the plain launch. Both must expand the unchanged source,
+  preserve arguments and return the bundled asset. Two API requests remain.
+  The earlier unequal-context/concurrent measurements survive at `966af16fd`.
+
+## Startup and prompt cost (October 8)
+
+The debug binary, local fake APIs and timestamp wrapper measure this fixture,
+not production latency. Before removal, equivalent-context serial pairs added
+3,029 request JSON bytes for Claude terminal and 2,248 for Codex headless.
+Budget and conversation guidance accounted for 2,154 and 2,126 bytes respectively.
+
+| Matching native launch | Extra JSON bytes | Added seconds, existing Machine | Added seconds, fresh Machine |
+| --- | ---: | ---: | ---: |
+| Claude terminal / internal-comms | 875 | 0.713 | 1.009 |
+| Codex headless / skill-installer | 122 | 0.748 | 1.112 |
+
+Remaining Claude text names the snapshot, original asset directory and JSON-safe
+context; Codex retains document provenance and separate input blocks, partly offset
+by different transport metadata. Request JSON bytes are not token counts.
+
+Almost all added time precedes provider startup: 0.643 s Claude / 0.654 s Codex
+on initialized disposable Machines. Fresh-store creation adds about 0.3–0.4 s.
+The traced Claude native launch preparation fell from 288 to 37 ms after removing
+the executable version probe. Its final trace also measures prompt preparation
+184 ms, capture publication 89 ms and Process admission 38 ms. The remaining
+entry/setup time is not individually attributed; no overall latency win is claimed
+from single samples. Budget tokenization, durable Session capture and launch
+authority remain intact. No generic recovery or store redesign was introduced.
+
+Review findings fixed: version probes rejected executable wrappers without a
+version command; plain baselines inherited the preceding provider's cached state.
+The fixture now resets that state and distinguishes total time from first request.
+Residual cost prevents a blanket “strictly better” claim; gate and authored review
+own the remaining acceptance, including whether this tradeoff meets the outcome.
 
 No new product decision is identified. Full gate and authored review remain.
 
@@ -108,4 +140,4 @@ Release was the only immediate child Wave found; its goal and complete memory
 were read during realignment. Its operation-entry lesson applies: successful
 provider output alone cannot establish the requested launch behavior.
 
-Check (2026-10-08): `cargo build -p loopflow --bin lf`, isolated `cargo test -p loopflow --lib engine::skill -- --test-threads=1` (13), `uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q` (9), contained `request_mapping.py --terminal --command` and `launch.py --source skill-installer --provider codex --folder .codex/skills`, fmt, Ruff and all-target Clippy pass; earlier custom-prompt/Flow evidence remains at `a63599341`. Full affected verification belongs to gate.
+Check (2026-10-08): build; isolated lib `engine::process_prompt` (29) and `cli_discovery_needs_an_executable` (1); pytest request mapping (9); contained native serial comparisons, terminal command mapping and captured-Flow launch; fmt, Ruff and all-target Clippy pass. Full affected verification belongs to gate; earlier evidence remains at `966af16fd`.

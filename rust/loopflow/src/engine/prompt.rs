@@ -202,6 +202,17 @@ pub struct PromptComponents {
     pub budget_decisions: Vec<crate::trace::ContextDecision>,
 }
 
+impl PromptComponents {
+    pub fn is_standalone_skill(&self) -> bool {
+        !self.operate
+            && self.skill.as_ref().is_some_and(|skill| {
+                skill.source.as_ref().is_some_and(|source| {
+                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                })
+            })
+    }
+}
+
 /// Count tokens using tiktoken (cl100k_base encoding).
 /// Falls back to byte length / 3 if tiktoken fails.
 pub fn count_tokens(text: &str) -> usize {
@@ -1507,6 +1518,9 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
 /// These are safe to include in the system prompt without triggering
 /// third-party app classifiers: loopflow, surface.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
+    if components.is_standalone_skill() {
+        return Vec::new();
+    }
     let mut parts = Vec::new();
 
     if components.operate {

@@ -110,19 +110,21 @@ def _response(model: str) -> bytes:
     ).encode()
 
 
-def _run(command: list[str], root: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
+def _run(
+    command: list[str], root: Path, env: dict[str, str], stdin: str | None = None
+) -> subprocess.CompletedProcess:
     with subprocess.Popen(
         command,
         cwd=root,
         env=env,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
     ) as process:
         try:
-            stdout, stderr = process.communicate(timeout=45)
+            stdout, stderr = process.communicate(input=stdin, timeout=45)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             process.communicate(timeout=5)

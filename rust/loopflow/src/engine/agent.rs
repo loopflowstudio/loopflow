@@ -2355,32 +2355,32 @@ pub fn missing_agent_message(cli: &str) -> String {
 
 /// Check if a CLI is available.
 pub fn check_cli_available(cli: &str) -> bool {
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some(value) = guard.get(cli) {
-            return *value;
-        }
-    }
-
-    let available = Command::new(cli)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(cli.to_string(), available);
-    }
-
-    available
+    crate::engine::process::which_on_path(Path::new(cli)).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn cli_discovery_needs_an_executable_not_a_version_command() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let provider = root.path().join("provider");
+        fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!check_cli_available(provider.to_str().unwrap()));
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(check_cli_available(provider.to_str().unwrap()));
+        let linked = root.path().join("linked-provider");
+        symlink(&provider, &linked).unwrap();
+        assert!(check_cli_available(linked.to_str().unwrap()));
+        fs::remove_file(provider).unwrap();
+        assert!(!check_cli_available(linked.to_str().unwrap()));
+        assert!(!check_cli_available(root.path().to_str().unwrap()));
+    }
 
     fn default_launch() -> AgentConfig {
         AgentConfig {

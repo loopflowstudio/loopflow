@@ -616,6 +616,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
+    let started = std::time::Instant::now();
     // Keep admission and client publication on the same side of Session stop.
     // Release before waiting for the child, so stop can settle that client.
     let capture_dir = environment
@@ -701,6 +702,10 @@ fn session_command_status_with_env(
     if let Some((store, session, driver)) = &owned {
         store.record_session_provider_launch(session, driver, true)?;
     }
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "prepared native provider launch"
+    );
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {

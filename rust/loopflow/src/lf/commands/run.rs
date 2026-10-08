@@ -690,6 +690,7 @@ fn begin_capture(
     prepared_config: &AgentConfig,
     resume: Option<&str>,
 ) -> Result<CaptureHandle> {
+    let started = Instant::now();
     let cwd = built
         .agent_config
         .cwd
@@ -733,6 +734,10 @@ fn begin_capture(
     })?;
     capture.claim_conversation_driver()?;
     capture.record_input("initial", &built.context.task.text);
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "published Session capture"
+    );
     Ok(capture)
 }
 

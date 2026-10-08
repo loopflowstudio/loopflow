@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import shutil
+import sys
 import tarfile
 import tempfile
 import threading
@@ -149,8 +150,11 @@ def _probe(
     flow: bool,
     folder: str | None = None,
     custom_prompt: bool = False,
+    output: Path | None = None,
+    warm_machine: bool = False,
 ) -> bool:
     requests = []
+    request_times = []
     with tempfile.TemporaryDirectory(prefix="lf-installed-skill-", dir="/tmp") as directory:
         root = Path(directory).resolve()
         work, home, bin_dir = root / "work", root / "home", root / "bin"
@@ -197,6 +201,7 @@ def _probe(
                     self.send_error(404)
                     return
                 requests.append(body)
+                request_times.append(time.monotonic())
                 done = len(requests) % 2 == 0
                 if provider == "claude":
                     response = (
@@ -230,6 +235,9 @@ def _probe(
             DISABLE_AUTOUPDATER="1",
             ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
         )
+        if output:
+            output.mkdir(parents=True, exist_ok=True)
+            env["RUST_LOG"] = "loopflow=debug"
         Path(env["CODEX_HOME"]).mkdir()
         (Path(env["CODEX_HOME"]) / "config.toml").write_text(f"""model = "gpt-5.4"
 model_provider = "fixture"
@@ -258,11 +266,28 @@ enabled = false
             if terminal
             else ""
         )
-        prefix = "ANTHROPIC_API_KEY=local-fixture-not-a-credential " if provider == "claude" else ""
         wrapper = bin_dir / provider
-        wrapper.write_text(f'#!/bin/sh\n{prefix}exec {shlex.quote(executable)}{flags} "$@"\n')
+        spawn_time = root / "provider-start"
+        wrapper.write_text(
+            f"#!{sys.executable}\nimport os, sys, time\n"
+            f"with open({str(spawn_time)!r}, 'w') as output:\n"
+            "    output.write(str(time.monotonic()))\n"
+            + (
+                "os.environ['ANTHROPIC_API_KEY'] = 'local-fixture-not-a-credential'\n"
+                if provider == "claude"
+                else ""
+            )
+            + f"os.execv({executable!r}, "
+            f"[{executable!r}, *{shlex.split(flags)!r}, *sys.argv[1:]])\n"
+        )
         wrapper.chmod(0o755)
         env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+        if warm_machine:
+            prepared = _run([str(lf), "machine", "id"], work, env)
+            if prepared.returncode:
+                raise RuntimeError(prepared.stderr)
+        pristine_home = root / "pristine-home"
+        shutil.copytree(home, pristine_home)
         target = [skill_name, argument]
         if flow:
             flows = work / ".lf/flows"
@@ -292,6 +317,16 @@ enabled = false
                 env,
             )
             seconds = time.monotonic() - start
+            timing = {
+                "provider_start": round(float(spawn_time.read_text()) - start, 3),
+                "first_request": round(request_times[0] - start, 3) if request_times else None,
+                "after_last_request": round(time.monotonic() - request_times[-1], 3)
+                if request_times
+                else None,
+            }
+            if output:
+                (output / "lf-requests.json").write_text(json.dumps(requests, indent=2))
+                (output / "lf-stderr.txt").write_text(result.stderr)
             first = requests[0] if requests else {}
             items = first.get("messages", first.get("input", []))
             user_text = json.dumps(
@@ -319,7 +354,12 @@ enabled = false
                 )
             comparison = None
             if dialect == provider and not flow and not custom_prompt:
+                # Neither launch inherits provider caches/history from the other.
+                shutil.rmtree(home)
+                shutil.copytree(pristine_home, home)
                 requests.clear()
+                request_times.clear()
+                plain_input = None
                 if provider == "claude":
                     plain = [
                         str(wrapper),
@@ -328,23 +368,66 @@ enabled = false
                             if terminal
                             else ["-p", "--output-format", "stream-json", "--verbose"]
                         ),
-                        f"/{source.name} {argument}",
+                        "--input-format",
+                        "stream-json",
                     ]
+                    plain_input = (
+                        "\n".join(
+                            json.dumps(message)
+                            for message in [
+                                {
+                                    "type": "user",
+                                    "shouldQuery": False,
+                                    "message": {"role": "user", "content": marker},
+                                },
+                                {
+                                    "type": "user",
+                                    "message": {
+                                        "role": "user",
+                                        "content": f"/{source.name} {argument}",
+                                    },
+                                },
+                            ]
+                        )
+                        + "\n"
+                    )
                 else:
                     plain = [
                         str(wrapper),
                         *([] if terminal else ["exec", "--skip-git-repo-check"]),
-                        f"[${source.name}]({bundle / 'SKILL.md'}) {argument}",
+                        f"{marker}\n\n[${source.name}]({bundle / 'SKILL.md'}) {argument}",
                     ]
                 started = time.monotonic()
-                baseline = _run(plain, work, env)
+                baseline = _run(plain, work, env, plain_input)
                 plain_seconds = time.monotonic() - started
                 baseline_checks = _fidelity(
                     requests, baseline.returncode, body, argument, asset, provider
                 )
+                plain_items = (
+                    requests[0].get("messages", requests[0].get("input", [])) if requests else []
+                )
+                baseline_checks["context_user_only"] = marker in json.dumps(
+                    [item for item in plain_items if item.get("role") == "user"]
+                ) and marker not in json.dumps(
+                    [item for item in plain_items if item.get("role") in ("system", "developer")]
+                ) + json.dumps(
+                    requests[0].get("system", requests[0].get("instructions", ""))
+                    if requests
+                    else ""
+                )
+                if output:
+                    (output / "plain-requests.json").write_text(json.dumps(requests, indent=2))
+                    (output / "plain-stderr.txt").write_text(baseline.stderr)
                 checks.update({f"plain_{key}": value for key, value in baseline_checks.items()})
                 comparison = {
                     "seconds": round(plain_seconds, 3),
+                    "provider_start": round(float(spawn_time.read_text()) - started, 3),
+                    "first_request": round(request_times[0] - started, 3)
+                    if request_times
+                    else None,
+                    "after_last_request": round(time.monotonic() - request_times[-1], 3)
+                    if request_times
+                    else None,
                     "added_seconds": round(seconds - plain_seconds, 3),
                     "added_request_bytes": len(json.dumps(first)) - len(json.dumps(requests[0]))
                     if requests
@@ -356,7 +439,9 @@ enabled = false
                         "source": source.name,
                         "provider": provider,
                         "surface": "terminal-command" if terminal else "headless",
+                        "machine": "existing" if warm_machine else "fresh",
                         "seconds": round(seconds, 3),
+                        "timing": timing,
                         "request_bytes": len(json.dumps(first)),
                         "plain": comparison,
                         "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
@@ -394,6 +479,12 @@ def main() -> int:
     parser.add_argument("--source", choices=tuple(SOURCES), default="internal-comms")
     parser.add_argument("--terminal", action="store_true")
     parser.add_argument("--flow", action="store_true")
+    parser.add_argument("--output", type=Path, help="Save isolated requests and startup traces")
+    parser.add_argument(
+        "--warm-machine",
+        action="store_true",
+        help="Initialize the disposable Machine before timing",
+    )
     parser.add_argument(
         "--custom-prompt", action="store_true", help="Exercise Codex prompt placeholders"
     )
@@ -415,6 +506,8 @@ def main() -> int:
             args.flow,
             args.folder,
             args.custom_prompt,
+            args.output,
+            args.warm_machine,
         )
         else 1
     )

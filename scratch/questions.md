@@ -10,7 +10,8 @@ without another catalog or conversation. Model/permission/subagent equivalence
 is not guessed; the launch reports declarations it does not enforce.
 
 Ordinary third-party invocation without Work attribution or a captured Flow omits
-LOOPFLOW.md. This reversible implementation choice removes unrelated operating
-instructions from the drop-in path; attributed Work and Flow steps retain them.
+operating and conversation guidance. This reversible implementation choice removes
+unrelated instructions; attributed Work and Flow steps retain them. Budget checks
+remain; notices accompany managed memory, scratch or bounded excerpts.
 The native terminal snapshot carries separate gathered user context as a JSON
 literal so native argument/preprocessing syntax in that context stays inert.

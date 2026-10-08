@@ -9,6 +9,10 @@ uv run python scripts/test_network.py uv run --no-sync python \
 uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --flow
 uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/launch.py --fixtures /tmp/lf-skill-fixtures \
+  --source internal-comms --provider claude --terminal --warm-machine \
+  --output /tmp/lf-skill-comparison
 ```
 
 Fetch immutable third-party bundles before network containment. `launch.py` copies
@@ -29,8 +33,14 @@ behavior. Claude terminal exercises native expansion with separate gathered user
 context. `--flow` removes the source
 file after capture and checks that its instructions still reach the provider.
 
-Matching-provider cases also run a plain native skill for comparison. JSON reports
-startup seconds and request JSON size, plus exact quoted/multiline arguments,
+Matching-provider cases run lf then a plain native skill serially, with identical
+context text and freshly restored provider homes. `--warm-machine` initializes the
+disposable Loopflow store before timing; omit it to include first-use setup.
+JSON separates provider startup, first request and time after the last request
+from total duration. `--output` saves fake-API requests and debug traces for
+attribution. Both launches use the same timestamping wrapper. Run comparisons
+without competing builds or benchmarks. JSON also reports request size and checks
+exact quoted/multiline arguments,
 user-only context, source retention and actual asset reads. Request size is not
 a token measurement; local fake-API latency is not real API latency. Equal request
 counts do not establish a blanket performance improvement. Both the lf case and

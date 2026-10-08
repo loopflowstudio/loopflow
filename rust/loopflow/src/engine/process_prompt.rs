@@ -145,7 +145,19 @@ pub(crate) fn preview_process_prompt(
         &format_claude_system_prompt(&components),
         &format_claude_task_prompt(&components),
     );
-    components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
+    // Plain installed skills need no instructions for maintaining absent Work
+    // context. Keep enforcing budgets and disclose any managed context or excerpts.
+    if !components.is_standalone_skill()
+        || !components.budget_decisions.is_empty()
+        || components.docs.iter().any(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
+            )
+        })
+    {
+        components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
+    }
     let prompt = format_prompt(PromptFormatMode::Full, &components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
@@ -1025,6 +1037,51 @@ Test skill body.
             Some("team/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+    }
+
+    #[test]
+    fn standalone_skill_omits_work_guidance_but_keeps_context_and_budget_enforcement() {
+        let tmp = create_repo_fixture();
+        fs::write(tmp.path().join("context.md"), "docs content").unwrap();
+        let source = Skill {
+            content: Some("Audit $ARGUMENTS".into()),
+            source: Some(crate::engine::skill_catalog::SkillOrigin {
+                path: tmp.path().join(".claude/skills/audit/SKILL.md"),
+                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                frontmatter: None,
+            }),
+            ..Skill::named("audit")
+        };
+        let input = ProcessPromptInput {
+            repo_root: tmp.path().into(),
+            resolved_skill: Some(source),
+            docs: vec!["context.md".into()],
+            no_loopflow: true,
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let prepared = prepare_process_prompt(&default_test_config(), input.clone()).unwrap();
+        assert!(prepared.config.system_prompt.is_empty());
+        assert!(prepared.config.task_prompt.contains("docs content"));
+        assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
+
+        let limited = Config {
+            context_budgets: [(crate::engine::context_budget::BudgetKey::InputTokens, 1)].into(),
+            ..default_test_config()
+        };
+        assert!(prepare_process_prompt(&limited, input.clone())
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds the input budget"));
+
+        std::fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+        std::fs::write(tmp.path().join("scratch/plan.md"), "Preserve this decision").unwrap();
+        let prepared = prepare_process_prompt(&default_test_config(), input).unwrap();
+        assert!(prepared.config.task_prompt.contains("<lf:context-budget>"));
+        assert!(prepared
+            .config
+            .task_prompt
+            .contains("Preserve this decision"));
     }
 
     #[test]

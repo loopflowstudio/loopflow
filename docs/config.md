@@ -527,8 +527,10 @@ and tool-name instructions, retain declarations and identify the original asset
 directory. Codex custom prompts expand one-based positions and `NAME=value`
 arguments. A warning names declarations the launch does not enforce.
 
-Ordinary third-party launches omit LOOPFLOW.md; attributed Work and captured Flow
-steps retain it. LF builtins remain inline. Captured Flow definitions survive
+Ordinary third-party launches omit Loopflow operating and conversation guidance.
+Budget enforcement stays active; budget notices appear when managed memory,
+scratch or excerpts need them. Attributed Work and captured Flow steps retain
+their guidance. LF builtins remain inline. Captured Flow definitions survive
 source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.

@@ -624,9 +624,11 @@ machine. Jack also requires semi-live comments/completion and suggested Task syn
 on machine registration. Whole-store callbacks and follow-up-only delivery are
 insufficient directions. Jack selected local stores with bidirectional planning
 sync, retaining execution per machine, and suggested Git as a possible transport.
-Git is a candidate, not a selected backend. Scope, sync lifetime, conflicts,
-completion versus local Workflow state and Linear coordination remain open.
-LOO-406 owns one local model with optional Linear sync.
+Jack explicitly separates shared planning/completion from unshared execution.
+Imported completion never moves a local Workflow or controls its Processes.
+Jack selected a custom Git ref. LOO-412 owns transport; LOO-406 owns the common
+writer and Linear sync. Scope, sync lifetime, conflicts and Linear coordination
+remain open. Independent Git work can proceed.
 
 The pursue Flow `73f78216-2429-4d5a-a404-ef4bd1f5ae81` stopped for review;
 partial callback transport remains unverified in the checkout. Preserve existing

@@ -28,61 +28,8 @@ class TestMobileNavNoOverlap:
     """Test that navigation elements don't overlap on mobile."""
 
     @pytest.mark.parametrize("viewport", MOBILE_VIEWPORTS, ids=lambda v: v["name"])
-    def test_nav_items_no_overlap(self, page: Page, base_url: str, viewport: dict):
-        """Nav items should not overlap each other."""
-        page.set_viewport_size({"width": viewport["width"], "height": viewport["height"]})
-        page.goto(base_url)
-        page.wait_for_load_state("networkidle")
-
-        nav_links = page.locator(".home-page nav a:visible")
-        count = nav_links.count()
-
-        if count < 2:
-            pytest.skip("Not enough visible nav links to test overlap")
-
-        # Get bounding boxes of all visible nav links
-        boxes = []
-        for i in range(count):
-            link = nav_links.nth(i)
-            box = link.bounding_box()
-            if box:
-                boxes.append((link.text_content() or f"link_{i}", box))
-
-        # Check no two boxes overlap
-        for i, (name_a, box_a) in enumerate(boxes):
-            for name_b, box_b in boxes[i + 1 :]:
-                overlap = _boxes_overlap(box_a, box_b)
-                assert not overlap, (
-                    f"Nav items overlap on {viewport['name']}: "
-                    f"'{name_a.strip()}' and '{name_b.strip()}'"
-                )
-
-    @pytest.mark.parametrize("viewport", MOBILE_VIEWPORTS, ids=lambda v: v["name"])
-    def test_nav_logo_no_overlap_with_links(self, page: Page, base_url: str, viewport: dict):
-        """Nav logo should not overlap with nav links."""
-        page.set_viewport_size({"width": viewport["width"], "height": viewport["height"]})
-        page.goto(base_url)
-        page.wait_for_load_state("networkidle")
-
-        logo = page.locator(".home-page .brand img")
-        nav_links = page.locator(".home-page nav")
-
-        logo_box = logo.bounding_box()
-        links_box = nav_links.bounding_box()
-
-        if not logo_box or not links_box:
-            pytest.skip("Could not get bounding boxes")
-
-        overlap = _boxes_overlap(logo_box, links_box)
-        assert not overlap, (
-            f"Logo overlaps nav links on {viewport['name']}: "
-            f"logo ends at x={logo_box['x'] + logo_box['width']:.0f}, "
-            f"links start at x={links_box['x']:.0f}"
-        )
-
-    @pytest.mark.parametrize("viewport", MOBILE_VIEWPORTS, ids=lambda v: v["name"])
-    def test_nav_title_no_overlap_with_links(self, page: Page, base_url: str, viewport: dict):
-        """Centered nav title should not overlap with nav links on mobile."""
+    def test_brand_no_overlap_with_links(self, page: Page, base_url: str, viewport: dict):
+        """The whole brand, including its logo, stays clear of navigation."""
         page.set_viewport_size({"width": viewport["width"], "height": viewport["height"]})
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
@@ -90,15 +37,10 @@ class TestMobileNavNoOverlap:
         nav_title = page.locator(".home-page .brand")
         nav_links = page.locator(".home-page nav")
 
-        # Skip if nav-title doesn't exist (some pages may not have it)
-        if nav_title.count() == 0:
-            pytest.skip("No .home-page .brand element")
-
         title_box = nav_title.bounding_box()
         links_box = nav_links.bounding_box()
 
-        if not title_box or not links_box:
-            pytest.skip("Could not get bounding boxes")
+        assert title_box and links_box
 
         overlap = _boxes_overlap(title_box, links_box)
         assert not overlap, (

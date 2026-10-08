@@ -119,29 +119,15 @@ def CopyButton(text: str):
     )
 
 
-# Load content from YAML (edit content.yaml, not this file)
-CONTENT_FILE = Path(__file__).parent / "content.yaml"
-_content = yaml.safe_load(CONTENT_FILE.read_text())
-
-
-def _require_content_path(path: str) -> object:
-    current = _content
-    for segment in path.split("."):
-        if not isinstance(current, dict) or segment not in current:
-            raise RuntimeError(f"content.yaml missing required key: {path}")
-        current = current[segment]
-    return current
-
-
-# Homepage
-HOME_CONTENT = _require_content_path("homepage")
-HERO_CONTENT = _require_content_path("homepage.hero")
-OWNERSHIP_CONTENT = _require_content_path("homepage.ownership")
-FLOWS_CONTENT = _require_content_path("homepage.flows")
-TASKS_CONTENT = _require_content_path("homepage.tasks")
-MAC_CONTENT = _require_content_path("homepage.mac")
-WHY_CONTENT = _require_content_path("homepage.why")
-INSTALL_CONTENT = _require_content_path("homepage.install")
+# Homepage copy (edit content.yaml, not this file)
+HOME_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())["homepage"]
+HERO_CONTENT = HOME_CONTENT["hero"]
+OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
+FLOWS_CONTENT = HOME_CONTENT["flows"]
+TASKS_CONTENT = HOME_CONTENT["tasks"]
+MAC_CONTENT = HOME_CONTENT["mac"]
+WHY_CONTENT = HOME_CONTENT["why"]
+INSTALL_CONTENT = HOME_CONTENT["install"]
 
 # Markdown rendering
 

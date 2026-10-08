@@ -58,14 +58,10 @@ def test_nav_title_no_overlap_with_links_desktop(homepage: Page):
     nav_title = homepage.locator(".home-page .brand")
     nav_links = homepage.locator(".home-page nav")
 
-    if nav_title.count() == 0 or not nav_title.is_visible():
-        return  # No nav title on desktop, that's fine
-
     title_box = nav_title.bounding_box()
     links_box = nav_links.bounding_box()
 
-    if not title_box or not links_box:
-        return
+    assert title_box and links_box
 
     # Check for overlap
     title_right = title_box["x"] + title_box["width"]

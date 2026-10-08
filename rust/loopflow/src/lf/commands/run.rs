@@ -845,16 +845,15 @@ pub(crate) fn attributed_context(
     }
     if let Some(skill) = &components.skill {
         if let Some(content) = &skill.content {
-            let source_path = crate::engine::find_skill_source_path(
-                &skill.name,
-                std::path::Path::new(&components.repo_root),
-            );
             push(
                 content,
                 Kind::SkillInstructions,
                 Scope::Step,
                 skill.name.clone(),
-                source_path.map(|path| path.to_string_lossy().to_string()),
+                skill
+                    .source
+                    .as_ref()
+                    .map(|source| source.path.to_string_lossy().to_string()),
                 "skill",
             );
         } else {
@@ -1009,6 +1008,7 @@ mod tests {
 
     use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+    use crate::engine::skill_catalog::SkillCatalog;
     use crate::lf::Cli;
     use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
@@ -1489,6 +1489,34 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             asset.kind == ContextAssetKind::Scratch
                 && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
         }));
+    }
+
+    #[test]
+    fn retained_skill_context_keeps_its_source_after_catalog_selection_changes() {
+        let repo = tempfile::tempdir().unwrap();
+        let native = repo.path().join(".claude/skills/audit/SKILL.md");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::write(&native, "Original audit instructions").unwrap();
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog.resolve("audit").unwrap().load().unwrap();
+        std::fs::remove_file(&native).unwrap();
+        let replacement = repo.path().join(".lf/skills/audit.md");
+        std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
+        std::fs::write(replacement, "Replacement instructions").unwrap();
+
+        let components = PromptComponents {
+            repo_root: repo.path().display().to_string(),
+            skill: Some(skill),
+            ..PromptComponents::default()
+        };
+        let context = attributed_context(&components, "", "Original audit instructions", &[]);
+        let asset = context
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::SkillInstructions)
+            .unwrap();
+        assert_eq!(asset.source_path.as_deref(), native.to_str());
     }
 
     #[test]

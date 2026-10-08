@@ -821,6 +821,7 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
         .find(|entry| entry["name"] == "audit")
         .unwrap();
     assert_eq!(audit["source"], ".claude/skills/audit/SKILL.md");
+    assert_eq!(audit["description"], "Audit a project");
     assert!(!entries.iter().any(|entry| entry["name"] == "audit/rules"));
 
     fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();

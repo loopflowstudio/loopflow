@@ -147,8 +147,8 @@ also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
 measured): new captures keep 28% of rows and 72% of bytes, preflight validates
 an exact store in place (1.0 s, no copy), WAL holds 64 MiB, two fingerprinted
 migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
-PR 2 (source, not installed): published promotion appended every release to
-`retained_published_sets`; a settled install now retains its fallback and the
+PR #1501 merged as `812d8cc55` (installation unproved): promotion appended every
+release to `retained_published_sets`; a settled install now retains its fallback and the
 prior one, then removes unnamed content-addressed binaries/bundles no live
 process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
 Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
@@ -161,13 +161,9 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
-one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
-comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
-(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
-select history. Preservation constraints and contrary evidence remain under
-Capture cutover below. This decision authorizes neither installed conversion nor
-live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
+LOO-370's opaque-root decision, preservation limits and contrary evidence are
+under Capture cutover below. Delegation and PR #1450 evidence remain at
+`747e24ea3:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -1060,7 +1056,7 @@ follow-ups. Measure command drift, avoidable rebases and post-land repairs befor
 tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (curated 2026-10-05)
+## Direct invocation and large inputs (curated 2026-10-08)
 
 `44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
 checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
@@ -1070,9 +1066,12 @@ LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports, inlined builtins and `--agent`/`-a`, with same-conversation use
 through review, without landing. Missing transport/admission cannot narrow scope.
 The local unified catalog replaces external/npx/rams and Flow resolvers, retaining
-source/declarations through Flow capture. Selection/export tests prove no native
+source/declarations through Flow capture. Prompt attribution uses the retained
+source, never a fresh lookup. Selection/export tests prove no native
 dispatch, translation or current-owner admission. Export must preserve third-party
 files; a native `agent: Explore` must never select an lf harness.
+Retained source identity must also govern native selection under collisions or
+file changes; serialized instructions alone prove no native asset access.
 
 Codex receipts prove source, separate context and same-thread resume, not recall
 without resupply. Claude 2.1.294 fake-API captures put hook context in `system`

@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::Command;
 use serde::Serialize;
 
-use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
+use crate::lf::discovery::{definition_source, resolve_definition, DefinitionKind};
 use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
 
 #[derive(Debug, Serialize)]
@@ -18,17 +18,9 @@ pub struct Entry {
     pub invocation: String,
 }
 
-fn definition_entry(tree: &Command, repo: &Path, name: String, kind: DefinitionKind) -> Entry {
-    let description = match resolve_local_definition(repo, &name, Some(kind)) {
-        Ok(Target::Skill(skill)) => skill
-            .content
-            .unwrap_or_default()
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or_default()
-            .trim_start_matches('#')
-            .trim()
-            .to_string(),
+fn flow_entry(tree: &Command, repo: &Path, name: String) -> Entry {
+    let kind = DefinitionKind::Flow;
+    let description = match resolve_definition(repo, &name, Some(kind)) {
         Ok(target) => crate::lf::discovery::format_target(&target),
         Err(error) => format!("unavailable: {error}"),
     };
@@ -94,12 +86,10 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                     continue;
                 }
             }
-            let description = match source.load() {
-                Ok(skill) => skill
-                    .content
-                    .as_deref()
-                    .and_then(crate::engine::skills::first_prose_line)
-                    .unwrap_or_default(),
+            let description = match source.read() {
+                Ok(content) => {
+                    crate::engine::skills::skill_description(&content).unwrap_or_default()
+                }
                 Err(error) => format!("unavailable: {error}"),
             };
             entries.push(Entry {
@@ -116,7 +106,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
     }
     if path.is_empty() || path == ["flow"] {
         for name in crate::engine::available_flow_names(repo)? {
-            entries.push(definition_entry(tree, repo, name, DefinitionKind::Flow));
+            entries.push(flow_entry(tree, repo, name));
         }
         if !path.is_empty() {
             return Ok(entries);

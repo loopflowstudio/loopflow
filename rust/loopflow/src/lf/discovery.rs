@@ -10,8 +10,6 @@ pub fn resolve_definition(repo: &Path, name: &str, kind: Option<DefinitionKind>)
     crate::engine::target::resolve_definition(repo, name, kind).map_err(Into::into)
 }
 
-pub use resolve_definition as resolve_local_definition;
-
 pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
     crate::engine::load_skill(name, repo).map_err(Into::into)
 }

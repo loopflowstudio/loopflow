@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
-use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
+use crate::lf::discovery::{definition_source, resolve_definition, DefinitionKind, Target};
 use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {
@@ -426,7 +426,7 @@ fn definition_help(
     name: &str,
     kind: Option<DefinitionKind>,
 ) -> Result<String> {
-    let target = resolve_local_definition(repo, name, kind)?;
+    let target = resolve_definition(repo, name, kind)?;
     let (name, kind, description) = match &target {
         Target::Command(_) | Target::Xor(_) => anyhow::bail!("{name} is not a named skill or flow"),
         Target::Skill(skill) => (
@@ -449,7 +449,7 @@ fn definition_help(
     let invocation = definition_invocation(tree, name, kind);
     let mut output =
         format!("{name} — {label} ({source})\n{description}\n\n  {invocation} [message]\n");
-    match (kind, resolve_local_definition(repo, name, None)) {
+    match (kind, resolve_definition(repo, name, None)) {
         (_, Err(error)) => {
             output.push_str(&format!("\nUntyped lookup fails: {error}\n"));
         }
@@ -464,7 +464,7 @@ fn definition_help(
         }
     }
     if kind == DefinitionKind::Flow
-        && resolve_local_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
+        && resolve_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
     {
         output.push_str(&format!(
             "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",

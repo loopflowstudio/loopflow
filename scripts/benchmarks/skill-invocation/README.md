@@ -167,8 +167,9 @@ Jack Heart selected native invocation on the skill's own harness, translated
 ports on the other harness, and inlined Loopflow builtins on October 7, 2026.
 Jack then selected `--agent` / `-a` for the harness and optional model, and
 removed `--ide` after the installed reconnect probe below. The selector rename
-and app-launch removal are implemented. LOO-420's native discovery, dispatch and
-ports remain unfinished; these probes do not implement them.
+and app-launch removal are implemented. The unified catalog now selects skill
+sources; native dispatch and ports remain unfinished. These probes establish
+provider behavior separately from Loopflow execution.
 
 [LOO-420](https://linear.app/loopflow/issue/LOO-420) owns implementation and
 acceptance: one catalog, faithful native dispatch, translated ports, existing

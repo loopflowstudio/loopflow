@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -45,21 +45,16 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         .ok_or_else(|| LoadError::InvalidSkill("home directory not found".to_string()))?;
 
     let catalog = SkillCatalog::load(None, Some(&home), options.global_home.is_none())?;
-    let resolved = catalog
-        .entries()
-        .map(|source| (source.name.clone(), source.clone()))
-        .collect();
-
     let mut report = SkillSyncReport::default();
     write_targets(
-        &resolved,
+        &catalog,
         &home.join(".claude/skills"),
         Vendor::Claude,
         options.prune,
         &mut report,
     )?;
     write_targets(
-        &resolved,
+        &catalog,
         &home.join(".agents/skills"),
         Vendor::Codex,
         options.prune,
@@ -72,17 +67,17 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
 }
 
 fn write_targets(
-    skills: &BTreeMap<String, SkillSource>,
+    catalog: &SkillCatalog,
     target_root: &Path,
     vendor: Vendor,
     prune: bool,
     report: &mut SkillSyncReport,
 ) -> Result<(), LoadError> {
     fs::create_dir_all(target_root)?;
-    let desired: BTreeSet<String> = skills.keys().cloned().collect();
+    let desired: BTreeSet<_> = catalog.entries().map(|skill| skill.name.as_str()).collect();
 
-    for skill in skills.values() {
-        let path = skill_path(target_root, &skill.name);
+    for skill in catalog.entries() {
+        let path = target_root.join(&skill.name).join(SKILL_FILE_NAME);
         // Third-party definitions own their paths, even on a name collision.
         if path.exists() && !is_generated(&path) {
             continue;
@@ -109,7 +104,7 @@ fn write_targets(
             let Some(name) = synced_skill_name_from_path(target_root, &path) else {
                 continue;
             };
-            if desired.contains(&name) {
+            if desired.contains(name.as_str()) {
                 continue;
             }
             fs::remove_file(&path)?;
@@ -125,7 +120,8 @@ fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError
     let content = skill.read()?;
     let (original_frontmatter, mut body) =
         split_frontmatter(&content).unwrap_or_else(|| (String::new(), content.clone()));
-    let description = skill_description(&original_frontmatter, &body, &skill.name);
+    let description = skill_description(&content)
+        .unwrap_or_else(|| format!("Run the loopflow {} skill.", skill.name));
     if let Some(path) = &skill.path {
         body = format!(
             "Base directory for this skill: {}\n\n{body}",
@@ -160,24 +156,23 @@ fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError
     Ok(format!("---\n{}\n---\n{}", frontmatter.join("\n"), body))
 }
 
-fn skill_description(frontmatter: &str, body: &str, name: &str) -> String {
-    if let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(frontmatter) {
-        if let Some(description) = value
-            .as_mapping()
-            .and_then(|map| map.get(serde_yaml_ng::Value::String("description".to_string())))
-            .and_then(serde_yaml_ng::Value::as_str)
-            .map(first_line)
-            .filter(|line| !line.is_empty())
-        {
-            return description;
-        }
-    }
-
-    first_prose_line(body).unwrap_or_else(|| format!("Run the loopflow {name} skill."))
-}
-
-fn first_line(value: &str) -> String {
-    value.lines().next().unwrap_or("").trim().to_string()
+pub(crate) fn skill_description(content: &str) -> Option<String> {
+    let Some((frontmatter, body)) = split_frontmatter(content) else {
+        return first_prose_line(content);
+    };
+    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&frontmatter)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("description")?
+                .as_str()?
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| first_prose_line(&body))
 }
 
 pub(crate) fn first_prose_line(body: &str) -> Option<String> {
@@ -200,32 +195,18 @@ fn yaml_string(value: &str) -> String {
         .to_string()
 }
 
-fn skill_path(root: &Path, name: &str) -> PathBuf {
-    name.split('/')
-        .fold(root.to_path_buf(), |path, segment| path.join(segment))
-        .join(SKILL_FILE_NAME)
-}
-
 fn generated_skill_files(root: &Path) -> Result<Vec<PathBuf>, LoadError> {
     if !root.is_dir() {
         return Ok(Vec::new());
     }
 
     let mut files = Vec::new();
-    collect_skill_files(root, &mut files, &mut HashSet::new())?;
+    collect_skill_files(root, &mut files)?;
     files.retain(|path| is_generated(path));
     Ok(files)
 }
 
-fn collect_skill_files(
-    dir: &Path,
-    files: &mut Vec<PathBuf>,
-    ancestors: &mut HashSet<PathBuf>,
-) -> Result<(), LoadError> {
-    let canonical = fs::canonicalize(dir)?;
-    if !ancestors.insert(canonical.clone()) {
-        return Ok(());
-    }
+fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadError> {
     let skill = dir.join(SKILL_FILE_NAME);
     if skill.is_file() {
         // A bundle owns everything below it, including example skills.
@@ -234,11 +215,10 @@ fn collect_skill_files(
         for entry in fs::read_dir(dir)? {
             let path = entry?.path();
             if path.is_dir() && !path.is_symlink() {
-                collect_skill_files(&path, files, ancestors)?;
+                collect_skill_files(&path, files)?;
             }
         }
     }
-    ancestors.remove(&canonical);
     Ok(())
 }
 

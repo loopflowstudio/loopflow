@@ -8,8 +8,8 @@ use loopflow::engine::{
     skill_catalog::{SkillCatalog, SkillScope},
 };
 use loopflow::lf::discovery::{
-    builtin_skill_description, builtin_skills, discover_skill, resolve_definition,
-    resolve_local_definition, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
+    builtin_skill_description, builtin_skills, discover_skill, resolve_definition, Target,
+    BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -330,7 +330,7 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
     let flows = repo.path().join(".lf/flows");
     fs::create_dir_all(&flows).unwrap();
     fs::write(flows.join("explain-code.yaml"), "- missing-child-23952\n").unwrap();
-    let error = resolve_local_definition(repo.path(), "explain-code", None).unwrap_err();
+    let error = resolve_definition(repo.path(), "explain-code", None).unwrap_err();
     assert!(error.to_string().contains("invalid flow"), "{error}");
     assert!(error.to_string().contains("missing-child-23952"), "{error}");
 }

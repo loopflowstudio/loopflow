@@ -510,7 +510,8 @@ scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
 `.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
 folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports
 never override the current embedded builtin. Help, listing, execution lookup,
-and retained Flow definitions use the same selection.
+and retained Flow definitions use the same selection. Listings prefer the authored
+`description`, falling back to the first prose line.
 
 Install third-party skills with their own installer, then use their installed
 names. The `npx/` fetch path and `rams/rams` alias are removed; an installed

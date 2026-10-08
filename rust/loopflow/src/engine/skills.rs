@@ -118,16 +118,15 @@ fn write_targets(
 
 fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError> {
     let content = skill.read()?;
-    let (original_frontmatter, mut body) =
-        split_frontmatter(&content).unwrap_or_else(|| (String::new(), content.clone()));
+    let (original_frontmatter, body) = split_frontmatter(&content).unwrap_or(("", &content));
     let description = skill_description(&content)
         .unwrap_or_else(|| format!("Run the loopflow {} skill.", skill.name));
-    if let Some(path) = &skill.path {
-        body = format!(
-            "Base directory for this skill: {}\n\n{body}",
+    let source = skill.path.as_ref().map_or_else(String::new, |path| {
+        format!(
+            "Base directory for this skill: {}\n\n",
             path.parent().expect("skill source has a parent").display()
-        );
-    }
+        )
+    });
     let mut frontmatter = Vec::new();
     frontmatter.push(format!("name: {}", yaml_string(&skill.name)));
     frontmatter.push(format!("description: {}", yaml_string(&description)));
@@ -140,7 +139,7 @@ fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError
     if skill.dialect != SkillDialect::Loopflow {
         // Preserve authored declarations; the destination provider decides which it supports.
         if let Ok(serde_yaml_ng::Value::Mapping(mut metadata)) =
-            serde_yaml_ng::from_str(&original_frontmatter)
+            serde_yaml_ng::from_str(original_frontmatter)
         {
             for field in ["name", "description", "loopflow", "loopflow-skill"] {
                 metadata.remove(serde_yaml_ng::Value::String(field.into()));
@@ -153,14 +152,17 @@ fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError
             }
         }
     }
-    Ok(format!("---\n{}\n---\n{}", frontmatter.join("\n"), body))
+    Ok(format!(
+        "---\n{}\n---\n{source}{body}",
+        frontmatter.join("\n")
+    ))
 }
 
 pub(crate) fn skill_description(content: &str) -> Option<String> {
     let Some((frontmatter, body)) = split_frontmatter(content) else {
         return first_prose_line(content);
     };
-    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&frontmatter)
+    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(frontmatter)
         .ok()
         .and_then(|value| {
             value
@@ -172,7 +174,7 @@ pub(crate) fn skill_description(content: &str) -> Option<String> {
                 .filter(|line| !line.is_empty())
                 .map(str::to_string)
         })
-        .or_else(|| first_prose_line(&body))
+        .or_else(|| first_prose_line(body))
 }
 
 pub(crate) fn first_prose_line(body: &str) -> Option<String> {
@@ -366,8 +368,7 @@ mod tests {
             for name in builtins::builtin_skill_names() {
                 let exported = fs::read_to_string(root.join(name).join("SKILL.md")).unwrap();
                 let source = builtins::get_builtin_skill(name).unwrap();
-                let body =
-                    split_frontmatter(source).map_or_else(|| source.to_string(), |(_, body)| body);
+                let body = split_frontmatter(source).map_or(source, |(_, body)| body);
                 assert!(
                     exported.contains(body.trim()),
                     "{vendor} omitted {name}'s method"

@@ -1,23 +1,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
 use crate::engine::error::LoadError;
-use crate::engine::skill_catalog::{SkillDialect, SkillOrigin, SkillSource};
+use crate::engine::skill_catalog::{SkillCatalog, SkillOrigin};
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
 use crate::engine::workflow::names_workflow;
-
-static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<crate::engine::skill_catalog::SkillOrigin>,
+    pub source: Option<SkillOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -513,55 +510,14 @@ pub fn human_occurrence_ids(flow: &FlowDefinition, repo: &Path) -> Result<Vec<St
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
-    let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
+    let catalog = SkillCatalog::discover(Some(repo))?;
     let source = catalog
         .resolve(name)
         .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
-    skill_from_source(source)
+    source.load()
 }
 
-pub(crate) fn skill_from_source(source: &SkillSource) -> Result<Skill, LoadError> {
-    let content = source.read()?;
-    let (frontmatter, body) = match split_frontmatter(&content) {
-        Some((frontmatter, body)) => (Some(frontmatter), body),
-        None => (None, content),
-    };
-    let metadata = frontmatter
-        .as_deref()
-        .map(serde_yaml_ng::from_str::<Value>)
-        .transpose();
-    let loopflow = source.dialect == SkillDialect::Loopflow;
-    let metadata = match metadata {
-        Ok(value) => value,
-        Err(error) if loopflow => return Err(LoadError::InvalidSkill(error.to_string())),
-        Err(_) => None, // Unfamiliar native declarations remain instructions.
-    };
-    let metadata = metadata.as_ref().and_then(Value::as_mapping);
-    let field = |name| metadata.and_then(|map| parse_optional_string(map, name));
-    if metadata.is_some_and(|map| map.contains_key(key("interactive")))
-        && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed)
-    {
-        eprintln!(
-            "warning: skill {:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface",
-            source.name
-        );
-    }
-    Ok(Skill {
-        name: source.name.clone(),
-        source: source.path.as_ref().map(|path| SkillOrigin {
-            path: path.clone(),
-            dialect: source.dialect,
-            frontmatter,
-        }),
-        // Claude's `agent: Explore` describes its subagent, not an lf harness.
-        agent: loopflow.then(|| field("agent")).flatten(),
-        default_agent: loopflow.then(|| field("default_agent")).flatten(),
-        action_style: field("action_style"),
-        content: Some(body),
-    })
-}
-
-pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
+pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     if !content.starts_with("---") {
         return None;
     }
@@ -569,8 +525,8 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     let _ = parts.next();
     let frontmatter = parts.next()?;
     let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
-    Some((frontmatter.to_string(), body))
+    let body = rest.strip_prefix('\n').unwrap_or(rest);
+    Some((frontmatter, body))
 }
 
 fn collect_flow_names(

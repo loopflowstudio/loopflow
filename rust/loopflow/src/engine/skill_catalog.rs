@@ -2,10 +2,14 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
+use serde_yaml_ng::Value;
 
-use crate::engine::{builtins, flow::split_frontmatter, LoadError};
+use crate::engine::{builtins, flow::split_frontmatter, LoadError, Skill};
+
+static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,8 +36,49 @@ pub struct SkillSource {
 }
 
 impl SkillSource {
-    pub fn load(&self) -> Result<crate::engine::Skill, LoadError> {
-        crate::engine::flow::skill_from_source(self)
+    pub fn load(&self) -> Result<Skill, LoadError> {
+        let content = self.read()?;
+        let (frontmatter, body) = match split_frontmatter(&content) {
+            Some((frontmatter, body)) => (Some(frontmatter), body),
+            None => (None, content.as_str()),
+        };
+        let metadata = frontmatter
+            .map(serde_yaml_ng::from_str::<Value>)
+            .transpose();
+        let loopflow = self.dialect == SkillDialect::Loopflow;
+        let metadata = match metadata {
+            Ok(value) => value,
+            Err(error) if loopflow => return Err(LoadError::InvalidSkill(error.to_string())),
+            Err(_) => None, // Unfamiliar native declarations remain instructions.
+        };
+        let metadata = metadata.as_ref().and_then(Value::as_mapping);
+        let field = |name: &str| {
+            metadata
+                .and_then(|map| map.get(name))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        if metadata.is_some_and(|map| map.contains_key("interactive"))
+            && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed)
+        {
+            eprintln!(
+                "warning: skill {:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface",
+                self.name
+            );
+        }
+        Ok(Skill {
+            name: self.name.clone(),
+            source: self.path.as_ref().map(|path| SkillOrigin {
+                path: path.clone(),
+                dialect: self.dialect,
+                frontmatter: frontmatter.map(str::to_string),
+            }),
+            // Claude's `agent: Explore` describes its subagent, not an lf harness.
+            agent: loopflow.then(|| field("agent")).flatten(),
+            default_agent: loopflow.then(|| field("default_agent")).flatten(),
+            action_style: field("action_style"),
+            content: Some(body.to_string()),
+        })
     }
 
     pub fn read(&self) -> Result<String, LoadError> {
@@ -191,17 +236,12 @@ impl SkillCatalog {
 }
 
 pub(crate) fn is_generated(path: &Path) -> bool {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|content| split_frontmatter(&content))
-        .and_then(|(frontmatter, _)| {
-            serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&frontmatter).ok()
-        })
-        .and_then(|value| {
-            value
-                .get("loopflow")
-                .and_then(serde_yaml_ng::Value::as_bool)
-        })
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    split_frontmatter(&content)
+        .and_then(|(frontmatter, _)| serde_yaml_ng::from_str::<Value>(frontmatter).ok())
+        .and_then(|value| value.get("loopflow").and_then(Value::as_bool))
         == Some(true)
 }
 

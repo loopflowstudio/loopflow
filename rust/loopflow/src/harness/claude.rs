@@ -654,7 +654,7 @@ mod native_input_tests {
     async fn context_acknowledgement_does_not_finish_the_skill() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
-        let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_HOME", "LF_BIN"]);
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let fixture = tempfile::tempdir().unwrap();
         let script = fixture.path().join("claude");
         std::fs::write(
@@ -669,9 +669,11 @@ printf '%s\n' '{"type":"result","subtype":"success","num_turns":1,"result":"skil
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("PATH", fixture.path());
+        let lf = fixture.path().join("lf");
+        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &lf).unwrap();
         std::env::set_var("LF_HOME", fixture.path());
-        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        // Vendor setup prepends this directory only to the child's PATH.
+        std::env::set_var("LF_BIN", lf);
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.config = Some(AgentConfig {

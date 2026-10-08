@@ -56,6 +56,8 @@ continuity. Release schedules retain original ownership and activation.
 Release's operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Root words may resolve to authored skills; public lookup proves builtin removal.
+After #1489, Machine discovery covers id/add/list/status/rename/remove; Flow
+normalization must not restore the removed SSH owner path.
 Renamed installation entry proofs passed in disposable Linux OS accounts.
 
 Jack Heart's PR #1489 review permits private OpenSSH sharing, an interactive
@@ -559,27 +561,21 @@ Jack Heart selected one editable draft per Task and immutable released SQL.
 Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
 Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
-## One main Home (LOO-342, curated 2026-10-04)
+## One main Home (LOO-342, curated 2026-10-07)
 
-Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
-Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
-`LF_HOME` experiment initializes once and needs a fresh directory after schema
-changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
-at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
-reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
-The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
-configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
+Jack Heart approved the one-Home cutover: ordinary commands, Task workers and
+Flow steps use installed `lf` and `~/.lf`; explicit `LF_HOME` experiments need a
+fresh directory after schema changes. PR #1381 merged as `6c73356074c4`; installed
+v0.12.31 acceptance passed and LOO-342 is done. Current mechanics:
+[CLI docs](../../docs/lf.md#use-one-machine) and
+[Machines](../../docs/architecture/machines.md#one-main-machine).
 
-### Legacy retirement completed (2026-10-04)
-
-Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
-The four installed stores, the unused root database and two demo databases are
-intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
-identities, signals and paths); seven earlier snapshots remain at
-`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
-identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
+Jack authorized legacy retirement on October 4. All 37 identified processes
+exited after SIGTERM; retained databases and exact signal/path receipts remain
+under `~/.lf-retired/20261004T161815Z/`, earlier snapshots under
+`~/.lf-retired/20261002T191224Z/worktrees/`. Main identity stayed unchanged.
+Release recovery, acceptance and retirement details:
+`173d649cf:wave/infrastructure/MEMORY.md` under “One main Home.”
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 

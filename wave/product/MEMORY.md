@@ -4,6 +4,22 @@ Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wav
 scope widened past the Mac app: product now owns the shared API and every surface
 (CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
+## Terminal-host adoption (2026-10-07)
+
+Jack Heart's LOO-421 direction: other tools should use lf; adoption grows from a
+Flow to a Task to a Wave, with Desktop optional. The trial covers Ghostty, herdr
+and cmux without Desktop. Jack permits isolated headless work and building herdr;
+his running cmux windows remain untouched. No automated logins, credential reads
+or real-account use; signed-in cells require Jack. Study behavior without lifting
+host code. Stop with findings, not landing.
+
+One observation, repeated three times: Jack's `claude --resume` in the
+Loopflow repo displayed **Loopflow operating guide** in cmux's sidebar/tab.
+Running, branch, directory and resume hooks worked. First-content naming is
+Jack's hypothesis; this was not an lf launch. Title repair belongs to LOO-422.
+Kickoff inspected source/interfaces only. Fixtures cannot prove agent detection,
+PTYs Ghostty rendering, or seeded Tasks adoption without Linear. No progress credit.
+
 ## Live Home reconciliation (2026-10-05)
 
 Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
@@ -782,42 +798,30 @@ caps, and keep missing ownership evidence explicit.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-- **The sealed chapter records the accepted starting plan**, not the provisional
-  summer drafts: [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
-  The interval is 23 September–21 October, starting at 00:09:59 UTC. Gate 2
-  accepted the plan; it did not authorize publication. The 24 September human
-  amendments above govern current hierarchy and ownership. The summer review judged
-  39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
-  List adds three previously unreviewed claims. Those are different populations.
-- **Product value is explicitly chosen external progress.** Current Work
-  direction plus material Task progress in any three of Cube, Etude, Kata, and
-  Hootro makes a successful week. An open Session, refreshed plan, settled Run,
-  or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
-  review heuristics, never runtime limits. Preserve capacity outside Loopflow.
-- **The summer reset clarified ownership through real use.** Product dogfood
-  built much of the execution foundation; that was useful discovery, not simply
-  work in the wrong Wave. Infrastructure now owns execution and self-hosting
-  repair, Intelligence owns evidence, and Product owns the external experience.
-  The validated Sessions design is a foundation to finish, not restart.
-- **Review rows before telling the story.** Freeze the exact Project/KR union,
-  including retired or rewritten claims; keep each report's Run id and recompute
-  totals from rows. A definition verdict is not another KR. A complete current
-  roster cannot establish complete historical lineage. Missing duration proof is
-  unknown unless a dated in-scope counterexample disproves the claim.
-- **Keep evidence and user consequences together.** Each Project report needs
-  both exact observations and a concise account of who benefited, what changed,
-  and why the KRs prove it. Carry, learned, not actually prioritized, and misplaced
-  work are separate judgments; review proposes, accepted start applies.
-- **Chapter review now aggregates one report per Wave.** The former direct
-  Project-review shortcut belongs to the multi-Project chapter. Preserve exact
-  historical KR membership and dated reports; current operations must not recreate
-  a Project operator. Run settlement and the report together establish completion;
-  unknown liveness remains unknown. Archive authority follows explicit Task binding.
-- **The baseline cannot recover missing KR history.** PM retains current text
-  and `holds` with one overwritten snapshot timestamp. The new start ledger
-  establishes a forward boundary; retain later wording changes as dated evidence.
-  Append-only PM revisions or provider KR identities remain an instrumentation
-  option when a real review needs lineage the archive cannot supply.
+Full dated account: `626789dcd0382c6754ba3b7c61ea2448b57658ce:wave/product/MEMORY.md`
+under this heading. The [sealed start](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+covers September 23–October 21, starting 00:09:59 UTC. Gate 2 accepted planning,
+not publication; September 24 amendments govern hierarchy/ownership. Summer's
+39 verdicts (2 hold, 16 do not, 21 unknown) and the start's 42 KRs differ because
+List added three unreviewed claims.
+
+- Product value remains selected external progress in three of Cube, Etude,
+  Kata and Hootro per week. Sessions, planning and self-hosting earn no credit.
+  Small/Medium/Big are review heuristics, not runtime limits. Preserve external
+  capacity. Dogfood usefully discovered execution needs; Infrastructure now owns
+  those, Intelligence evidence, Product experience. Finish proven Sessions work.
+- Freeze historical Project/KR membership, including rewrites; retain Run IDs
+  and compute totals from rows. Definition verdicts are not KRs. Current rosters
+  do not prove lineage; missing duration remains unknown absent a dated
+  counterexample. Keep beneficiary, consequence and observations together;
+  distinguish carried, learned, unprioritized and misplaced work.
+- Review proposes; accepted start applies. Aggregate one report per Wave, with
+  no Project operator. Report plus Run settlement proves completion; unknown
+  liveness stays unknown, and archive authority requires explicit Task binding.
+- PM's overwritten text/holds timestamp cannot recover earlier KR history.
+  The start ledger is a forward boundary; retain later changes as dated evidence.
+  Append-only revisions/provider KR IDs remain an option when missing lineage
+  obstructs a real review.
 
 ## Work and continuity (reconciled 2026-09-23)
 

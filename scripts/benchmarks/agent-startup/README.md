@@ -53,8 +53,8 @@ Only publish numeric JSON, metadata, sanitized folded symbols, and SVGs.
 
 ## October 8, 2026: measured improvement is small
 
-Jack Heart requested an autonomous profiling pass through publication for review,
-without landing or Task completion. Three small deletions survive this pass:
+Jack Heart requested autonomous profiling and optimization with matched evidence
+for every retained change. Three small deletions survive this pass:
 
 - Interactive startup uses the actual provider spawn result instead of launching
   the selected provider once with `--version` and again to open it. Automatic
@@ -63,7 +63,6 @@ without landing or Task completion. Three small deletions survive this pass:
 - An absent ambient Wave returns before Git discovery, runtime/thread creation,
   and registry reads. Explicit and inherited Wave IDs retain their existing
   resolver, including stale-identity errors. Nothing is cached.
-
 - Prompt construction takes the directory already resolved by CLI dispatch.
   It no longer launches Git a second time to find that same directory. Task-bound
   execution retains its selected directory; no repository facts persist across

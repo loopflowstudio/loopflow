@@ -20,7 +20,7 @@ Magic is pursued for the joy of it and as a demonstration of pure research
 pursued with craft. It does not need to be framed as a commercial customer workload.
 
 Etude is a hosted experiment service combining execution through Loopflow with
-a database and UX for organizing research. Its underlying resource is open source.
+a database and UX for organizing research. Etude is proprietary; its customizable research resources are not open source.
 It connects research questions, experiments, training runs/jobs, reports,
 findings and recommendations. General infrastructure includes budgets, launch
 parameterization, hardware allocation, supervision and provenance.
@@ -93,3 +93,16 @@ Loopflow itself stays free. Routes built: `/` product, `/studio`, `/fantasia`,
 draft.
 
 Jack Heart on the Etude page: "etude's page can be super short. We are building this - no links, no pics, info anything".
+
+## Fantasia page direction from Jack Heart (2026-10-08)
+
+Jack cut "They do not yet." and "Research pursued for the joy of it, and to show
+what research done with craft looks like." He asked for more of the Fantasia
+repository's own language, for the page to be "a little bit more explicit about
+using AI mtg as lever to drive the development of loopflow and etude", and for a
+link to the Fantasia GitHub. The repository is public at
+github.com/loopflowstudio/fantasia; the rename from etude has happened. Its
+README supplied "AI-assisted Pro Tour testing house" and "serious practice,
+visible disagreement, rapid experiments, and the fun of discovering something
+together." No line in that repository is quoted as Jack's; the lever wording on
+the page is a draft.

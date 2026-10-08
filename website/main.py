@@ -962,7 +962,15 @@ def build_effort_page(slug: str) -> tuple:
             cls="strip points",
             aria_label=content["title"],
         ),
-        Section(P(content["status"], cls="capture-label"), cls="studio-status"),
+        Section(
+            P(
+                content["status"],
+                " ",
+                A(content["link"]["label"], href=content["link"]["href"]),
+                cls="capture-label install-links",
+            ),
+            cls="studio-status",
+        ),
     )
 
 

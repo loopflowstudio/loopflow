@@ -34,8 +34,9 @@ studio:
         label: Loopflow ↗
         href: /
     - name: Fantasia
-      label: The research that keeps us good at it
-      text: 'Superhuman Magic: The Gathering bots, pursued for the joy of it.'
+      label: The research that drives both
+      text: 'Superhuman Magic: The Gathering bots. Building them is what drives the development
+        of Loopflow and Etude.'
       status: In progress
       link:
         label: Fantasia ↗
@@ -44,15 +45,21 @@ studio:
     title: Fantasia
     label: Fantasia · Loopflow Studio
     heading: 'Superhuman Magic: The Gathering bots.'
-    lede: Research pursued for the joy of it, and to show what research done with craft looks
-      like.
+    lede: 'An AI-assisted Pro Tour testing house: serious practice, visible disagreement, rapid
+      experiments, and the fun of discovering something together.'
     points:
     - title: Today
       text: A person can play a one-on-one game against a trained bot, a search bot, or random
         play, and replay the finished game.
     - title: The aim
-      text: Bots that play better than the best people. They do not yet.
-    status: In progress. Nothing to install.
+      text: Bots that play better than the best people.
+    - title: Why Magic
+      text: It is the lever for the other two. Building the bots shows us what Loopflow needs,
+        and running their training shows us what Etude needs. Fantasia is Etude’s first user.
+    status: In progress.
+    link:
+      label: Source ↗
+      href: https://github.com/loopflowstudio/fantasia
   etude:
     title: Etude
     label: Etude · Loopflow Studio

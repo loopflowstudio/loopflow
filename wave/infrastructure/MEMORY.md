@@ -151,12 +151,10 @@ Unknown ownership is not permission to delete. Test `session_record` with `LF_*`
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart delegated LOO-370's source delivery. Infrastructure selected one opaque
-`~/.lf/runs` root (comment `3829b49e-2ade-4bee-8850-2ae2297399a8`), superseding
-relocation. PR #1450 (`1af81fe03`) is integrated; installed conversion and live
-interruption remain unauthorized. Capture cutover below retains preservation
-constraints and counterevidence; earlier detail is at
-`6448e3c9e:wave/infrastructure/MEMORY.md`.
+LOO-370's opaque-root decision, source delivery and remaining preservation
+constraints are retained under Capture cutover below. Earlier detail:
+`6448e3c9e:wave/infrastructure/MEMORY.md`. Installed conversion and live
+interruption remain unauthorized.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -1057,19 +1055,24 @@ follow-ups. Measure command drift, avoidable rebases and post-land repairs befor
 tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (LOO-428, 2026-10-07)
+## Direct invocation and large inputs (LOO-428 / LOO-429, 2026-10-07)
 
-Jack Heart retained interactive prompt arguments, superseding LOO-428's original
-file/stdin redesign. Claude system content must contain only fixed Loopflow
-instructions, never uncontrolled repo/scratch text; the names identified in
-comment `9286d15d-71d6-4575-b2b6-40088759881b` must stay out of those instructions.
-Headless Claude already uses stdin. Prior transport history remains at
-`44fe36620:wave/infrastructure/MEMORY.md`; preserve common invocation loading and
-caller-owned checkpointing. Codex rejected-turn recovery remains unresolved.
+Jack Heart's later LOO-429 decisions supersede 428's retained-argv and fixed-only
+system-content direction: all assembled context goes in the system/instructions
+file, one path, a short user trigger, no split, relaunch fallback or lf-side refusal
+wording. PR #1498 owns that change. Its design records Claude interactive readback;
+plan mode and Codex remain unproved. Codex failed on 428's duplicate trust flag.
 
-Isolated measurement: macOS ARG_MAX is 1,048,576 bytes; cmux's Claude wrapper
-accepts 122,880 and rejects 122,881, independently. Native Codex config readback
-shows lf's whole-table hooks override drops host hooks. A duplicate-flag-only
-repair cannot prove tracking. Hook composition and real cmux launch acceptance
-remain unfinished; separate-window access was denied. No live sessions changed.
-Jack authorized review publication only.
+Jack narrowed remaining 428 work to setup-free Codex flag/hook coexistence;
+existing Flow-output and Task Started changes stay preserved. He requires original
+oversized-launch success through 429 and rejects one-time hook setup.
+Combined acceptance depends on 429; do not reopen prompt transport here. Reconcile
+428's argv diagnostics and fixture with 429 before publication. Native config
+readback showed whole-table replacement, not runtime hook loss or coexistence.
+Exact native capture and cmux tracking remain required; earlier separate-window
+access was denied and live Sessions were untouched. Publication only is authorized.
+
+Measured macOS ARG_MAX was 1,048,576 bytes; cmux's Claude cap was 122,880.
+Earlier prompt history: `44fe36620:wave/infrastructure/MEMORY.md`. Preserve common
+invocation loading and caller-owned checkpointing. Codex rejected-turn recovery
+remains unresolved. 429's first-response proof is not installed or combined acceptance.

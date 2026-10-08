@@ -43,8 +43,9 @@ Compression removes the nested command matches and unreachable SSH arm; the CLI
 dispatcher selects each handler once. Shared process-group cleanup still serves
 provider authentication, Flow execution and read retries, so it remains.
 
-Remaining: publication for PR review; landing is not authorized. Disposable OS-account installation
-proofs remain with gate/CI; Desktop app launch is unchanged and was not exercised
+Jack Heart accepted PR #1494 and advancement through shipping. Gate completed
+affected checks and disposable OS-account installation proofs; landing remains
+with the authored ship Flow and hosted CI owns its required matrix. Desktop app launch is unchanged and remains unexercised
 in this headless run. The generated reference and prompt snapshots match source.
 Public discovery tests exercised the demo: `lf help --all` shows self install/doctor,
 config user and root open; machine lists only id/observe/ssh; screenshot and its
@@ -55,7 +56,7 @@ its operation-entry lesson is already reflected in these removal checks. LOO-397
 owns the broader command map; this Task supplies the implemented owner paths.
 No unresolved product decision remains.
 
-Checks: `cargo test -p loopflow --test cli_discovery --test user_cli_tests --test global_commands --test one_machine_tests` — 32 passed, three OS-account cases deferred to isolated gate/CI; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` pass. Earlier owner-tree, recovery, Flow and prompt checks remain applicable; exact commands/results: `4328a5347:scratch/move-installation-commands-out-of.md`.
+Earlier focused evidence: `4328a5347:scratch/move-installation-commands-out-of.md`.
 
 ## Command discovery demo — 2026-10-07
 
@@ -120,19 +121,32 @@ and preserved the database bytes. The initial probe expected the generic warning
 the actual existing diagnostic was `ledger unavailable — Processes are not being
 recorded`, and the corrected probe passed without another code change.
 
-Checks: `cargo test -p loopflow --test cli_discovery --test process_ownership_tests --no-run` built; compiled cli_discovery plus process_ownership_tests filters `parser_returns_exact_status_without_admitting_an_early_store` and `early_commands_record_exact_exits_without_initializing_or_migrating` through `scripts/test_network.py` — 22 passed; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed.
+Help-repair evidence: `3f29ff57e:scratch/move-installation-commands-out-of.md`.
 
 Review confirmed the warning stays at admission, compatible-ledger history is
 unchanged, and successful discovery asserts empty stderr. Recommended next
 action at repair completion was publication for review with this evidence.
-Installation proofs remain with isolated gate/CI; app launch was not exercised.
+The later gate below closes the isolated installation proofs; app launch remains
+unexercised.
 
 ### Accepted review and next work
 
 Jack Heart reviewed PR #1494 and said “ok looks good keep advacning the task.”
 This accepts the review and requests the next workflow edge, superseding the
-earlier stop-before-landing boundary. The Task is at `code`'s `demo` node with
-no live Flow; its completed implementation and publication are retained history.
-Next: `lf task run LOO-401 ship` runs gate, then `pr land -c`. Include the committed
-help repair (`3f29ff57e`) in publication. Gate owns remaining automated proof;
-review acceptance does not claim installation or app-launch evidence.
+earlier stop-before-landing boundary. The authored `ship` edge runs gate, then
+`pr land -c`. The committed help repair
+(`3f29ff57e`) remains part of the landing candidate. Review acceptance does not
+claim installation or app-launch evidence.
+
+### Gate review
+
+Review found the architecture map omitted the new `lf config` public owner.
+The User row now includes it, and the architecture check and its 21 tests pass.
+The shared Rust dispatch remains singular; no retired command alias, capture
+supervisor, installation-path change or schema change was added. Release child
+memory was read in full; its entry-point and isolated-installation lessons still
+apply. The Python checkout-observation proof cannot nest its macOS sandbox inside
+the suite wrapper; it passes directly under its own network-denying sandbox.
+
+
+Checks: `uv run python scripts/test.py --base 626789dcd0382c6754ba3b7c61ea2448b57658ce --reuse-passing` — materialized Rust 2,281 passed/17 skipped, website 78 passed/3 skipped, Python 404 passed/two initial failures; architecture omission repaired (`uv run python scripts/check_architecture.py` and network-isolated `pytest python/tests/test_architecture.py`: 21 passed), sandbox limitation resolved by direct `uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes -q`: one passed; Rust 1.99 `cargo +stable fmt --all -- --check` and `cargo +stable clippy --all-targets --jobs 4 -- -D warnings` passed; `uv run python scripts/test_task_installation.py --test installation_uses_candidate_authority_from_any_checkout installation_reaches_candidate_verdict_with_an_unreadable_task_registry early_observation_records_preflight default_and_nested_commands_use_the_installed_cli_and_main_home` passed all four entry proofs plus its migration proof in a disposable Linux OS account. The original aggregate is not a green rerun; hosted CI still owns the full required matrix. No host installation or app launch was attempted.

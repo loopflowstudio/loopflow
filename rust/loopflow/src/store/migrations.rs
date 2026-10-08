@@ -2606,10 +2606,14 @@ mod tests {
             [directory.path().to_str().unwrap()],
         )
         .unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
-        for draft in crate::build_info::migration_draft_manifest() {
-            conn.execute_batch(draft.sql).unwrap();
-        }
+        super::_migration_transaction(&conn, |conn| {
+            apply_set(conn, MIGRATIONS)?;
+            for draft in crate::build_info::migration_draft_manifest() {
+                conn.execute_batch(draft.sql)?;
+            }
+            validate_foreign_keys(conn)
+        })
+        .unwrap();
         drop(conn);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);

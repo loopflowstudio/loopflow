@@ -7,7 +7,7 @@ for compatibility with particular attention to ID generation, then requested
 Landing, installation, callbacks, Git synchronization and Linear export are outside
 this slice. Reconciled on 2026-10-08: the local lifecycle is implemented, with
 focused public CLI, migration and headless Desktop proofs in disposable stores.
-The affected acceptance matrix and publication remain with gate and delivery.
+The affected acceptance matrix passes; the change is ready for publication for review.
 The earlier execution feedback is superseded by native launch/import checkpoint
 `817ec2634`, lifecycle/Desktop checkpoint `2d4115339`, and compression checkpoint
 `b8abd3c9a`. `require_provider_session_process` now uses the authority-aware
@@ -543,15 +543,23 @@ in stable order before choosing the current destination. Public fixtures scrub
 inherited Loopflow/Linear authority, and unknown provider/GitHub stub calls fail.
 Personal deletion uses a timestamp on its Task, never Linear's recovery table.
 
-Remaining before publication: finish the affected gate below, including connected
+Publication preparation: the affected gate passes, including connected
 planning/rotation recovery and the full headless app/model matrix. The mixed rotation
 operation fixture now interrupts each of ten provider mutations after personal
 settlement. Retry retains the personal receipt, original started membership and
 backlog even when that backlog starts afterward; connected PR/Flow history survives.
 A second retry creates no Project and performs no provider mutation. This is
 composed operation evidence, not a public CLI crash or live-provider proof.
-Gate also found five SQLite owners missing from the architecture map; its corrected
-owner inventory now passes. Any further failure requires repair in this same PR.
+Gate found five missing architecture-map owners and nineteen Rust failures.
+Corrections retain imported unplaced identities in fixtures, exercise populated
+migration through its transaction, add planning revisions for private definitions,
+workflows and comments, and permit duplicate ticket aliases across repositories
+while keeping full identities unique and ambiguous lookup explicit. Delivery still
+validates the Task commit range before checking remote availability. The 66-test repair selection and final six-suite matrix pass. The disposable Linux
+migration/adoption proof also passes after its fixture retains the imported Task ID
+and checks absent placement, PRs and Started before checkout. No installation,
+provider or GitHub effects escaped the fixtures. Public CLI proofs use contained
+providers; no live-provider continuity or installed upgrade is established.
 
 Desktop evidence has two boundaries: public CLI output is compared with the
 shared Task/comment fixture and decoded/rendered in Swift; workflow controls use
@@ -566,7 +574,7 @@ revision/removal evidence before projecting the shared reader. Update Rust/Swift
 DTOs and fixtures together. The callback, Git and Linear follow-ups above require
 separate designs; no follow-up Tasks are filed and machine delivery does not wait.
 
-Remaining keystone gate: `uv run python scripts/test.py --rust --swift --loopflow --e2e`
+Completed keystone gate: `uv run python scripts/test.py --rust --swift --loopflow --e2e`
 with new public-CLI `local_planning` fixtures and populated released-frontier
 migration cases. Tests use disposable stores with inherited LF authority cleared,
 stub providers/GitHub and no installation promotion. Unknown CLI calls must fail
@@ -610,4 +618,4 @@ Earlier focused storage/migration, DTO and headless Desktop evidence remains at
 or Swift code. Publication preparation adds the composed recovery regression and repairs the
 architecture map; production behavior is unchanged.
 
-Check (2026-10-08): `git diff --check` passed; reused compression results: `cargo nextest run -p loopflow --test local_planning --test session_lifecycle_tests -E "binary(local_planning) | test(personal_task_launch_resume_and_skill_workflow_keep_native_identity)" --no-fail-fast` — 9 passed; `cargo nextest run -p loopflow --lib -E "test(task_creation_confirmation_failure_retries_without_starting_backlog) | test(changing_the_workflow_keeps_the_projects_krs) | test(connected_fields_match_personal_order_assignment_and_summary)" --no-fail-fast` — 3 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; broader matrix and mixed-authority recovery remain gate-owned.
+Check (2026-10-08): `uv run python scripts/test.py --rust --swift --loopflow --e2e` — PASS, six suites (2,293 Rust tests, 402 headless Swift tests, 76 website tests, CLI smoke, app/UI-runner build; 17 ignored Rust tests); `uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history` — PASS, disposable Linux migration and adoption; mixed rotation's ten failure points passed in the matrix; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. Optional display diagnostics and live/installed acceptance are not claimed.

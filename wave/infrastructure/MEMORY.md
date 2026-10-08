@@ -25,10 +25,12 @@ including personal tombstones and connected refusal; history survives deletion.
 Personal definitions/workflows stay in SQLite. Contained public fixtures cover
 concurrency, placement recovery, rotation, paired fields and confirmed GitHub merge;
 no-remote landing refuses. CLI fixtures and headless Swift views prove separate
-source boundaries, not installed/live-provider continuity. Mixed rotation passes ten interrupted provider mutations: retry preserves personal
-receipts/membership and later-started backlog while recovering connected effects.
-This proves operation recovery, not CLI crashes or live providers; Release's
-entry-point lesson applies. The broader matrix remains required. No installation or landing authority; no product decision blocks publication.
+source boundaries, not installed/live-provider continuity. Mixed rotation passes ten
+interrupted provider mutations, preserving receipts and
+membership across retry. Gate exposed missing planning revisions and globally unique
+ticket aliases; private definition/workflow changes now notify readers, and separate
+repositories retain duplicate aliases with ambiguous lookup explicit. Six-suite gate
+and disposable Linux migration/adoption pass.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

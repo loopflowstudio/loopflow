@@ -121,7 +121,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 "project":"chapter", "team_id":"team-1", "assignee":null}]
         }))
         .unwrap();
-        runtime.block_on(async {
+        let imported_id = runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
             rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -159,7 +159,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 )
                 .await
                 .unwrap();
-            assert!(store.list_tasks(None).await.unwrap().is_empty());
+            let tasks = store.list_tasks(None).await.unwrap();
+            assert_eq!(tasks.len(), 1);
+            assert!(tasks[0].worktree.is_none());
+            assert!(store.task_prs(&tasks[0].id).await.unwrap().is_empty());
+            assert!(!store.task_started(&tasks[0].id).await.unwrap());
+            tasks[0].id.clone()
         });
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
@@ -212,6 +217,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             .block_on(store.get_task_by_issue("FIX-1"))
             .unwrap()
             .unwrap();
+        assert_eq!(task.id, imported_id);
         if !remote_only {
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
         }

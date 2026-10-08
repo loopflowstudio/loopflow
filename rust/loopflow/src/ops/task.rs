@@ -5806,7 +5806,11 @@ mod tests {
             };
             let result = super::create_prepared_task(repo.path().to_path_buf(), resolved, prepared);
             if moved {
-                assert!(result.unwrap_err().to_string().contains("changed Project"));
+                let error = result.unwrap_err().to_string();
+                assert!(
+                    error.contains("accepted planning did not retain the Task identity"),
+                    "{error}"
+                );
                 assert!(runtime
                     .block_on(fixture.store.get_task_by_issue("new-issue"))
                     .unwrap()

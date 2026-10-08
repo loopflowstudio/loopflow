@@ -1641,7 +1641,6 @@ mod tests {
             select_project(&store, &project);
             let mut task = make_task(&wave, &project);
             task.worktree = Some(directory.path().join("checkout"));
-            let pr = make_task_pr(&task);
             let mut snapshot = task_planning_snapshot(&wave, &project, &task);
             snapshot.synced_at = 17;
             snapshot.snapshot.items[0].completed = false;
@@ -1651,6 +1650,11 @@ mod tests {
             snapshot.snapshot.items[0].name = "Accepted title".into();
             snapshot.snapshot.items[0].description = "Accepted direction".into();
             store.put_pm_snapshot(snapshot, None).await.unwrap();
+            let imported = store.get_task_by_issue("NEXT-9").await.unwrap().unwrap();
+            task.id = imported.id;
+            task.created_at = imported.created_at;
+            task.updated_at = imported.updated_at;
+            let pr = make_task_pr(&task);
             let accepted = if initializing {
                 store
                     .create_task_with_worktree(&task, &pr, None)

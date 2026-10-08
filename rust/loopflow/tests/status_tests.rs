@@ -202,7 +202,7 @@ fn prepend_test_bin(command: &mut Command, home: &Path) {
     command.env("PATH", std::env::join_paths(paths).expect("test PATH"));
 }
 
-fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
+fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_task: bool) {
     const STALE_WORK_ID: &str = "proj_e972b70272fbb5e91c096ebe657f9f9b";
     const STALE_PROJECT_ID: &str = "f56c583c-c360-4dc4-ba12-4b5a02268623";
     const STALE_TASK_WORK_ID: &str = "task_40fbeeaadfbca5367aa7391432ae84ff";
@@ -238,7 +238,14 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
         plan: TaskPlan {
             revision: 0,
-            linear_id: Some(LinearIssueId::new("linear-task-w2-127").expect("recorded PM Task id")),
+            linear_id: Some(
+                LinearIssueId::new(if current_task {
+                    "task-prd-52"
+                } else {
+                    "linear-task-w2-127"
+                })
+                .expect("recorded PM Task id"),
+            ),
             identifier: "W2-127".to_string(),
             title: "Preserve historical architecture evidence".to_string(),
             description: "This Task outlived its retired Linear Project.".to_string(),
@@ -368,7 +375,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
 }
 
 fn seed_persisted_merge_request_without_copy(home: &Path) {
-    seed_stale_project_work(home, true);
+    seed_stale_project_work(home, true, true);
     let connection =
         rusqlite::Connection::open(home.join("loopflow.db")).expect("open seeded Task registry");
     let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -736,7 +743,7 @@ fn a_wave_with_no_runs_reports_an_empty_reading_not_a_missing_one() {
 fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
     for abandon_parent in [true, false] {
         let home = tempfile::tempdir().expect("tempdir");
-        seed_stale_project_work(home.path(), abandon_parent);
+        seed_stale_project_work(home.path(), abandon_parent, false);
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
         let wave = &roadmap["waves"][0];
@@ -772,7 +779,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
 fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
     for payload in [None, Some("{}"), Some("not-json")] {
         let home = tempfile::tempdir().unwrap();
-        seed_stale_project_work(home.path(), false);
+        seed_stale_project_work(home.path(), false, false);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
             conn.execute("UPDATE pm_projects SET body=?1", [payload])
@@ -785,8 +792,14 @@ fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
         for view in [&status, &roadmap["waves"][0]] {
             assert!(view["chapter"].is_null());
             assert_eq!(view["tasks"]["state"], "unavailable");
-            assert_eq!(view["unavailable_tasks"].as_array().unwrap().len(), 1);
-            assert_eq!(view["unavailable_tasks"][0]["work_id"], PERSISTED_TASK_ID);
+            let unavailable = view["unavailable_tasks"].as_array().unwrap();
+            assert_eq!(unavailable.len(), 2);
+            assert!(unavailable
+                .iter()
+                .any(|task| task["work_id"] == PERSISTED_TASK_ID));
+            assert!(unavailable
+                .iter()
+                .any(|task| task["task_identifier"] == "PRD-52"));
         }
     }
 }
@@ -901,7 +914,7 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
 #[test]
 fn exact_task_roadmap_retains_history_without_starting_work() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false);
+    seed_stale_project_work(home.path(), false, false);
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute("DELETE FROM task_prs", []).unwrap();
     let before: (i64, i64, i64) = conn
@@ -967,7 +980,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
 #[test]
 fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false);
+    seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let original = store.list_waves(None).unwrap().remove(0);
     let other_repo = home.path().join("other-repo");
@@ -988,6 +1001,11 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
     snapshot.wave_id = other.id().clone();
     snapshot.initiative = "other-initiative".into();
     store.put_pm_snapshot(&snapshot).unwrap();
+    assert!(store
+        .task_by_issue("PRD-52")
+        .unwrap_err()
+        .to_string()
+        .contains("multiple stable Tasks"));
 
     for all in [true, false] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));

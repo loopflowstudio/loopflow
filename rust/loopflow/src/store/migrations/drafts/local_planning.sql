@@ -18,10 +18,6 @@ CREATE TABLE personal_workflows (
     content TEXT NOT NULL,
     PRIMARY KEY(wave_id,name)
 );
-CREATE TRIGGER store_revision_personal_wave_definition AFTER UPDATE ON personal_wave_definitions
-BEGIN
-    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
-END;
 DROP INDEX idx_waves_active_locator;
 CREATE UNIQUE INDEX idx_waves_active_locator
     ON waves(repo,ifnull(personal_plan_id,''),ifnull(parent_wave_id,''),name)
@@ -160,7 +156,7 @@ ALTER TABLE tasks_migration RENAME TO tasks;
 
 CREATE INDEX idx_tasks_project ON tasks(project_id, created_at);
 
-CREATE UNIQUE INDEX idx_tasks_issue_identifier ON tasks(issue_identifier);
+CREATE INDEX idx_tasks_issue_identifier ON tasks(issue_identifier);
 
 CREATE UNIQUE INDEX idx_tasks_worktree ON tasks(worktree);
 
@@ -250,3 +246,27 @@ UPDATE projects SET project_summary=COALESCE((SELECT json_extract(observed.body,
         AND observed.provider='linear'),'');
 
 PRAGMA legacy_alter_table = OFF;
+
+CREATE TRIGGER store_revision_personal_wave_definitions_insert AFTER INSERT ON personal_wave_definitions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_personal_wave_definitions_update AFTER UPDATE ON personal_wave_definitions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_personal_wave_definitions_delete AFTER DELETE ON personal_wave_definitions
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_personal_workflows_insert AFTER INSERT ON personal_workflows
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_personal_workflows_update AFTER UPDATE ON personal_workflows
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_personal_workflows_delete AFTER DELETE ON personal_workflows
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_task_comments_update AFTER UPDATE ON task_comments
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_task_comments_delete AFTER DELETE ON task_comments
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

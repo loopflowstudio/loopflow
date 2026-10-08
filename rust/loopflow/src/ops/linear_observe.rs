@@ -343,6 +343,16 @@ pub(crate) mod tests {
                 .unwrap();
             let mut task = task();
             task.worktree = Some(home.path().to_path_buf());
+            let conn = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'fixture',?2,1)",
+                rusqlite::params![task.wave_id, home.path().to_string_lossy()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",
+                rusqlite::params![task.project_id.as_str(), task.wave_id],
+            ).unwrap();
             std::fs::create_dir_all(home.path().join(".lf")).unwrap();
             std::fs::write(
                 home.path().join(".lf/config.yaml"),

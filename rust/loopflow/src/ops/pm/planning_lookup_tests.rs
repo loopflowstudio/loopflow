@@ -89,7 +89,11 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                     .unwrap();
             assert_eq!(resolved.wave, "product");
             assert_eq!(resolved.item, record.item);
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
             assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
             assert!(fixture
                 .store
@@ -665,7 +669,11 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -730,7 +738,11 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -780,7 +792,11 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -918,7 +934,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
             fixture.store.put_pm_snapshot(list, None).await.unwrap();
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }

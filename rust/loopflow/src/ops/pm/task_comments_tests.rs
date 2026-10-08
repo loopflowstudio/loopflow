@@ -309,7 +309,11 @@ async fn task_comments_read_and_publish_without_starting_work() {
             let body = &direction.comments.last().unwrap().body;
             assert!(body.contains("<!-- loopflow-steer:"));
             assert!(crate::ops::linear_observe::is_direction_comment(body, Some("same-account")));
-            assert!(store.list_tasks(None).await.unwrap().is_empty());
+            let tasks = store.list_tasks(None).await.unwrap();
+            assert_eq!(tasks.len(), 1);
+            assert!(tasks[0].worktree.is_none());
+            assert!(store.task_prs(&tasks[0].id).await.unwrap().is_empty());
+            assert!(!store.task_started(&tasks[0].id).await.unwrap());
         })
         .await;
     server.abort();

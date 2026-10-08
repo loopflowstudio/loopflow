@@ -11,12 +11,10 @@ use std::time::{Duration, Instant};
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
-#[cfg(target_os = "macos")]
-use loopflow::planning::{LinearIssueId, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -123,28 +121,9 @@ impl Machine {
         let worktree = repository(&self.path().join("checkout"));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let project = self.store.project_by_project(PROJECT).unwrap().unwrap();
-        let task = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
-                identifier: "FIX-1".into(),
-                title: "Task 1".into(),
-                description: String::new(),
-                pm_snapshot_synced_at: Some(now.unix_timestamp()),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: self.wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: Some(worktree.clone()),
-            workspace_slug: "fix-one".into(),
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
+        let mut task = self.store.task_by_issue("issue-1").unwrap().unwrap();
+        task.worktree = Some(worktree.clone());
+        task.workspace_slug = "fix-one".into();
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),

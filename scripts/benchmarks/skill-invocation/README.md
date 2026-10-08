@@ -204,7 +204,9 @@ uv run python scripts/test_network.py uv run --offline --script \
 ```
 
 Uses Codex 0.160.1, private HOME/CODEX_HOME, no credentials and a local fake
-Responses API. Exit zero means the counterexample reproduced. Two requests prove
+Responses API. Each mode ends with one JSON report containing request count and
+all checks; catalog paths and native title counts appear where applicable.
+Missing requests fail the checks. Exit zero means the counterexample reproduced. Two requests prove
 that an explicit captured `skill` path is ignored until registered, then expands
 when registered. `skills/list.perCwdExtraUserRoots` is silently ignored. Its
 replacement `skills/extraRoots/set` replaces engine-global roots; clearing those

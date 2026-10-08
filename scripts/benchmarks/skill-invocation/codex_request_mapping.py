@@ -209,10 +209,14 @@ async def _ws_until(socket, matches) -> dict:
     raise RuntimeError("fixture connection ended before the expected event")
 
 
-async def _ws_request(socket, method: str, params: dict, ident: str | None = None) -> dict:
+async def _ws_reply(socket, method: str, params: dict, ident: str | None = None) -> dict:
     ident = ident or uuid.uuid4().hex
     await socket.send(json.dumps({"id": ident, "method": method, "params": params}))
-    reply = await _ws_until(socket, lambda event: event.get("id") == ident)
+    return await _ws_until(socket, lambda event: event.get("id") == ident)
+
+
+async def _ws_request(socket, method: str, params: dict, ident: str | None = None) -> dict:
+    reply = await _ws_reply(socket, method, params, ident)
     if "error" in reply:
         raise RuntimeError(f"{method}: {reply['error'].get('message')}")
     return reply["result"]
@@ -225,16 +229,19 @@ async def _read_thread(socket, thread_id: str) -> dict:
     return history["thread"]
 
 
-async def _initialize_socket(socket) -> None:
-    await _ws_request(
-        socket,
-        "initialize",
-        {
-            "clientInfo": {"name": "lf_boundary_fixture", "version": "1"},
-            "capabilities": {"experimentalApi": True},
-        },
-    )
-    await socket.send(json.dumps({"method": "initialized"}))
+@asynccontextmanager
+async def _connection(endpoint: Path):
+    async with unix_connect(str(endpoint), uri="ws://localhost") as socket:
+        await _ws_request(
+            socket,
+            "initialize",
+            {
+                "clientInfo": {"name": "lf_boundary_fixture", "version": "1"},
+                "capabilities": {"experimentalApi": True},
+            },
+        )
+        await socket.send(json.dumps({"method": "initialized"}))
+        yield socket
 
 
 def _invocation_receipts(thread: dict, capture: str) -> list[tuple[dict, dict]]:
@@ -244,6 +251,63 @@ def _invocation_receipts(thread: dict, capture: str) -> list[tuple[dict, dict]]:
         for item in turn["items"]
         if item["type"] == "userMessage" and item.get("clientId") == capture
     ]
+
+
+async def _consume_queued_input(
+    socket,
+    thread_id: str,
+    capture: str,
+    active_before: dict,
+    release: threading.Event,
+    terminal: _Terminal,
+) -> tuple[dict, dict]:
+    history = await _read_thread(socket, thread_id)
+    matches = _invocation_receipts(history, capture)
+    checks = {}
+    queue = await _ws_request(socket, "thread/queue/list", {"threadId": thread_id})
+    submissions = [item for item in queue["data"] if item["clientUserMessageId"] == capture]
+    checks.update(
+        queued_once=len(submissions) == 1,
+        not_in_active_turn=matches == [],
+        active_turn_unchanged=history == active_before,
+    )
+    if len(submissions) != 1:
+        raise RuntimeError("lost queue acknowledgement did not retain one submission")
+    submission = submissions[0]
+    # Ask the native owner while the already-attached writer is active.
+    # Its refusal must retain both the queue and current turn unchanged.
+    reply = await _ws_reply(
+        socket,
+        "thread/queue/start",
+        {"threadId": thread_id, "queuedSubmissionId": submission["id"]},
+    )
+    checks["busy_start_rejected"] = (
+        reply.get("error", {}).get("message") == "thread already has an active or pending turn"
+    )
+    checks["busy_start_preserves_active_turn"] = (
+        await _read_thread(socket, thread_id) == active_before
+    )
+    retained = await _ws_request(socket, "thread/queue/list", {"threadId": thread_id})
+    checks["busy_start_preserves_queue"] = retained["data"] == queue["data"]
+    release.set()
+    async with asyncio.timeout(30):
+        while True:
+            await asyncio.to_thread(terminal.pump, 0.1)
+            history = await _read_thread(socket, thread_id)
+            matches = _invocation_receipts(history, capture)
+            if len(matches) == 1 and matches[0][0]["status"] == "completed":
+                break
+    retained = await _ws_request(socket, "thread/queue/list", {"threadId": thread_id})
+    checks.update(
+        queue_consumed=retained["data"] == [],
+        queued_input_unchanged=matches[0][1]["content"] == submission["input"],
+        competing_turn_preserved=history["turns"][1]["id"] == active_before["turns"][1]["id"]
+        and history["turns"][1]["status"] == "completed"
+        and history["turns"][1]["items"][: len(active_before["turns"][1]["items"])]
+        == active_before["turns"][1]["items"],
+        skill_on_separate_turn=matches[0][0]["id"] != active_before["turns"][1]["id"],
+    )
+    return checks, history
 
 
 async def _boundary_delivery(
@@ -317,8 +381,7 @@ async def _boundary_delivery(
             )
 
     async with unix_serve(relay, str(proxy)), AsyncExitStack() as cleanup:
-        async with unix_connect(str(proxy), uri="ws://localhost") as owner:
-            await _initialize_socket(owner)
+        async with _connection(proxy) as owner:
             thread = await _ws_request(
                 owner,
                 "thread/start",
@@ -356,10 +419,7 @@ async def _boundary_delivery(
                 terminal.write(draft.encode())
                 await asyncio.to_thread(terminal.pump, 0.5)
             if queued:
-                competitor = await cleanup.enter_async_context(
-                    unix_connect(str(endpoint), uri="ws://localhost")
-                )
-                await _initialize_socket(competitor)
+                competitor = await cleanup.enter_async_context(_connection(endpoint))
                 sibling = await _ws_request(
                     competitor,
                     "thread/start",
@@ -417,72 +477,18 @@ async def _boundary_delivery(
                 await asyncio.gather(pending, return_exceptions=True)
         # A different connection inherits only the retained invocation and thread.
         # The engine is still running; the lost reply's turn id is unavailable.
-        async with unix_connect(str(endpoint), uri="ws://localhost") as successor:
-            await _initialize_socket(successor)
-            history = await _read_thread(successor, thread_id)
-            matches = _invocation_receipts(history, capture)
+        async with _connection(endpoint) as successor:
             if queued:
-                queue = await _ws_request(successor, "thread/queue/list", {"threadId": thread_id})
-                submissions = [
-                    item for item in queue["data"] if item["clientUserMessageId"] == capture
-                ]
-                checks.update(
-                    queued_once=len(submissions) == 1,
-                    not_in_active_turn=matches == [],
-                    active_turn_unchanged=history == active_before,
-                    sibling_unchanged=await _read_thread(successor, sibling_id) == sibling_before,
+                checks["sibling_unchanged"] = (
+                    await _read_thread(successor, sibling_id) == sibling_before
                 )
-                if len(submissions) != 1:
-                    raise RuntimeError("lost queue acknowledgement did not retain one submission")
-                submission = submissions[0]
-                # Ask the native owner while the already-attached writer is active.
-                # Its refusal must retain both the queue and current turn unchanged.
-                ident = uuid.uuid4().hex
-                await successor.send(
-                    json.dumps(
-                        {
-                            "id": ident,
-                            "method": "thread/queue/start",
-                            "params": {
-                                "threadId": thread_id,
-                                "queuedSubmissionId": submission["id"],
-                            },
-                        }
-                    )
+                queued_checks, history = await _consume_queued_input(
+                    successor, thread_id, capture, active_before, release, terminal
                 )
-                reply = await _ws_until(successor, lambda event: event.get("id") == ident)
-                checks["busy_start_rejected"] = (
-                    reply.get("error", {}).get("message")
-                    == "thread already has an active or pending turn"
-                )
-                checks["busy_start_preserves_active_turn"] = (
-                    await _read_thread(successor, thread_id) == active_before
-                )
-                retained = await _ws_request(
-                    successor, "thread/queue/list", {"threadId": thread_id}
-                )
-                checks["busy_start_preserves_queue"] = retained["data"] == queue["data"]
-                release.set()
-                async with asyncio.timeout(30):
-                    while True:
-                        await asyncio.to_thread(terminal.pump, 0.1)
-                        history = await _read_thread(successor, thread_id)
-                        matches = _invocation_receipts(history, capture)
-                        if len(matches) == 1 and matches[0][0]["status"] == "completed":
-                            break
-                retained = await _ws_request(
-                    successor, "thread/queue/list", {"threadId": thread_id}
-                )
-                checks.update(
-                    queue_consumed=retained["data"] == [],
-                    queued_input_unchanged=matches[0][1]["content"] == submission["input"],
-                    competing_turn_preserved=history["turns"][1]["id"]
-                    == active_before["turns"][1]["id"]
-                    and history["turns"][1]["status"] == "completed"
-                    and history["turns"][1]["items"][: len(active_before["turns"][1]["items"])]
-                    == active_before["turns"][1]["items"],
-                    skill_on_separate_turn=matches[0][0]["id"] != active_before["turns"][1]["id"],
-                )
+                checks.update(queued_checks)
+            else:
+                history = await _read_thread(successor, thread_id)
+            matches = _invocation_receipts(history, capture)
             content = matches[0][1]["content"] if len(matches) == 1 else []
             checks.update(
                 {
@@ -521,31 +527,29 @@ async def _boundary_delivery(
             checks["outcome_without_resubmission"] = True
             checks["expected_turns"] = len(history["turns"]) == (3 if queued else 2)
             if terminal:
-                try:
-                    await asyncio.to_thread(terminal.pump, 0.5)
-                    terminal.write(b"\r")
-                    async with asyncio.timeout(15):
-                        while True:
-                            await asyncio.to_thread(terminal.pump, 0.1)
-                            history = await _read_thread(successor, thread_id)
-                            turns = history["turns"]
-                            if (
-                                len(turns) == (4 if queued else 3)
-                                and turns[-1]["status"] == "completed"
-                            ):
-                                break
-                    checks["terminal_draft_preserved"] = any(
-                        item["type"] == "userMessage"
-                        and any(block.get("text") == draft for block in item["content"])
-                        for item in turns[-1]["items"]
+                await asyncio.to_thread(terminal.pump, 0.5)
+                terminal.write(b"\r")
+                async with asyncio.timeout(15):
+                    while True:
+                        await asyncio.to_thread(terminal.pump, 0.1)
+                        history = await _read_thread(successor, thread_id)
+                        turns = history["turns"]
+                        if (
+                            len(turns) == (4 if queued else 3)
+                            and turns[-1]["status"] == "completed"
+                        ):
+                            break
+                checks["terminal_draft_preserved"] = any(
+                    item["type"] == "userMessage"
+                    and any(block.get("text") == draft for block in item["content"])
+                    for item in turns[-1]["items"]
+                )
+                if queued:
+                    checks["queue_consumed_without_client_start"] = queue_starts == 0
+                    checks["sibling_unchanged_after_delivery"] = (
+                        await _read_thread(successor, sibling_id) == sibling_before
                     )
-                    if queued:
-                        checks["queue_consumed_without_client_start"] = queue_starts == 0
-                        checks["sibling_unchanged_after_delivery"] = (
-                            await _read_thread(successor, sibling_id) == sibling_before
-                        )
-                finally:
-                    await cleanup.aclose()
+            await cleanup.aclose()
             print(
                 json.dumps(
                     {"boundary_case": "interrupted" if interrupt else "completed", "checks": checks}
@@ -629,11 +633,9 @@ async def _boundary_race(
     endpoint = workspace.parent / "race.sock"
     async with _app_server(codex, workspace, env, endpoint):
         async with (
-            unix_connect(str(endpoint), uri="ws://localhost") as owner,
-            unix_connect(str(endpoint), uri="ws://localhost") as competitor,
+            _connection(endpoint) as owner,
+            _connection(endpoint) as competitor,
         ):
-            await _initialize_socket(owner)
-            await _initialize_socket(competitor)
             thread = await _ws_request(
                 owner,
                 "thread/start",
@@ -697,16 +699,21 @@ async def _boundary_race(
             return checks
 
 
-def _skill_paths(request: dict) -> list[str]:
+def _user_texts(request: dict) -> list[str]:
     return [
-        block["text"].split("<path>", 1)[1].split("</path>", 1)[0]
+        block.get("text", "")
         for item in request.get("input", [])
         if item.get("role") == "user"
         for block in item.get("content", [])
         if isinstance(block, dict)
-        and block.get("text", "").startswith("<skill>\n")
-        and "<path>" in block["text"]
-        and "</path>" in block["text"]
+    ]
+
+
+def _skill_paths(request: dict) -> list[str]:
+    return [
+        text.split("<path>", 1)[1].split("</path>", 1)[0]
+        for text in _user_texts(request)
+        if text.startswith("<skill>\n") and "<path>" in text and "</path>" in text
     ]
 
 
@@ -716,6 +723,102 @@ def _last_user_texts(request: dict) -> list[str]:
         {},
     )
     return [block.get("text", "") for block in user.get("content", [])]
+
+
+def _assess_requests(
+    requests: list[dict], mode: str, skill: Path, snapshot: Path, marker: str, context: str
+) -> dict:
+    additive = mode in ("original", "alias")
+    checks = {}
+    observation = {
+        "mode": {
+            "original": "additive-catalog",
+            "alias": "additive-catalog",
+            "catalog": "provider-counterexample",
+            "redelivery": "steer-redelivery",
+        }.get(mode, mode),
+        "requests": len(requests),
+        "checks": checks,
+    }
+    if mode == "boundary-race":
+        checks.update(
+            expected_requests=len(requests) == 4,
+            raced_start_not_expanded=len(requests) >= 3 and not _skill_paths(requests[2]),
+            fresh_start_expanded=len(requests) == 4 and str(skill) in _skill_paths(requests[3]),
+        )
+        return observation
+    if mode in ("boundary", "queue-race"):
+        expected_expansions = 1 if mode == "queue-race" else 2
+        native_requests = [
+            request
+            for request in requests
+            if any(text.startswith("<skill>\n") for text in _last_user_texts(request))
+        ]
+        title_requests = [
+            request
+            for request in requests
+            if any(
+                text.startswith("Generate a concise, single-line task title")
+                for text in _last_user_texts(request)
+            )
+        ]
+        observation["title_requests"] = len(title_requests)
+        checks.update(
+            expected_conversation_requests=len(requests) - len(title_requests) == 5,
+            native_expansion=len(native_requests) == expected_expansions
+            and all(
+                _skill_paths(request) == [str(skill)]
+                and any(
+                    f"<path>{skill}</path>" in text and marker in text
+                    for text in _last_user_texts(request)
+                    if text.startswith("<skill>\n")
+                )
+                for request in native_requests
+            ),
+            draft_not_submitted_with_skill=len(native_requests) == expected_expansions
+            and all("UNSUBMITTED_DRAFT_" not in json.dumps(request) for request in native_requests),
+        )
+        return observation
+    if mode == "redelivery":
+        texts = _user_texts(requests[1]) if len(requests) >= 2 else []
+        checks.update(
+            expected_requests=len(requests) == 5,
+            duplicate_model_input=sum(text.count(f"$audit {context}") for text in texts) == 2,
+            steer_skill_not_expanded=len(requests) >= 2 and not _skill_paths(requests[1]),
+            single_steer_not_expanded=len(requests) >= 4
+            and not _skill_paths(requests[3])
+            and sum(text.count(f"$audit {context}") for text in _user_texts(requests[3])) == 1,
+            start_skill_expanded=len(requests) == 5 and str(skill) in _skill_paths(requests[4]),
+        )
+        return observation
+    checks.update(
+        expected_requests=len(requests) == (5 if additive else 2),
+        unregistered_path_ignored=len(requests) >= 2
+        and marker not in json.dumps(requests[0].get("input", [])),
+        registered_path_expanded=len(requests) >= 2
+        and any(
+            f"<path>{snapshot}</path>" in json.dumps(item) and marker in json.dumps(item)
+            for item in requests[1].get("input", [])
+            if item.get("role") == "user"
+        ),
+    )
+    if additive:
+        checks["additive_native_expansion"] = len(requests) == 5 and any(
+            marker in json.dumps(item)
+            and "<skill>" in json.dumps(item)
+            and f"<path>{skill}</path>" not in json.dumps(item)
+            for item in requests[3].get("input", [])
+            if item.get("role") == "user"
+        )
+        before = _skill_paths(requests[2]) if len(requests) >= 3 else []
+        after = _skill_paths(requests[-1]) if requests else []
+        checks["implicit_selection_unchanged"] = before == after == [str(skill)]
+        observation.update(
+            before_mount=before,
+            explicit_mount=_skill_paths(requests[3]) if len(requests) == 5 else [],
+            after_mount=after,
+        )
+    return observation
 
 
 def _probe(codex: str, mode: str) -> bool:
@@ -845,147 +948,10 @@ def _probe(codex: str, mode: str) -> bool:
                     )
 
             checks = asyncio.run(_native())
-            if mode == "boundary-race":
-                checks.update(
-                    expected_requests=len(requests) == 4,
-                    raced_start_not_expanded=len(requests) >= 3 and not _skill_paths(requests[2]),
-                    fresh_start_expanded=len(requests) == 4
-                    and str(skill) in _skill_paths(requests[3]),
-                )
-                print(
-                    json.dumps(
-                        {"mode": "boundary-race", "requests": len(requests), "checks": checks}
-                    ),
-                    flush=True,
-                )
-                return all(checks.values())
-            if mode in ("boundary", "queue-race"):
-                expected_expansions = 1 if mode == "queue-race" else 2
-                native_requests = [
-                    request
-                    for request in requests
-                    if any(text.startswith("<skill>\n") for text in _last_user_texts(request))
-                ]
-                title_requests = [
-                    request
-                    for request in requests
-                    if any(
-                        text.startswith("Generate a concise, single-line task title")
-                        for text in _last_user_texts(request)
-                    )
-                ]
-                checks.update(
-                    expected_conversation_requests=len(requests) - len(title_requests) == 5,
-                    native_expansion=len(native_requests) == expected_expansions
-                    and all(
-                        _skill_paths(request) == [str(skill)]
-                        and any(
-                            f"<path>{skill}</path>" in text and marker in text
-                            for text in _last_user_texts(request)
-                            if text.startswith("<skill>\n")
-                        )
-                        for request in native_requests
-                    ),
-                    draft_not_submitted_with_skill=len(native_requests) == expected_expansions
-                    and all(
-                        "UNSUBMITTED_DRAFT_" not in json.dumps(request)
-                        for request in native_requests
-                    ),
-                )
-                print(
-                    json.dumps(
-                        {
-                            "mode": mode,
-                            "requests": len(requests),
-                            "title_requests": len(title_requests),
-                            "checks": checks,
-                        }
-                    ),
-                    flush=True,
-                )
-                return all(checks.values())
-            if mode == "redelivery":
-                texts = (
-                    [
-                        block.get("text", "")
-                        for item in requests[1].get("input", [])
-                        if item.get("role") == "user"
-                        for block in item.get("content", [])
-                    ]
-                    if len(requests) >= 2
-                    else []
-                )
-                checks.update(
-                    expected_requests=len(requests) == 5,
-                    duplicate_model_input=sum(text.count(f"$audit {context}") for text in texts)
-                    == 2,
-                    steer_skill_not_expanded=len(requests) >= 2 and not _skill_paths(requests[1]),
-                    single_steer_not_expanded=len(requests) >= 4
-                    and not _skill_paths(requests[3])
-                    and sum(
-                        block.get("text", "").count(f"$audit {context}")
-                        for item in requests[3].get("input", [])
-                        if item.get("role") == "user"
-                        for block in item.get("content", [])
-                    )
-                    == 1,
-                    start_skill_expanded=len(requests) == 5
-                    and str(skill) in _skill_paths(requests[4]),
-                )
-                print(
-                    json.dumps(
-                        {
-                            "mode": "steer-redelivery",
-                            "requests": len(requests),
-                            "checks": checks,
-                        }
-                    ),
-                    flush=True,
-                )
-                return all(checks.values())
-            checks.update(
-                expected_requests=len(requests) == (5 if additive else 2),
-                unregistered_path_ignored=len(requests) >= 2
-                and marker not in json.dumps(requests[0].get("input", [])),
-                registered_path_expanded=len(requests) >= 2
-                and any(
-                    f"<path>{snapshot}</path>" in json.dumps(item) and marker in json.dumps(item)
-                    for item in requests[1].get("input", [])
-                    if item.get("role") == "user"
-                ),
-            )
-            if additive:
-                checks["additive_native_expansion"] = len(requests) == 5 and any(
-                    marker in json.dumps(item)
-                    and "<skill>" in json.dumps(item)
-                    and f"<path>{skill}</path>" not in json.dumps(item)
-                    for item in requests[3].get("input", [])
-                    if item.get("role") == "user"
-                )
-                before, after = _skill_paths(requests[2]), _skill_paths(requests[-1])
-                checks["implicit_selection_unchanged"] = before == after == [str(skill)]
-                print(
-                    json.dumps(
-                        {
-                            "before_mount": before,
-                            "explicit_mount": _skill_paths(requests[3])
-                            if len(requests) == 5
-                            else [],
-                            "after_mount": after,
-                        }
-                    ),
-                    flush=True,
-                )
-            print(
-                json.dumps(
-                    {
-                        "mode": "additive-catalog" if additive else "provider-counterexample",
-                        "checks": checks,
-                    }
-                ),
-                flush=True,
-            )
-            return all(checks.values())
+            observation = _assess_requests(requests, mode, skill, snapshot, marker, context)
+            observation["checks"].update(checks)
+            print(json.dumps(observation), flush=True)
+            return all(observation["checks"].values())
     finally:
         release.set()
         server.shutdown()

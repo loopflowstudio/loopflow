@@ -839,9 +839,8 @@ Provider stubs must contain conflict-agent launches: one bad fixture launched
 real credentials whose effects were not audited. Dense CLI timing and configured
 continuity remained unfinished in that dated evidence.
 
-Jack Heart's October 7 direction retires numeric performance targets, soak
-requirements and deeper optimization. LOO-291/300's measurements, missing mounted
-proofs and instrumentation remain at
+Jack Heart retired numeric performance targets, soak and deeper optimization
+on October 7. LOO-291/300 evidence and instrumentation:
 `07bbd801e:wave/infrastructure/MEMORY.md` under this heading and in
 [scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
 Different recording windows prove no causal improvement; PTY echo and next draw

@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PR 1498 · Context from files</title>
+<style>
+:root{color-scheme:light;--paper:#faf9f6;--ink:#202625;--muted:#59635f;--line:#d3d8d2;--link:#125c52;--code:#f0f2ee}
+*{box-sizing:border-box}html{scroll-behavior:auto;scroll-padding-top:30px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1160px;margin:0 auto;padding:38px 40px 80px}a{color:var(--link);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #9d632a;outline-offset:4px}.skip{position:absolute;left:20px;top:-70px}.skip:focus{top:10px}nav{display:flex;gap:10px 24px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:17px;margin-bottom:38px;font-size:15px}h1{font-size:38px;font-weight:600;letter-spacing:-1.6px;line-height:1.1;margin:12px 0 20px}h2{font-size:29px;font-weight:600;letter-spacing:-.6px;line-height:1.25;margin:0 0 15px}h3{font-size:21px;font-weight:600;margin:25px 0 10px}p{max-width:850px;margin:12px 0 20px}.kicker,.meta,figcaption{font-size:13px;color:var(--muted)}.kicker{letter-spacing:.07em;text-transform:uppercase}.lead{font-size:20px;max-width:860px}.meta{overflow-wrap:anywhere}section{margin-top:58px;padding-top:28px;border-top:1px solid var(--line)}.decision{border-left:3px solid var(--link);padding-left:20px;margin:25px 0 30px}.map{border-collapse:collapse;width:100%;font-size:16px;margin:26px 0 0}.map th,.map td{border-bottom:1px solid var(--line);text-align:left;vertical-align:top;padding:17px 20px 17px 0}.map th{font-size:13px;color:var(--muted);font-weight:600}.map td:first-child{width:23%}.map td:nth-child(2){width:32%}figure{margin:25px 0 32px;min-width:0}figcaption{margin:0 0 8px;overflow-wrap:anywhere}pre{margin:0;padding:23px 25px;background:var(--code);border-left:2px solid #c3ccc4;overflow-x:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;tab-size:4}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}p code,td code,li code{font-size:.86em;overflow-wrap:anywhere}.terminal pre{background:#242c2a;color:#f2f5f0;border-left:0;white-space:pre-wrap;overflow-wrap:anywhere}.terminal figcaption{color:var(--muted)}details{border-top:1px solid var(--line);padding:17px 0;margin-top:20px}summary{cursor:pointer;font-size:16px;font-weight:550}ul{padding-left:24px;max-width:880px}li{margin:9px 0}footer{margin-top:55px;padding-top:20px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+@media(max-width:640px){body{font-size:16px}main{padding:30px 19px 55px}h1{font-size:34px;letter-spacing:-1px}h2{font-size:25px}.lead{font-size:18px}nav{gap:10px 18px}.map,.map tbody,.map tr,.map td{display:block}.map thead{display:none}.map tr{padding:15px 0;border-bottom:1px solid var(--line)}.map td,.map td:first-child,.map td:nth-child(2){width:100%;border:0;padding:7px 0}.map td:before{content:attr(data-label);display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:3px}pre{padding:17px 15px;font-size:13px}section{margin-top:38px}figure{margin:22px 0 28px}}
+@media print{body{background:white;font-size:10pt}main{max-width:none;padding:0}nav,.skip{display:none}section{margin-top:25px;padding-top:15px}h1{font-size:28pt}h2{font-size:19pt}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:8pt;line-height:1.4;background:#f5f5f5!important;color:#111!important}figure{break-inside:auto}h2,h3,figcaption{break-after:avoid}a{color:inherit}details>*{display:block!important}footer{font-size:9pt}}
+</style></head><body><a class="skip" href="#assembly">Skip to code</a><main>
+<nav aria-label="Review sections"><a href="#experience">Observed behavior</a><a href="#assembly">Assemble</a><a href="#launch">Launch</a><a href="#continuation">Continue</a><a href="#proof">Evidence &amp; next step</a></nav>
+<header><div class="kicker">LOO-429 · PR #1498 · Review walkthrough</div><h1>Load launch context from files</h1>
+<p class="lead">Claude and Codex launches carry assembled context in an instruction file. The terminal argument becomes a fixed 48-byte request to follow that context.</p>
+<p>Jack Heart selected all assembled content in that file, including the skill and Task brief. This PR removes the old curated/content split and adds no refusal classifier or relaunch fallback. IDE deep links retain their existing transport.</p>
+<p class="meta">Published <a href="https://github.com/loopflowstudio/loopflow/pull/1498">PR #1498</a> · base <a href="https://github.com/loopflowstudio/loopflow/commit/35e759aaf4e79e7dc8eef2e8d30048f10172b45a">35e759aaf4</a> → head <a href="https://github.com/loopflowstudio/loopflow/commit/c143359f9eb76c0d75e5da0b86b3aff8d1e27714">c143359f9</a>.<br>Reviewed 2026-10-07 local time. Product source matches the published head. The updated demo note and this walkthrough are local, unpublished review artifacts.</p></header>
+<table class="map"><thead><tr><th>When someone…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
+<tr><td data-label="When someone…">Starts an lf Session with large Wave memory</td><td data-label="What happens">The bounded context, skill and request are assembled together; only the short trigger is the first user turn.</td><td data-label="Where the code controls this"><a href="#assembly"><code>prepare_process_prompt</code></a> returns an <code>AgentConfig</code> carrying the complete system text and small turn text.</td></tr>
+<tr><td data-label="When someone…">Opens Claude or Codex in the terminal</td><td data-label="What happens">The native CLI receives a file path and the trigger. Its output stays visible. A failed exit is recorded without an automatic retry.</td><td data-label="Where the code controls this"><a href="#launch"><code>run_prompt</code></a> writes the file and retains capture state; <code>build_session_command</code> selects the provider’s file argument.</td></tr>
+<tr><td data-label="When someone…">Starts or reconnects a persistent provider</td><td data-label="What happens">Its instructions also use the shared file writer. The file remains on disk; real native resume is still unverified.</td><td data-label="Where the code controls this"><a href="#continuation"><code>write_system_prompt_file</code></a> stores text, while the existing provider session/thread ID selects continuation.</td></tr>
+</tbody></table>
+
+<section id="assembly"><h2>1. One assembled launch payload</h2><p><code>PreparedProcessPrompt</code> is the result of assembly: launch inputs, rendered text, source components and a budget report. The existing <code>AgentConfig</code> carries the two provider channels; this PR changes their contents without adding a stored object.</p>
+<p>At the base, separate Claude renderers put reference material and the request in <code>task_prompt</code>. At this head, the complete bounded rendering becomes <code>system_prompt</code>; <code>task_prompt</code> is the fixed 48-byte trigger. The public entry still checks the effective total, including structured reply guidance.</p>
+<figure><figcaption>rust/loopflow/src/engine/process_prompt.rs · PreparedProcessPrompt / prepare_process_prompt / preview_process_prompt · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/engine/process_prompt.rs#L44-L66">L44–66</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/engine/process_prompt.rs#L135-L193">L135–193</a> · gathering omitted; final assignment and budget measurement shown</figcaption><pre tabindex="0"><code>/// Canonical Process preparation output.
+#[derive(Debug, Clone)]
+pub struct PreparedProcessPrompt {
+    pub budget_report: crate::engine::context_budget::ContextBudgetReport,
+    pub config: AgentConfig,
+    pub components: PromptComponents,
+    pub deduplication_decisions: Vec&lt;crate::trace::ContextDecision&gt;,
+    pub prompt: String,
+}
+
+/// Build context + Process config from canonical Process preparation input.
+pub fn prepare_process_prompt(
+    config: &amp;Config,
+    input: ProcessPromptInput,
+) -&gt; Result&lt;PreparedProcessPrompt, CoreError&gt; {
+    let prepared = preview_process_prompt(config, input)?;
+    crate::engine::context_budget::check_input(
+        &amp;crate::engine::agent::system_prompt_with_structured_replies(&amp;prepared.config),
+        &amp;prepared.config.task_prompt,
+        &amp;prepared.budget_report.budgets,
+    )?;
+    Ok(prepared)
+}
+
+// … omitted source …
+
+
+    let original_system = format_prompt(PromptFormatMode::Full, &amp;components);
+    let mut budget_report = crate::engine::context_budget::bound_context(&amp;mut components, budgets)?;
+    budget_report.measure_input(
+        &amp;original_system,
+        INITIAL_TURN_PROMPT,
+        &amp;format_prompt(PromptFormatMode::Full, &amp;components),
+        INITIAL_TURN_PROMPT,
+    );
+    components.budget_notice = Some(format!(&quot;{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.&quot;, budget_report.render()));
+    let prompt = format_prompt(PromptFormatMode::Full, &amp;components);
+
+    let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
+    validate_agent_policy(&amp;agent)?;
+
+    let action_style = components
+        .skill
+        .as_ref()
+        .and_then(|skill| skill.action_style.as_deref());
+    let launch = AgentConfig {
+        chrome: false,
+        session_driver: None,
+        system_prompt: prompt.clone(),
+        task_prompt: INITIAL_TURN_PROMPT.to_string(),
+        agent: Some(agent),
+        max_turns,
+        resume_token: None,
+        provider_account_id: None,
+        provider_account_authority_home: None,
+        cwd: Some(cwd.unwrap_or(repo_root)),
+        write_scope: crate::engine::agent::AgentWriteScope::Configured,
+        execution_boundary: None,
+        skip_permissions: yolo_mode,
+        structured_replies: structured_replies_for_context(&amp;client_context, action_style),
+        directive_relay: None,
+        env: [(
+            crate::engine::config::USER_NAME_ENV.to_string(),
+            components.user_name.clone().unwrap_or_default(),
+        )]
+        .into(),
+    };
+    let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&amp;launch);
+    budget_report.measure_input(
+        &amp;original_system,
+        INITIAL_TURN_PROMPT,
+        &amp;effective_system,
+        &amp;launch.task_prompt,
+    );
+    // The source snapshot is stable; the total includes this notice and provider guidance.
+    // The notice labels its pre-feedback total; the report measures submitted bytes.
+
+    Ok(PreparedProcessPrompt {
+        budget_report,
+        config: launch,
+        components,
+        deduplication_decisions,
+        prompt,
+    })
+}</code></pre></figure>
+<p>“All context” describes placement of assembled content, not removal of context budgets. Source boundaries, reference escaping and attribution remain; the two obsolete split renderers and unused Claude turn launcher are deleted.</p>
+</section>
+<section id="launch"><h2>2. Write the file, then hand over the terminal</h2><div id="experience"><h3>Observed first responses</h3><p>Jack Heart’s Claude screenshot shows the intended readback. The returned marker matches the retained fixture’s <code>probe.md</code>; the response also names OpenCode and the correct Infrastructure memory heading.</p>
+<figure class="terminal"><figcaption>Jack Heart’s screenshot · 2026-10-07, 10:56 PM · candidate c143359f9 · cmux, Claude Code v2.1.294</figcaption><pre tabindex="0"><code>Visible first user turn:
+Follow the instructions in the supplied context.
+
+Claude’s first response:
+- Context marker: 30b57325421a3963faafcfbd
+- Provider name: OpenCode
+- First Infrastructure memory entry heading: &quot;Program Status direction (LOO-398, 2026-10-07)&quot;
+
+Visible title: Supplied context instructions
+Visible mode: auto mode on</code></pre></figure>
+<p>The visible title is “Supplied context instructions,” exposing the generic trigger in the naming experience. LOO-422 owns broader title behavior. The screenshot shows auto mode, so it supplies no plan-mode proof.</p>
+<figure class="terminal"><figcaption>Jack Heart’s captured command and output · same candidate · unrelated INFO lines omitted</figcaption><pre tabindex="0"><code>$ uv run --no-project python scripts/check_context_launch.py --agent codex
+Expected marker: 62122b947caa37de1d9184d1
+[context table omitted: total 28,325 tokens]
+error: the argument &#x27;--dangerously-bypass-hook-trust&#x27; cannot be used multiple times
+
+Usage: codex [OPTIONS] [PROMPT]
+       codex [OPTIONS] &lt;COMMAND&gt; [<figure><figcaption>rust/loopflow/src/lf/commands/util.rs · build_session_command · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/lf/commands/util.rs#L163-L226">L163–226</a> · remaining harness branches omitted</figcaption><pre tabindex="0"><code>pub(crate) fn build_session_command(
+    harness: &amp;str,
+    model: Option&lt;&amp;str&gt;,
+    worktree: &amp;Path,
+    prompt: &amp;str,
+    provider_session_id: Option&lt;&amp;str&gt;,
+    context_file: Option&lt;&amp;Path&gt;,
+) -&gt; Result&lt;SessionCommand&gt; {
+    let cwd = worktree.to_path_buf();
+    let worktree_arg = worktree.to_string_lossy().to_string();
+
+    match harness {
+        &quot;codex&quot; =&gt; {
+            let mut args = vec![&quot;-C&quot;.to_string(), worktree_arg];
+            if let Some(model) = model {
+                args.push(&quot;-c&quot;.to_string());
+                args.push(format!(&quot;model=\&quot;{model}\&quot;&quot;));
+            }
+            for dir in workspace_add_dirs(worktree) {
+                args.push(&quot;--add-dir&quot;.to_string());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            args.extend(codex_permission_args(Some(worktree), false, false));
+            if let Some(path) = context_file {
+                args.push(&quot;-c&quot;.to_string());
+                args.push(format!(
+                    &quot;model_instructions_file={}&quot;,
+                    serde_json::to_string(&amp;path.to_string_lossy())?
+                ));
+            }
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: &quot;codex&quot;.to_string(),
+                args,
+                cwd,
+            })
+        }
+        &quot;claude&quot; =&gt; {
+            let mut args = Vec::new();
+            if let Some(model) = model {
+                args.push(&quot;--model&quot;.to_string());
+                args.push(model.to_string());
+            }
+            for dir in workspace_add_dirs(worktree) {
+                args.push(&quot;--add-dir&quot;.to_string());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            if let Some(provider_session_id) = provider_session_id {
+                args.push(&quot;--session-id&quot;.to_string());
+                args.push(provider_session_id.to_string());
+            }
+            if let Some(path) = context_file {
+                args.push(&quot;--append-system-prompt-file&quot;.to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            // Claude&#x27;s variadic --add-dir otherwise consumes the positional prompt.
+            args.push(&quot;--&quot;.to_string());
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: &quot;claude&quot;.to_string(),
+                args,
+                cwd,
+            })
+        }</code></pre></figure>]
+
+For more information, try &#x27;--help&#x27;.
+Error: session launcher exited with status exit status: 2</code></pre></figure>
+<div class="decision"><strong>Current mismatch:</strong> the configured Codex path fails at argument parsing. This matches LOO-428’s assigned duplicate-flag issue. It supplies no evidence of model refusal or successful context delivery. Retry with the same wrappers after that repair is integrated.</div>
+</div><p>The interactive entry creates the capture before provider launch. For Claude and Codex TUI targets it writes the instruction file, passes the short turn, and records the launch result. Other targets keep their existing full-prompt behavior.</p>
+<figure><figcaption>rust/loopflow/src/lf/commands/run.rs · run_prompt · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/lf/commands/run.rs#L602-L674">L602–674</a> · interactive branch; function continues into headless execution</figcaption><pre tabindex="0"><code>    let forced_target = forced_launch_target(cli, built.skill_name.as_deref());
+
+    if forced_target.is_some() || !built.process.auto {
+        info!(&quot;launching interactive vendor session&quot;);
+        let target = forced_target.unwrap_or(built.config.session.launch);
+        let surface = if target == ProcessTarget::Ide {
+            &quot;ide&quot;
+        } else {
+            &quot;tui&quot;
+        };
+        let capture = begin_capture(built, surface, &amp;built.agent_config, None)?;
+        let provider_session_id = if target == ProcessTarget::Tui &amp;&amp; built.harness == &quot;claude&quot; {
+            let artifact_key = capture.artifact_key();
+            let raw_id = artifact_key
+                .as_str()
+                .strip_prefix(&quot;run_&quot;)
+                .unwrap_or(&amp;artifact_key);
+            Some(
+                uuid::Uuid::parse_str(raw_id)
+                    .expect(&quot;capture keys always carry a UUID&quot;)
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+        let mut environment = built.agent_config.env.clone();
+        environment.extend(capture.environment());
+        if target == ProcessTarget::Ide {
+            // An external application launch has no child process receipt.
+            capture.begin_provider_spawn()?;
+        }
+        let context_file = if target == ProcessTarget::Tui
+            &amp;&amp; matches!(built.harness.as_str(), &quot;claude&quot; | &quot;codex&quot;)
+        {
+            crate::engine::agent::write_system_prompt_file(&amp;built.agent_config, &amp;built.log_name)?
+        } else {
+            None
+        };
+        let prompt = if context_file.is_some() {
+            &amp;built.agent_config.task_prompt
+        } else {
+            &amp;built.prompt
+        };
+        let result = launch_session_with_env(
+            target,
+            &amp;built.harness,
+            built.model.as_deref(),
+            &amp;built.repo_root,
+            prompt,
+            &amp;environment,
+            provider_session_id.as_deref(),
+            context_file.as_deref(),
+        );
+        if let Some(provider_session) =
+            crate::session_record::read_provider_session(&amp;capture.artifact_dir())
+                .map_err(|error| anyhow!(&quot;failed to read provider session: {error}&quot;))?
+        {
+            capture.observe_provider(
+                Some(provider_session.provider_session_id),
+                provider_session.account_id,
+            );
+        }
+        if target == ProcessTarget::Ide &amp;&amp; result.is_ok() {
+            capture.mark_handoff(surface);
+        } else {
+            capture.finish(if result.is_ok() {
+                &quot;completed&quot;
+            } else {
+                &quot;failed&quot;
+            })?;
+        }
+        return result.map(|_| None);
+    }</code></pre></figure>
+<p>The provider adapter adds a path, preserving the existing model, working-directory and permission arguments. Claude uses an appended system file; Codex uses its instructions-file configuration. Claude’s <code>--</code> keeps the variadic directory option from consuming the trigger.</p>
+<figure><figcaption>rust/loopflow/src/lf/commands/util.rs · build_session_command · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/lf/commands/util.rs#L163-L226">L163–226</a> · remaining harness branches omitted</figcaption><pre tabindex="0"><code>pub(crate) fn build_session_command(
+    harness: &amp;str,
+    model: Option&lt;&amp;str&gt;,
+    worktree: &amp;Path,
+    prompt: &amp;str,
+    provider_session_id: Option&lt;&amp;str&gt;,
+    context_file: Option&lt;&amp;Path&gt;,
+) -&gt; Result&lt;SessionCommand&gt; {
+    let cwd = worktree.to_path_buf();
+    let worktree_arg = worktree.to_string_lossy().to_string();
+
+    match harness {
+        &quot;codex&quot; =&gt; {
+            let mut args = vec![&quot;-C&quot;.to_string(), worktree_arg];
+            if let Some(model) = model {
+                args.push(&quot;-c&quot;.to_string());
+                args.push(format!(&quot;model=\&quot;{model}\&quot;&quot;));
+            }
+            for dir in workspace_add_dirs(worktree) {
+                args.push(&quot;--add-dir&quot;.to_string());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            args.extend(codex_permission_args(Some(worktree), false, false));
+            if let Some(path) = context_file {
+                args.push(&quot;-c&quot;.to_string());
+                args.push(format!(
+                    &quot;model_instructions_file={}&quot;,
+                    serde_json::to_string(&amp;path.to_string_lossy())?
+                ));
+            }
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: &quot;codex&quot;.to_string(),
+                args,
+                cwd,
+            })
+        }
+        &quot;claude&quot; =&gt; {
+            let mut args = Vec::new();
+            if let Some(model) = model {
+                args.push(&quot;--model&quot;.to_string());
+                args.push(model.to_string());
+            }
+            for dir in workspace_add_dirs(worktree) {
+                args.push(&quot;--add-dir&quot;.to_string());
+                args.push(dir.to_string_lossy().to_string());
+            }
+            if let Some(provider_session_id) = provider_session_id {
+                args.push(&quot;--session-id&quot;.to_string());
+                args.push(provider_session_id.to_string());
+            }
+            if let Some(path) = context_file {
+                args.push(&quot;--append-system-prompt-file&quot;.to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            // Claude&#x27;s variadic --add-dir otherwise consumes the positional prompt.
+            args.push(&quot;--&quot;.to_string());
+            args.push(prompt.to_string());
+            Ok(SessionCommand {
+                program: &quot;claude&quot;.to_string(),
+                args,
+                cwd,
+            })
+        }</code></pre></figure>
+<div class="decision"><strong>Failure and recovery:</strong> a nonzero provider exit finishes this capture as failed and propagates the error. No second launch is attempted. The historical Claude block happened inside its first response, which this terminal handoff does not classify. For the observed Codex failure, recovery is LOO-428’s repair followed by a fresh interactive check.</div>
+<details><summary>Existing exit handling and inspected failure-preservation test</summary><p>The exit adapter is unchanged. The fixture replaces providers with scripts that reject oversized arguments, read the file, then deliberately exit 23. Its Session-count assertion proves preservation in that fixture, not successful native continuation.</p><figure><figcaption>rust/loopflow/src/lf/commands/util.rs · spawn_session_command_with_env · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/lf/commands/util.rs#L625-L657">L625–657</a> · unchanged exit handling</figcaption><pre tabindex="0"><code>fn spawn_session_command_with_env(
+    command: &amp;SessionCommand,
+    environment: &amp;BTreeMap&lt;String, String&gt;,
+    provider_session_id: Option&lt;&amp;str&gt;,
+    exact_account_id: Option&lt;&amp;crate::store::ProviderAccountId&gt;,
+    launch_lock: Option&lt;File&gt;,
+) -&gt; Result&lt;()&gt; {
+    let outcome = session_command_status_with_env(
+        command,
+        environment,
+        provider_session_id,
+        exact_account_id,
+        launch_lock,
+    )?;
+    if let Some(reason) = outcome.stop_reason {
+        eprintln!(&quot;{}&quot;, provider_client_stop_message(reason));
+        Ok(())
+    } else if outcome.status.success() {
+        Ok(())
+    } else if provider_session_id.is_some() {
+        Err(anyhow!(
+            &quot;{} could not open this session (status {}). If another client still owns it, close that client or use `lf session connect --replace` for a Loopflow-owned client.&quot;,
+            command.program,
+            outcome.status,
+        ))
+    } else {
+        Err(anyhow!(
+            &quot;session launcher exited with status {}&quot;,
+            outcome.status
+        ))
+    }
+}
+</code></pre></figure> <figure><figcaption>rust/loopflow/tests/context_launch_tests.rs · terminal_context_uses_files_and_preserves_failed_sessions · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/tests/context_launch_tests.rs#L86-L116">L86–116</a> · assertions after stub provider exit; setup omitted</figcaption><pre tabindex="0"><code>        assert!(
+            stderr.contains(&quot;provider fixture refused this request&quot;),
+            &quot;{harness}: {stderr}&quot;
+        );
+        let context = fs::read_to_string(home.path().join(&quot;received-context&quot;)).unwrap();
+        assert!(context.len() &gt; 122_880, &quot;{}&quot;, context.len());
+        assert!(context.contains(&amp;memory));
+        assert!(context.contains(&amp;scratch));
+        assert!(context.contains(&quot;A fixture goal.&quot;));
+        assert!(context.contains(&quot;&lt;lf:skill:probe&gt;&quot;));
+        assert!(context.contains(&quot;Find the fixture goal.&quot;));
+        let argv = fs::read_to_string(home.path().join(&quot;argv&quot;)).unwrap();
+        assert_eq!(argv.matches(INITIAL_TURN_PROMPT).count(), 1, &quot;no retry&quot;);
+        assert!(!argv.contains(&quot;--dangerously-skip-permissions&quot;));
+        assert!(
+            !argv.contains(&quot;--permission-mode&quot;),
+            &quot;native plan mode survives&quot;
+        );
+        assert!(argv.len() &lt; 4096, &quot;{argv}&quot;);
+        let db = rusqlite::Connection::open(home.path().join(&quot;machine/loopflow.db&quot;)).unwrap();
+        let sessions: i64 = db
+            .query_row(&quot;SELECT count(*) FROM agent_sessions&quot;, [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sessions, 1, &quot;failed launch keeps the Session&quot;);
+    }
+}
+
+#[test]
+fn headless_codex_reads_context_file_and_keeps_it_for_native_resume() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();</code></pre></figure></details>
+</section>
+<section id="continuation"><h2>3. The same writer serves persistent Sessions</h2><p>The shared writer appends structured reply guidance and returns a retained path, or no path for empty instructions. It uses the existing prompt log under <code>&lt;cwd&gt;/.lf/prompts/</code>; no new database table or alternate context layout is introduced.</p>
+<figure><figcaption>rust/loopflow/src/engine/agent.rs · write_system_prompt_file / system_prompt_with_structured_replies · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/engine/agent.rs#L301-L334">L301–334</a></figcaption><pre tabindex="0"><code>/// Retain provider instructions on disk so native resume can read the same context.
+pub(crate) fn write_system_prompt_file(
+    config: &amp;AgentConfig,
+    name: &amp;str,
+) -&gt; Result&lt;Option&lt;PathBuf&gt;, CoreError&gt; {
+    let prompt = system_prompt_with_structured_replies(config);
+    if prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let cwd = config
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    Ok(Some(crate::engine::prompt::write_prompt_log(
+        &amp;cwd,
+        &amp;prompt,
+        &amp;format!(&quot;{name}.context&quot;),
+        None,
+    )?))
+}
+
+/// Build the effective system prompt including structured reply guidance.
+pub fn system_prompt_with_structured_replies(config: &amp;AgentConfig) -&gt; String {
+    let guidance = render_structured_reply_guidance(&amp;config.structured_replies);
+    if guidance.is_empty() {
+        return config.system_prompt.clone();
+    }
+    if config.system_prompt.trim().is_empty() {
+        return guidance;
+    }
+
+    format!(&quot;{}\n\n{guidance}&quot;, config.system_prompt.trim_end())
+}</code></pre></figure>
+<p>Codex’s existing thread ID decides start versus resume. This PR puts the instruction-file path into that request’s config, alongside the existing tool environment. Its first-turn seeding no longer copies system text into user text.</p>
+<figure><figcaption>rust/loopflow/src/harness/codex.rs · build_thread_request / CodexHarness::start_inner · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/harness/codex.rs#L59-L75">L59–75</a>, <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/harness/codex.rs#L1519-L1540">L1519–1540</a> · existing thread selection plus changed config</figcaption><pre tabindex="0"><code>fn build_thread_request(
+    launch: &amp;AgentConfig,
+    resume_provider_session_id: Option&lt;&amp;str&gt;,
+) -&gt; (&amp;&#x27;static str, serde_json::Map&lt;String, Value&gt;) {
+    let mut params = build_codex_thread_start_params(launch);
+    match resume_provider_session_id {
+        Some(session_id) =&gt; {
+            params.insert(
+                &quot;threadId&quot;.to_string(),
+                Value::String(session_id.to_string()),
+            );
+            (&quot;thread/resume&quot;, params)
+        }
+        None =&gt; (&quot;thread/start&quot;, params),
+    }
+}
+
+
+// … omitted source …
+
+
+        let (thread_method, mut thread_params) =
+            build_thread_request(launch, self.resume_provider_session_id.as_deref());
+        let mut config = json!({
+            &quot;shell_environment_policy.set&quot;: tool_environment,
+            &quot;allow_login_shell&quot;: false,
+            &quot;features.shell_snapshot&quot;: false,
+        });
+        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, &quot;session&quot;)? {
+            config[&quot;model_instructions_file&quot;] = json!(path.to_string_lossy());
+        }
+        thread_params.insert(&quot;config&quot;.into(), config);
+        // The thread params include Loopflow&#x27;s conservative defaults only when
+        // Codex config is missing or less permissive. More permissive user or
+        // repo config, such as danger-full-access, is left alone.
+        // Publish the request id before sending so the reader can match the
+        // response even if it races the send.
+        let request_id = self.next_request_id;
+        self.thread_start_request_id
+            .store(request_id, Ordering::Relaxed);
+        self.send_request(thread_method, Value::Object(thread_params))
+            .await?;</code></pre></figure>
+<p>File retention is implemented and covered by a stub test. Native resume still depends on the retained checkout and file; an actual provider resume has not been demonstrated here.</p>
+<details><summary>Claude’s persistent process uses the same writer</summary><p>The existing provider session ID still selects resume. The active stream launcher takes the context path; turn content continues through stream JSON on stdin.</p><figure><figcaption>rust/loopflow/src/harness/claude.rs · ClaudeHarness::ensure_process · c143359f9 · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/src/harness/claude.rs#L95-L126">L95–126</a> · process setup continues below</figcaption><pre tabindex="0"><code>    /// running. Resumes the captured vendor session after an interrupt/crash.
+    async fn ensure_process(&amp;mut self) -&gt; Result&lt;()&gt; {
+        if self.child.is_some() {
+            return Ok(());
+        }
+        let config = self
+            .config
+            .as_ref()
+            .ok_or_else(|| anyhow!(&quot;claude harness not started&quot;))?;
+        let resume_id = self
+            .provider_session_id
+            .lock()
+            .expect(&quot;claude provider session id lock poisoned&quot;)
+            .clone();
+        let context_file = crate::engine::agent::write_system_prompt_file(config, &quot;session&quot;)?;
+        let args =
+            build_claude_stream_session_args(config, resume_id.as_deref(), context_file.as_deref());
+        let mut cmd = Command::new(&quot;claude&quot;);
+        cmd.args(&amp;args);
+        super::configure_agent_env(&amp;mut cmd, config);
+        let activation = match &amp;self.account_route {
+            Some(route) =&gt; route.launch_as(cmd.as_std_mut()).await?,
+            None =&gt; None,
+        };
+        cmd.stdin(std::process::Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(cwd) = &amp;config.cwd {
+            cmd.current_dir(cwd);
+        }
+        super::configure_vendor_std_env(cmd.as_std_mut())?;
+        self.shutdown_requested.store(false, Ordering::SeqCst);</code></pre></figure></details>
+</section>
+<section id="proof"><h2>Evidence and the next check</h2>
+<ul><li><strong>Observed:</strong> Jack Heart’s interactive Claude marker readback, memory heading and visible title. Codex’s argument-parsing failure is retained counterevidence for the configured launch path.</li><li><strong>Run in this review conversation:</strong> candidate build and provider-free fixture preparation passed. Diff checks and context budgets passed after the demo-note updates. No live provider was launched by the agent.</li><li><strong>Inspected and previously reported passing:</strong> two context-launch integration tests, focused Claude stream and ad-hoc batch tests, formatting and Clippy. These checks were not rerun for this HTML.</li><li><strong>Still open:</strong> Claude plan mode, Codex first response and title after LOO-428, native resume, and the full affected gate/CI suites. A recorded passing checkpoint PR state is not proof of that full matrix.</li></ul>
+<h3>Recommended next action</h3><p>Keep the all-context file design. Integrate the separately owned Codex flag repair, rebuild, and rerun Codex through the configured cmux wrappers. Claude plan mode can be checked independently. Compare the first response with the marker printed by each run and record mode and titles.</p>
+<figure class="terminal"><figcaption>Pending manual commands · from this checkout, inside cmux</figcaption><pre tabindex="0"><code>uv run --no-project python scripts/check_context_launch.py --agent claude --plan
+# After integrating LOO-428 and rebuilding:
+uv run --no-project python scripts/check_context_launch.py --agent codex</code></pre></figure>
+<p>These are pending manual checks, not executions performed by this walkthrough. Jack Heart’s publication-for-review direction remains in force; this artifact makes no merge decision and advances no Flow.</p>
+<details><summary>Design, measurements and supporting evidence</summary><p><a href="put-all-assembled-context-back.md">Current design and demo note</a> (local, includes Jack Heart’s feedback) · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/scratch/put-all-assembled-context-back.md">Published design at c143359f9</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/scripts/check_context_launch.py">Manual check script</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/c143359f9eb76c0d75e5da0b86b3aff8d1e27714/rust/loopflow/tests/context_launch_tests.rs">Terminal and headless fixtures</a>.</p><p>Earlier captured user payloads were 145,625 bytes (LOO-428), 128,272 (LOO-418), and 94,657 (LOO-429). The current trigger is 48 bytes. Those historical payload comparisons are separate from the native acceptance runs above.</p><p>Claude screenshot: <code>~/Desktop/Screenshot 2026-10-07 at 10.56.50 PM.png</code>. Its retained fixture is <code>/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-context-check-ro3s07wd/repo</code>. Codex fixture: <code>/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-context-check-nj38lms_</code>. Full local evidence paths and boundaries are in the demo note.</p><p>Source review found no additional demonstrated implementation defect in this change. The unresolved launch dependency and title behavior are surfaced above; provider acceptance cannot be inferred from the stub tests.</p></details>
+</section><footer>Self-contained local walkthrough · revision-pinned source excerpts · no product-code changes, publication or merge action.</footer>
+</main><script>const printDetails=[];addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>{printDetails.push([d,d.open]);d.open=true}));addEventListener('afterprint',()=>{printDetails.splice(0).forEach(([d,open])=>d.open=open)});</script></body></html>

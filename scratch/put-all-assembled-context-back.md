@@ -49,9 +49,61 @@ not observed cmux launches; old terminal launches also included operating contex
 Each capture is at `~/.lf/runs/<first-two-key-characters>/<key>/manifest.json`.
 Read-only measurement used `exec.task_prompt` UTF-8 bytes. The regression's
 providers reject arguments at 122,880 bytes and read the larger context from the
-file. Native first-response acceptance and generated titles remain unobserved.
+file. Claude's interactive first response and visible title are now observed below;
+plan mode and Codex remain unobserved.
 
 ## Remaining acceptance
+
+### Demo preparation (2026-10-07)
+
+The candidate at `c143359f9` built successfully. The provider-free preparation
+command below created a fixture and printed its marker and native launch command:
+
+```sh
+uv run --no-project python scripts/check_context_launch.py --agent claude --prepare-only
+```
+
+Evidence is retained at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-context-check-sg4eoswl`.
+This establishes fixture preparation only; the agent invoked no real provider.
+
+### Claude interactive result (2026-10-07)
+
+Jack Heart supplied `~/Desktop/Screenshot 2026-10-07 at 10.56.50 PM.png`
+and asked whether it showed the intended result. Claude Code v2.1.294 returned
+marker `30b57325421a3963faafcfbd`, provider name OpenCode, and the first memory
+heading, “Program Status direction (LOO-398, 2026-10-07).” Read-only inspection
+confirmed the marker matches the retained fixture at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-context-check-ro3s07wd/repo/probe.md`.
+The visible first user turn is the short context trigger; the response shows no
+refusal. The host and tab display “Supplied context instructions.”
+
+The agent assesses this as successful Claude interactive context readback.
+The screenshot shows “auto mode on,” so it does not establish plan-mode behavior.
+Jack Heart has not yet supplied plan-mode results or authorized landing.
+No design revision is agreed. The subsequent Codex attempt is recorded below.
+
+### Codex interactive blocker (2026-10-07)
+
+Jack Heart ran the Codex check and supplied terminal output. Assembly reported
+28,325 tokens; the expected marker was `62122b947caa37de1d9184d1`, with the
+fixture retained at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-context-check-nj38lms_`.
+Codex rejected its arguments before a first response:
+
+```text
+error: the argument '--dangerously-bypass-hook-trust' cannot be used multiple times
+Error: session launcher exited with status exit status: 2
+```
+
+This matches LOO-428's assigned duplicate-Codex-flag scope. The output establishes
+an argument-parsing failure, not a system-context refusal or successful delivery.
+No Codex readback or title acceptance is established. Preserve the configured
+wrapper path for the eventual retry; do not bypass it to claim cmux acceptance.
+Recommended next action: integrate LOO-428's flag repair when available, rebuild
+the candidate, and have Jack Heart rerun the Codex command below to obtain the
+marker readback and visible title. Claude plan mode can be checked independently
+now. The all-context system-file design remains unchanged; landing stays withheld.
 
 The outstanding acceptance belongs to Jack Heart: a candidate build followed by
 these real-account checks from this checkout inside cmux, with its wrappers on
@@ -86,3 +138,29 @@ Checks: `git diff --check` and `cargo fmt --check` PASS; retained compression re
 15,963/16,000 tokens. The earlier launch
 snapshot included the workspace diff and exceeded the goal source budget; its
 complete source remains in the existing context archive. No limit was raised.
+
+## PR walkthrough (2026-10-07)
+
+Jack Heart requested `pr-review` after discussing advancement. The local
+[HTML walkthrough](pr-review.html) reviews published PR #1498 from
+`35e759aaf4e79e7dc8eef2e8d30048f10172b45a` to
+`c143359f9eb76c0d75e5da0b86b3aff8d1e27714`, tracing assembly, terminal handoff,
+failure capture and persistent-provider context files. It separates the published
+source from the unpublished demo evidence above. No further implementation
+defect was demonstrated; the material remaining gaps are Codex's LOO-428 launch
+dependency, plan mode and native resume. No Flow was advanced or merge requested.
+
+Walkthrough checks: revision-pinned excerpts and local HTML anchors verified;
+desktop/narrow captures and expanded disclosure inspected with `lf screenshot`;
+product checks were not rerun for this artifact.
+
+## Landing direction (2026-10-07)
+
+Jack Heart requested landing after the PR walkthrough. This supersedes the
+earlier hold on landing; it does not establish the unobserved acceptance checks.
+Jack Heart clarified that the Task must advance through queued preparation
+before landing. Run the existing `queue` Flow (compress → sync → realign → gate),
+then the Task’s `ship` edge (gate → `pr land -c`) only if queue succeeds. The ship
+gate should reuse still-valid checks under the repository verification cadence.
+The remaining live-account checks stay unproved; they no longer hold landing. Durable findings are retained in Infrastructure memory; this
+design and `scratch/pr-review.html` are checkpointed before scratch cleanup.

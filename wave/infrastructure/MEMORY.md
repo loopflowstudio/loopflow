@@ -1,5 +1,9 @@
 # infrastructure wave memory
 
+## One PR per Task; follow-through is separate (2026-10-07)
+
+Jack Heart accepted zero or one PR per Task in [LOO-418](https://linear.app/loopflow/issue/LOO-418). After a PR merges, file any needed follow-through as a linked follow-up Task and complete the original. This supersedes the earlier serial-PR and keep-the-original-open direction in LOO-408. PR-less Tasks remain valid and end through their Workflow. LOO-418 owns the implementation; preserve existing histories during that transition. LOO-390's remaining retention work must move to a follow-up rather than a second serial PR. Retired performance gates remain retired.
+
 ## Retire provisional performance gates (2026-10-07)
 
 Jack Heart retired numeric performance targets, benchmark/soak requirements and

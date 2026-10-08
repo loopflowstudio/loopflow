@@ -24,7 +24,7 @@ use tracing::{debug, info, instrument, trace};
 /// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
-pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.process_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -33,7 +33,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
         }
         return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
     }
-    let mut built = build_prompt(skill, message, cli)?;
+    let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
@@ -209,9 +209,14 @@ struct PromptBuild {
     work: Option<crate::session::SessionWork>,
 }
 
-fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
+fn build_prompt(
+    repo_root: &Path,
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = crate::repo::working_directory()?;
+    let repo_root = repo_root.to_path_buf();
     let repo_root = if skill == Some("repo/operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()

@@ -1,9 +1,9 @@
 # LOO-428 — Codex hook coexistence
 
 Jack Heart approved setup-free Codex coexistence and publication for review on
-2026-10-07; no landing. The accepted scope preserves Flow-output changes, native
-terminal behavior, wrappers and PATH, with live cmux Sessions untouched and no
-real accounts in automated checks.
+2026-10-07, then queue and landing on October 8. The accepted scope preserves
+Flow-output changes, native terminal behavior, wrappers and PATH, with live cmux
+Sessions untouched and no real accounts in automated checks.
 
 ## Ownership and remaining acceptance
 
@@ -17,16 +17,22 @@ fallback or lf-side refusal wording. Provider errors remain visible.
 cmux tracking or combined-candidate acceptance. Its Codex attempt hit the trust
 collision owned here. Its October 7 landing direction now permits delivery after
 queued preparation despite those unobserved checks. That permission applies to
-429; 428 remains publication-only. Prompt placement is settled independently of
-this hook repair. Evidence: October 7 Task status and the complete sibling design at
+429; Jack Heart separately authorized 428's landing on October 8. Prompt placement
+is settled independently of this hook repair. Evidence: October 7 Task status and the complete sibling design at
 `/Users/jack/src/loopflow.put-all-assembled-context-back/scratch/put-all-assembled-context-back.md`;
 that checkout remains owned by 429 and was not edited here.
 
-Gate owns affected suites on the candidate after integration with main. Capable
+The affected headless gate passed after the fixture repairs below. Capable
 review owns launch and agent-list proof in a separate cmux window with wrappers
 on PATH; the earlier access-policy denial remains valid. LOO-429 owns the combined
 oversized Claude/Codex launch. Homepage capture follows landing and installation.
 Source fixtures prove neither installed behavior nor actual cmux tracking.
+
+Jack Heart's October 8 OSC 7501 simplification follow-up is recorded and read back
+in [LOO-422](https://linear.app/loopflow/issue/LOO-422): after shipped provider/host
+adoption, remove redundant status-hook/trust workarounds while preserving exact
+native capture and reconnect. [Mitchell Hashimoto's announcement](https://mitchellh.com/writing/program-status-osc7501)
+is the reference; adoption is not yet established. This does not delay 428.
 
 ## Terminal selector removal (Jack Heart, 2026-10-08)
 
@@ -34,11 +40,11 @@ Jack Heart requested removal of `--tui` after PR #1497 removed `--ide` and
 `session.launch`. Terminal launch remains the sole interactive surface. A direct
 TTY launches interactively by default; `-i` retains the explicit interactive
 choice for piped or detached callers, and `-b` retains headless execution.
-Delete `Cli.tui`, its dispatch branches and generated flag documentation. Move
-internal callers and fixtures to the surviving interactive selection; preserve
-native capture, reconnect, historical `tui` surface records and provider TUI code.
-Reject the removed flag at a valid skill entry. Verify default TTY, explicit
-interactive without a TTY, headless batch and the real terminal capture path.
+`Cli.tui`, its dispatch branches and generated flag documentation are removed.
+Internal callers and fixtures use the surviving interactive selection; native
+capture, reconnect, historical `tui` surface records and provider TUI code remain.
+The removed flag is rejected at a valid skill entry. Focused checks cover default
+TTY, explicit interactive without a TTY, headless batch and terminal capture.
 
 ## Implementation and preservation
 
@@ -68,7 +74,11 @@ Removed: whole-table CLI capture injection, unconditional trust insertion,
 `interactive_launch_diagnostic` and its argv-only fixture, `mark_task_started`,
 duplicate progress printers and prompt-bearing debug dumps. Compression also
 removed the hook-string helper/test and the fixture's custom TOML serializer.
-Native behavior proof, exact capture fencing and transactional Started remain.
+`Cli.tui` and its consumers are removed. The last skill-name mode override in
+`run_prompt` is also deleted: `default` obeys the resolved interactive/headless
+mode, including `-b` and Flow steps. No deletion targets remain in this scope.
+Native behavior proof, exact capture fencing and transactional Started remain;
+LOO-422 owns later removal of hook workarounds after demonstrated adoption.
 
 ## Evidence and review limits
 
@@ -92,7 +102,33 @@ Prior Flow-output/Task-binding proofs remain applicable. Release is the only
 immediate child Wave; its goal and full memory were read. Its operation-entry
 lesson applies here: launch, reconnect and host tracking have separate evidence.
 Launch hook receipts cannot establish fresh reconnect hooks or actual cmux tracking.
-Source review found no bounded implementation mismatch requiring repair.
+Compression review found `default` bypassing the selected headless mode. The
+existing output fixture now runs `default`, an operation and an ordinary skill
+under quiet, verbose and trace logging. Its stale `-m` selector is corrected to
+`-a`; the original fixture otherwise failed at CLI parsing before testing output.
+
+October 8 realignment found upstream #1500's `step_args` still forwarding the
+deleted `Cli.tui` field after integration. That reference is now removed;
+interactive/batch forwarding stays intact. Earlier build results did not cover
+this merged source. The affected gate now covers it; real cmux acceptance remains open.
+
+Gate review corrected two fixture defects: the chapter-evidence test still expected
+an unstarted Task after a Flow reserved its checkout, and the Flow-preservation
+fixture had lost the working-directory receipt its assertions read. The latter
+now records cwd when the provider receives the turn. No production change was
+needed. Ruff also normalized the native fixture's reconnect call.
+
+The first affected run passed 1,803 of 1,806 tests; both repaired tests passed
+focused reruns. The remaining planning-migration fixture passed with CI's
+materialized schema in a disposable source copy; its authoring-schema failure
+was `no such table: machines`. No checkout, migration draft, installed store or
+live Session was changed by that proof. This establishes all selected checks,
+not a full materialized Rust matrix. CI retains that matrix.
+
+Native Codex 0.160.1 passed plain/wrapped launch, exact capture, both launch hooks
+and reconnect again. Evidence: `/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-codex-terminal-8hr2h89b`.
+The review walkthrough remains a dated, pinned-source artifact; this design owns
+current gate evidence and the remaining acceptance limits.
 
 ## Retained measurements and history
 
@@ -109,4 +145,4 @@ Earlier interface table and complete pre-compression notes remain in the launch
 snapshot `.lf/tmp/context/036c563040dd8f5e56d2b30fd95d88df8385cd239ce93cd8058bf95c101c8955.md`.
 `lf commit` excludes scratch, so that existing snapshot preserves the local notes.
 
-Checks (2026-10-08): build/fmt/Clippy, Ruff, six focused selector/prompt tests, isolated `terminal_launch_tests` and native `codex_terminal.py` PASS; native PTYs now exercise default terminal launch/reconnect without `--tui`; generated CLI reference refreshed; gate owns affected suites, capable review owns cmux tracking, LOO-429 owns combined oversized input.
+Checks (2026-10-08 gate): `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, network-isolated `cargo nextest run -p loopflow --lib --bin lf --test flow_tests --test session_cli_tests --test session_lifecycle_tests --test task_flow_launch_tests --test terminal_launch_tests` (1,803 pass, two fixture repairs pass focused reruns, one migration fixture passes after materialization), native `codex_terminal.py`, `website/dev.py test` (76 pass), Ruff check/format, architecture and diff checks PASS; CI owns the full materialized matrix, capable review owns actual cmux tracking, LOO-429 owns combined oversized input.

@@ -47,11 +47,11 @@ not execute the original skill again. Native terminal captures still have no
 headless AgentProcessRequest; source and snapshot retention checks are separate.
 Failed terminal plugin preparation reaches capture settlement before returning.
 
-## Delete — do not maintain
+## Removed mechanisms
 
-Completed: delete Claude terminal's translated matching-harness branch; reuse
-native plugin preparation. Delete Codex's silently ignored out-of-catalog `skill`
-input item; both surfaces use explicit native links. No catalog mounts, provider
+Claude terminal's translated matching-harness branch now reuses native plugin
+preparation. Codex's silently ignored out-of-catalog `skill` input item is removed;
+both surfaces use explicit native links. No catalog mounts, provider
 registration or additional resolver is needed.
 
 Compression also removes the unused replay-argument parser and its exclusive
@@ -62,16 +62,16 @@ Provider discovery now uses the existing executable PATH resolver, deleting the
 `--version` subprocess and its availability cache. Launch failures remain failures;
 an installed executable no longer needs a successful version command.
 
-Final input enforcement now uses the budget report's measured tokens and bytes.
-Delete the second CLI check and both enforcement-time recounts; standalone skills
-also skip the intermediate measurement used only to render an omitted notice.
+Final input enforcement uses the budget report's measured tokens and bytes
+(`f5cc05bb6`). The second CLI check and both enforcement-time recounts are removed;
+standalone skills skip the intermediate measurement for an omitted notice.
 The final measurement still includes skill instructions, arguments and structured
 reply guidance. Permission setup after preparation changes none of those bytes.
 
 Previously removed queue, engine-restart, dispatch receipt and PTY/inbox machinery
 remains at `1e4ae02a5` and `7dd9819b2`; provider-only probes at `31e0640eb`;
-unreachable ClaudeHarness plugin state at `dd2cdba82`. Preserve the ordinary lf
-fixtures and baseline Session continuity. Do not restore any of those paths.
+unreachable ClaudeHarness plugin state at `dd2cdba82`. Ordinary lf fixtures and
+baseline Session continuity remain required.
 
 ## Counterexamples and remaining acceptance
 
@@ -136,7 +136,11 @@ no latency improvement. The cut removes redundant work without changing submitte
 input or weakening enforcement; the 33 focused tests include token, byte and
 structured-reply limits. Prior check details remain at `68ff53aab` in this file.
 
-No new product decision is identified. Full gate and authored review remain.
+The requested overhead attribution and bounded compression are implemented.
+Residual cost remains contrary evidence to the unchanged drop-in outcome;
+these samples do not establish that nothing got worse. Full gate owns the
+acceptance matrix above, and authored review owns judgment of that tradeoff.
+No additional product decision is needed for this reconciliation.
 
 ## Evidence boundary
 

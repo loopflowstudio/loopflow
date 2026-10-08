@@ -1087,10 +1087,12 @@ Ordinary lf fixtures prove native terminal model/argument/context fidelity,
 single-file collisions, out-of-catalog Codex expansion, custom-prompt translation,
 and provider asset reads against fake APIs. Serial plain baselines now use equal
 context and fresh provider homes, asserting source, arguments and asset contents.
-Remaining request JSON overhead: 875 bytes Claude terminal, 122 Codex headless;
-elapsed overhead: 0.71–0.75 s initialized Machine, 1.01–1.11 s fresh. Most precedes
-provider startup. Version-probe removal reduces measured native preparation;
-remaining costs/limits live in the plan. These debug/local samples prove neither
-production speedup, live model compliance nor terminal UI. Prior costs: `966af16fd`.
+Request overhead remains 875 bytes Claude terminal, 122 Codex headless. Final
+budget enforcement reuses measured input, including arguments and structured
+replies; omitted notices need no intermediate count. Serial warm-Machine
+samples add 0.99/0.70 s, mostly before provider startup; no latency improvement
+is established. Prior/fresh costs: `d505007b1:scratch/run-any-claude-or-codex.md`.
+Residual cost leaves drop-in acceptance to gate/review. Local samples prove no
+production speedup, live compliance or terminal UI.
 Release was the only immediate child found; its goal and complete memory were read.
 Its operation-entry lesson applies. No landing or Task completion occurred.

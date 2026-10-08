@@ -1,5 +1,4 @@
 {
-  "forwarded_accounts_diagnostic": "forwarded account identities uninspected; cached status does not contact the origin broker",
   "accounts": [
     {
       "provider": "claude",
@@ -140,25 +139,6 @@
           "source": "poll"
         }
       ],
-      "verified_windows": [],
-      "reset_credits": null
-    },
-    {
-      "provider": "codex",
-      "account_id": "remote",
-      "login": "remote@example.com",
-      "scope": "forwarded",
-      "source": "forwarded_origin",
-      "cached_credential_state": "uninspected",
-      "verification": "not_checked",
-      "diagnostic": null,
-      "recovery": null,
-      "observed_plan": null,
-      "configured_plan": null,
-      "routing": null,
-      "cooldown_until": null,
-      "expires_at": null,
-      "windows": [],
       "verified_windows": [],
       "reset_credits": null
     },

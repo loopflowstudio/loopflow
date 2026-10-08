@@ -299,9 +299,9 @@ pub(crate) fn lf_session_shell_command(
         .collect::<Vec<_>>()
         .join(" ");
     let clear_context = format!(
-        "if [ -n \"${{LF_FORWARDED_SECRET_NAMES:-}}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset {} {}; export LF_USER_NAME=\"\"",
+        "unset {} {}; export LF_USER_NAME=\"\"",
         PROCESS_CONTEXT_ENV.join(" "),
-        FORWARDED_AUTHORITY_ENV.join(" "),
+        SESSION_AUTH_ENV.join(" "),
     );
     // A long-lived tmux server can retain a deleted cwd despite new-session -c.
     let enter_directory = format!("cd -- {} || exit", shell_escape(&cwd.to_string_lossy()));
@@ -326,7 +326,7 @@ pub(crate) async fn start_tmux_session(
         command.env_remove(name);
     }
     command.env_remove(crate::engine::config::USER_NAME_ENV);
-    for name in forwarded_authority_env_names() {
+    for name in SESSION_AUTH_ENV {
         command.env_remove(name);
     }
     let status = command
@@ -382,14 +382,10 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_HOME",
 ];
 
-/// Credentials and account authority forwarded to one process, never onward.
-const FORWARDED_AUTHORITY_ENV: &[&str] = &[
-    crate::provider_account::lease::ACCOUNT_LEASE_ENV,
-    crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
+/// Credentials and account choices a new Session must receive explicitly.
+const SESSION_AUTH_ENV: &[&str] = &[
+    crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
     crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
-    crate::ops::pm::FORWARDED_PM_TOKEN_ENV,
-    crate::ops::pm::FORWARDED_PM_PROVIDER_ENV,
-    "LF_FORWARDED_SECRET_NAMES",
     DISCORD_TOKEN_ENV,
     "GH_TOKEN",
     "OPENCODE_API_KEY",
@@ -399,24 +395,10 @@ const FORWARDED_AUTHORITY_ENV: &[&str] = &[
     "OPENAI_API_KEY",
 ];
 
-fn forwarded_authority_env_names() -> Vec<String> {
-    let mut names = FORWARDED_AUTHORITY_ENV
-        .iter()
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>();
-    if let Ok(forwarded) = std::env::var("LF_FORWARDED_SECRET_NAMES") {
-        names.extend(forwarded.split_whitespace().map(str::to_string));
-    }
-    names
-}
-
 #[cfg(test)]
 mod tests {
 
-    use super::{
-        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
-        DISCORD_TOKEN_ENV,
-    };
+    use super::{lf_session_shell_command, pin_control_binary};
 
     #[test]
     fn detached_child_enters_quoted_directory_and_reports_missing_directory() {
@@ -537,10 +519,8 @@ mod tests {
         let command =
             lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
-        assert!(command.contains(
-            "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
-        ));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("unset "));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
@@ -576,7 +556,7 @@ mod tests {
         let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
 
@@ -606,36 +586,26 @@ mod tests {
     }
 
     #[test]
-    fn durable_session_scrubs_every_named_forwarded_secret() {
-        let _lock = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_FORWARDED_SECRET_NAMES");
-        std::env::set_var("LF_FORWARDED_SECRET_NAMES", "SENTRY_TOKEN STRIPE_KEY");
-
-        let names = forwarded_authority_env_names();
-
-        match previous {
-            Some(value) => std::env::set_var("LF_FORWARDED_SECRET_NAMES", value),
-            None => std::env::remove_var("LF_FORWARDED_SECRET_NAMES"),
-        }
-        assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
-        assert!(names.iter().any(|name| name == "GH_TOKEN"));
-        assert!(names.iter().any(|name| name == "LF_DISCORD_TOKEN"));
-        assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
-        assert!(names.iter().any(|name| name == "STRIPE_KEY"));
-    }
-
-    #[test]
-    fn discord_chat_token_is_scrubbed_from_durable_provider_children() {
-        assert!(forwarded_authority_env_names()
-            .iter()
-            .any(|name| name == DISCORD_TOKEN_ENV));
+    fn durable_session_drops_parent_credentials_and_account_choices() {
         let command = lf_session_shell_command(
             std::path::Path::new("."),
-            &["lf".into(), "wave".into()],
+            &[
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s' \"${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}${LF_ACCOUNT_ISOLATION-}\"".into(),
+            ],
             &[],
         );
-        assert!(command.contains("unset "));
-        assert!(command.contains(DISCORD_TOKEN_ENV));
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("LF_DISCORD_TOKEN", "fixture-chat-token")
+            .env("GH_TOKEN", "fixture-github-token")
+            .env("LF_ACCOUNT_SELECTION", "parent-selection")
+            .env("LF_ACCOUNT_ISOLATION", "isolated")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
     }
 
     #[test]
@@ -658,7 +628,7 @@ mod tests {
         );
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
+        assert!(command.contains("LF_ACCOUNT_SELECTION LF_ACCOUNT_ISOLATION"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_LFID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));

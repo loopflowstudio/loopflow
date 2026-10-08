@@ -6,25 +6,27 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 ## Task delivery boundary (LOO-418, 2026-10-07)
 
-Jack Heart decided: a Task has zero or one PR, never a serial chain. Follow-through
-is a follow-up Task, filed after landing before the source Task completes.
-Dependent PRs belong to stacked Tasks and may start before their parents merge;
-research can end without a PR. This supersedes older serial-chain/keep-open
-directions below. Jack authorized kickoff and its design review boundary, not
-landing. `scratch/make-a-task-up-to.md` is a draft, not accepted implementation.
+Jack Heart decided: zero or one PR per Task. Every merge requires follow-ups
+filed or “none needed” recorded before completion. End means completed;
+`task complete` may return as an alias for `task move end`, with identical checks
+and no separate flag. Dependent PRs use stacked Tasks; research needs no PR.
+Jack accepted a waited landing Flow with follow-through, recovered by the next
+Task/Wave operation, without a new watcher. No schedule means no automatic wake.
+These decisions supersede older serial-chain and keep-open directions below.
+Jack requested advancement: first Flow visibility and the completion alias;
+no landing. `scratch/make-a-task-up-to.md` retains unresolved lifecycle choices.
 
 Base `626789dcd` includes #1488: bare land already defaults to completion, while
 `TaskFollowUp` keeps an obligation on the source Task. Replace that writer as
 well as rotation; retain existing obligations and multi-PR history. LOO-385's
 no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.
 
-Source inspection found Process admission before `--task` placement, while
-Started and Flow membership use recorded cwd. A disposable trigger probe
-reproduced the warning with caller cwd and accepted target cwd; historical
-launches and the corrected public CLI remain unverified. Stack sync already
-preserves child code through parent updates/squash; deliberate scratch isolation
-explains missing designs. Handoff must preserve child-specific scope. Proposed
-post-merge filing, waiting, due-date return and migration mechanisms await review.
+Process admission precedes `--task` placement; Started and Flow membership use
+recorded cwd. A disposable trigger probe rejected caller cwd and accepted target
+cwd; historical launches and the corrected CLI remain unverified. Stack sync
+preserves child code through parent updates/squash; scratch isolation requires
+child-specific handoff. Task operator guidance currently stops at landing and
+lacks an explicit completion call; update it to finish follow-through.
 
 ## Live Home reconciliation (2026-10-05)
 

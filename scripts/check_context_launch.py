@@ -69,7 +69,7 @@ def main() -> int:
     environment.update(LF_HOME=str(root / "machine"), LF_BIN=str(binary))
     command = [
         str(binary),
-        "--tui",
+        "-i",
         "-a",
         args.agent,
         ":",

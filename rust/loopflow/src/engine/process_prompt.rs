@@ -676,7 +676,6 @@ Test skill body.
         for agent in ["claude", "codex", "opencode"] {
             for surface in [
                 Surface::Cli,
-                Surface::Ide,
                 Surface::Mac,
                 Surface::Iphone,
                 Surface::Headless,

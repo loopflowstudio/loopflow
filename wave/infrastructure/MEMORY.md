@@ -28,7 +28,7 @@ original design is preserved at `c62c19f5c:scratch/read-and-write-program-status
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
 Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
-publication and review; LOO-411 has no landing or later-slice authority. A machine
+publication and review, later superseded by the landing request below. A machine
 is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
 opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
 Jack chose to discard version-1 Desktop caches and name install scope `installation`
@@ -67,8 +67,9 @@ The target parses the whole command in its saved repository;
 `--machine Y machine add X` edits Y's registry. No command allowlist, SSH alias or
 per-call repository override. Secret and agent-forwarding options require a
 machine. Account flags resolve on the target, not against origin-only accounts;
-inherited origin restrictions still constrain its grant. Republish #1489 and
-stop; no landing or later-slice authority. Local fixtures prove dispatch and
+inherited origin restrictions still constrain its grant. Jack Heart later requested
+landing; this repair is limited to syncing main, focused verification and publication,
+then stopping. No later slice is authorized. Local fixtures prove dispatch and
 separate registries, not configured remote continuity or installation.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
@@ -576,17 +577,10 @@ identity is unchanged. [Method and verification](https://github.com/loopflowstud
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
-Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
-and shipped in v0.13.6 on October 6. Installed validation on 54 worktrees returned
-20/20 successful samples per surface: external text median/p95 1.465/1.511 s,
-JSON 1.387/1.443 s. Jack Heart has retired the one-second aim. Production timing is installed;
-local Git is the larger phase, with no measured hard lower bound. Numbers and method:
-[report](../../scripts/benchmarks/wt-list/README.md).
+PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
+[report](../../scripts/benchmarks/wt-list/README.md),
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading.
 
-- **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
-  Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
   doctor and install. Keep the Session fence outside runtime waits; OpenCode's
   fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
@@ -845,26 +839,13 @@ Provider stubs must contain conflict-agent launches: one bad fixture launched
 real credentials whose effects were not audited. Dense CLI timing and configured
 continuity remained unfinished in that dated evidence.
 
-Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
-intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
-Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
-`scripts/benchmarks/desktop-performance/record_live.py` records local usage
-without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
-measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
-was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
-zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
-installed build's six-second probe measured 51 ms/s hitches; these different
-windows/builds do not prove a causal improvement. Republishing identical readings
-was found in source and removed; remaining hang causes need profiling.
-
-LOO-300 owns Session streaming, projection caching and the density harness after
-the data-model work. The handoff records passes only for cold-start-to-outline
-and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
-that can skip when SwiftUI exposes no NSTextField; six other tests were removed
-after mounted paint hooks failed to fire. Missing results remain proof gaps.
-Key-to-next-draw and PTY echo are proxies, not glyph presentation. Jack Heart's
-October 7 direction retires the proposed numeric targets, soak requirements and
-deeper optimization; these historical gaps are not open acceptance requirements.
+Jack Heart's October 7 direction retires numeric performance targets, soak
+requirements and deeper optimization. LOO-291/300's measurements, missing mounted
+proofs and instrumentation remain at
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading and in
+[scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
+Different recording windows prove no causal improvement; PTY echo and next draw
+are not glyph presentation. Those historical gaps are not open acceptance requirements.
 
 The earlier S5 active-PR resolver left landed branches unbound. That is historical
 failure evidence, not binding policy: current Session rows own attribution and

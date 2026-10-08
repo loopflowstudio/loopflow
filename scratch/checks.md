@@ -1,0 +1,1 @@
+`cargo test -p loopflow --test cli_discovery remote_selection_preserves_command_arguments_and_literal_boundaries -- --exact`, `cargo test -p loopflow --test machine_commands`, `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`: passed after main sync (12 tests); new-head CI remains pending publication.

@@ -71,7 +71,7 @@ shells unset them and tmux never receives them.
 | `LOOPFLOW_BUILD_*`, `LOOPFLOW_MIGRATION_AUTHORITY`, `LOOPFLOW_RELEASE_TAG` | `build.rs`, release scripts | Build provenance, compiled in. |
 | `LF_RELEASE_*` | Release scripts | Inputs from `lf release` to its scripts. |
 
-`LF_TEST_*`, `LF_PROBE_*`, `LF_SCREENSHOT_*`, `LOOPFLOW_UI_TEST_*` and
+`LF_TEST_*`, `LF_PROBE_*`, `LOOPFLOW_UI_TEST_*` and
 `LOOPFLOW_TEST_*` exist only in tests and their fixtures. The three
 `LF_TEST_CLAUDE_*_URL` readers in `subscription.rs` are compiled only under
 `cfg(test)`.

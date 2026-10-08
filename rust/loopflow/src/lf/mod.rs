@@ -288,24 +288,6 @@ impl Cli {
     }
 }
 
-#[derive(Args, Debug, Clone)]
-pub struct ScreenshotArgs {
-    /// URL or local HTML file to capture
-    pub source: String,
-
-    /// PNG destination
-    #[arg(short = 'o', long = "output")]
-    pub output: PathBuf,
-
-    /// Viewport width in pixels
-    #[arg(long, default_value_t = 1440)]
-    pub width: u32,
-
-    /// Viewport height in pixels
-    #[arg(long, default_value_t = 900)]
-    pub height: u32,
-}
-
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Pull request lifecycle
@@ -350,12 +332,6 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal owner-loss supervisor for one browser capture.
-    #[command(name = "__screenshot-supervisor", hide = true)]
-    ScreenshotSupervisor {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
@@ -386,10 +362,18 @@ pub enum Commands {
         cmd: RepoCommand,
     },
     /// Manage the installed Loopflow release and exported skills
-    Installation {
+    #[command(name = "self")]
+    Self_ {
         #[command(subcommand)]
-        cmd: InstallationCommand,
+        cmd: SelfCommand,
     },
+    /// Read Loopflow configuration
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCommand,
+    },
+    /// Open or focus Loopflow.app
+    Open,
     /// Name and connect to machines
     Machine {
         #[command(subcommand)]
@@ -1463,7 +1447,16 @@ pub enum RepoCommand {
 
 /// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
-pub enum InstallationCommand {
+pub enum SelfCommand {
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
+    Doctor {
+        /// Diagnose repository planning without changing it
+        #[arg(long)]
+        planning: bool,
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Install the latest published Loopflow release from any directory
     Install {
         #[command(subcommand)]
@@ -1481,30 +1474,19 @@ pub enum InstallationCommand {
     },
 }
 
-/// Inspect and observe durable Machines.
+/// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
-pub enum MachineCommand {
-    /// Open or focus Loopflow.app
-    Desktop,
-    /// Capture a URL or local HTML file without claiming the user's browser
-    Screenshot {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
-    /// Diagnose installation, storage, Process integrity and scheduled receipts
-    Doctor {
-        /// Diagnose repository planning without changing it
-        #[arg(long)]
-        planning: bool,
-        /// Emit the audit as JSON
-        #[arg(long)]
-        json: bool,
-    },
+pub enum ConfigCommand {
     /// Print the configured participant display name.
     User {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// Name and connect to machines.
+#[derive(Debug, Subcommand)]
+pub enum MachineCommand {
     /// Print this machine's stable local Machine identity.
     Id {
         #[arg(long)]
@@ -1845,7 +1827,7 @@ mod tests {
                 "home_00000000000000000000000000000001",
             ],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "machine", "doctor", "--planning", "--json"],
+            vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
@@ -1870,36 +1852,9 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_requires_an_output_and_accepts_a_viewport() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "screenshot",
-            "page.html",
-            "--output",
-            "capture.png",
-            "--width",
-            "390",
-            "--height",
-            "844",
-        ])
-        .expect("parse screenshot");
-        let Some(Commands::Machine {
-            cmd: crate::lf::MachineCommand::Screenshot { screenshot },
-        }) = cli.command
-        else {
-            panic!("expected screenshot command");
-        };
-        assert_eq!(screenshot.source, "page.html");
-        assert_eq!(screenshot.output, PathBuf::from("capture.png"));
-        assert_eq!((screenshot.width, screenshot.height), (390, 844));
-        assert!(Cli::try_parse_from(["lf", "machine", "screenshot", "page.html"]).is_err());
-    }
-
-    #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
-        let installation = command.find_subcommand_mut("installation").unwrap();
+        let installation = command.find_subcommand_mut("self").unwrap();
         assert!(installation
             .render_long_help()
             .to_string()
@@ -1912,17 +1867,17 @@ mod tests {
         assert!(help.contains("schedule"));
         assert!(!help.contains("preflight"));
         assert!(matches!(
-            Cli::try_parse_from(["lf", "installation", "install"])
+            Cli::try_parse_from(["lf", "self", "install"])
                 .unwrap()
                 .command,
-            Some(Commands::Installation {
-                cmd: crate::lf::InstallationCommand::Install { cmd: None }
+            Some(Commands::Self_ {
+                cmd: crate::lf::SelfCommand::Install { cmd: None }
             })
         ));
         assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "schedule"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "status"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "preflight"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
     }
 
     #[test]

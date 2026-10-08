@@ -5,7 +5,8 @@ lf user                                # show the resolved display name
 lf user --json                         # name as a JSON string, or null when unavailable
 ```
 
-Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
+`user` is the unique shortcut for `lf config user`. It returns a display name,
+such as `Jack Heart`, using Git's configured `user.name`,
 including repository overrides. Agents can use a familiar name such as `Jack`
 in prose. No first name or username is derived from this value. Override it
 in personal Loopflow configuration (`$LF_HOME/config.yaml`, or

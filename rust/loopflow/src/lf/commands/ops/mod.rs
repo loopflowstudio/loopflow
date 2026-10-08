@@ -1500,7 +1500,7 @@ fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
             anyhow!("Machine registry path cannot be resolved: {error}")
         }
         RegistryUnavailable::Incompatible { path, error } => anyhow!(
-            "Machine registry at {} is incompatible: {error}; run `lf machine doctor`",
+            "Machine registry at {} is incompatible: {error}; run `lf doctor`",
             path.display()
         ),
     }

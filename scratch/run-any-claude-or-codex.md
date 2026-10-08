@@ -5,7 +5,9 @@ LOO-420, PR 2. Jack Heart's October 8 comments
 `76407cd0-b271-45e7-8953-62abe7f9df2b` select ordinary installed-skill invocation,
 matching help/list, native matching-harness execution, translated ports, exact
 arguments, reachable assets and declarations. `--agent/-a` remains. Builtins stay
-inline. Review is the delivery boundary; no landing or Task completion is authorized.
+inline. Jack Heart reviewed the walkthrough and startup comparison on October 8, then
+authorized advancing through verification and landing this Task. This supersedes
+the earlier review-only delivery boundary; completion follows verified merge.
 Busy-terminal injection and generic engine recovery remain excluded.
 
 Reconciled October 8. Prior plan and contrary evidence: `c6c75dc68` in this file.
@@ -159,3 +161,19 @@ were read during realignment. Its operation-entry lesson applies: successful
 provider output alone cannot establish the requested launch behavior.
 
 Check (2026-10-08): isolated `cargo test -p loopflow --lib engine::process_prompt` (29) and `engine::context_budget` (4), `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and contained `launch.py --warm-machine` native Claude-terminal/Codex-headless comparisons PASS; full affected verification belongs to gate.
+
+## PR-base startup comparison (October 8)
+
+Jack Heart requested comparison with regular LF. Three alternating pairs per
+harness compare base `35bb84ef1` with candidate `510bf4abb` using the same debug
+profile, initialized disposable stores, pinned bundles and contained fake API.
+Median pre-provider time: Claude terminal 0.772 → 0.628 s; Codex headless
+0.717 → 0.672 s. Median first-request time: 0.995 → 0.866 s and
+0.803 → 0.746 s. This small sample shows no added startup second from this PR;
+these are neither production measurements nor comparison with a running slash command.
+Both versions deliver source, arguments, user context and the asset read. Claude's
+unchanged source is also copied into legacy `.claude/commands` for both versions
+because base cannot discover `.claude/skills`. Base then fails post-provider Git
+status in the ordinary-folder fixture; candidate exits successfully. Compare
+startup boundaries only, not successful end-to-end completion time.
+Check: contained comparison completed 12 launches; launch fidelity passes, base completion fails as described; raw samples, hashes and exact-source archive at `/tmp/loo420-base-comparison/`; full gate remains separate.

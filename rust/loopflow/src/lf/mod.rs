@@ -518,8 +518,6 @@ pub enum ProjectWorkflowCommand {
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
-    /// Copy a builtin Workflow when needed and print its local path
-    Customize { name: String },
 }
 
 #[derive(Subcommand, Debug)]

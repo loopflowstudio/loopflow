@@ -109,7 +109,7 @@ its start. See [workflows](authoring.md#workflows).
 ```bash
 lf project workflow list                 # Workflow definitions and validity
 lf project workflow set PROJECT code     # selection for future Tasks
-lf project workflow customize feature    # print its local source path
+lf project workflow source PROJECT feature # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf flow list                             # autonomous Flow definitions

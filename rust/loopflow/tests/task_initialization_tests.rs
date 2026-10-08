@@ -408,7 +408,7 @@ fn missing_worktree_status_is_actionable_and_read_only() {
 
 #[test]
 fn saved_task_checkout_works_offline_with_and_without_linear() {
-    for connected in [false, true] {
+    for (connected, explicit_name) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
         let fixture = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
@@ -455,7 +455,7 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
         }
         // A saved edit must survive allocation, even while an older provider fact remains.
         conn.execute(
-            "UPDATE tasks SET issue_title='Retain local direction',planning_revision=3 WHERE id=?1",
+            "UPDATE tasks SET issue_title='Retain all five title words',planning_revision=3 WHERE id=?1",
             [task.id.as_str()],
         )
         .unwrap();
@@ -467,18 +467,12 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
             .unwrap()
             .unwrap();
         let checkout = || {
-            let mut command = unbound_command(
-                Path::new(env!("CARGO_BIN_EXE_lf")),
-                repo.path(),
-                &[
-                    "task",
-                    "checkout",
-                    task.id.as_str(),
-                    "--name",
-                    "offline-placement",
-                    "--json",
-                ],
-            );
+            let mut args = vec!["task", "checkout", task.id.as_str(), "--json"];
+            if explicit_name {
+                args.extend(["--name", "offline-placement"]);
+            }
+            let mut command =
+                unbound_command(Path::new(env!("CARGO_BIN_EXE_lf")), repo.path(), &args);
             for (name, _) in std::env::vars_os() {
                 if name.to_string_lossy().starts_with("LINEAR_") {
                     command.env_remove(name);
@@ -528,6 +522,14 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
         assert_eq!(placed.plan, saved.plan);
         assert_eq!(placed.project_id, saved.project_id);
         assert_eq!(placed.wave_id, saved.wave_id);
+        assert_eq!(
+            placed.workspace_slug,
+            if explicit_name {
+                "offline-placement".to_string()
+            } else {
+                format!("retain-all-five-title-{}", &task.id.as_str()[5..17])
+            }
+        );
         let worktree = placed.worktree.as_ref().unwrap();
         assert!(worktree.join(".git").exists());
         let prs = runtime.block_on(fixture.store.task_prs(&task.id)).unwrap();
@@ -535,7 +537,7 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
         assert_eq!(
             prs[0].branch,
             format!(
-                "lf/{}/retain-local-direction",
+                "lf/{}/retain-all-five-title-words",
                 task.id.as_str().trim_start_matches("task_")
             )
         );

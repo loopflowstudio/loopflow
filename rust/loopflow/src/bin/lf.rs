@@ -1841,13 +1841,6 @@ fn execute_command(
                     }
                     Ok(())
                 }
-                loopflow::lf::ProjectWorkflowCommand::Customize { name } => {
-                    println!(
-                        "{}",
-                        loopflow::engine::workflow::customize(name, &repo)?.display()
-                    );
-                    Ok(())
-                }
                 loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
                     let selected = tokio::runtime::Runtime::new()?
                         .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;

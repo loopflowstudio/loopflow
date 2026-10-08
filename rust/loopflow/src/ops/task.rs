@@ -853,38 +853,19 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                     load_task_flow(repo, flow)?;
                 }
             }
-            let mut item = local_task_item(&store, &task)?;
             // A retained provider branch may already own Git work. It is metadata,
             // not a reason to reacquire planning or allocate another Task.
-            if let Some(id) = &task.plan.linear_id {
-                if let Some(record) = store
+            let branch = match &task.plan.linear_id {
+                Some(id) => store
                     .sqlite
                     .pm_task_observation(wave.repo(), "linear", id.as_str())
                     .map_err(task_error)?
                     .record
-                {
-                    item.branch_name = record.item.branch_name;
-                }
-            }
-            let uuid = task.id.as_str().trim_start_matches("task_");
-            let title = derive_workspace_slug(&task.plan.title)?;
-            let name = options.name.clone().unwrap_or_else(|| {
-                format!(
-                    "{}-{}",
-                    title.as_str(),
-                    uuid.chars().take(12).collect::<String>()
-                )
-            });
-            let placement = prepare_task_placement(
-                &main,
-                &task.plan.title,
-                Some(&item),
-                &TaskProcessOptions {
-                    name: Some(name),
-                    ..options.clone()
-                },
-            )
-            .await?;
+                    .and_then(|record| record.item.branch_name),
+                None => None,
+            };
+            let placement =
+                prepare_task_placement(&main, &task, branch.as_deref(), &options).await?;
             place_prepared_task(&store, &task.id, placement).await?
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
@@ -1051,8 +1032,8 @@ struct TaskPlacement {
 
 async fn prepare_task_placement(
     main_repo: &Path,
-    title: &str,
-    item: Option<&crate::pm::PmItem>,
+    task: &Task,
+    recorded_branch: Option<&str>,
     options: &TaskProcessOptions,
 ) -> OpsResult<TaskPlacement> {
     let directive = options
@@ -1063,26 +1044,21 @@ async fn prepare_task_placement(
     if directive.as_deref() == Some("") {
         return Err(task_error("directive cannot be empty"));
     }
+    let uuid = task.id.as_str().trim_start_matches("task_");
+    let title = derive_workspace_slug(&task.plan.title)?;
     let segment = match options.name.as_deref() {
         Some(name) => parse_workspace_slug(name)?,
-        None => derive_workspace_slug(title)?,
+        None => parse_workspace_slug(&format!(
+            "{}-{}",
+            derive_workspace_slug_with_cap(&task.plan.title, 4)?.as_str(),
+            uuid.chars().take(12).collect::<String>(),
+        ))?,
     };
     let workspace_slug = segment.as_str().to_string();
-    let recorded_branch = item
-        .and_then(|item| item.branch_name.as_deref())
-        .filter(|branch| !branch.is_empty());
-    let generated_branch = item
-        .filter(|item| item.id.starts_with("task_"))
-        .map(|item| {
-            Ok::<_, OpsError>(format!(
-                "lf/{}/{}",
-                item.id.trim_start_matches("task_"),
-                derive_workspace_slug(title)?.as_str()
-            ))
-        })
-        .transpose()?;
-    let branch = recorded_branch.or(generated_branch.as_deref());
-    let mut plan = plan_branch_placement(main_repo, segment, branch)
+    let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
+    let generated_branch = format!("lf/{uuid}/{}", title.as_str());
+    let branch = recorded_branch.unwrap_or(&generated_branch);
+    let mut plan = plan_branch_placement(main_repo, segment, Some(branch))
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
@@ -1102,11 +1078,7 @@ async fn prepare_task_placement(
                     "stack parent {parent_issue:?} has no Task; run it first"
                 ))
             })?;
-        if item.is_some_and(|item| {
-            parent_task.id.as_str() == item.id
-                || parent_task.plan.linear_id.as_ref().map(|id| id.as_str())
-                    == Some(item.id.as_str())
-        }) {
+        if parent_task.id == task.id {
             return Err(task_error("a Task cannot stack on itself"));
         }
         let parent = store
@@ -6798,6 +6770,7 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_rejects_invalid_inputs_before_allocating_placement() {
         let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
         for (options, message) in [
             (
                 super::TaskProcessOptions {
@@ -6814,7 +6787,7 @@ mod tests {
                 "directive cannot be empty",
             ),
         ] {
-            let error = super::prepare_task_placement(repo.path(), "New task", None, &options)
+            let error = super::prepare_task_placement(repo.path(), &fixture.task, None, &options)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains(message), "{error}");
@@ -6830,11 +6803,12 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_preserves_occupied_placement_and_resolves_base_without_creating() {
         let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
         let options = super::TaskProcessOptions {
             name: Some("existing-task".into()),
             ..Default::default()
         };
-        let planned = super::prepare_task_placement(repo.path(), "New task", None, &options)
+        let planned = super::prepare_task_placement(repo.path(), &fixture.task, None, &options)
             .await
             .unwrap();
         assert_eq!(planned.plan.base_ref, repo.head_sha());
@@ -6842,7 +6816,8 @@ mod tests {
         std::fs::create_dir_all(&planned.plan.worktree_path).unwrap();
         let authored = planned.plan.worktree_path.join("authored.txt");
         std::fs::write(&authored, "retain these bytes").unwrap();
-        let result = super::prepare_task_placement(repo.path(), "New task", None, &options).await;
+        let result =
+            super::prepare_task_placement(repo.path(), &fixture.task, None, &options).await;
         assert!(result.unwrap_err().to_string().contains("already exists"));
         assert_eq!(
             std::fs::read_to_string(&authored).unwrap(),
@@ -6854,6 +6829,7 @@ mod tests {
     #[tokio::test]
     async fn task_checkout_pins_upstream_without_requiring_clean_canonical_main() {
         let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
         let upstream = repo.head_sha();
         repo.create_file("local.txt", "unpublished main work");
         repo.stage_all();
@@ -6862,7 +6838,7 @@ mod tests {
         repo.create_file("dirty.txt", "uncommitted work");
         let prepared = super::prepare_task_placement(
             repo.path(),
-            "Clean task",
+            &fixture.task,
             None,
             &super::TaskProcessOptions::default(),
         )
@@ -6885,16 +6861,17 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_keeps_the_resolved_base_when_the_remote_ref_advances() {
         let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
         let prepared = super::prepare_task_placement(
             repo.path(),
-            "Pinned base",
+            &fixture.task,
             None,
             &super::TaskProcessOptions::default(),
         )
         .await
         .unwrap();
         let original = repo.head_sha();
-        repo.create_file("later.txt", "arrived while Linear was creating the issue");
+        repo.create_file("later.txt", "arrived before placement committed");
         repo.stage_all();
         repo.commit("Advance the remote after preparation");
         repo.push();
@@ -6918,6 +6895,7 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_refuses_an_unresolvable_base_before_allocating_placement() {
         let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("FIX-2", repo.path().to_path_buf()).await;
         let output = std::process::Command::new("git")
             .current_dir(repo.path())
             .args([
@@ -6931,7 +6909,7 @@ mod tests {
         assert!(output.status.success());
         let error = super::prepare_task_placement(
             repo.path(),
-            "New task",
+            &fixture.task,
             None,
             &super::TaskProcessOptions {
                 name: Some("missing-base".into()),
@@ -6962,11 +6940,32 @@ mod tests {
             std::env::remove_var(name);
         }
         let repo = loopflow_test_support::TestRepo::new();
-        let fixture = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
-        std::env::set_var("LF_HOME", fixture._database.path());
+        let parent = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
+        std::env::set_var("LF_HOME", parent._database.path());
+        for selector in ["FIX-1", parent.task.id.as_str(), "FIX-1-issue"] {
+            let error = super::prepare_task_placement(
+                repo.path(),
+                &parent.task,
+                None,
+                &super::TaskProcessOptions {
+                    stack_on: Some(selector.into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("cannot stack on itself"),
+                "{error}"
+            );
+        }
+        let child = Task {
+            id: TaskId::new(),
+            ..parent.task.clone()
+        };
         let result = super::prepare_task_placement(
             repo.path(),
-            "Child",
+            &child,
             None,
             &super::TaskProcessOptions {
                 name: Some("child-task".into()),
@@ -6979,21 +6978,16 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("open the parent PR"));
-        let retained = fixture
+        let retained = parent
             .store
-            .get_task(&fixture.task.id)
+            .get_task(&parent.task.id)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(retained.worktree, fixture.task.worktree);
-        assert_eq!(fixture.store.list_tasks(None).await.unwrap().len(), 1);
+        assert_eq!(retained.worktree, parent.task.worktree);
+        assert_eq!(parent.store.list_tasks(None).await.unwrap().len(), 1);
         assert_eq!(
-            fixture
-                .store
-                .task_prs(&fixture.task.id)
-                .await
-                .unwrap()
-                .len(),
+            parent.store.task_prs(&parent.task.id).await.unwrap().len(),
             1
         );
     }

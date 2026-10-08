@@ -347,7 +347,8 @@ See [Machines and processes](architecture/machines.md) and
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
 lf project workflow set PROJECT research    # only the workflow
-lf project workflow customize research                     # .lf/workflows/research.yaml, written from the builtin
+lf project workflow source PROJECT research > /tmp/research.yaml
+lf project workflow set PROJECT research --file /tmp/research.yaml
 ```
 
 `plan.json` contains the complete current plan:

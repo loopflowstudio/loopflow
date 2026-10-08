@@ -1095,6 +1095,17 @@ Manage Wave identity, placement and planning
 |---|---|
 | `--help / -h` | Print help |
 
+## lf wave edit
+
+Replace authored Wave documents in their personal store or shared files
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--goal` | goal |
+| `--memory` | memory |
+| `--help / -h` | Print help |
+
 ## lf wave new-chapter
 
 Rotate this Wave using its exact destination in a retained chapter plan
@@ -1301,6 +1312,17 @@ Project-owned planning configuration
 |---|---|
 | `--help / -h` | Print help |
 
+## lf project edit
+
+Update a Project's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `--name` | name |
+| `--summary` | summary |
+| `--help / -h` | Print help |
+
 ## lf project workflow
 
 Select and inspect reusable Workflows
@@ -1309,12 +1331,23 @@ Select and inspect reusable Workflows
 |---|---|
 | `--help / -h` | Print help |
 
+## lf project workflow source
+
+Read the authored definition without creating a repository file
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `<name>` | name |
+| `--help / -h` | Print help |
+
 ## lf project workflow list
 
 List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
+| `--project` | Include this Project's stored Wave definitions |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1336,15 +1369,7 @@ Select the Workflow future Tasks take up; captured Tasks stay unchanged
 |---|---|
 | `<project>` | project |
 | `<name>` | name |
-| `--help / -h` | Print help |
-
-## lf project workflow customize
-
-Copy a builtin Workflow when needed and print its local path
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
+| `--file` | Store this definition in the Wave |
 | `--help / -h` | Print help |
 
 ## lf task
@@ -1353,6 +1378,17 @@ Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf task sync
+
+Synchronize a Task; explicitly resolve a state or comment conflict
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--resolve` | resolve |
+| `--comment` | Resolve this comment instead of the Task state; local keeps a new copy |
 | `--help / -h` | Print help |
 
 ## lf task workflow
@@ -1477,13 +1513,14 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 
 ## lf task create
 
-File a Task in the current chapter
+Create a planning Task without allocating a checkout or starting work
 
 | Argument | What it does |
 |---|---|
 | `--wave` | Wave name; defaults to the bound Wave |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
+| `--creation-id` | Retain this identity when retrying an interrupted creation |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1587,6 +1624,9 @@ Edit a Task's title or notes, before or after placement
 | `<issue>` | issue |
 | `--title` | title |
 | `--notes` | notes |
+| `--rank` | Zero-based position in the Project's Task order |
+| `--assignee` | Assignee identity; provider user ID in connected plans |
+| `--unassign` | unassign Default: false. |
 | `--wave / -w` | wave |
 | `--help / -h` | Print help |
 

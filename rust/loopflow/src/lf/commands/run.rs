@@ -687,9 +687,12 @@ fn begin_capture(
         work: built.work.clone(),
     };
     let capture = if let Some(session) = resume {
-        // A headless resume is another turn of the same conversation.
-        let input = crate::ops::human_session::continue_conversation(session)?;
-        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
+        CaptureHandle::continue_with_context(
+            session,
+            spec,
+            &built.context,
+            AgentProcessRequest::from_prepared(prepared_config, &built.capabilities),
+        )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {

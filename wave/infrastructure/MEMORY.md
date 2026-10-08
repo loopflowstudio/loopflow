@@ -1072,18 +1072,23 @@ Intelligence's October 1 ablation shows omitted context returning through disk r
 cost comparisons need repeated baselines and resumed history, absent from its pilot.
 No live-model fidelity or cost improvement is established.
 
-Codex 0.160.1 ignores unregistered explicit skill paths while returning success.
-Its documented per-cwd extra roots are ignored; `skills/extraRoots/set` works but
-replaces engine-global roots. A retained fake-API probe proves both expansion and
-replacement. The unsafe LF prototype was removed. Session input authority cannot
-rewrite sibling catalogs; captured-source native dispatch needs a revised approach.
-Earlier native receipts prove same-thread resume with context resupply, not recall.
+Codex 0.160.1 ignores unregistered explicit paths despite success. Its per-cwd
+extra-root field is ignored; the working replacement changes engine-global roots.
+The unsafe prototype remains removed. October 8's additive-catalog probe expands
+a captured path while preserving sibling roots and fresh plain `$audit` selection
+only after assigning the snapshot a unique native name. Keeping `name: audit`
+makes fresh plain invocation expand neither source; reused history hid that failure.
+This candidate proves no LF dispatch, placement/lifetime, native-name fidelity or
+complete controls/resources. Earlier receipts prove resume with context resupply,
+not recall.
 
 Claude's hook maps context to system on tested Sonnet/Opus; queued user context
-survives resume without resupply or answer leakage. PTY injection submits unfinished
-drafts, while inbox slash text stays unexpanded. These reject tested transports,
-not every native path; a replacement terminal remains unapproved. Resume still
-replaces capture before driver claim. Current-owner admission, uncertain delivery,
-cancellation and handoff remain unfinished. Release's entry-point lesson applies:
-provider success and LF dispatch are separate proofs, neither implies admission.
+survives resume without resupply or answer leakage. PTY injection submits drafts;
+inbox slash text stays unexpanded. A replacement terminal remains unapproved.
+Headless resume now reserves capture and claims driver atomically. CLI fixtures
+preserve held-owner captures on both harnesses; store/capture proofs cover losing
+claims, handoff and failed publication without provider completion. This is not
+held-owner delivery, uncertain-acknowledgement recovery or installed continuity.
+Resume context still follows caller cwd despite retained Session placement.
+Release's entry-point lesson applies: admission and provider success are separate.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

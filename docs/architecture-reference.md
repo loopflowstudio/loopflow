@@ -361,6 +361,12 @@ lf <command> <args>                               # operation step
 lf --batch session resume <session> <message>     # correction of an answer
 ```
 
+Headless Session correction reserves the next captured input and claims its driver
+in one SQLite transaction after provider-custody checks. A rejected driver claim
+leaves the previous capture unchanged. Publication failure retains the reservation
+and releases its driver without reporting a provider turn. This path does not yet
+deliver input through a held driver.
+
 A step is told nothing about its Flow and writes nothing about it. The driver
 writes FlowProcess, and only by appending: `flow_processes` holds one row per Flow process
 (driver Process, Flow name, graph as compiled at launch) and `flow_process_steps` one

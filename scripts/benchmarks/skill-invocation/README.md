@@ -108,12 +108,13 @@ the user-role requirement fails. This settles client request mapping; it proves
 no live-model behavior, Loopflow capture, live-terminal admission, tool policy,
 cross-harness translation or startup-cost improvement.
 
-The production resume path replaces the captured input before claiming a new
-driver. It cannot deliver through a surviving native terminal's current driver.
-A saved native Session and a live input queue require different admission;
-admission through the current owner remains implementation work. The harness API
-still needs structured subsequent-turn input. Claude headless first-turn delivery
-now separates context and invocation as described below.
+Headless resume now reserves its next capture and claims the driver in one SQLite
+transaction after provider-custody checks. Publication retains the new context and
+process request; failure releases only that driver and records no provider turn.
+CLI regressions for Claude and Codex preserve a held owner's input and history;
+store/capture tests cover losing claims, handoff and publication failure. These
+prove preservation, not delivery through a held owner. The harness API still needs
+structured subsequent-turn input and a current-owner transport.
 
 ## Native terminal admission
 
@@ -212,6 +213,35 @@ The LF prototype reproduced exit zero without expansion and was removed.
 to fail until native dispatch is implemented. Registering one Session's snapshot
 must not overwrite roots used by other conversations in the same engine.
 No global-root replacement or shared-engine rejection was added to production.
+
+### Additive Codex catalog selection
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --additive alias
+```
+
+October 8, Codex 0.160.1: a symlink in a disposable repository's `.agents/skills`
+exposes a captured definition without changing the engine's extra roots. The
+probe seeds a separate extra root and verifies it remains listed. An explicit
+skill input expands the canonical capture path. Fresh conversations before and
+after the mount both expand the original personal `$audit` source when the
+snapshot receives a unique `name` alias. Five fake-API requests establish these
+separate boundaries; no real model or credentials are used.
+
+`--additive original` is the counterexample and exits 1: keeping the snapshot's
+original `name: audit` preserves both catalog entries but makes a fresh plain
+`$audit` invocation expand neither. Checking an already-used thread would hide
+that failure because its earlier skill expansion remains in history.
+
+The alias is a candidate, not LF dispatch. Production placement, cleanup across
+cancellation/handoff, caller checkout preservation, catalog pollution/cost, native
+name semantics and complete assets/declarations remain unproved. The probe changes
+only its private fixture. It installs no global skills or settings. The official
+[App Server reference](https://learn.chatgpt.com/docs/app-server#skills) still
+documents the ineffective per-cwd field and separately describes process-wide root
+replacement; provider receipts govern these version-specific observations.
+
 
 ## Decisions and remaining work
 

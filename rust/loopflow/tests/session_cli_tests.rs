@@ -492,6 +492,74 @@ fn prepare_conversation(
     (session.id, input, dir)
 }
 
+#[cfg(unix)]
+#[test]
+fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for harness in ["claude", "codex"] {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = home.path().join("work");
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&cwd).unwrap();
+        std::fs::create_dir(&bin).unwrap();
+        let provider = bin.join(harness);
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\necho unexpected-provider-launch >&2\nexit 97\n",
+        ).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (id, input, dir) =
+            prepare_conversation(home.path(), &cwd, harness, "Preserve this draft");
+        let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let process = loopflow::id::ProcessLfid::new();
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let driver = store
+            .claim_session_driver(&id, None, &process, true)
+            .unwrap();
+        let before = store.session(&id).unwrap().unwrap();
+        let history = store.session_history(&id, 0, 0).unwrap();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let output = command(
+            home.path(),
+            &[
+                "--batch",
+                "--no-loopflow",
+                "session",
+                "resume",
+                &id,
+                "another instruction",
+            ],
+        )
+        .current_dir(&cwd)
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(!error.contains("unexpected-provider-launch"), "{error}");
+        assert_eq!(store.session(&id).unwrap().unwrap(), before);
+        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
+        assert!(dir.join("prepared").exists());
+        assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    }
+}
+
 #[test]
 fn waiting_lists_only_conversations_waiting_on_a_person() {
     let home = tempfile::tempdir().unwrap();

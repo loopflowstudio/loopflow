@@ -16,8 +16,28 @@ from continuity import _request, _send, _until
 from request_mapping import _run
 
 
+async def _turn(process: asyncio.subprocess.Process, workspace: Path, inputs: list[dict]) -> None:
+    thread = await _request(
+        process,
+        "thread/start",
+        {
+            "cwd": str(workspace),
+            "approvalPolicy": "never",
+            "sandbox": "read-only",
+        },
+    )
+    await _request(process, "turn/start", {"threadId": thread["thread"]["id"], "input": inputs})
+    await _until(process, lambda event: event.get("method") == "turn/completed")
+
+
 async def _native(
-    codex: str, workspace: Path, env: dict[str, str], snapshot: Path, context: str
+    codex: str,
+    workspace: Path,
+    env: dict[str, str],
+    snapshot: Path,
+    context: str,
+    additive: str | None,
+    source: Path,
 ) -> dict:
     process = await asyncio.create_subprocess_exec(
         codex,
@@ -55,32 +75,66 @@ async def _native(
         for register in [False, True]:
             if register:
                 await _request(process, "skills/extraRoots/set", {"extraRoots": [str(roots)]})
-            thread = await _request(
+            await _turn(
                 process,
-                "thread/start",
-                {"cwd": str(workspace), "approvalPolicy": "never", "sandbox": "read-only"},
+                workspace,
+                [
+                    {"type": "text", "text": context},
+                    {"type": "skill", "name": "audit", "path": str(snapshot)},
+                    {"type": "text", "text": "$audit alpha"},
+                ],
             )
-            await _request(
-                process,
-                "turn/start",
-                {
-                    "threadId": thread["thread"]["id"],
-                    "input": [
-                        {"type": "text", "text": context},
-                        {"type": "skill", "name": "audit", "path": str(snapshot)},
-                        {"type": "text", "text": "$audit alpha"},
-                    ],
-                },
-            )
-            await _until(process, lambda event: event.get("method") == "turn/completed")
         await _request(process, "skills/extraRoots/set", {"extraRoots": []})
         cleared = await _request(
             process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
         )
-        return {
+        checks = {
             "documented_roots_ignored": ignored,
             "replacement_clears_root": str(snapshot) not in json.dumps(cleared),
         }
+        if additive:
+            sibling = snapshot.parents[3] / "sibling-skills/sibling/SKILL.md"
+            sibling.parent.mkdir(parents=True)
+            sibling.write_text(
+                "---\nname: sibling\ndescription: Retained sibling skill.\n---\nKeep this skill.\n"
+            )
+            await _request(
+                process, "skills/extraRoots/set", {"extraRoots": [str(sibling.parent.parent)]}
+            )
+            await _turn(process, workspace, [{"type": "text", "text": "$audit baseline"}])
+            alias = f"lf-{uuid.uuid4().hex}"
+            if additive == "alias":
+                snapshot.write_text(
+                    snapshot.read_text().replace("name: audit\n", f"name: {alias}\n", 1)
+                )
+            mount = workspace / ".agents/skills" / alias
+            mount.parent.mkdir(parents=True, exist_ok=True)
+            mount.symlink_to(snapshot.parent, target_is_directory=True)
+            listed = await _request(
+                process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
+            )
+            skills = [skill for group in listed["data"] for skill in group["skills"]]
+            selected = next(
+                (skill for skill in skills if Path(skill["path"]).resolve() == snapshot), None
+            )
+            checks["additive_catalog_membership"] = selected is not None
+            checks["sibling_root_preserved"] = any(
+                Path(skill["path"]).resolve() == sibling for skill in skills
+            )
+            checks["original_skill_preserved"] = any(
+                Path(skill["path"]) == source for skill in skills
+            )
+            if selected:
+                await _turn(
+                    process,
+                    workspace,
+                    [
+                        {"type": "skill", "name": selected["name"], "path": selected["path"]},
+                        {"type": "text", "text": f"${selected['name']} additive"},
+                    ],
+                )
+            await _turn(process, workspace, [{"type": "text", "text": "$audit after"}])
+        return checks
     finally:
         process.stdin.close()
         try:
@@ -90,7 +144,20 @@ async def _native(
             await process.wait()
 
 
-def _probe(lf: Path | None, codex: str) -> bool:
+def _skill_paths(request: dict) -> list[str]:
+    return [
+        block["text"].split("<path>", 1)[1].split("</path>", 1)[0]
+        for item in request.get("input", [])
+        if item.get("role") == "user"
+        for block in item.get("content", [])
+        if isinstance(block, dict)
+        and block.get("text", "").startswith("<skill>\n")
+        and "<path>" in block["text"]
+        and "</path>" in block["text"]
+    ]
+
+
+def _probe(lf: Path | None, codex: str, additive: str | None = None) -> bool:
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -150,7 +217,8 @@ def _probe(lf: Path | None, codex: str) -> bool:
                 "[analytics]\nenabled = false\n[feedback]\nenabled = false\n"
             )
             workspace = root / "workspace"
-            skill = workspace / ".agents/skills/audit/SKILL.md"
+            workspace.mkdir()
+            skill = (home if additive else workspace) / ".agents/skills/audit/SKILL.md"
             skill.parent.mkdir(parents=True)
             marker, context = uuid.uuid4().hex, uuid.uuid4().hex
             source = (
@@ -167,12 +235,14 @@ def _probe(lf: Path | None, codex: str) -> bool:
                 snapshot = root / "captured/skills/audit/SKILL.md"
                 snapshot.parent.mkdir(parents=True)
                 snapshot.write_text(source)
-                checks = asyncio.run(_native(codex, workspace, env, snapshot, context))
+                checks = asyncio.run(
+                    _native(codex, workspace, env, snapshot, context, additive, skill)
+                )
                 checks.update(
-                    two_requests=len(requests) == 2,
-                    unregistered_path_ignored=len(requests) == 2
+                    expected_requests=len(requests) == (5 if additive else 2),
+                    unregistered_path_ignored=len(requests) >= 2
                     and marker not in json.dumps(requests[0].get("input", [])),
-                    registered_path_expanded=len(requests) == 2
+                    registered_path_expanded=len(requests) >= 2
                     and any(
                         f"<path>{snapshot}</path>" in json.dumps(item)
                         and marker in json.dumps(item)
@@ -180,7 +250,37 @@ def _probe(lf: Path | None, codex: str) -> bool:
                         if item.get("role") == "user"
                     ),
                 )
-                print(json.dumps({"mode": "provider-counterexample", "checks": checks}), flush=True)
+                if additive:
+                    checks["additive_native_expansion"] = len(requests) == 5 and any(
+                        marker in json.dumps(item)
+                        and "<skill>" in json.dumps(item)
+                        and f"<path>{skill}</path>" not in json.dumps(item)
+                        for item in requests[3].get("input", [])
+                        if item.get("role") == "user"
+                    )
+                    before, after = _skill_paths(requests[2]), _skill_paths(requests[-1])
+                    checks["implicit_selection_unchanged"] = before == after == [str(skill)]
+                    print(
+                        json.dumps(
+                            {
+                                "before_mount": before,
+                                "explicit_mount": _skill_paths(requests[3])
+                                if len(requests) == 5
+                                else [],
+                                "after_mount": after,
+                            }
+                        ),
+                        flush=True,
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "mode": "additive-catalog" if additive else "provider-counterexample",
+                            "checks": checks,
+                        }
+                    ),
+                    flush=True,
+                )
                 return all(checks.values())
             env["LF_BIN"] = str(lf)
             result = _run(
@@ -247,10 +347,17 @@ def main() -> int:
         help="Check the pending native LF implementation instead of the provider counterexample",
     )
     parser.add_argument("--codex", default=shutil.which("codex"))
+    parser.add_argument(
+        "--additive",
+        choices=["original", "alias"],
+        help="Probe a skill link while preserving sibling roots and plain invocation",
+    )
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")
-    return 0 if _probe(args.lf.resolve() if args.lf else None, args.codex) else 1
+    if args.lf and args.additive:
+        parser.error("--additive probes provider catalog behavior without --lf")
+    return 0 if _probe(args.lf.resolve() if args.lf else None, args.codex, args.additive) else 1
 
 
 if __name__ == "__main__":

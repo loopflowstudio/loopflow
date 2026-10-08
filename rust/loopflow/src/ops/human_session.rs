@@ -258,23 +258,6 @@ pub enum SessionFlowOccurrence {
     Past,
 }
 
-/// Add one headless input to an open conversation and return it prepared; the
-/// launch that takes it resumes the conversation's native history.
-pub(crate) fn continue_conversation(id: &str) -> Result<String> {
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
-    anyhow::ensure!(
-        next.completed_at.is_none(),
-        "session {id:?} is already complete"
-    );
-    let replaced = next.captured;
-    next.artifact_key = crate::session_record::new_artifact_key();
-    next.input_published = false;
-    let next = store.replace_session_input(replaced, next)?;
-    let flow = crate::session_record::SessionFlowMembership::Independent;
-    Ok(publish_prepared_input(&store, &next, flow)?.artifact_key)
-}
-
 pub(crate) fn publish_prepared_input(
     store: &crate::store::sqlite::SqliteStore,
     session: &AgentSession,
@@ -638,7 +621,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -
     args
 }
 
-fn work_selector(session: &AgentSession) -> Option<String> {
+pub(crate) fn work_selector(session: &AgentSession) -> Option<String> {
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(format!("task:{task}")),
         (None, Some(wave)) => Some(format!("wave:{wave}")),

@@ -70,7 +70,7 @@ def main() -> int:
     command = [
         str(binary),
         "--tui",
-        "-m",
+        "-a",
         args.agent,
         ":",
         "Without tools, reply with the context marker from probe.md, one provider name "

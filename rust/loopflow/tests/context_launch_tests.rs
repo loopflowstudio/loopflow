@@ -71,7 +71,7 @@ exit 23
         }
         let output = command
             .current_dir(repo.path())
-            .args(["--tui", "-m", harness, "probe", "Find the fixture goal."])
+            .args(["--tui", "-a", harness, "probe", "Find the fixture goal."])
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
@@ -154,7 +154,7 @@ while read -r line; do :; done
     }
     let output = command
         .current_dir(repo.path())
-        .args(["-b", "-m", "codex", "probe"])
+        .args(["-b", "-a", "codex", "probe"])
         .env("HOME", home.path())
         .env("LF_HOME", home.path().join("machine"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))

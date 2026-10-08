@@ -628,13 +628,15 @@ and dirty files. Nested calls retain the origin; cancel invocation forwarding
 even when the SSH master survives. No replay, resident service, detached-work
 guarantee or landing.
 
-LOO-406 published `dfe18ab60` and local `3a219561a` still
-use personal/Linear writers; the latter updates memory only. Creation retains an
-ID, but public edits lack operation identity and comments mint one per call.
-Callback retry cannot wrap a separate mutation/receipt crash gap. Required writer
-APIs: `scratch/work-on-another-machine-name.md`. Callback unimplemented.
-Five scenarios at `0cd8e7f14` prove only adoption. Worktree-built public
-dispatch, lost replies, history and loopback cleanup remain open.
+LOO-406's previously published `dfe18ab60` and rechecked local `3a219561a`
+still use personal/Linear writers; the latter updates memory only. Creation
+retains identity; edits/comments lack public retry identity. Mutation and receipt
+need one commit boundary. LOO-412 owns transport and worker registration; only
+the host writer depends on LOO-406. Callback unimplemented. Release's entry-point
+lesson requires unavailable/unconfirmed failures to reach command exits.
+Five scenarios at `0cd8e7f14` prove only adoption. Public dispatch, lost replies,
+history and loopback cleanup remain open; `scratch/work-on-another-machine-name.md`
+owns the remaining plan.
 
 ## Synced planning integration (LOO-334)
 

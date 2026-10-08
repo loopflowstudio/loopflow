@@ -1,170 +1,202 @@
-# Loopflow Website Content
-# Edit copy here—no need to touch main.py
+# Homepage copy approved by Jack Heart, prototype 05, 2026-10-07.
+# Edit copy here; main.py renders it.
 
 homepage:
+  navigation:
+  - label: Flows
+    href: '#flows'
+  - label: Tasks
+    href: '#tasks'
+  - label: Mac app
+    href: '#mac'
+  - label: Why
+    href: '#why'
+  - label: Docs ↗
+    href: /docs
   hero:
-    tagline: "A software instrument."
-    subline: >-
-      It doesn't make the software for you. You make the software through it.
-    loopflow_download_url: "https://downloads.loopflow.studio/Loopflow-latest.dmg"
-
-  showcase:
+    label: Loopflow is a software instrument
+    tagline: A command line for great software engineering.
+    subline: A free, open-source podium for conducting your software orchestra, with native
+      macOS and terminal interfaces.
+    actions:
+    - label: See it ↓
+      href: '#flows'
+    - label: Install ↓
+      href: '#start'
+    commands: |-
+      $ lf skill design "Add CSV export"  # one session
+      $ lf run ship-api                   # a Flow: sessions in order
+      $ lf flow list                      # the Flows you have
+      $ lf task create --title "Add CSV export"
+      $ lf task run EXP-12                # a task's next step
+      $ lf task status EXP-12
+      $ lf session list                   # every conversation
+      $ lf wave status exports            # the plan
+      $ lf pr land                        # merge it
+  ownership:
     items:
-      - image: "/static/wave-surface.png"
-        image_alt: "A Wave with its objective, projects, tasks, and live conversation"
-        caption: "A Wave: its goal, its work, and a conversation you can steer."
+    - title: Your models
+      text: Claude Code, Codex, or OpenCode, on your own accounts.
+    - title: Your machines
+      text: Runs locally, and over SSH where you choose.
+    - title: Your methods
+      text: Skills and workflows are files in your repo (or use the built-ins). MIT licensed.
+    - title: Your terminal
+      text: lf is a command. Run it in the terminal you already use.
+  flows:
+    label: In the terminal
+    heading: Stay in flow while you work with agents.
+    introduction: 'A session is one conversation with an agent. Good work takes several: a plan,
+      a build, a check, another pass. A Flow is a file that runs those sessions in order: each
+      step is its own session, with a commit between them. lf runs the Flow in whatever terminal
+      you are in.'
+    example:
+      label: 'Example loopflow:'
+      steps:
+      - name: kickoff
+        detail: writes a design note
+        you: false
+      - name: review-design
+        detail: a conversation with you
+        you: true
+      - name: implement
+        detail: builds it
+        you: false
+      - name: gate
+        detail: runs the checks
+        you: false
+      - name: demo
+        detail: a conversation with you
+        you: true
+      loop_to: implement
+      loop_label: another pass
+      exit_label: done
+      exit_to: land
+      caption: The filled steps are conversations with you.
+      file: .lf/flows/feature.yaml
+    commands: |-
+      # .lf/flows/ship-api.yaml
+      - implement
+      - compress
+      - gate
 
-  pillars:
-    heading: "One task at a time"
-    diagram_alt: >-
-      You ask, and you make the plan together. It builds and checks, then
-      you review the demo. If the result is not right yet, it
-      builds again and shows you another demo. Otherwise the work is done.
+      # one session
+      $ lf implement "Rate-limit the export endpoint"
+
+      # the Flow: three sessions, in order
+      $ lf run ship-api "Rate-limit the export endpoint"
+    parts:
+    - title: Skills & workflows
+      description: Instructions are Markdown and sequences are YAML, kept in your repository,
+        or use the built-ins. Choose the steps, and which of them are conversations with you.
+      link:
+        label: Skills and workflows ↗
+        href: /docs/authoring
+    - title: Scale the autonomy
+      description: Stay in one session and steer as you go, meet it at design and demo, or let
+        it run. Choose one per task or per project.
+      link:
+        label: Write your own Flow ↗
+        href: /docs/authoring#flows
+    - title: Checks & review
+      description: Checks run on each change. After a task’s pull request is handed off for
+        landing, a failed required check can start a repair in the same task.
+      link:
+        label: Review workflows ↗
+        href: /docs/authoring#loopflows
+  tasks:
+    label: Around the sessions
+    heading: An organizing system for all your work.
+    introduction: Whether you are one person or a large company. Four things, each inside the
+      one before, kept in the same records the terminal and the Mac app read.
     items:
-      - title: "Make the plan"
-        description: >-
-          You say what you want. You work out the plan together and it
-          writes it down.
-      - title: "Let it build"
-        description: >-
-          It works in small steps and checks each one. Watch, or go do
-          something else.
-      - title: "See the result"
-        description: >-
-          It shows you what it made, working. Not right yet? It goes back
-          and builds again.
-
-  problems:
-    heading: "What it helps with"
-    items:
-      - title: "It goes in circles"
-        problem: >-
-          AI can build a lot of software fast. It can also spend all day
-          going in circles, and it's hard to tell which is happening.
-        solve: >-
-          Loopflow keeps track, so you can see what got done and what still
-          needs you.
-      - title: "It says it's done"
-        problem: >-
-          Finished and working are not the same thing.
-        solve: >-
-          Loopflow shows you the result running before anything counts as
-          done.
-      - title: "You lose the thread"
-        problem: >-
-          The more you hand off, the more there is to catch up on.
-        solve: >-
-          Loopflow checks in at the plan and at the demo. Step in closer
-          whenever you like.
-      - title: "It forgets"
-        problem: >-
-          Every new session starts from zero.
-        solve: >-
-          Loopflow writes down what it learned and brings it to the next
-          task.
-      - title: "Tasks trip over each other"
-        problem: >-
-          Two things in progress at once can undo each other.
-        solve: >-
-          Each task gets its own copy of your project, so work in progress
-          never collides.
-      - title: "It's not how you'd do it"
-        problem: >-
-          Everyone works differently.
-        solve: >-
-          Every step is a plain text file. Change any of them.
-
-  definition:
-    heading: "What is a loopflow?"
-    diagram_alt: >-
-      The default workflow, step by step: kickoff, review plan, implement,
-      compress, review, decide, review demo, decide, done. Review plan and
-      review demo are nodes where a person takes part; the steps between
-      them are flows. Each decide step can return to implement.
+    - label: Wave
+      title: A goal
+      text: A lasting objective, with its plan and its memory. Reviewed notes carry goals and
+        lessons into later sessions, so you do not rebuild context by hand.
+      commands: |-
+        $ lf --wave exports : "Review the goal"
+        $ lf wave status exports
+      link:
+        label: Tasks and Waves ↗
+        href: /docs/waves
+    - label: Project
+      title: The plan
+      text: 'What the Wave is doing now: its tasks, its key results, and the workflow its tasks
+        follow.'
+      commands: |-
+        $ lf task create --wave exports \
+             --title "Add CSV export"
+    - label: Task
+      title: One outcome
+      text: Each task gets its own working copy, branch, and pull request. Its sessions stay
+        with it. Return to a task and its work is where you left it.
+      commands: |-
+        $ lf task run EXP-12
+        $ lf task status EXP-12
+      link:
+        label: Worktrees and delivery ↗
+        href: /architecture/delivery
+    - label: Workflow
+      title: Your part in it
+      text: A workflow joins them. It names the points where you take part in a task’s conversation
+        and the Flow that runs between each. A Flow is a file, so a team can review how it works
+        with agents the way it reviews code.
+      commands: |-
+        # .lf/workflows/feature.yaml
+        nodes:
+          design: review-design
+          demo: demo
+        edges:
+          - { from: start,  to: design, flow: task-design }
+          - { from: design, to: demo,   flow: pursue }
+          - { from: demo,   to: demo,   flow: pursue }
+          - { from: demo,   to: end,    flow: ship }
+      link:
+        label: Write a workflow ↗
+        href: /docs/authoring#workflows
+  mac:
+    label: On your Mac
+    heading: Your sessions, organized around the work.
+    introduction: Loopflow for Mac files each conversation with the task it belongs to. Go from
+      the plan to a task’s terminal to what it shipped.
+    capture:
+      image: /static/wave-surface.png
+      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their
+        status
+      width: 2880
+      height: 1800
+      caption: Actual capture, unedited. The Mac app includes the command line tool; the command
+        line tool does not need the Mac app.
+  why:
+    label: Why it exists
+    claim: To empower any human being to build with endless scale.
+    lead: With great agents comes a need for great software process.
     paragraphs:
-      - >-
-        A flow is a directed graph of steps. Each step gives an agent one
-        bounded job. In a pipeline, steps run in order and the graph has no
-        cycles.
-      - >-
-        A loopflow is a flow with at least one backward edge. A deciding
-        step looks at the work so far and either continues forward or
-        returns to an earlier step. The steps in between form the loop
-        body, and they repeat until the deciding step moves on.
-
-  scale:
-    heading: "Works for one person or a whole company"
-    text: >-
-      Everyone runs it on their own computer, set up their own way. Nobody
-      has to buy it or get it approved. A team can start with one person
-      who already uses it.
-
-  building_blocks:
-    heading: "Every step is a file you can change"
-    items:
-      - label: "A skill"
-        filename: ".lf/skills/implement.md"
-        content: |
-          Turn the design doc into working code.
-
-          ## Workflow
-          1. Understand the design
-          2. Implement data structures and functions
-          3. Verify with tests and done-when checks
-
-      - label: "A flow"
-        filename: ".lf/flows/pursue.yaml"
-        content: |
-          - implement
-          - compress
-          - flow: refresh
-          - loop: implement
-          - pr-publish
-      - label: "A workflow"
-        filename: ".lf/workflows/feature.yaml"
-        content: |
-          nodes:
-            design: review-design
-            demo: demo
-          edges:
-            - { from: start,  to: design, flow: task-design }
-            - { from: design, to: demo,   flow: pursue }
-            - { from: demo,   to: demo,   flow: pursue }
-            - { from: demo,   to: end,    flow: ship }
-      - label: "A task"
-        filename: "terminal"
-        content: |
-          lf task create --wave auth \
-            --title "Unify token validation"
-          lf -b task run AUTH-12
-          lf comment AUTH-12 \
-            "prefer the middleware approach"
-          lf task status AUTH-12 --json
-          lf land -c
-      - label: "A wave"
-        filename: "wave/auth/GOAL.md"
-        content: |
-          ## Objective
-
-          Unify authentication. Each wake, pick the next gap — duplicate
-          token validation, session refresh, a slow startup path — direct
-          the concrete Task that closes it, and record what shipped in
-          memory.
-
-          ## Process
-
-          Read current Projects, KR proof, and Project-owned metrics. Route
-          the most important gap to its owning Project; record only
-          strategy-changing learning in memory.
-
+    - Agents make it possible for one engineer to build what used to take a team. They make
+      it just as easy to bury yourself in a mess. The more you zoom out, the more you need to
+      zoom in to counterbalance.
+    - The emphasis of the Loopflow product is around the work done by you. Its purpose is to
+      make your time more effective, to help you mentally organize around the work happening
+      with your agents.
   install:
-    heading: "Get Loopflow"
-    facts: >-
-      Free and open source · Runs on your computer · Every step is a file
-      you can change · Needs Claude Code or Codex, which have their own cost
-    note: "The Mac app includes the command line tool."
-    cli_label: "Or just the command line tool (macOS or Linux):"
-    command_display: |
-      curl -fsSL https://loopflow.studio/install.sh | sh
-      lf init
-    command_copy: "curl -fsSL https://loopflow.studio/install.sh | sh && lf init"
+    label: Install
+    heading: Start playing.
+    commands: |-
+      # macOS or Linux, with Claude Code, Codex, or OpenCode installed
+      $ curl -fsSL https://loopflow.studio/install.sh | sh
+      $ lf init
+    links:
+    - label: Getting started ↗
+      href: /docs/getting-started
+    - label: Source ↗
+      href: https://github.com/loopflowstudio/loopflow
+    download_label: Download for Mac
+    download_url: https://downloads.loopflow.studio/Loopflow-latest.dmg
+  footer:
+    text: Loopflow · An open-source software instrument.
+    links:
+    - label: Get started ↗
+      href: /docs/getting-started
+    - label: Source ↗
+      href: https://github.com/loopflowstudio/loopflow

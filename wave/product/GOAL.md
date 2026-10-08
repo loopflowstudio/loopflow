@@ -25,14 +25,15 @@ planning, identity, and legal actions without inventing a second authority.
 
 The Wave retains its objective, memory, cadence, budget, chat, and metric
 instruments. Exactly one internal Project owns the current chapter's Tasks, KRs,
-metric targets, and recommended Flow. Present the plan through the Wave; ordinary
+metric targets, and Workflow selection. Present the plan through the Wave; ordinary
 navigation and steering select Waves and Tasks. Historical chapters remain readable.
 Linear owns authored planning; the local registry supplies shared reads.
 
 Chapter changes use the deterministic `lf wave new-chapter` operation after the
 concrete plan is accepted. Started unfinished Tasks keep their identity, checkout,
-PR, and Flow. Untouched backlog expires as abandoned; uncertain evidence cannot
-authorize closure. Code integration alone never authorizes a live migration.
+PR, and execution. Unreviewed backlog stays in its Project until explicit
+disposition; uncertain evidence cannot authorize closure. Code integration alone
+never authorizes a live migration.
 
 ## Process
 

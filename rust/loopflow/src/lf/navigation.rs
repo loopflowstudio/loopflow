@@ -2,7 +2,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use clap::{Command, CommandFactory};
+use clap::{Command, CommandFactory, Parser};
 
 use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
 use crate::lf::{Cli, Commands, FlowCommand};
@@ -102,6 +102,69 @@ fn descendant_flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Ar
     })
 }
 
+fn takes_separate_value(tree: &Command, current: &Command, value: &str, boundary: bool) -> bool {
+    if value.contains('=') || (!value.starts_with("--") && value.len() > 2) {
+        return false;
+    }
+    flag(current, value)
+        .or_else(|| flag(tree, value))
+        .or_else(|| {
+            (!boundary)
+                .then(|| descendant_flag(current, value))
+                .flatten()
+        })
+        .is_some_and(|arg| arg.get_action().takes_values())
+}
+
+/// Remove only transport options; the target owns command parsing and placement.
+pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>, clap::Error> {
+    let tree = command_tree();
+    let mut current = &tree;
+    let mut path = Vec::new();
+    let mut boundary = false;
+    let mut transport = vec!["lf".to_string()];
+    let mut remote = Vec::new();
+    let mut index = 1;
+    while index < args.len() {
+        let value = &args[index];
+        if value == "--" {
+            remote.extend_from_slice(&args[index..]);
+            break;
+        }
+        if value.starts_with('-') {
+            let name = value.split('=').next().expect("split has a first item");
+            let is_transport = matches!(name, "--machine" | "--secret" | "--forward-agent");
+            let start = index;
+            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
+                index += 1;
+            }
+            let tokens = &args[start..=index];
+            if is_transport {
+                transport.extend_from_slice(tokens);
+            } else {
+                remote.extend_from_slice(tokens);
+            }
+        } else {
+            remote.push(value.clone());
+            if !boundary {
+                if let Some(expansion) = resolve_child(current, value, &path).ok().flatten() {
+                    for owner in &expansion {
+                        current = current
+                            .find_subcommand(owner)
+                            .expect("resolved child exists");
+                    }
+                    path.extend(expansion);
+                } else {
+                    boundary = true;
+                }
+            }
+        }
+        index += 1;
+    }
+    let cli = Cli::try_parse_from(transport)?;
+    Ok(cli.machine.is_some().then_some((cli, remote)))
+}
+
 /// Expand command owners and route help before execution or account selection.
 pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
     if args.len() < 2 {
@@ -130,11 +193,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             output.extend_from_slice(&args[index..]);
             break;
         }
-        // SSH's target and everything following it belong to the transport.
-        if current.get_name() == "ssh" && !value.starts_with('-') {
-            output.extend_from_slice(&args[index..]);
-            break;
-        }
         if value == "--help" || value == "-h" {
             help = true;
             index += 1;
@@ -145,19 +203,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             let selects_location = matches!(value.split('=').next(), Some("--task" | "--wt"))
                 && (path.is_empty() || flag(current, value).is_none());
             output.push(value.clone());
-            let argument = flag(current, value)
-                .or_else(|| flag(&tree, value))
-                .or_else(|| {
-                    (!boundary)
-                        .then(|| descendant_flag(current, value))
-                        .flatten()
-                });
-            let attached_short_value = !value.starts_with("--") && value.len() > 2;
-            if argument.is_some_and(|arg| arg.get_action().takes_values())
-                && !value.contains('=')
-                && !attached_short_value
-                && index + 1 < args.len()
-            {
+            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
                 output.push(args[index].clone());
             }
@@ -208,11 +254,14 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
-        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.sessions
+        Commands::Flow { cmd: FlowCommand::List { inventory, .. } } if inventory.processes
     ) || matches!(
         command,
         Commands::Flow {
-            cmd: FlowCommand::Show { sessions: true, .. }
+            cmd: FlowCommand::Show {
+                processes: true,
+                ..
+            }
         }
     ) {
         return None;
@@ -240,22 +289,23 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "filters over Flows that ran require --sessions"
+                    "filters over Flows that ran require --processes"
                 );
                 crate::lf::commands::flow::list(&repo, *json)?;
             }
             Commands::Flow {
                 cmd: FlowCommand::Show { name, json, .. },
             } => {
-                anyhow::ensure!(!json, "--json requires --sessions for flow show");
-                crate::lf::commands::flow::show(name, &repo)?;
+                if *json {
+                    let entry = crate::engine::flow_graph::flow_catalog_entry(name, &repo)?;
+                    println!("{}", serde_json::to_string(&entry)?);
+                } else {
+                    crate::lf::commands::flow::show(name, &repo)?;
+                }
             }
             Commands::Flow {
                 cmd: FlowCommand::Customize { name },
-            } => println!(
-                "{}",
-                crate::engine::workflow::customize(name, &repo)?.display()
-            ),
+            } => println!("{}", crate::engine::flow::customize(name, &repo)?.display()),
             _ => unreachable!("inspection command selected above"),
         }
         Ok(())
@@ -306,6 +356,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
+        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --secret <name>, --forward-agent\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }

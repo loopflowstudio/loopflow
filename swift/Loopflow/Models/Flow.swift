@@ -1,4 +1,4 @@
-// A Task's Flow as Rust projects it (`ops/task_flow.rs`, `engine/flow_graph.rs`).
+// Flow graphs, execution details and catalogs projected by Rust.
 //
 // Topology, captured node IDs, cursor position, return counts, and control
 // legality all come from the shared read. Clients draw them; they never parse
@@ -93,31 +93,13 @@ public struct FlowReturn: Decodable, Sendable, Hashable {
     public let traversals: UInt32
 }
 
-public enum TaskFlowExecution: String, Decodable, Sendable, Hashable {
+public enum TaskExecutionState: String, Decodable, Sendable, Hashable {
     case idle
     case starting
     case running
     case stalled
     case blocked
     case unknown
-}
-
-/// The most recently launched Flow and where its cursor stands.
-public struct LatestTaskFlow: Decodable, Sendable, Hashable {
-    public let invocationId: String
-    public let graph: FlowGraph
-    public let current: UInt32?
-    /// Occurrences finished in the current pass only.
-    public let completed: [UInt32]
-    public let returns: [FlowReturn]
-    public let iterations: [[UInt32]]
-    public let execution: TaskFlowExecution
-    public let reason: String
-
-    enum CodingKeys: String, CodingKey {
-        case graph, current, completed, returns, iterations, execution, reason
-        case invocationId = "invocation_id"
-    }
 }
 
 /// One launched step and how its process ended.
@@ -144,8 +126,8 @@ public struct FlowStepProcess: Decodable, Sendable, Hashable, Identifiable {
 
 /// One Flow process as its driver recorded it: the graph captured at launch and
 /// every step it started. Any Flow reads the same way, ad hoc or a Task's edge.
-public struct FlowDetail: Decodable, Sendable, Hashable {
-    public let entry: TaskFlowMember
+public struct FlowProcessDetail: Decodable, Sendable, Hashable {
+    public let entry: FlowProcessInventoryEntry
     public let graph: FlowGraph
     public let current: UInt32?
     public let completed: [UInt32]
@@ -154,93 +136,50 @@ public struct FlowDetail: Decodable, Sendable, Hashable {
     public let cwd: String?
     public let steps: [FlowStepProcess]
 
-    /// The run in the shape the diagram draws. `current` records no driver
-    /// exit, which is not proof of a live process.
-    public var progress: LatestTaskFlow {
+    /// Labels derived from recorded exits; these do not establish process liveness.
+    public var presentation: (execution: TaskExecutionState, reason: String) {
         let last = steps.last
-        let execution: TaskFlowExecution
-        let reason: String
         switch entry.state {
         case .current:
-            execution = .running
-            reason = last.map { "Running \($0.label)" } ?? "Starting"
+            return (.running, last.map { "Running \($0.label)" } ?? "Starting")
         case .completed:
-            execution = .idle
-            reason = "Completed"
+            return (.idle, "Completed")
         case .stopped:
-            let failed = last.flatMap { step in step.outcome.flatMap { $0 == "ok" ? nil : "\(step.label) · \($0)" } }
-            execution = failed == nil ? .idle : .blocked
-            reason = failed ?? "Stopped before its last step"
-        }
-        return LatestTaskFlow(invocationId: entry.id, graph: graph, current: current, completed: completed,
-                              returns: returns, iterations: iterations, execution: execution, reason: reason)
-    }
-}
-
-public enum TaskFlowRecord: Decodable, Sendable, Hashable {
-    /// No Flow has been launched for this Task.
-    case none
-    case latest(LatestTaskFlow)
-    /// The most recently launched Flow finished; its definition was not retained, so nothing is drawn.
-    case finished(flow: String)
-
-    private enum Kind: String, Decodable {
-        case none, latest, finished
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case kind, flow
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(Kind.self, forKey: .kind) {
-        case .none:
-            self = .none
-        case .latest:
-            self = .latest(try LatestTaskFlow(from: decoder))
-        case .finished:
-            self = .finished(flow: try container.decode(String.self, forKey: .flow))
+            guard let last, let outcome = last.outcome, outcome != "succeeded" else {
+                return (.idle, "Stopped before its last step")
+            }
+            return (.blocked, "\(last.label) · \(outcome)")
         }
     }
 }
 
-public enum TaskFlowControlKind: String, Decodable, Sendable, Hashable {
-    case start
-}
-
-public struct TaskFlowControl: Decodable, Sendable, Hashable {
-    public let kind: TaskFlowControlKind
-    /// Why the control cannot be used now; `nil` when it may be invoked.
+public struct TaskRunControl: Decodable, Sendable, Hashable {
     public let unavailable: String?
 }
 
-public struct TaskFlowSnapshot: Decodable, Sendable, Hashable {
-    /// The Flow a Start without a selection runs.
-    public let recommended: String
-    public let record: TaskFlowRecord
-    public let controls: [TaskFlowControl]
-
-    public func control(_ kind: TaskFlowControlKind) -> TaskFlowControl? {
-        controls.first { $0.kind == kind }
-    }
+public struct TaskExecutionSnapshot: Decodable, Sendable, Hashable {
+    public let state: TaskExecutionState
+    public let reason: String
+    public let step: String?
+    public let captured: Int64?
 }
 
-/// One Flow or workflow a Task can run, as it would be captured if started now.
+/// One autonomous definition, including an invalid local source.
 public struct FlowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
-    public enum Kind: String, Decodable, Sendable { case flow, workflow }
-
     public let name: String
-    public let kind: Kind
-    /// The repository file that defines it; `nil` for a builtin.
     public let source: String?
     public let graph: FlowGraph?
-    public let template: FlowTemplate?
-    public let workflow: WorkflowDefinition?
-    /// Why the definition cannot be used. Its file stays listed.
+    public let composition: FlowComposition?
     public let unavailable: String?
+    public var id: String { name }
+}
 
-    public var id: String { "\(kind.rawValue)/\(name)" }
+public struct WorkflowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
+    public let name: String
+    public let source: String?
+    public let workflow: WorkflowDefinition?
+    public let unavailable: String?
+    public var id: String { name }
 }
 
 /// An authored workflow before any Task has taken it up.
@@ -248,13 +187,6 @@ public struct WorkflowDefinition: Decodable, Sendable, Hashable {
     public let name: String
     public let nodes: [Workflow.Node]
     public let edges: [Workflow.Edge]
-}
-
-extension Array where Element == FlowCatalogEntry {
-    /// What `lf task run ISSUE <name>` would take up: a workflow wins over a Flow.
-    public func named(_ name: String) -> FlowCatalogEntry? {
-        first { $0.name == name && $0.kind == .workflow } ?? first { $0.name == name }
-    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.
@@ -267,14 +199,14 @@ public func flowIterationLabel(_ levels: [[UInt32]]) -> String? {
 }
 
 /// Template-local disclosure IDs never identify execution or an invocation.
-public struct FlowTemplate: Decodable, Sendable, Hashable {
+public struct FlowComposition: Decodable, Sendable, Hashable {
     public let revision: String
-    public let items: [FlowTemplateItem]
+    public let items: [FlowCompositionItem]
 }
 
-public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiable {
-    case node(key: UInt32, paths: [String: [FlowTemplateItem]])
-    case group(id: String, name: String, items: [FlowTemplateItem])
+public indirect enum FlowCompositionItem: Decodable, Sendable, Hashable, Identifiable {
+    case node(key: UInt32, paths: [String: [FlowCompositionItem]])
+    case group(id: String, name: String, items: [FlowCompositionItem])
 
     public var id: String {
         switch self {
@@ -290,11 +222,11 @@ public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiab
         switch try value.decode(Kind.self, forKey: .kind) {
         case .node:
             self = .node(key: try value.decode(UInt32.self, forKey: .key),
-                         paths: try value.decode([String: [FlowTemplateItem]].self, forKey: .paths))
+                         paths: try value.decode([String: [FlowCompositionItem]].self, forKey: .paths))
         case .group:
             self = .group(id: try value.decode(String.self, forKey: .id),
                           name: try value.decode(String.self, forKey: .name),
-                          items: try value.decode([FlowTemplateItem].self, forKey: .items))
+                          items: try value.decode([FlowCompositionItem].self, forKey: .items))
         }
     }
 
@@ -307,12 +239,12 @@ public indirect enum FlowTemplateItem: Decodable, Sendable, Hashable, Identifiab
 }
 
 /// Presentation maps hidden endpoints onto their visible composition boundary.
-public struct FlowTemplateProjection {
+public struct FlowCompositionProjection {
     public let graph: FlowGraph
     public let visibleKeys: [UInt32: UInt32]
     public let groups: [UInt32: String]
 
-    public init(graph: FlowGraph, items: [FlowTemplateItem], expanded: Set<String>) {
+    public init(graph: FlowGraph, items: [FlowCompositionItem], expanded: Set<String>) {
         var visible: [UInt32: UInt32] = [:]
         var groups: [UInt32: String] = [:]
         var sourceNodes: [UInt32: FlowNode] = [:]
@@ -324,7 +256,7 @@ public struct FlowTemplateProjection {
         }
         index(graph.steps)
         var next = (sourceNodes.keys.max() ?? 0) + 1
-        func nodes(_ items: [FlowTemplateItem]) -> [FlowNode] {
+        func nodes(_ items: [FlowCompositionItem]) -> [FlowNode] {
             items.flatMap { item -> [FlowNode] in
                 switch item {
                 case .group(let id, let name, let children):

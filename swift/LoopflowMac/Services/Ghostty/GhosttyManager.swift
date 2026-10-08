@@ -36,7 +36,7 @@ import GhosttyKit
 import CoreVideo
 
 enum GhosttyRuntimeResources {
-    static let sourceRevision = "4c838723173da757a16a2f3afd4c94f16732ef6a"
+    static let sourceRevision = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
 
     static var directoryURL: URL? {
         #if SWIFT_PACKAGE
@@ -226,6 +226,20 @@ final class GhosttyManager: ObservableObject {
             let terminal = MainActor.assumeIsolated {
                 Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue().terminal
             }
+            if action.tag == GHOSTTY_ACTION_PROGRAM_STATUS,
+               let status = action.action.program_status?.pointee,
+               let event = copyProgramStatusEvent(
+                   event: Int(status.event.rawValue), state: Int(status.state),
+                   kind: Int(status.kind), progress: Int(status.progress),
+                   id: status.id, app: status.app, title: status.title, msg: status.msg
+               ) {
+                let (owner, incarnation) = MainActor.assumeIsolated {
+                    let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
+                    return (view.programStatus, view.programStatus.incarnation)
+                }
+                Task { @MainActor in owner.receive(event, incarnation: incarnation) }
+                return true
+            }
             if action.tag == GHOSTTY_ACTION_RING_BELL {
                 Task { @MainActor in
                     NotificationCenter.default.post(name: .ghosttyTerminalBell, object: terminal)
@@ -248,15 +262,25 @@ final class GhosttyManager: ObservableObject {
             }
             return false
         }
-        runtimeConfig.read_clipboard_cb = { userdata, _, state in
-            guard let userdata else { return }
-            MainActor.assumeIsolated {
+        runtimeConfig.read_clipboard_cb = { userdata, _, state, _, _, _ in
+            guard let userdata else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
+            return MainActor.assumeIsolated {
                 let view = Unmanaged<GhosttyMetalView>.fromOpaque(userdata).takeUnretainedValue()
-                guard let surface = view.surface else { return }
+                guard let surface = view.surface else { return GHOSTTY_CLIPBOARD_READ_UNAVAILABLE }
                 let value = NSPasteboard.general.string(forType: .string) ?? ""
-                value.withCString {
-                    ghostty_surface_complete_clipboard_request(surface, $0, state, false)
+                value.withCString { text in
+                    "text/plain".withCString { mime in
+                        var content = ghostty_clipboard_content_s(mime: mime, data: text, len: value.utf8.count)
+                        withUnsafePointer(to: &content) { contents in
+                            var complete = ghostty_clipboard_complete_s(
+                                contents: contents, contents_len: 1, available: nil, available_len: 0,
+                                confirmed: false, remember: false
+                            )
+                            ghostty_surface_complete_clipboard_request(surface, &complete, state)
+                        }
+                    }
                 }
+                return GHOSTTY_CLIPBOARD_READ_STARTED
             }
         }
         runtimeConfig.confirm_read_clipboard_cb = { userdata, content, state, request in
@@ -266,17 +290,25 @@ final class GhosttyManager: ObservableObject {
                 guard let surface = view.surface else { return }
                 let allowed = request == GHOSTTY_CLIPBOARD_REQUEST_PASTE
                     || request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_WRITE
-                let value = allowed ? content.map(String.init(cString:)) ?? "" : ""
-                value.withCString {
-                    ghostty_surface_complete_clipboard_request(surface, $0, state, allowed)
+                guard allowed, let content else {
+                    ghostty_surface_deny_clipboard_request(surface, state)
+                    return
                 }
+                var complete = ghostty_clipboard_complete_s(
+                    contents: content.pointee.contents, contents_len: content.pointee.contents_len,
+                    available: content.pointee.available, available_len: content.pointee.available_len,
+                    confirmed: true, remember: false
+                )
+                ghostty_surface_complete_clipboard_request(surface, &complete, state)
             }
         }
         runtimeConfig.write_clipboard_cb = { _, _, content, len, _ in
             guard let content, len > 0, let data = content.pointee.data else { return }
+            let bytes = UnsafeRawBufferPointer(start: data, count: content.pointee.len)
+            let value = String(decoding: bytes, as: UTF8.self)
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            pasteboard.setString(String(cString: data), forType: .string)
+            pasteboard.setString(value, forType: .string)
         }
         runtimeConfig.close_surface_cb = { userdata, _ in
             guard let userdata else { return }

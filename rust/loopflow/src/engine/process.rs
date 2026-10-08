@@ -371,7 +371,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::process::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
-    crate::ops::flow_run::FLOW_ID_ENV,
+    crate::ops::flow_process::FLOW_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,
     crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,
     "LF_TERMINAL_ID",

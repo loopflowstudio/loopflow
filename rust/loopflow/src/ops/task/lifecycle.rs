@@ -19,7 +19,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
-    let blockers = associated_work_blockers(store, task)?;
+    let blockers = associated_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         eprintln!(
             "Task {} is complete; retained checkout: {}",
@@ -106,8 +106,8 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
     Ok(Some((store, task)))
 }
 
-async fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let blockers = associated_work_blockers(store, task)?;
+fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    let blockers = associated_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -121,7 +121,7 @@ pub(crate) fn notice_retained_task(
 ) -> OpsResult<()> {
     block_on_task(async {
         if let Some((store, task)) = branch_task(repo, branch).await? {
-            require_idle(&store, &task).await?;
+            require_idle(&store, &task)?;
             progress.status(&format!("Task {} and its Linear outcome remain unchanged; use `lf task abandon {}` to cancel the Task.", task.plan.identifier, task.plan.identifier));
         }
         Ok(())
@@ -283,7 +283,7 @@ async fn prepare_abandon(
         {
             return Err(task_error("completed Tasks cannot be abandoned"));
         }
-        require_idle(store, task).await?;
+        require_idle(store, task)?;
         for pr in &prs {
             // Merged history is never recast as abandonment.
             if pr.merge_commit.is_none() {
@@ -386,7 +386,7 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
             .output()?;
         if !output.status.success() {
             return Err(task_error(format!(
-                "linked PR {url} is untracked and unreadable; cancellation was not attempted"
+                "linked PR {url} is untracked and unreadable; retained checkout and PR"
             )));
         }
         #[derive(serde::Deserialize)]
@@ -395,7 +395,7 @@ async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResul
         }
         let pr: PullRequest = serde_json::from_slice(&output.stdout).map_err(task_error)?;
         if !matches!(pr.state.as_str(), "CLOSED" | "MERGED") {
-            return Err(task_error(format!("linked PR {url} is untracked and {}; close it explicitly before canceling this Task", pr.state)));
+            return Err(task_error(format!("linked PR {url} is untracked and {}; close it explicitly before removing this Task's checkout", pr.state)));
         }
     }
     Ok(())
@@ -484,31 +484,16 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// A Flow whose driver died is history; only live or unresolved execution waits.
-pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    associated_execution_blockers(store, task)
-}
-
-fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
-    let open = store.sqlite.open_processes().map_err(task_error)?;
-    store
-        .sqlite
-        .task_open_work(&task.id, &open)
-        .map_err(task_error)
-}
-
-/// Restoring a checkout preserves idle Flows; only unresolved execution waits.
+/// Checkout restoration and cleanup wait for live or unresolved execution.
 pub(super) fn associated_execution_blockers(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Vec<String>> {
-    execution_blockers(store, &open_work(store, task)?)
-}
-
-fn execution_blockers(
-    store: &SharedStore,
-    work: &crate::task_work::TaskWork,
-) -> OpsResult<Vec<String>> {
+    let open = store.sqlite.open_processes().map_err(task_error)?;
+    let work = store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)?;
     let mut blockers = Vec::new();
     // The caller cannot outlive the processes that launched it, nor wait on
     // the Flow whose step it is. Lineage exempts waiting, not authority.

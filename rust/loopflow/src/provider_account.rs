@@ -178,7 +178,7 @@ enum AccountLogin {
         catalog: SharedStore,
         profile: PathBuf,
     },
-    /// The origin of an `lf ssh` session owns the login and lends one access
+    /// The origin of an `lf --machine` session owns the login and lends one access
     /// token, which is never written here. Claude takes it from its
     /// environment; a Codex engine is handed it over its protocol.
     Lent {
@@ -277,7 +277,7 @@ impl ProviderAccountRoute {
         }
     }
 
-    /// A route on an account its `lf ssh` origin lent.
+    /// A route on an account its `lf --machine` origin lent.
     fn lent(
         client: lease::AccountLeaseClient,
         provider: Provider,

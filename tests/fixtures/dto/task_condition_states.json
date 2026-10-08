@@ -26,18 +26,6 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "clear",
       "reason": "Task is ready to start",
@@ -52,6 +40,17 @@
         "reason": null
       },
       "unresolved_execution": false
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   },
   "completed": {
@@ -94,19 +93,6 @@
       "recommended": "no_action",
       "reason": "Task is completed"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "finished",
-        "flow": "feature"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Task is complete"
-        }
-      ]
-    },
     "condition": {
       "state": "clear",
       "reason": "Linear Task is complete",
@@ -121,6 +107,266 @@
         "reason": null
       },
       "unresolved_execution": false
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "name": "pursue",
+        "state": "completed",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/repo",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "pursue",
+        "steps": [
+          {
+            "key": 0,
+            "id": null,
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": null,
+            "label": "compress",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "sync",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "pursue",
+              "refresh"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "pursue",
+              "refresh"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": null,
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 0,
+            "sources": [
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": null,
+            "label": "pr-publish",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "pursue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "@end",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": null
+                },
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": "advance"
+                },
+                {
+                  "from": "4",
+                  "to": "0",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "5",
+                  "to": "@end",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": null,
+      "completed": [],
+      "returns": [
+        {
+          "decider": 4,
+          "traversals": 1
+        }
+      ],
+      "iterations": [
+        [
+          1
+        ]
+      ],
+      "cwd": "/src/loopflow.task",
+      "steps": [
+        {
+          "process_lfid": "00000001-0000-4000-8000-000000000000",
+          "label": "implement",
+          "key": 0,
+          "iterations": [
+            [
+              0
+            ]
+          ],
+          "started_at": 10,
+          "completed_at": 20,
+          "outcome": "ok",
+          "exit_code": 0
+        },
+        {
+          "process_lfid": "00000002-0000-4000-8000-000000000000",
+          "label": "compress",
+          "key": 1,
+          "iterations": [
+            [
+              0
+            ]
+          ],
+          "started_at": 20,
+          "completed_at": 30,
+          "outcome": "ok",
+          "exit_code": 0
+        },
+        {
+          "process_lfid": "00000003-0000-4000-8000-000000000000",
+          "label": "sync",
+          "key": 2,
+          "iterations": [
+            [
+              0
+            ]
+          ],
+          "started_at": 30,
+          "completed_at": 40,
+          "outcome": "ok",
+          "exit_code": 0
+        },
+        {
+          "process_lfid": "00000004-0000-4000-8000-000000000000",
+          "label": "realign",
+          "key": 3,
+          "iterations": [
+            [
+              0
+            ]
+          ],
+          "started_at": 40,
+          "completed_at": 50,
+          "outcome": "ok",
+          "exit_code": 0
+        },
+        {
+          "process_lfid": "00000005-0000-4000-8000-000000000000",
+          "label": "loop-or-next",
+          "key": 4,
+          "iterations": [
+            [
+              0
+            ]
+          ],
+          "started_at": 50,
+          "completed_at": 60,
+          "outcome": "ok",
+          "exit_code": 0
+        },
+        {
+          "process_lfid": "00000006-0000-4000-8000-000000000000",
+          "label": "implement",
+          "key": 0,
+          "iterations": [
+            [
+              1
+            ]
+          ],
+          "started_at": 60,
+          "completed_at": null,
+          "outcome": null,
+          "exit_code": null
+        }
+      ]
+    },
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": "Task is complete"
     }
   },
   "stale": {
@@ -163,305 +409,6 @@
       "recommended": "resume",
       "reason": "resume the parked Task"
     },
-    "flow": {
-      "recommended": "build",
-      "record": {
-        "kind": "latest",
-        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
-        "graph": {
-          "name": "feature",
-          "steps": [
-            {
-              "key": 0,
-              "id": "design",
-              "label": "task-design",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": []
-            },
-            {
-              "key": 1,
-              "id": "implement",
-              "label": "implement",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 2,
-              "id": null,
-              "label": "realign",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 3,
-              "id": "decide",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 4,
-              "id": "demo",
-              "label": "demo",
-              "kind": "skill",
-              "human": true,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 5,
-              "id": "decide_delivery",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 6,
-              "id": null,
-              "label": "xor-route",
-              "kind": "xor",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": [
-                {
-                  "name": "fix",
-                  "description": "Repair the failing check",
-                  "steps": [
-                    {
-                      "key": 7,
-                      "id": "patch",
-                      "label": "patch",
-                      "kind": "skill",
-                      "human": false,
-                      "returns_to": null,
-                      "sources": [],
-                      "paths": []
-                    }
-                  ]
-                },
-                {
-                  "name": "skip",
-                  "description": "Nothing to repair",
-                  "steps": []
-                }
-              ]
-            },
-            {
-              "key": 8,
-              "id": null,
-              "label": "pr land -c",
-              "kind": "op",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "queue"
-              ],
-              "paths": []
-            }
-          ],
-          "interactions": {
-            "stages": [
-              "4"
-            ],
-            "transitions": [
-              {
-                "from": "@start",
-                "to": "4",
-                "nodes": [
-                  "0",
-                  "1",
-                  "2",
-                  "3"
-                ],
-                "routes": [
-                  {
-                    "from": "@start",
-                    "to": "0",
-                    "condition": null
-                  },
-                  {
-                    "from": "0",
-                    "to": "1",
-                    "condition": null
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "4",
-                "nodes": [
-                  "1",
-                  "2",
-                  "3",
-                  "5"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "1",
-                    "condition": "repeat"
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "@end",
-                "nodes": [
-                  "5",
-                  "6",
-                  "7",
-                  "8"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "6",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "6",
-                    "to": "7",
-                    "condition": "fix"
-                  },
-                  {
-                    "from": "6",
-                    "to": "8",
-                    "condition": "skip"
-                  },
-                  {
-                    "from": "8",
-                    "to": "@end",
-                    "condition": null
-                  },
-                  {
-                    "from": "7",
-                    "to": "8",
-                    "condition": null
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        "current": 3,
-        "completed": [
-          0,
-          1,
-          2
-        ],
-        "returns": [
-          {
-            "decider": 3,
-            "traversals": 0
-          },
-          {
-            "decider": 5,
-            "traversals": 0
-          }
-        ],
-        "execution": "blocked",
-        "reason": "Release target is unavailable",
-        "iterations": [
-          [
-            0,
-            0
-          ]
-        ]
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "blocked",
       "reason": "local Task progress requires recovery",
@@ -476,6 +423,314 @@
         "reason": null
       },
       "unresolved_execution": true
+    },
+    "workflow_name": "build",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "stopped",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 3,
+      "completed": [
+        0,
+        1,
+        2
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 0
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          0,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "blocked",
+      "reason": "Release target is unavailable",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   },
   "unavailable": {
@@ -518,18 +773,6 @@
       "recommended": "resume",
       "reason": "resume the parked Task"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "unknown",
       "reason": "failed to inspect Task worktree",
@@ -544,6 +787,17 @@
         "reason": "failed to inspect Task worktree"
       },
       "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   },
   "user_wait": {
@@ -586,306 +840,6 @@
       "recommended": "no_action",
       "reason": "Waiting for your answer"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "latest",
-        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
-        "graph": {
-          "name": "feature",
-          "steps": [
-            {
-              "key": 0,
-              "id": "design",
-              "label": "task-design",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": []
-            },
-            {
-              "key": 1,
-              "id": "implement",
-              "label": "implement",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 2,
-              "id": null,
-              "label": "realign",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 3,
-              "id": "decide",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 4,
-              "id": "demo",
-              "label": "demo",
-              "kind": "skill",
-              "human": true,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 5,
-              "id": "decide_delivery",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 6,
-              "id": null,
-              "label": "xor-route",
-              "kind": "xor",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": [
-                {
-                  "name": "fix",
-                  "description": "Repair the failing check",
-                  "steps": [
-                    {
-                      "key": 7,
-                      "id": "patch",
-                      "label": "patch",
-                      "kind": "skill",
-                      "human": false,
-                      "returns_to": null,
-                      "sources": [],
-                      "paths": []
-                    }
-                  ]
-                },
-                {
-                  "name": "skip",
-                  "description": "Nothing to repair",
-                  "steps": []
-                }
-              ]
-            },
-            {
-              "key": 8,
-              "id": null,
-              "label": "pr land -c",
-              "kind": "op",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "queue"
-              ],
-              "paths": []
-            }
-          ],
-          "interactions": {
-            "stages": [
-              "4"
-            ],
-            "transitions": [
-              {
-                "from": "@start",
-                "to": "4",
-                "nodes": [
-                  "0",
-                  "1",
-                  "2",
-                  "3"
-                ],
-                "routes": [
-                  {
-                    "from": "@start",
-                    "to": "0",
-                    "condition": null
-                  },
-                  {
-                    "from": "0",
-                    "to": "1",
-                    "condition": null
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "4",
-                "nodes": [
-                  "1",
-                  "2",
-                  "3",
-                  "5"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "1",
-                    "condition": "repeat"
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "@end",
-                "nodes": [
-                  "5",
-                  "6",
-                  "7",
-                  "8"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "6",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "6",
-                    "to": "7",
-                    "condition": "fix"
-                  },
-                  {
-                    "from": "6",
-                    "to": "8",
-                    "condition": "skip"
-                  },
-                  {
-                    "from": "8",
-                    "to": "@end",
-                    "condition": null
-                  },
-                  {
-                    "from": "7",
-                    "to": "8",
-                    "condition": null
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        "current": 4,
-        "completed": [
-          0,
-          1,
-          2,
-          3
-        ],
-        "returns": [
-          {
-            "decider": 3,
-            "traversals": 1
-          },
-          {
-            "decider": 5,
-            "traversals": 1
-          }
-        ],
-        "execution": "idle",
-        "reason": "Waiting for your review at demo",
-        "iterations": [
-          [
-            1,
-            1
-          ]
-        ]
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "waiting",
       "reason": "choose the recovery boundary",
@@ -900,6 +854,315 @@
         "reason": null
       },
       "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "stopped",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 4,
+      "completed": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 1
+        },
+        {
+          "decider": 5,
+          "traversals": 1
+        }
+      ],
+      "iterations": [
+        [
+          1,
+          1
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "idle",
+      "reason": "Waiting for your review at demo",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   },
   "dirty": {
@@ -942,18 +1205,6 @@
       "recommended": "resume",
       "reason": "resume the parked Task"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "blocked",
       "reason": "Task has uncommitted work",
@@ -968,6 +1219,17 @@
         "reason": null
       },
       "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   },
   "authored_commits": {
@@ -1039,304 +1301,6 @@
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "latest",
-        "invocation_id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
-        "graph": {
-          "name": "feature",
-          "steps": [
-            {
-              "key": 0,
-              "id": "design",
-              "label": "task-design",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": []
-            },
-            {
-              "key": 1,
-              "id": "implement",
-              "label": "implement",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 2,
-              "id": null,
-              "label": "realign",
-              "kind": "skill",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 3,
-              "id": "decide",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 4,
-              "id": "demo",
-              "label": "demo",
-              "kind": "skill",
-              "human": true,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 5,
-              "id": "decide_delivery",
-              "label": "loop-or-next",
-              "kind": "skill",
-              "human": false,
-              "returns_to": 1,
-              "sources": [
-                "feature",
-                "pursue"
-              ],
-              "paths": []
-            },
-            {
-              "key": 6,
-              "id": null,
-              "label": "xor-route",
-              "kind": "xor",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature"
-              ],
-              "paths": [
-                {
-                  "name": "fix",
-                  "description": "Repair the failing check",
-                  "steps": [
-                    {
-                      "key": 7,
-                      "id": "patch",
-                      "label": "patch",
-                      "kind": "skill",
-                      "human": false,
-                      "returns_to": null,
-                      "sources": [],
-                      "paths": []
-                    }
-                  ]
-                },
-                {
-                  "name": "skip",
-                  "description": "Nothing to repair",
-                  "steps": []
-                }
-              ]
-            },
-            {
-              "key": 8,
-              "id": null,
-              "label": "pr land -c",
-              "kind": "op",
-              "human": false,
-              "returns_to": null,
-              "sources": [
-                "feature",
-                "queue"
-              ],
-              "paths": []
-            }
-          ],
-          "interactions": {
-            "stages": [
-              "4"
-            ],
-            "transitions": [
-              {
-                "from": "@start",
-                "to": "4",
-                "nodes": [
-                  "0",
-                  "1",
-                  "2",
-                  "3"
-                ],
-                "routes": [
-                  {
-                    "from": "@start",
-                    "to": "0",
-                    "condition": null
-                  },
-                  {
-                    "from": "0",
-                    "to": "1",
-                    "condition": null
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "4",
-                "nodes": [
-                  "1",
-                  "2",
-                  "3",
-                  "5"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "1",
-                    "condition": "repeat"
-                  },
-                  {
-                    "from": "1",
-                    "to": "2",
-                    "condition": null
-                  },
-                  {
-                    "from": "2",
-                    "to": "3",
-                    "condition": null
-                  },
-                  {
-                    "from": "3",
-                    "to": "4",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "3",
-                    "to": "1",
-                    "condition": "repeat"
-                  }
-                ]
-              },
-              {
-                "from": "4",
-                "to": "@end",
-                "nodes": [
-                  "5",
-                  "6",
-                  "7",
-                  "8"
-                ],
-                "routes": [
-                  {
-                    "from": "4",
-                    "to": "5",
-                    "condition": null
-                  },
-                  {
-                    "from": "5",
-                    "to": "6",
-                    "condition": "advance"
-                  },
-                  {
-                    "from": "6",
-                    "to": "7",
-                    "condition": "fix"
-                  },
-                  {
-                    "from": "6",
-                    "to": "8",
-                    "condition": "skip"
-                  },
-                  {
-                    "from": "8",
-                    "to": "@end",
-                    "condition": null
-                  },
-                  {
-                    "from": "7",
-                    "to": "8",
-                    "condition": null
-                  }
-                ]
-              }
-            ]
-          }
-        },
-        "current": 2,
-        "completed": [
-          0,
-          1
-        ],
-        "returns": [
-          {
-            "decider": 3,
-            "traversals": 2
-          },
-          {
-            "decider": 5,
-            "traversals": 0
-          }
-        ],
-        "execution": "running",
-        "reason": "Worker is running realign",
-        "iterations": [
-          [
-            2,
-            0
-          ]
-        ]
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "condition": {
       "state": "waiting",
       "reason": "merge pull request head head-commits on GitHub",
@@ -1351,6 +1315,313 @@
         "reason": null
       },
       "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "current",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 2,
+      "completed": [
+        0,
+        1
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 2
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          2,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "running",
+      "reason": "Worker is running realign",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
     }
   }
 }

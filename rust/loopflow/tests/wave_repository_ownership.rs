@@ -321,7 +321,12 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .unwrap();
     let foreign_home = MachineId::new();
     store
-        .observe_machine(&foreign_home, "ssh://operator@foreign-home")
+        .add_machine(
+            &foreign_home,
+            "ssh://operator@foreign-home",
+            "ssh://operator@foreign-home",
+            ".",
+        )
         .await
         .unwrap();
     let foreign_place = lf_command(

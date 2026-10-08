@@ -194,20 +194,26 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    /// The repository file that defines a Flow or workflow, written from the
-    /// builtin when the repository has none.
-    public func customizeDefinition(_ name: String, cwd: String?) async throws -> String {
+    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["project", "workflow", "list", "--json"], cwd)
+        return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
+    }
+
+    public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Change the workflow of the Wave's current chapter, keeping its KRs and targets.
-    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
-        _ = try await run(["wave", "update-plan", "--wave", wave, "--workflow", name], cwd)
+    public func customizeWorkflow(_ name: String, cwd: String?) async throws -> String {
+        try await run(["project", "workflow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {
+        _ = try await run(["project", "workflow", "set", project, name], cwd)
     }
 
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust takes the Task's edge or its Project's workflow.
-    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
+    public func runTask(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
         if let flow { args.append(flow) }
         if let start {
@@ -420,13 +426,15 @@ public struct RegistryQuery: Sendable {
 
 /// Durable execution authority and its mutable observed route.
 public struct Machine: Decodable, Sendable, Hashable {
+    public let label: String?
+    public let repo: String?
     public let id: String
     public let route: String
     public let createdAt: String
     public let observedAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, route
+        case id, route, label, repo
         case createdAt = "created_at"
         case observedAt = "observed_at"
     }

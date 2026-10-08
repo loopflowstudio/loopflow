@@ -1499,7 +1499,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
-                agent: cli.model.clone(),
+                agent: cli.agent.clone(),
                 name: name.clone(),
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
@@ -1528,8 +1528,8 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
         }
-        if cli.model.is_none() {
-            cli.model = binding.agent.clone();
+        if cli.agent.is_none() {
+            cli.agent = binding.agent.clone();
         }
         _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
         _work_declaration = Some(EnvGuard::set(
@@ -1719,7 +1719,7 @@ fn execute_command(
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
+            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
         }),
         Some(Commands::Wt { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
@@ -1735,7 +1735,7 @@ fn execute_command(
                 *push,
                 *no_add,
                 paths,
-                cli.model.as_deref(),
+                cli.agent.as_deref(),
             )
         }),
         Some(Commands::Sync(sync)) => {
@@ -1958,7 +1958,7 @@ mod tests {
 
         let (target, message) = resolve(&[
             "lf",
-            "-m",
+            "-a",
             "codex",
             "pr",
             "land",
@@ -2112,15 +2112,15 @@ mod tests {
 
     #[test]
     fn reorder_args_value_flag_before_skill() {
-        // lf -m codex implement -> should stay the same (already correct order)
+        // lf -a codex implement -> should stay the same (already correct order)
         let args = vec![
             "lf".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "codex".to_string(),
             "implement".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-m", "codex", "implement"]);
+        assert_eq!(result, vec!["lf", "-a", "codex", "implement"]);
     }
 
     #[test]
@@ -2128,11 +2128,11 @@ mod tests {
         let args = vec![
             "lf".to_string(),
             "debug".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "codex".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-m", "codex", "debug"]);
+        assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
     }
 
     #[test]
@@ -2168,13 +2168,13 @@ mod tests {
             "--interactive".to_string(),
             "implement".to_string(),
             "-c".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "claude".to_string(),
         ];
         let result = reorder_args(args);
         assert_eq!(
             result,
-            vec!["lf", "--interactive", "-c", "-m", "claude", "implement"]
+            vec!["lf", "--interactive", "-c", "-a", "claude", "implement"]
         );
     }
 
@@ -2268,11 +2268,11 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
+        let args: Vec<String> = ["lf", "pr", "-a", "codex", "open"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
+        assert_eq!(reordered, vec!["lf", "pr", "open", "-a", "codex"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Pr {

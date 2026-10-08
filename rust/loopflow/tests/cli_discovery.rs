@@ -98,7 +98,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "paired"],
             vec!["paired", "--help"],
-            vec!["run", "paired", "-m", "unused", "--help"],
+            vec!["run", "paired", "-a", "unused", "--help"],
         ],
     ] {
         let expected = success(run(repo.path(), home.path(), &forms[0]));

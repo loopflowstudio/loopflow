@@ -42,9 +42,9 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Model to use (harness or harness:model)
-    #[arg(short = 'm', long = "model")]
-    pub model: Option<String>,
+    /// Agent to use (harness or harness:model)
+    #[arg(short = 'a', long = "agent")]
+    pub agent: Option<String>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -93,13 +93,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
-    #[arg(long, conflicts_with_all = ["ide", "batch"])]
-    pub tui: bool,
-
-    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
+    /// Hand off Claude, Codex, or OpenCode to the terminal
     #[arg(long, conflicts_with = "batch")]
-    pub ide: bool,
+    pub tui: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -224,8 +220,8 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
-        if let Some(model) = &self.model {
-            args.extend(["--model".to_string(), model.clone()]);
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".to_string(), agent.clone()]);
         }
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
@@ -243,7 +239,7 @@ impl Cli {
             command: None,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
-            model: self.model.clone(),
+            agent: self.agent.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
             isolate: self.isolate,
@@ -253,7 +249,6 @@ impl Cli {
             interactive: self.interactive,
             batch: self.batch,
             tui: self.tui,
-            ide: self.ide,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -1171,8 +1166,9 @@ pub enum PrCommand {
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
-        #[arg(short = 'm', long = "model")]
-        model: Option<String>,
+        /// Agent to use (harness or harness:model)
+        #[arg(short = 'a', long = "agent")]
+        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1181,8 +1177,9 @@ pub enum PrCommand {
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
-        #[arg(short = 'm', long = "model")]
-        model: Option<String>,
+        /// Agent to use (harness or harness:model)
+        #[arg(short = 'a', long = "agent")]
+        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1773,6 +1770,13 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
+        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert!(error.to_string().contains("--ide"));
+    }
 
     #[test]
     fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
@@ -2674,34 +2678,49 @@ mod tests {
     }
 
     #[test]
-    fn pr_open_accepts_model_override() {
-        let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
+    fn pr_open_accepts_agent_override() {
+        for flag in ["--agent", "-a"] {
+            let cli = Cli::try_parse_from(["lf", "pr", "open", flag, "codex"]).expect("parse");
+            let Some(Commands::Pr {
+                cmd: Some(PrCommand::Open { agent, title, body }),
+            }) = cli.command
+            else {
+                panic!("expected pr command");
+            };
+
+            assert_eq!(agent.as_deref(), Some("codex"));
+            assert_eq!(title, None);
+            assert_eq!(body, None);
+        }
+    }
+
+    #[test]
+    fn top_level_agent_reaches_pr_open() {
+        let cli = Cli::try_parse_from(["lf", "-a", "codex", "pr", "open"]).expect("parse");
         let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
+            cmd: Some(PrCommand::Open { agent, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");
         };
 
-        assert_eq!(model.as_deref(), Some("codex"));
+        assert_eq!(cli.agent.as_deref(), Some("codex"));
+        assert_eq!(agent, None);
         assert_eq!(title, None);
         assert_eq!(body, None);
     }
 
     #[test]
-    fn top_level_model_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
-        }) = cli.command
-        else {
-            panic!("expected pr command");
-        };
-
-        assert_eq!(cli.model.as_deref(), Some("codex"));
-        assert_eq!(model, None);
-        assert_eq!(title, None);
-        assert_eq!(body, None);
+    fn flow_children_keep_the_selected_agent() {
+        for flag in ["--agent", "-a"] {
+            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "run", "code"])
+                .expect("parse agent selection");
+            let args = std::iter::once("lf".to_owned())
+                .chain(cli.process_options().step_args())
+                .chain(["skill".to_owned(), "debug".to_owned()]);
+            let child = Cli::try_parse_from(args).expect("parse child invocation");
+            assert_eq!(child.agent.as_deref(), Some("claude:opus"));
+        }
     }
 }
 

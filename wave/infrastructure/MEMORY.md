@@ -1089,8 +1089,9 @@ PR-base startup shows no added second; base's post-provider Git failure limits
 that evidence. Plain-native overhead remains; production speedup, live compliance
 and terminal UI are unproved. Prior costs: `d505007b1:scratch/run-any-claude-or-codex.md`.
 
-October 8 gate found Codex terminal treating translated YAML's leading `---` as
-an option. A prompt separator fixes the ordinary launch; the real-provider fixture
-now proves source, exact arguments, user context and bundled asset read. Native
-Claude/Codex home continuity, reconnect and headless gate pass; hosted CI remains.
-No merge or Task completion is claimed.
+October 8 gate repaired Codex terminal's missing `--` before translated YAML.
+After main's system-file merge, the resume fixture reads that file,
+retaining workspace/provenance assertions. Eight native/ported surface cases,
+mapping proofs and affected checks pass after repair.
+Native home continuity and reconnect passed earlier. Hosted CI, merge and Task
+completion remain unproved.

@@ -582,6 +582,13 @@ if [ "${1:-}" = --version ]; then exit 0; fi
 pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
 printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
 printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = --append-system-prompt-file ]; then
+        cat "$2" > "$LF_TEST_RESUME_PROOF.context"
+        break
+    fi
+    shift
+done
 cat > "$LF_TEST_RESUME_PROOF.input"
 printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
 "#,
@@ -641,7 +648,7 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let sent = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
+    let sent = std::fs::read_to_string(home.path().join("proof.context")).unwrap();
     assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
     assert!(sent.contains("Continue here"), "{sent}");
     assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");

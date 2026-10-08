@@ -59,6 +59,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
+                Li(A("Features", href="/#features")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -119,18 +120,6 @@ def CopyButton(text: str):
     )
 
 
-def CodeBlock(filename: str, content: str):
-    return Div(
-        Div(filename, cls="code-block-header"),
-        Pre(Code(content), tabindex="0"),
-        cls="code-block",
-    )
-
-
-def CapabilityItem(title: str, description: str):
-    return Div(H3(title), P(render_inline(description)), cls="capability-item")
-
-
 # Load content from YAML (edit content.yaml, not this file)
 CONTENT_FILE = Path(__file__).parent / "content.yaml"
 _content = yaml.safe_load(CONTENT_FILE.read_text())
@@ -147,27 +136,26 @@ def _require_content_path(path: str) -> object:
 
 # Homepage
 HERO_CONTENT = _require_content_path("homepage.hero")
+OWNERSHIP_CONTENT = _require_content_path("homepage.ownership")
+LEVELS_CONTENT = _require_content_path("homepage.levels")
 SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
-PILLARS_CONTENT = _require_content_path("homepage.pillars")
-PROBLEMS_CONTENT = _require_content_path("homepage.problems")
-DEFINITION_CONTENT = _require_content_path("homepage.definition")
-SCALE_CONTENT = _require_content_path("homepage.scale")
-BUILDING_BLOCKS_CONTENT = _require_content_path("homepage.building_blocks")
+WHY_CONTENT = _require_content_path("homepage.why")
+AUTONOMY_CONTENT = _require_content_path("homepage.autonomy")
 INSTALL_CONTENT = _require_content_path("homepage.install")
 
 for required_key in (
     "homepage.hero.tagline",
     "homepage.hero.subline",
     "homepage.hero.loopflow_download_url",
+    "homepage.hero.example.steps",
+    "homepage.ownership.items",
+    "homepage.levels.items",
     "homepage.showcase.items",
-    "homepage.pillars.items",
-    "homepage.pillars.diagram_alt",
-    "homepage.problems.items",
-    "homepage.definition.paragraphs",
-    "homepage.definition.diagram_alt",
-    "homepage.scale.text",
-    "homepage.install.facts",
-    "homepage.building_blocks.items",
+    "homepage.showcase.pointer",
+    "homepage.showcase.highlight",
+    "homepage.why.claim",
+    "homepage.why.paragraphs",
+    "homepage.autonomy.levels",
     "homepage.install.command_display",
     "homepage.install.command_copy",
 ):
@@ -504,35 +492,6 @@ def _doc_outline(content: str) -> list[tuple[str, str]]:
     return headings
 
 
-def render_inline(text: str) -> NotStr:
-    # Handle images - convert relative paths to /static/
-    def fix_image(m):
-        alt, src = m.group(1), m.group(2)
-        if not src.startswith(("http", "/")):
-            src = "/static/" + src
-        return f'<img src="{src}" alt="{alt}">'
-
-    text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", fix_image, text)
-
-    # Handle links - convert relative .md links to absolute /docs/ paths
-    def fix_link(m):
-        label, href = m.group(1), m.group(2)
-        if href.endswith(".md") and not href.startswith(("http", "/")):
-            href = "/docs/" + href
-        elif ".md#" in href and not href.startswith(("http", "/")):
-            href = "/docs/" + href.replace(".md#", "#")
-        return f'<a href="{href}">{label}</a>'
-
-    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", fix_link, text)
-    # Handle inline code
-    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
-    # Handle bold
-    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
-    # Handle italic
-    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
-    return NotStr(text)
-
-
 def DocsNav(current: str = "index"):
     groups = []
     for area in DOCS_AREAS:
@@ -849,169 +808,344 @@ def _provenance_line(sidecar_path: Path):
         app_version = provenance["app_version"]
     except (KeyError, TypeError, json.JSONDecodeError):
         return None
+    scope = f" from the {wave} wave" if wave else ""
     return P(
-        f"Captured {captured_at} from the {wave} wave · Loopflow {app_version}",
+        f"Captured {captured_at}{scope} · Loopflow {app_version}",
         cls="loopflow-showcase-provenance",
     )
 
 
-def _capture_figure(item):
-    """A figure renders whenever its image exists; provenance rides along when proven."""
-    image = item["image"]
-    image_path = STATIC_DIR / image.removeprefix("/static/")
-    if not image_path.is_file():
-        return None
-    caption_parts = [P(item["caption"])]
-    provenance = _provenance_line(image_path.with_suffix(".json"))
-    if provenance is not None:
-        caption_parts.append(provenance)
-    return Figure(
-        Img(
-            src=image,
-            alt=item["image_alt"],
-            cls="loopflow-showcase-img",
+def _loopflow_diagram(example) -> FT:
+    """The hero's example Flow: steps down a rail, one edge looping back, one exiting."""
+    steps = example["steps"]
+    rows = [(12 + 50 * index, step) for index, step in enumerate(steps)]
+    last_y = rows[-1][0]
+    loop_y = next(y for y, step in rows if step["name"] == example["loop_to"])
+
+    def name_end(name: str) -> int:
+        return 26 + round(len(name) * 7.9) + 12
+
+    parts = [
+        '<defs><marker id="loopflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
+        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
+        '<path d="M0 0L10 5L0 10z"/></marker></defs>'
+    ]
+    for y, step in rows:
+        you = " you" if step["you"] else ""
+        if y != last_y:
+            parts.append(f'<line class="rail" x1="8" y1="{y + 8}" x2="8" y2="{y + 42}"/>')
+        parts.append(
+            f'<circle class="dot{you}" cx="8" cy="{y}" r="5.5"/>'
+            f'<text class="name{you}" x="26" y="{y + 4}">{step["name"]}</text>'
+            f'<text class="detail" x="26" y="{y + 21}">{step["detail"]}</text>'
+        )
+    parts.append(
+        f'<path class="edge" d="M{name_end(steps[-1]["name"])} {last_y}H250V{loop_y}'
+        f'H{name_end(example["loop_to"])}" marker-end="url(#loopflow-arrow)"/>'
+        f'<text class="edge-label" transform="translate(266 {(last_y + loop_y) // 2}) rotate(90)" '
+        f'text-anchor="middle">{example["loop_label"]}</text>'
+        f'<path class="edge" d="M8 {last_y + 8}V{last_y + 50}" marker-end="url(#loopflow-arrow)"/>'
+        f'<text class="edge-label" x="20" y="{last_y + 40}">{example["exit_label"]}</text>'
+        f'<rect class="end" x="2.5" y="{last_y + 54.5}" width="11" height="11"/>'
+        f'<text class="name" x="26" y="{last_y + 64}">{example["exit_to"]}</text>'
+    )
+    names = ", ".join(step["name"] for step in steps)
+    label = (
+        f"A loopflow: {names}. From {steps[-1]['name']}, one arrow returns to "
+        f"{example['loop_to']} for {example['loop_label']} and one exits to {example['exit_to']}."
+    )
+    return NotStr(
+        f'<svg class="home-loopflow" viewBox="0 0 280 {last_y + 78}" role="img" '
+        f'aria-label="{label}">{"".join(parts)}</svg>'
+    )
+
+
+def _section_head(content, heading_id: str) -> FT:
+    return Div(
+        Div(
+            P(content["label"], cls="home-label") if "label" in content else None,
+            H2(content["heading"], id=heading_id),
         ),
-        Figcaption(*caption_parts, cls="loopflow-showcase-caption"),
-        cls="loopflow-showcase-figure",
+        P(content["introduction"]),
+        cls="home-section-head",
     )
 
 
-def _flow_diagram(name: str, description: str):
-    """Inline a static flow diagram so it takes the page's fonts and colors."""
-    svg = (STATIC_DIR / name).read_text()
-    return Figure(
-        NotStr(svg),
-        Figcaption(description, cls="visually-hidden"),
-        cls="flow-figure",
+def _part(part) -> FT:
+    return Article(
+        H3(part["title"]),
+        P(part["description"], cls="feature-description"),
+        A(part["link_label"], Span(" →", aria_hidden="true"), href=part["href"]),
+        cls="home-part",
     )
 
 
-def _screenshot_section():
-    """One product shot under the hero; a missing capture never renders."""
-    for item in SHOWCASE_CONTENT["items"]:
-        figure = _capture_figure(item)
-        if figure is not None:
-            return Section(Div(figure, cls="container"), cls="loopflow-showcase-section")
-    return None
+def _levels_section() -> FT:
+    return Section(
+        Div(
+            _section_head(LEVELS_CONTENT, "levels-heading"),
+            Ol(
+                *[
+                    Li(
+                        Div(P(item["label"], cls="home-label"), H3(item["title"])),
+                        Div(
+                            P(item["text"]),
+                            Div(*[_part(part) for part in item["parts"]], cls="home-parts")
+                            if "parts" in item
+                            else None,
+                            A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"])
+                            if "href" in item
+                            else None,
+                        ),
+                        cls="home-way",
+                    )
+                    for item in LEVELS_CONTENT["items"]
+                ],
+                cls="home-ways",
+            ),
+            cls="home-wrap",
+        ),
+        id="features",
+        cls="home-levels-section",
+        aria_labelledby="levels-heading",
+    )
+
+
+def _showcase_frames() -> list[dict]:
+    """A frame renders only when its image exists; a missing capture never ships as a 404."""
+    return [
+        item
+        for item in SHOWCASE_CONTENT["items"]
+        if (STATIC_DIR / item["image"].removeprefix("/static/")).is_file()
+    ]
+
+
+def _showcase_section():
+    frames = _showcase_frames()
+    if not frames:
+        return None
+    pointer = SHOWCASE_CONTENT["pointer"]
+    highlight = SHOWCASE_CONTENT["highlight"]
+    position = (
+        f"--pointer-left:{pointer['left']}%;--pointer-top:{pointer['top']}%;"
+        f"--hit-left:{highlight['left']}%;--hit-top:{highlight['top']}%;"
+        f"--hit-width:{highlight['width']}%;--hit-height:{highlight['height']}%"
+    )
+    provenance = []
+    for frame in frames:
+        sidecar = (STATIC_DIR / frame["image"].removeprefix("/static/")).with_suffix(".json")
+        if (line := _provenance_line(sidecar)) is not None:
+            provenance.append(line)
+    return Section(
+        Div(
+            _section_head(SHOWCASE_CONTENT, "product-heading"),
+            Div(
+                *[
+                    Img(
+                        src=frame["image"],
+                        alt=frame["image_alt"],
+                        cls="home-shot is-current" if index == 0 else "home-shot",
+                        data_frame=frame["id"],
+                    )
+                    for index, frame in enumerate(frames)
+                ],
+                Span(cls="home-stage-hit", aria_hidden="true"),
+                Span(I(), cls="home-stage-pointer", aria_hidden="true"),
+                cls="home-stage",
+                style=position,
+                data_stage="",
+            ),
+            Div(
+                Div(
+                    *[
+                        Button(
+                            Span(f"{index}", aria_hidden="true"),
+                            f" {frame['label']}",
+                            type="button",
+                            data_frame=frame["id"],
+                            data_caption=frame["caption"],
+                            aria_pressed="true" if index == 1 else "false",
+                        )
+                        for index, frame in enumerate(frames, start=1)
+                    ],
+                    cls="home-stage-tabs",
+                    role="group",
+                    aria_label="Views",
+                ),
+                P(
+                    frames[0]["caption"],
+                    cls="home-stage-caption",
+                    aria_live="polite",
+                    data_caption="",
+                ),
+                cls="home-stage-bar",
+            ),
+            Div(
+                P(SHOWCASE_CONTENT["note"]),
+                *provenance,
+                P(
+                    "Full size: ",
+                    *[A(frame["label"], href=frame["image"]) for frame in frames],
+                    cls="home-stage-links",
+                ),
+                cls="home-stage-note",
+            ),
+            Div(
+                *[P(B(item["title"]), f" {item['text']}") for item in SHOWCASE_CONTENT["notes"]],
+                cls="home-stage-points",
+            ),
+            cls="home-wrap",
+        ),
+        id="product",
+        cls="home-showcase",
+        aria_labelledby="product-heading",
+    )
+
+
+def _autonomy_section() -> FT:
+    link = AUTONOMY_CONTENT["link"]
+    return Section(
+        Div(
+            Div(
+                H2(AUTONOMY_CONTENT["heading"], id="autonomy-heading"),
+                P(AUTONOMY_CONTENT["introduction"]),
+                cls="home-section-head",
+            ),
+            Div(
+                *[
+                    Div(
+                        Div(Span(level["label"], cls="home-label"), H3(level["title"])),
+                        Ol(
+                            *[
+                                Li(step["name"], cls="you" if step["you"] else None)
+                                for step in level["steps"]
+                            ],
+                            cls="home-staff",
+                        ),
+                        P(level["description"]),
+                        cls="home-level",
+                    )
+                    for level in AUTONOMY_CONTENT["levels"]
+                ],
+                cls="home-levels",
+            ),
+            P(
+                Span(f"● {AUTONOMY_CONTENT['legend_you']}"),
+                Span(f"○ {AUTONOMY_CONTENT['legend_agent']}"),
+                A(link["label"], Span(" →", aria_hidden="true"), href=link["href"]),
+                cls="home-legend",
+            ),
+            cls="home-wrap",
+        ),
+        cls="home-autonomy",
+        aria_labelledby="autonomy-heading",
+    )
 
 
 def build_homepage():
     loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
+    example = HERO_CONTENT["example"]
     install_display = INSTALL_CONTENT["command_display"].strip()
     install_copy = INSTALL_CONTENT["command_copy"]
-    pillar_items = PILLARS_CONTENT["items"]
-    building_blocks = BUILDING_BLOCKS_CONTENT["items"]
 
     return (
         Title("Loopflow, a software instrument"),
         SkipLink(),
         Navbar(),
         Main(
-            # Hero — logo, headline, tagline, CTAs
+            # Hero — headline and one sentence, beside an example loopflow
             Section(
                 Div(
-                    Img(src="/static/logo.svg", alt="Loopflow", cls="hero-logo-large"),
-                    H1("Loopflow"),
-                    P(HERO_CONTENT["tagline"], cls="tagline"),
-                    P(HERO_CONTENT["subline"], cls="hero-subline"),
                     Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="btn-group hero-actions",
+                        H1(HERO_CONTENT["tagline"]),
+                        P(HERO_CONTENT["subline"], cls="tagline hero-subline"),
+                        Div(
+                            A(
+                                "Download for Mac",
+                                href=loopflow_download_url,
+                                cls="btn btn-primary",
+                            ),
+                            A("Read the docs", href="/docs", cls="btn btn-secondary"),
+                            cls="hero-actions",
+                        ),
                     ),
-                    cls="container hero-centered",
+                    Aside(
+                        P(example["label"], cls="home-label"),
+                        _loopflow_diagram(example),
+                        P(example["caption"]),
+                        P(example["file"], cls="home-file"),
+                        cls="home-example",
+                    ),
+                    cls="home-wrap home-hero-grid",
                 ),
-                cls="hero",
+                cls="hero home-hero",
             ),
-            # One task at a time — the people-only diagram and its three steps
             Section(
                 Div(
-                    H2(PILLARS_CONTENT["heading"]),
-                    _flow_diagram("loopflow-steps.svg", PILLARS_CONTENT["diagram_alt"]),
+                    *[
+                        Div(H2(item["title"]), P(item["text"]))
+                        for item in OWNERSHIP_CONTENT["items"]
+                    ],
+                    cls="home-wrap home-owned-grid",
+                ),
+                cls="home-owned",
+                aria_label="Ownership",
+            ),
+            _levels_section(),
+            _showcase_section(),
+            Section(
+                Div(
+                    P(WHY_CONTENT["label"], cls="home-label"),
                     Div(
+                        H2(WHY_CONTENT["claim"]),
                         *[
-                            CapabilityItem(item["title"], item["description"])
-                            for item in pillar_items
+                            P(B(WHY_CONTENT["lead"]), f" {paragraph}")
+                            if index == 0
+                            else P(paragraph)
+                            for index, paragraph in enumerate(WHY_CONTENT["paragraphs"])
                         ],
-                        cls="capabilities-grid",
                     ),
+                    cls="home-wrap home-why-grid",
                 ),
-                cls="capabilities-section",
+                id="why",
+                cls="home-why",
             ),
-            # What it helps with — each problem beside what Loopflow does about it
-            Section(
-                Div(
-                    H2(PROBLEMS_CONTENT["heading"]),
-                    Div(
-                        *[
-                            Div(
-                                H3(item["title"]),
-                                P(item["problem"], cls="problem"),
-                                P(item["solve"], cls="solve"),
-                                cls="problem-item",
-                            )
-                            for item in PROBLEMS_CONTENT["items"]
-                        ],
-                        cls="problems-grid",
-                    ),
-                ),
-                cls="problems-section",
-            ),
+            _autonomy_section(),
             # Install — the app first; the command line tool rides along
             Section(
                 Div(
-                    H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
                     Div(
-                        A("Download for Mac", href=loopflow_download_url, cls="btn btn-primary"),
-                        A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                        cls="hero-actions",
+                        P(INSTALL_CONTENT["label"], cls="home-label"),
+                        H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
+                        Div(
+                            A(
+                                "Download for Mac",
+                                href=loopflow_download_url,
+                                cls="btn btn-primary",
+                            ),
+                            A("Read the docs", href="/docs", cls="btn btn-secondary"),
+                            cls="hero-actions",
+                        ),
+                        P(INSTALL_CONTENT["note"], cls="install-note"),
+                        P(INSTALL_CONTENT["requirement"], cls="install-note"),
                     ),
-                    P(INSTALL_CONTENT["facts"], cls="install-facts"),
-                    P(INSTALL_CONTENT["note"], cls="install-note"),
-                    P(INSTALL_CONTENT["cli_label"], cls="install-note"),
                     Div(
-                        Pre(Code(install_display), cls="install-code", tabindex="0"),
-                        CopyButton(install_copy),
-                        cls="install-code-wrapper",
+                        P(INSTALL_CONTENT["cli_label"], cls="install-note"),
+                        Div(
+                            Pre(Code(install_display), cls="install-code", tabindex="0"),
+                            CopyButton(install_copy),
+                            cls="install-code-wrapper",
+                        ),
                     ),
-                    cls="container",
+                    cls="home-wrap home-install-grid",
                 ),
-                cls="quick-install",
+                cls="quick-install home-install",
             ),
-            # The technical definition, beside the full flow
-            Section(
-                Div(
-                    H2(DEFINITION_CONTENT["heading"]),
-                    _flow_diagram("loopflow-full.svg", DEFINITION_CONTENT["diagram_alt"]),
-                    *[P(paragraph) for paragraph in DEFINITION_CONTENT["paragraphs"]],
-                    H2(SCALE_CONTENT["heading"], cls="scale-heading"),
-                    P(SCALE_CONTENT["text"]),
-                ),
-                cls="definition-section",
-            ),
-            # Building blocks — skill → flow → task → wave
-            Section(
-                Div(
-                    H2(BUILDING_BLOCKS_CONTENT["heading"]),
-                    Div(
-                        *[
-                            Div(
-                                P(item["label"], cls="building-block-label"),
-                                CodeBlock(item["filename"], item["content"].strip()),
-                                cls="building-block-item",
-                            )
-                            for item in building_blocks
-                        ],
-                        cls="building-blocks-grid",
-                    ),
-                ),
-                cls="building-blocks-section",
-            ),
-            # Demo — one product capture, when present
-            _screenshot_section(),
             id="main-content",
+            cls="home",
         ),
         SiteFooter(),
+        Script(src=f"/static/home.js?v={STYLE_VERSION}", defer=True),
     )
 
 

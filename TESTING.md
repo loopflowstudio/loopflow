@@ -688,6 +688,10 @@ After adding, renaming or removing a public command owner or concept, run
 retained tables and subprocesses still need their actual owners in the map.
 For architecture/README documentation changes, run
 `cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.
+For Markdown changes under `docs/`, builtins or skills, and changes to README or
+AGENTS, also run `cargo test -p loopflow --test documented_commands`. Its command
+scanner covers prose and headings as well as fenced examples; a focused runtime
+suite does not check those additions.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.

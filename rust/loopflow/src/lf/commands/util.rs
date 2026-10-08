@@ -60,9 +60,19 @@ pub(crate) fn launch_session(
     prompt: &str,
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
+    skill_config: Option<&crate::engine::agent::AgentConfig>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
-    let command = build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
+    let prompt = match skill_config.and_then(|config| {
+        config
+            .skill_invocation
+            .as_ref()
+            .map(|skill| (skill, config))
+    }) {
+        Some((skill, config)) => skill.terminal_input(harness, config),
+        None => prompt.to_string(),
+    };
+    let command = build_session_command(harness, model, &worktree, &prompt, provider_session_id)?;
     spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
 
@@ -1804,6 +1814,7 @@ mod tests {
             "review it",
             &BTreeMap::new(),
             None,
+            None,
         )
         .unwrap();
 
@@ -1885,6 +1896,7 @@ mod tests {
             "review it",
             &BTreeMap::new(),
             None,
+            None,
         )
         .unwrap();
 
@@ -1919,6 +1931,7 @@ mod tests {
             temp.path(),
             "review it",
             &BTreeMap::new(),
+            None,
             None,
         )
         .unwrap();

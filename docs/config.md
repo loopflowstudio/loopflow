@@ -517,15 +517,18 @@ Install third-party skills with their own installer, then use their installed
 names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
 `rams.md` is named `rams`.
 
-`lf -b -a claude audit` invokes a Claude source through its native command parser,
-with gathered context separate from command arguments. Captured Flow definitions
-survive source-file changes or removal. Existing sibling resources remain reachable;
-parent-relative paths and resources removed with the bundle are not preserved.
-Codex sources sent to Claude receive tool-mapping instructions and a notice for
-controls without an enforced equivalent. Codex and terminal launches currently
-inline the skill body without its source declarations; native invocation and
-cross-harness argument/control translation remain unfinished there. Builtins
-remain inline.
+`lf -b -a claude audit` invokes a Claude bundle directly from its original
+folder through the native command parser, with gathered context separate from
+command arguments. Codex sources use native skill input on Codex and native
+skill links in its terminal command. Cross-harness launches translate argument
+and tool-name instructions, retain declarations and identify the original asset
+directory. A warning names controls the launch does not enforce.
+
+Claude terminal launches currently use translated instructions; native invocation
+with separate user context remains unfinished. LF builtins remain inline.
+Captured Flow definitions survive source-file changes or removal: Claude uses a
+captured native definition, while Codex uses captured instructions. Both retain
+the original resource directory; resources removed with the bundle are not preserved.
 
 `lf sync-skills` exports personal sources and builtins, preserves third-party
 files at destination paths, and leaves repository skills local. Cross-harness

@@ -538,6 +538,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
             &built.prompt,
             &environment,
             provider_session_id.as_deref(),
+            Some(&built.agent_config),
         );
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())

@@ -1,44 +1,53 @@
 # Installed skill launch checks
 
 ```sh
+uv run python scripts/benchmarks/skill-invocation/launch.py \
+  --fetch --fixtures /tmp/lf-skill-fixtures
 uv run python scripts/test_network.py uv run --no-sync python \
-  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf
+  scripts/benchmarks/skill-invocation/launch.py --lf target/debug/lf \
+  --fixtures /tmp/lf-skill-fixtures --source internal-comms --provider codex
 uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --flow
-uv run pytest scripts/benchmarks/skill-invocation/ -q
+uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q
 ```
 
-The real Claude client runs against a local fake Messages API, with external
-egress denied and a disposable home. The ordinary case installs a skill without
-`.lf` configuration. The Flow case captures it, removes the source and adds a
-same-name collision before dispatch. Both use `--no-loopflow` and check the
-argument `alpha`, selected source bytes and supplied context in user messages.
-The fixture reads the linked reference file itself; the provider does not read it.
-A context acknowledgement cannot substitute for the command's result.
+Fetch immutable third-party bundles before network containment. `launch.py` copies
+them unchanged into a fresh workspace without `.lf` configuration, runs ordinary
+lf commands with default Loopflow context, and makes the real provider read a
+bundled file. The local fake API receives the resulting tool output. Provider
+homes, Machine directories and credentials are isolated; external egress is denied.
 
-These are synthetic skills and API receipts, not unchanged third-party or live
-model proofs. Default Loopflow context, quoted/multiline arguments, applied
-declarations, provider asset reads, native Codex and terminal dispatch, and
-third-party fidelity still need entry-point checks. Baseline reconnect and
-plain-provider continuity remain in `tests/e2e/codex_connect.py` and
-`tests/e2e/claude_shared_home.py`.
+Sources are pinned in `launch.py`:
 
-## Earlier provider experiments
+- Anthropic [internal-comms at 683bc88e](https://github.com/anthropics/skills/tree/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/internal-comms).
+- OpenAI [skill-installer at 49f948fa](https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.system/skill-installer).
 
-```sh
-uv run python scripts/benchmarks/skill-invocation/probe.py \
-  --claude /path/to/claude --codex /path/to/codex
-uv run python scripts/benchmarks/skill-invocation/continuity.py \
-  --provider codex --executable /path/to/codex
-```
+Use either source with `--provider claude` or `--provider codex`. `--terminal`
+exercises lf's terminal command builder, substituting provider print/exec mode
+for unattended execution. It proves neither terminal rendering nor interactive
+behavior. Claude terminal currently uses translated instructions; passing that
+case does **not** establish native skill invocation. `--flow` removes the source
+file after capture and checks that its instructions still reach the provider.
 
-These pre-existing standalone probes use native authentication and consume provider
-usage. Their diagnostic timing and receipt checks establish neither LF launch
-fidelity nor a matched cost comparison.
+Matching-provider cases also run a plain native skill for comparison. JSON reports
+startup seconds and request JSON size, plus exact quoted/multiline arguments,
+user-only context, source retention and actual asset reads. Request size is not
+a token measurement; local fake-API latency is not real API latency. Equal request
+counts do not establish a blanket performance improvement.
 
-Jack Heart's October 8 scope correction removes busy-terminal delivery from
-LOO-420. The deleted Codex queue/restart/receipt and Claude PTY/inbox probes,
-failed engine-retention candidates and detailed request-mapping observations
-remain at `1e4ae02a5:scripts/benchmarks/skill-invocation/README.md` and the
-scripts in that commit. No native writer-custody policy was adopted. Those
-observations are historical evidence, not ordinary-launch acceptance requirements.
+`request_mapping.py` uses a synthetic Claude skill to test native argument parsing,
+model declaration application and separate user context. `--flow` removes its
+source after capture and adds a same-name collision. Manifest bytes prove captured
+source retention. Its reference-file assertion is filesystem reachability only;
+`launch.py` supplies the actual provider tool read.
+
+Observed client boundaries: Claude 2.1.294 sends hook `additionalContext` in the
+API system field, including UserPromptSubmit hooks. Codex 0.160.1 ignores a native
+skill input whose path is outside its discovered catalog. Neither can be accepted
+from successful exit or assistant text alone. The implementation uses captured
+instructions for undiscovered Codex sources and keeps native Claude terminal
+invocation as remaining work.
+
+Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`.
+Baseline reconnect and plain-provider continuity remain in
+`tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.

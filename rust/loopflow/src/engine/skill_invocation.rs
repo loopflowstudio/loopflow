@@ -18,32 +18,149 @@ impl SkillInvocation {
         Ok(serde_json::from_slice(&std::fs::read(path)?)?)
     }
 
-    pub(crate) fn claude_plugin(
-        &self,
-        config: &crate::engine::agent::AgentConfig,
-    ) -> anyhow::Result<(PathBuf, String)> {
+    fn capture_directory(config: &crate::engine::agent::AgentConfig) -> anyhow::Result<PathBuf> {
         let capture = config
             .env
             .get(crate::session_record::CAPTURE_KEY_ENV)
-            .ok_or_else(|| anyhow::anyhow!("native skill input requires its Session capture"))?;
-        let directory = crate::session_record::capture_dir(capture)?;
+            .ok_or_else(|| anyhow::anyhow!("skill input requires its Session capture"))?;
+        Ok(crate::session_record::capture_dir(capture)?)
+    }
+
+    fn declarations(&self) -> Option<serde_yaml_ng::Value> {
+        self.skill
+            .source
+            .as_ref()?
+            .frontmatter
+            .as_deref()
+            .and_then(|text| serde_yaml_ng::from_str(text).ok())
+    }
+
+    fn native_name(&self) -> String {
+        self.declarations()
+            .as_ref()
+            .and_then(|fields| fields.get("name"))
+            .and_then(serde_yaml_ng::Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                self.skill
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.path.parent())
+                    .and_then(Path::file_name)
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| self.skill.name.clone())
+            })
+    }
+
+    fn unchanged_source(&self) -> bool {
+        self.skill.source.as_ref().is_some_and(|source| {
+            std::fs::read_to_string(&source.path).ok().as_deref() == Some(&self.source_text())
+        })
+    }
+
+    fn native_declarations(&self, harness: &str) -> bool {
+        let fields = self.declarations();
+        if self
+            .skill
+            .source
+            .as_ref()
+            .is_some_and(|source| source.frontmatter.is_some())
+            && !fields
+                .as_ref()
+                .is_some_and(serde_yaml_ng::Value::is_mapping)
+        {
+            return false;
+        }
+        harness != "codex"
+            || fields.as_ref().is_some_and(|fields| {
+                ["name", "description"]
+                    .iter()
+                    .all(|key| fields.get(key).is_some_and(serde_yaml_ng::Value::is_string))
+            })
+    }
+
+    pub(crate) fn claude_input(
+        &self,
+        config: &crate::engine::agent::AgentConfig,
+    ) -> anyhow::Result<(Vec<String>, String)> {
+        if !self.native_for("claude") || !self.native_declarations("claude") {
+            return Ok((Vec::new(), self.translated_input("claude")));
+        }
+        if self.unchanged_source() {
+            let path = &self
+                .skill
+                .source
+                .as_ref()
+                .expect("native skill has a source")
+                .path;
+            if path.file_name().is_some_and(|name| name == "SKILL.md") {
+                let directory = path.parent().expect("skill has a directory");
+                let namespace = directory
+                    .file_name()
+                    .expect("skill directory has a name")
+                    .to_string_lossy();
+                return Ok((
+                    vec!["--plugin-dir".into(), directory.display().to_string()],
+                    self.command(&format!("/{namespace}:{}", self.native_name())),
+                ));
+            }
+        }
+        // Captured definitions and legacy command files need an unambiguous native name.
         let root = tempfile::Builder::new()
             .prefix("skill-")
-            .tempdir_in(directory)?
+            .tempdir_in(Self::capture_directory(config)?)?
             .keep();
-        if !self.native_for("claude") {
-            eprintln!("warning: porting {} to claude; native model, tool permissions, subagents and shell preprocessing remain instructions, not enforced controls", self.skill.name);
-        }
         self.materialize(&root.join("skills/invoke"), "claude")?;
         let namespace = format!("lf-{}", uuid::Uuid::new_v4().simple());
         std::fs::create_dir(root.join(".claude-plugin"))?;
         std::fs::write(
             root.join(".claude-plugin/plugin.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "name": namespace,
-            }))?,
+            serde_json::to_vec(&serde_json::json!({"name": namespace}))?,
         )?;
-        Ok((root, self.command(&format!("/{namespace}:invoke"))))
+        Ok((
+            vec!["--plugin-dir".into(), root.display().to_string()],
+            self.command(&format!("/{namespace}:invoke")),
+        ))
+    }
+
+    fn codex_skill(&self) -> Option<(&Path, String)> {
+        let source = self.skill.source.as_ref()?;
+        (self.native_for("codex") && self.native_declarations("codex") && self.unchanged_source())
+            .then(|| (source.path.as_path(), self.native_name()))
+    }
+
+    pub(crate) fn codex_input(&self) -> Vec<serde_json::Value> {
+        match self.codex_skill() {
+            Some((path, name)) => vec![
+                serde_json::json!({"type": "text", "text": self.command(&format!("${name}"))}),
+                serde_json::json!({"type": "skill", "name": name, "path": path}),
+            ],
+            None => {
+                vec![serde_json::json!({"type": "text", "text": self.translated_input("codex")})]
+            }
+        }
+    }
+
+    pub(crate) fn terminal_input(
+        &self,
+        harness: &str,
+        config: &crate::engine::agent::AgentConfig,
+    ) -> String {
+        let prompt = match (harness, self.codex_skill()) {
+            ("codex", Some((path, name))) => {
+                self.command(&format!("[${name}]({})", path.display()))
+            }
+            _ => self.translated_input(harness),
+        };
+        format!(
+            "{prompt}\n\n{}\n\n{}",
+            config.system_prompt, config.task_prompt
+        )
+    }
+
+    fn translated_input(&self, harness: &str) -> String {
+        eprintln!("warning: {} on {harness}: running captured instructions; source model, permissions, hooks and subagent declarations are retained but not enforced by this launch", self.skill.name);
+        self.ported_text(harness)
     }
 
     fn native_for(&self, harness: &str) -> bool {
@@ -89,11 +206,11 @@ impl SkillInvocation {
             self.expand_arguments(body)
                 .replace("${CLAUDE_SKILL_DIR}", &directory.display().to_string())
         } else {
-            body.to_string()
+            self.expand_arguments(body)
         };
-        let tools = match harness {
-            "codex" => "Claude tool names map to Codex tools: Bash, Read, Grep and Glob use exec_command; Edit and Write use apply_patch; TodoWrite uses update_plan; Task uses spawn_agent when available. Use the available web tool for WebFetch and WebSearch.",
-            "claude" => "Codex tool names map to Claude tools: exec_command uses Bash; apply_patch uses Edit or Write; update_plan uses TodoWrite when available; spawn_agent uses Task. Use WebFetch and WebSearch for web requests.",
+        let tools = match (origin.dialect, harness) {
+            (SkillDialect::Claude, "codex") => "Claude tool names map to Codex tools: Bash, Read, Grep and Glob use exec_command; Edit and Write use apply_patch; TodoWrite uses update_plan; Task uses spawn_agent when available. Use the available web tool for WebFetch and WebSearch.",
+            (SkillDialect::Codex, "claude") => "Codex tool names map to Claude tools: exec_command uses Bash; apply_patch uses Edit or Write; update_plan uses TodoWrite when available; spawn_agent uses Task. Use WebFetch and WebSearch for web requests.",
             _ => "Use this harness's corresponding tools for the operations named below.",
         };
         format!("---\nname: {}\ndescription: {}\n---\nSource: {}\nBase directory of the original skill: {}\n\n{tools}\nExecute any shell-context directives below through ordinary tools before proceeding; they have not been pre-executed.\n\nOriginal declarations (model, permissions, subagents and preprocessing have no automatic cross-harness enforcement):\n```yaml\n{}\n```\n\n{body}",
@@ -173,34 +290,20 @@ impl SkillInvocation {
         }
     }
 
-    /// Materialize the captured definition without modifying a third-party file.
-    /// Sibling resources continue to resolve against the original bundle.
+    /// Keep the Flow's captured text and resolve resources at their original directory.
     fn materialize(&self, directory: &Path, harness: &str) -> std::io::Result<PathBuf> {
         std::fs::create_dir_all(directory)?;
         let target = directory.join("SKILL.md");
-        std::fs::write(&target, self.instruction_text(harness))?;
-        if let Some(parent) = self
+        let original = self
             .skill
             .source
             .as_ref()
             .and_then(|source| source.path.parent())
-        {
-            if parent.is_dir() {
-                for entry in std::fs::read_dir(parent)? {
-                    let entry = entry?;
-                    if entry.file_name() == "SKILL.md" {
-                        continue;
-                    }
-                    let link = directory.join(entry.file_name());
-                    #[cfg(unix)]
-                    std::os::unix::fs::symlink(entry.path(), link)?;
-                    #[cfg(not(unix))]
-                    if entry.file_type()?.is_file() {
-                        std::fs::copy(entry.path(), link)?;
-                    }
-                }
-            }
-        }
+            .unwrap_or(Path::new("."));
+        let text = self
+            .instruction_text(harness)
+            .replace("${CLAUDE_SKILL_DIR}", &original.display().to_string());
+        std::fs::write(&target, format!("{text}\n\nResolve supporting files and parent-relative paths from the original skill directory: {}\n", original.display()))?;
         Ok(target)
     }
 }
@@ -262,7 +365,7 @@ mod tests {
         assert!(text.contains("exec_command"));
         let snapshot = tempfile::tempdir().unwrap();
         let file = invocation.materialize(snapshot.path(), "codex").unwrap();
-        assert_eq!(std::fs::read_to_string(file).unwrap(), text);
+        assert!(std::fs::read_to_string(file).unwrap().contains(&text));
     }
 
     #[test]
@@ -290,9 +393,11 @@ mod tests {
         );
         let snapshot = repo.path().join("snapshot");
         let file = invocation.materialize(&snapshot, "claude").unwrap();
-        assert_eq!(std::fs::read_to_string(file).unwrap(), original);
+        let text = std::fs::read_to_string(file).unwrap();
+        assert!(text.starts_with(original));
+        assert!(text.contains(&bundle.display().to_string()));
         assert_eq!(
-            std::fs::read_to_string(snapshot.join("reference.txt")).unwrap(),
+            std::fs::read_to_string(bundle.join("reference.txt")).unwrap(),
             "the reference"
         );
     }

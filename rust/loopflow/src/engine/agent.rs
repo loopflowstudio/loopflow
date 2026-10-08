@@ -1837,11 +1837,11 @@ fn _run_agent_once(
         // argv limits. An anonymous file also avoids pipe backpressure at startup.
         let mut input = tempfile::tempfile()?;
         if let Some(invocation) = &launch.skill_invocation {
-            let (plugin, command) = invocation
-                .claude_plugin(launch)
+            let (flags, command) = invocation
+                .claude_input(launch)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
             cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
-            cmd.arg("--plugin-dir").arg(plugin);
+            cmd.args(flags);
             if !launch.task_prompt.is_empty() {
                 writeln!(
                     input,

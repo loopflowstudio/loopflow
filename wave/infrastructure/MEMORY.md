@@ -1071,12 +1071,23 @@ fake-API checks pass with one request, exact arguments and separate user context
 These checks establish no native Codex skill, terminal fidelity or unchanged
 third-party acceptance. No landing or Task completion occurred.
 
-The follow-up removes unreachable ClaudeHarness plugin state and its injected-state
-test. Preparation selects only headless Claude; Codex and terminal launches inline
-the body without source declarations, and the Claude-to-Codex port helper is not
-reached there. Test the operation that can receive the prepared input; a private-state
-fixture can keep an unused second implementation looking necessary. LF/Flow probes
-use `--no-loopflow`, `alpha` and fixture-side asset reads: they establish no default
-context, declaration enforcement or provider tool read. Retaining metadata is not
-applying it. Release's entry-point lesson applies; its child goal and relevant
-failure-boundary memory were read, leaving unrelated release evidence unreviewed.
+The `dd2cdba82` compression removed unreachable ClaudeHarness plugin state;
+`48d145b78` preserves the subsequent source audit. October 8 implementation now
+prepares selected source/arguments on both harnesses and surfaces. Headless Claude
+loads the original bundle; Codex accepts native skill input and terminal skill
+links. Pinned unchanged Anthropic/OpenAI skills run through lf against local fake
+APIs, with default context, quoted/multiline arguments and actual provider asset
+reads. Native Claude model and removed-source Flow selection are separately
+proved. This establishes neither live model compliance nor native terminal UI.
+
+Two entry-point counterexamples changed the approach. Claude 2.1.294 puts both
+startup and prompt-hook additional context in the API system field; those hooks
+were deleted. Claude terminal execution retains translated instructions, and
+native invocation with separate user context remains required, unimplemented work.
+Codex 0.160.1 ignored captured skill paths outside its catalog; captured instructions
+now preserve Flow selection without a catalog mount. Concurrent fixtures add
+3.5–4 seconds and 8–13 KB of request JSON over plain native invocation; equal
+request counts establish no blanket performance improvement. The plan owns remaining
+fidelity and gate. Release's operation-entry lesson was read in its child goal and
+relevant failure-boundary memory; unrelated child sections were not re-reviewed.
+No landing or Task completion occurred.

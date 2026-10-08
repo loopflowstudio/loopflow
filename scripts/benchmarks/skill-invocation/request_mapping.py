@@ -147,7 +147,7 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
         skill_marker, context_marker = uuid.uuid4().hex, uuid.uuid4().hex
         skill.write_text(
             "---\nname: lf-mapping\ndescription: Local request mapping fixture.\n"
-            "disable-model-invocation: true\n---\n"
+            "disable-model-invocation: true\nmodel: haiku\nallowed-tools: Read\n---\n"
             f"{skill_marker}|$ARGUMENTS|\nasset-path: ${{CLAUDE_SKILL_DIR}}/reference.txt\n"
         )
         (skill.parent / "reference.txt").write_text("fixture bundled reference")
@@ -247,11 +247,21 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
             _, native_arguments = _read_output(_output_events(raw))
             observation["checks"].update(
                 exit_zero=result.returncode == 0,
+                declared_model_applied=all("haiku" in body["model"] for body in requests),
                 native_arguments_exact=native_arguments == "alpha",
-                selected_bytes_retained=len(snapshots) == 1
-                and selected.read_text() == original_source,
-                bundled_reference_reachable=len(snapshots) == 1
-                and (selected.parent / "reference.txt").read_text() == "fixture bundled reference",
+                captured_bytes_retained=any(
+                    origin
+                    and (
+                        "---"
+                        + origin["skill"]["source"]["frontmatter"]
+                        + "---\n"
+                        + origin["skill"]["content"]
+                    )
+                    == original_source
+                    for origin in origins
+                ),
+                bundled_reference_reachable=(skill.parent / "reference.txt").read_text()
+                == "fixture bundled reference",
                 origin_retained=any(
                     origin
                     and origin["skill"]["source"]["path"] == str(skill)

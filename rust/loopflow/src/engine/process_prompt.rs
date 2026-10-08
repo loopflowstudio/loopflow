@@ -159,8 +159,7 @@ pub(crate) fn preview_process_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            surface == Surface::Headless
-                && parse_agent(&agent).0 == "claude"
+            matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
                 && skill.source.as_ref().is_some_and(|source| {
                     source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
                 })
@@ -1040,7 +1039,12 @@ Test skill body.
             }),
             ..Skill::named("audit")
         };
-        for agent in ["claude:sonnet", "claude:opus"] {
+        for (agent, surface) in [
+            ("claude:sonnet", Surface::Headless),
+            ("codex", Surface::Headless),
+            ("claude", Surface::Cli),
+            ("codex", Surface::Cli),
+        ] {
             let prepared = prepare_process_prompt(
                 &default_test_config(),
                 ProcessPromptInput {
@@ -1049,7 +1053,7 @@ Test skill body.
                     message: Some("Preserve the Task checkout and return the decision".into()),
                     skill_arguments: "  \"exact arguments\"  ".into(),
                     agent: Some(agent.into()),
-                    surface: Surface::Headless,
+                    surface,
                     ..ProcessPromptInput::default()
                 },
             )

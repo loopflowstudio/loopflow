@@ -2,6 +2,7 @@
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
 use crate::lf::Cli;
+use crate::ops::task::remote::TaskSource;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
@@ -14,7 +15,11 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
     let cli = parse_remote_command(lf_args)?;
     let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
-    let (lf_args, task_source) = runtime.block_on(task_source_args(lf_args))?;
+    let task_source = runtime.block_on(resolve_task_source(cli.task.as_deref()))?;
+    let source_json = task_source
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
         &target,
@@ -36,11 +41,11 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
     if let Some(value) = declaration.as_deref() {
         extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
     }
-    if let Some(source) = task_source.as_deref() {
+    if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));
     }
     let cmd = std::iter::once("lf".to_string())
-        .chain(resident_args(&lf_args, &cli))
+        .chain(resident_args(lf_args, &cli, task_source.as_ref()))
         .collect::<Vec<_>>();
     let preamble = build_preamble(
         &target.route,
@@ -54,9 +59,13 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
-fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
+fn resident_args(args: &[String], cli: &Cli, source: Option<&TaskSource>) -> Vec<String> {
     let mut remaining = cli.account.len() + cli.only_account.len();
     let mut shared = cli.shared;
+    let task_flag = cli
+        .task
+        .as_ref()
+        .map(|selector| format!("--task={selector}"));
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -75,6 +84,15 @@ fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
         } else if shared && arg == "--shared" {
             result.push("--isolate".into());
             shared = false;
+        } else if let Some(source) = source.filter(|_| {
+            (arg == "--task" && iter.as_slice().first() == cli.task.as_ref())
+                || task_flag.as_ref() == Some(arg)
+        }) {
+            // Replication preserves the saved identity, including local-born Tasks.
+            if arg == "--task" {
+                iter.next();
+            }
+            result.push(format!("--task={}", source.task_id));
         } else {
             result.push(arg.clone());
         }
@@ -82,43 +100,14 @@ fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
     result
 }
 
-async fn task_source_args(lf_args: &[String]) -> anyhow::Result<(Vec<String>, Option<String>)> {
-    let mut args = lf_args.to_vec();
-    // The normalized CLI owns option parsing, including --task=ISSUE.
-    let command = std::iter::once("lf".to_string())
-        .chain(args.iter().cloned())
-        .collect();
-    let Ok(cli) = crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(command)?)
-    else {
-        return Ok((args, None));
-    };
-    let Some(selector) = cli.task else {
-        return Ok((args, None));
+async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<TaskSource>> {
+    let Some(selector) = selector else {
+        return Ok(None);
     };
     let Some(store) = crate::store::open_existing_store().await else {
-        return Ok((args, None));
+        return Ok(None);
     };
-    let Some(source) =
-        crate::ops::task::remote::TaskSource::resolve(&std::sync::Arc::new(store), &selector)
-            .await?
-    else {
-        return Ok((args, None));
-    };
-    // Replication preserves the saved identity, including local-born Tasks.
-    let mut index = 0;
-    while index < args.len() {
-        if args[index] == "--" {
-            break;
-        }
-        if args[index] == "--task" && args.get(index + 1) == Some(&selector) {
-            args[index + 1] = source.task_id.to_string();
-            index += 1;
-        } else if args[index] == format!("--task={selector}") {
-            args[index] = format!("--task={}", source.task_id);
-        }
-        index += 1;
-    }
-    Ok((args, Some(serde_json::to_string(&source)?)))
+    Ok(TaskSource::resolve(&std::sync::Arc::new(store), selector).await?)
 }
 
 fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
@@ -278,7 +267,7 @@ mod tests {
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap()),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), None),
             ["--isolate", "skill", "implement"]
         );
     }
@@ -295,7 +284,7 @@ mod tests {
         ]
         .map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap()),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), None),
             [
                 "--isolate",
                 "skill",
@@ -306,6 +295,36 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn remote_task_identity_rewrite_preserves_literal_prompt_flags() {
+        let source = crate::ops::task::remote::TaskSource {
+            task_id: crate::durable::TaskId::new(),
+            identifier: "FIX-1".into(),
+            branch: "fix".into(),
+            commit: "fixture".into(),
+        };
+        for selector in [vec!["--task", "FIX-1"], vec!["--task=FIX-1"]] {
+            let args: Vec<String> = selector
+                .into_iter()
+                .chain(["--shared", "skill", "implement", "--", "--task", "FIX-1"])
+                .map(str::to_string)
+                .collect();
+            let cli = parse_remote_command(&args).unwrap();
+            assert_eq!(
+                resident_args(&args, &cli, Some(&source)),
+                [
+                    format!("--task={}", source.task_id),
+                    "--isolate".into(),
+                    "skill".into(),
+                    "implement".into(),
+                    "--".into(),
+                    "--task".into(),
+                    "FIX-1".into(),
+                ]
+            );
+        }
+    }
+
     #[test]
     fn ssh_args_bound_the_connection() {
         let args =

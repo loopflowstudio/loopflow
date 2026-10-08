@@ -633,15 +633,15 @@ Workflow position or controls. Imported completion grants no execution authority
 Jack authorized review-only publication and stacking on `e68f2a423`/`84664e661`,
 not public-remote planning export or landing. Plan ownership above governs sharing.
 
-Unverified source replaces copied planning and issue-derived IDs with transactional
-peer mutations/imports and destination-specific refs. Causality precedes Linear
-preference, then clock/ID; losing values survive. No passing Rust or installed proof.
-Destination binding, safe joining, foreground exchange/presentation, legacy-ID
-association and independent progress through projection conflicts remain unfinished.
-The importer currently rolls back on duplicate provider mappings or protected
-ancestry moves; that is not accepted conflict behavior. Public acquisition and
-composed Linear/execution preservation still need proof. Design:
-`scratch/work-on-another-machine-name.md`; earlier evidence: `5d336868f`, this heading.
+Source replaces copied planning and issue-derived IDs with transactional mutations
+and destination-specific refs. Causality precedes Linear preference, then clock/ID;
+losers survive. Rust and installed behavior remain unverified. Ref-rejection fixtures
+must target the selected ref, not its retired root. Destination binding, safe joining,
+foreground exchange/presentation and legacy-ID association remain unfinished.
+Duplicate provider mappings or protected ancestry moves still roll back the import;
+independent progress through conflicts and composed Linear/execution preservation
+remain required. Design: `scratch/work-on-another-machine-name.md`;
+earlier evidence: `5d336868f`, this heading.
 
 ## Synced planning integration (LOO-334)
 

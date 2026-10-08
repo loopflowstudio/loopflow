@@ -81,7 +81,7 @@ fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
         )))
         .unwrap();
     // Exercise the common-writer import, not copied provider bootstrap. Public
-    // destination synchronization is covered separately from this placement proof.
+    // destination synchronization remains unfinished; this proves placement only.
     let planning = runtime
         .block_on(
             fixture

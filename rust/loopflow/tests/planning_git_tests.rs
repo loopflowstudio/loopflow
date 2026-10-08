@@ -20,13 +20,10 @@ fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().into()
 }
 
+const PLANNING_REF: &str = "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001";
+
 fn transport(repo: &Path) -> PlanningGit {
-    PlanningGit::new(
-        repo,
-        "origin",
-        "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001",
-    )
-    .unwrap()
+    PlanningGit::new(repo, "origin", PLANNING_REF).unwrap()
 }
 
 fn source_state(repo: &Path) -> Vec<Vec<u8>> {
@@ -141,14 +138,7 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
     fs::rename(&unavailable, repo.bare_path()).unwrap();
     // A successful publication whose response the caller discards.
     online.publish(&saved.revision).unwrap();
-    let tip = git(
-        repo.path(),
-        &[
-            "ls-remote",
-            "origin",
-            "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001",
-        ],
-    );
+    let tip = git(repo.path(), &["ls-remote", "origin", PLANNING_REF]);
     let fresh = tempfile::tempdir().unwrap();
     git(
         fresh.path(),
@@ -162,14 +152,7 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
     );
     assert_eq!(
         tip,
-        git(
-            repo.path(),
-            &[
-                "ls-remote",
-                "origin",
-                "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001"
-            ]
-        )
+        git(repo.path(), &["ls-remote", "origin", PLANNING_REF])
     );
 }
 
@@ -224,13 +207,16 @@ fn source_commits_are_rejected_and_absence_does_not_delete_local_data() {
     let saved = planning.save(b"retained", None, None).unwrap();
     git(
         repo.path(),
-        &["push", "origin", "HEAD:refs/loopflow/planning"],
+        &["push", "origin", &format!("HEAD:{PLANNING_REF}")],
     );
     assert!(matches!(
         planning.fetch(),
         Err(PlanningGitError::Invalid(_))
     ));
-    git(repo.path(), &["push", "origin", ":refs/loopflow/planning"]);
+    git(
+        repo.path(),
+        &["push", "origin", &format!(":{PLANNING_REF}")],
+    );
     assert_eq!(planning.fetch().unwrap(), None);
     assert_eq!(planning.local().unwrap(), Some(saved));
 }

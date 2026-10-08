@@ -33,9 +33,9 @@ unconfirmed synchronization when disconnected.
 Execution stays local. Never replicate Workflow position, Sessions, Processes,
 claims, controls, checkout paths or PR execution state. Imported completion cannot
 move a local Workflow, settle execution, signal a process or claim an exit.
-Machine/account operations execute on their selected machine. No shared resident,
-terminal relay, automatic turn/Flow retry, hidden arguments or cross-version
-compatibility is included. Jack excluded code, tests, help and config from herdr/cmux.
+The selected machine owns account and machine operations. Jack excluded shared
+residents, terminal relays, automatic turn/Flow retries, hidden arguments, cross-version
+compatibility, and code, tests, help or config lifted from herdr/cmux.
 
 Ordinary creation establishes identity once; replication preserves it. Retrying
 one creation retains identity while separate same-title creations remain distinct.
@@ -102,6 +102,14 @@ The manual-conflict-only `PlanningField` model is replaced by immutable mutation
 and deterministic projection. No full-store callback or second planning store
 exists. Docs describe the unfinished public path rather than claiming adoption.
 
+Compression removes the second SSH CLI parse/argument scan, the duplicate Task
+preparation branch, and parallel mutation decoders. One decoder serves export and
+global change-ID comparison; validated field groups project without another schema
+list. Regression coverage retains literal `--task` prompt text and cross-repository
+ID conflicts. Review also found the source-commit rejection fixture pushing the
+retired root ref instead of the selected user ref; it now uses one selected-ref
+constant. These reductions do not complete automatic exchange or conflict isolation.
+
 ## Remaining integration — October 8
 
 1. Bind an explicitly selected planning remote/ref locally, provision/recover one
@@ -127,41 +135,22 @@ exists. Docs describe the unfinished public path rather than claiming adoption.
    walkthrough before republishing #1491. No publication, landing or installation
    has occurred in this implementation pass.
 
-## Integration now selected — 2026-10-08
+## Committed integration boundary — 2026-10-08
 
-Jack Heart requested stacking on LOO-406 and continuing pursue. `lf task checkout
-LOO-412 --stack-on LOO-406` selected PR #1503; `lf sync --manual` integrated its
-published `e68f2a423bdabf91acadea72f23f01b3f383f244`. The common ownership cut
-`84664e661` deletes `PlanningAuthority`, personal-plan storage and split writers.
-Saved readers, ordinary creation/edit/comment/disposition and placement now share
-local identity. This supersedes the missing-writer diagnosis at `4f9a8ea17`.
+Jack Heart requested stacking on LOO-406 and continuing pursue. Parent PR #1503's
+published `e68f2a423bdabf91acadea72f23f01b3f383f244` is integrated; its common
+ownership cut `84664e661` removed `PlanningAuthority`, personal-plan storage and
+split writers. Source: `e68f2a423:scratch/explore-loopflow-s-own-store.md`.
+The missing-writer diagnosis at `4f9a8ea17` is superseded. LOO-412 owns remaining
+peer integration independently of unfinished Linear delivery; no second planner.
 
-LOO-412 owns peer export/import, ordering and checkpoints on those writers. These
-are implementation work here, not a new dependency for LOO-406 to deliver. Do not
-wait for all Linear delivery to finish or create a second planner. Source evidence:
-`e68f2a423:scratch/explore-loopflow-s-own-store.md`, common ownership, preserved
-writers, accepted conflict policy and user-keyed planning sections.
-
-The merge uses saved Task placement, retaining fetch-before-placement and source
-branch/commit checks. Tasks may exist without checkout. The obsolete copied-record
-importer and cold Project selector are removed; new peer sync must provide missing
-planning before launch. Automatic peer acquisition and the remaining legacy-association handling
-are still absent. This intermediate integration is not ready for
-publication as a working remote path; complete the end-to-end cut before review.
-
-Jack's accepted destination policy: user-keyed planning by default, explicit opt-in
-to a common shared plan, same records/APIs. A common code remote never combines
-plans implicitly. LOO-412 owns stable key provisioning/recovery and local remote/ref
-binding; never derive identity from Git display name or a per-machine random user.
-Joining an existing plan must not silently upload or merge the current local plan.
-Shared ordering cannot grant an initiating host blanket precedence over other
-collaborators. Choose deterministic ties and retain losers. Ref separation is not
-access control; private planning needs an access-controlled destination. Synthetic
-fixtures remain the only authorized publication target.
-
-The remaining-integration list above owns the unfinished cut. LOO-406's known
-unseen-Linear-write race remains contrary evidence about provider atomicity,
-not a missing product decision or reason to block independent peer integration.
+Jack's destination policy uses a stable user key across machines, never Git display
+names or per-machine random users. Ref separation is not access control: private
+planning requires a controlled remote. Joining must preserve existing plans without
+silently merging or uploading them. Synthetic fixtures remain the only authorized
+publication target. LOO-406's unseen-Linear-write race is contrary provider-atomicity
+evidence, not a missing peer-sync decision. Public acquisition, legacy association
+and the remaining integration above are required before review-only publication.
 
 ## Acceptance for review
 
@@ -192,4 +181,4 @@ public command coverage here, not only exchange and transport tests.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8): `cargo fmt --all -- --check`, `git diff --check`, and isolated Python SQLite replay (released SQL + parent draft + populated peer upgrade/capture/rollback) pass; Rust build/focused binaries and `cargo clippy --all-targets -- -D warnings` remain unverified because the build-script executable stalled at `_dyld_start`, including fresh executable/path probes; the bounded Clippy attempt expired. Gate needs a capable runner. Earlier passing evidence remains at `5d336868f:scratch/work-on-another-machine-name.md` and does not cover this cut.
+Check (October 8 compression): `cargo fmt --all -- --check` and `git diff --check` pass; `cargo clippy --all-targets -- -D warnings` expired after 150 s with its build-script sampled at `_dyld_start`; gate/CI own the build and focused `planning_peers`, `ssh::tests`, `planning_git_tests` and `task_remote_tests`. Prior SQL replay and unavailable Rust checks: `b6acfb9ee:scratch/work-on-another-machine-name.md`.

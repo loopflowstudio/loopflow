@@ -1,7 +1,7 @@
 //! Peer receipts and projection commit together on the existing planning tables.
 //! Export reads retained mutation identities; it never creates a new edit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
@@ -35,30 +35,23 @@ impl SqliteStore {
         revision: &str,
         incoming: &PlanningSnapshot,
     ) -> StoreResult<PlanningSnapshot> {
-        incoming.validate().map_err(invalid)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = export_in(&tx, repo)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         // Check identities against the whole store, not only this repository.
-        for (id, change) in &incoming.changes {
-            let retained: Option<(String, String, String, String, i64, bool, String)> = tx.query_row(
+        {
+            let mut query = tx.prepare_cached(
                 "SELECT kind,object_id,field,value,clock,linear,parents FROM planning_peer_changes WHERE id=?1",
-                [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)),
-            ).optional()?;
-            if let Some((kind, object, field, value, clock, linear, parents)) = retained {
-                if kind != change.object.kind.as_str()
-                    || object != change.object.id
-                    || field != change.field
-                    || serde_json::from_str::<Value>(&value)? != change.value
-                    || clock != change.clock
-                    || linear != change.linear
-                    || serde_json::from_str::<std::collections::BTreeSet<String>>(&parents)?
-                        != change.parents
-                {
-                    return Err(invalid(format!(
-                        "planning change {id} has conflicting contents"
-                    )));
+            )?;
+            for (id, change) in &incoming.changes {
+                let mut rows = query.query([id])?;
+                if let Some(row) = rows.next()? {
+                    if read_mutation(row)? != *change {
+                        return Err(invalid(format!(
+                            "planning change {id} has conflicting contents"
+                        )));
+                    }
                 }
             }
         }
@@ -139,7 +132,6 @@ impl SqliteStore {
             }
         }
         for (object, fields) in &objects {
-            require_complete(object, fields)?;
             project_in(&tx, object, fields)?;
             require_repository(&tx, object, repo)?;
         }
@@ -175,37 +167,20 @@ fn export_in(conn: &Connection, repo: &str) -> StoreResult<PlanningSnapshot> {
         UNION ALL SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
         UNION ALL SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1
         UNION ALL SELECT 'comment',c.id FROM task_comments c JOIN tasks t ON t.id=c.task_id JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1)
-        SELECT c.id,c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents
+        SELECT c.kind,c.object_id,c.field,c.value,c.clock,c.linear,c.parents,c.id
         FROM planning_peer_changes c JOIN objects o ON o.kind=c.kind AND o.id=c.object_id ORDER BY c.clock,c.id")?;
     let mut snapshot = PlanningSnapshot::default();
     let mut rows = query.query([repo])?;
     while let Some(row) = rows.next()? {
-        let kind: String = row.get(1)?;
-        let value: String = row.get(4)?;
-        let parents: String = row.get(7)?;
-        snapshot.changes.insert(
-            row.get(0)?,
-            PlanningMutation {
-                object: PlanningObject {
-                    kind: serde_json::from_value(Value::String(kind))?,
-                    id: row.get(2)?,
-                },
-                field: row.get(3)?,
-                value: serde_json::from_str(&value)?,
-                clock: row.get(5)?,
-                linear: row.get(6)?,
-                parents: serde_json::from_str(&parents)?,
-            },
-        );
+        snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
     }
     snapshot.validate().map_err(invalid)?;
-    let expected: std::collections::BTreeSet<_> =
-        snapshot.heads().into_values().flatten().collect();
+    let expected: BTreeSet<_> = snapshot.heads().into_values().flatten().collect();
     let mut query = conn.prepare("SELECT id FROM planning_peer_heads")?;
     let retained = query
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    let actual: std::collections::BTreeSet<_> = retained
+    let actual: BTreeSet<_> = retained
         .into_iter()
         .filter(|id| snapshot.changes.contains_key(id))
         .collect();
@@ -215,6 +190,21 @@ fn export_in(conn: &Connection, repo: &str) -> StoreResult<PlanningSnapshot> {
         ));
     }
     Ok(snapshot)
+}
+
+/// SELECT kind,object_id,field,value,clock,linear,parents
+fn read_mutation(row: &rusqlite::Row<'_>) -> StoreResult<PlanningMutation> {
+    Ok(PlanningMutation {
+        object: PlanningObject {
+            kind: serde_json::from_value(Value::String(row.get(0)?))?,
+            id: row.get(1)?,
+        },
+        field: row.get(2)?,
+        value: serde_json::from_str(&row.get::<_, String>(3)?)?,
+        clock: row.get(4)?,
+        linear: row.get(5)?,
+        parents: serde_json::from_str(&row.get::<_, String>(6)?)?,
+    })
 }
 
 fn table(kind: PlanningKind) -> &'static str {
@@ -279,28 +269,16 @@ fn project_in(
     let mut columns = BTreeMap::new();
     for (field, value) in fields {
         if matches!(field.as_str(), "disposition" | "content") {
-            let allowed = if field == "disposition" {
-                &[
-                    "planning_state",
-                    "planning_completed",
-                    "planning_completed_at",
-                ][..]
-            } else {
-                &["body", "author", "created_at"][..]
-            };
-            let group = value
-                .as_object()
-                .ok_or_else(|| invalid("invalid planning field group"))?;
-            if group.len() != allowed.len() || allowed.iter().any(|key| !group.contains_key(*key)) {
-                return Err(invalid("invalid planning field group"));
-            }
+            // The merged snapshot has already validated names and grouped values.
             columns.extend(
-                group
+                value
+                    .as_object()
+                    .expect("validated planning field group")
                     .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
+                    .map(|(key, value)| (key.as_str(), value)),
             );
         } else {
-            columns.insert(field.clone(), value.clone());
+            columns.insert(field.as_str(), value);
         }
     }
     let assignments = columns
@@ -558,6 +536,37 @@ mod tests {
             Some("candidate")
         );
         assert_eq!(right.export_peer_planning("/target").unwrap(), base);
+    }
+
+    #[test]
+    fn reused_changes_in_another_repository_preserve_the_original_and_import_checkpoint() {
+        let (_home, store) = store();
+        seed(&store);
+        let original = store.export_peer_planning("/source").unwrap();
+        let mut reused = original.clone();
+        reused
+            .changes
+            .values_mut()
+            .find(|change| change.field == "issue_title")
+            .unwrap()
+            .value = json!("Conflicting identity from another plan");
+        let error = store
+            .import_peer_planning("/other", "synthetic", "reused", &reused)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("conflicting contents"),
+            "{error}"
+        );
+        assert_eq!(store.export_peer_planning("/source").unwrap(), original);
+        assert!(store
+            .export_peer_planning("/other")
+            .unwrap()
+            .changes
+            .is_empty());
+        assert!(store
+            .peer_import_revision("/other", "synthetic")
+            .unwrap()
+            .is_none());
     }
 
     #[test]

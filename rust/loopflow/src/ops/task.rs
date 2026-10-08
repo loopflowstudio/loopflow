@@ -769,37 +769,31 @@ pub(crate) async fn resolve_task(
             // Older independently created identities remain local. The explicit
             // provider alias associates them; matching titles never does.
             task = store
-                .get_task_by_issue(source.identifier())
+                .get_task_by_issue(&source.identifier)
                 .await
                 .map_err(task_error)?;
         }
     }
-    if let Some(task) = task {
-        if task.worktree.is_some() {
+    let selector = match task {
+        Some(task) if task.worktree.is_some() => {
             if let Some(source) = &source {
                 restore_task_checkout(store, &task).await?;
                 source.require_checkout(&task)?;
             }
             return Ok(task);
         }
-        let repo = repo.to_path_buf();
-        let selector = source
+        Some(task) => source
             .as_ref()
-            .map(|source| source.identifier().to_string())
-            .unwrap_or_else(|| task.id.to_string());
-        return tokio::task::spawn_blocking(move || {
-            prepare_task(&repo, &selector, TaskProcessOptions::default())
-        })
-        .await
-        .map_err(task_error)?;
-    }
-    if source.is_some() || crate::durable::TaskId::parse(selector).is_ok() {
-        return Err(task_error(format!(
-            "Task {selector} has not synchronized to this machine; synchronize the selected planning destination before launching"
-        )));
-    }
+            .map(|source| source.identifier.clone())
+            .unwrap_or_else(|| task.id.to_string()),
+        None if source.is_some() || crate::durable::TaskId::parse(selector).is_ok() => {
+            return Err(task_error(format!(
+                "Task {selector} has not synchronized to this machine; synchronize the selected planning destination before launching"
+            )));
+        }
+        None => selector.to_string(),
+    };
     let repo = repo.to_path_buf();
-    let selector = selector.to_string();
     tokio::task::spawn_blocking(move || {
         prepare_task(&repo, &selector, TaskProcessOptions::default())
     })

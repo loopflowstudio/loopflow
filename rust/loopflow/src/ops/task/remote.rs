@@ -28,19 +28,19 @@ impl TaskSource {
         else {
             return Ok(None);
         };
-        if task.worktree.is_none() {
+        let Some(worktree) = task.worktree.as_deref() else {
             return Ok(None);
-        }
+        };
         let pr = store
             .active_task_pr(&task.id)
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
-        if !is_clean(task.worktree()?)? {
+        if !is_clean(worktree)? {
             return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.plan.identifier, pr.branch)));
         }
-        let commit = rev_parse(task.worktree()?, "HEAD")?;
-        require_pushed_code(task.worktree()?, &task.plan.identifier, &pr.branch, &commit)?;
+        let commit = rev_parse(worktree, "HEAD")?;
+        require_pushed_code(worktree, &task.plan.identifier, &pr.branch, &commit)?;
         Ok(Some(Self {
             branch: pr.branch,
             commit,
@@ -49,20 +49,16 @@ impl TaskSource {
         }))
     }
 
-    pub fn identifier(&self) -> &str {
-        &self.identifier
-    }
-
     pub fn require_pushed(&self, repo: &Path) -> OpsResult<()> {
-        require_pushed_code(repo, self.identifier(), &self.branch, &self.commit)
+        require_pushed_code(repo, &self.identifier, &self.branch, &self.commit)
     }
 
     pub fn require_checkout(&self, task: &Task) -> OpsResult<()> {
-        let branch = crate::engine::git::current_branch(task.worktree()?)?;
-        if branch.as_deref() != Some(&self.branch)
-            || !is_ancestor(task.worktree()?, &self.commit, "HEAD")?
+        let worktree = task.worktree()?;
+        let branch = crate::engine::git::current_branch(worktree)?;
+        if branch.as_deref() != Some(&self.branch) || !is_ancestor(worktree, &self.commit, "HEAD")?
         {
-            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.identifier(), self.branch, self.commit, task.worktree()?.display())));
+            return Err(task_error(format!("Task {} needs branch {} at commit {}; run `lf sync` in {} before continuing; existing work is preserved", self.identifier, self.branch, self.commit, worktree.display())));
         }
         Ok(())
     }
@@ -74,7 +70,7 @@ pub(crate) fn source_for_task(issue: &str) -> OpsResult<Option<TaskSource>> {
     };
     let source: TaskSource = serde_json::from_str(&value.to_string_lossy())
         .map_err(|error| OpsError::Message(format!("invalid SSH Task source: {error}")))?;
-    Ok((source.identifier() == issue || source.task_id.as_str() == issue).then_some(source))
+    Ok((source.identifier == issue || source.task_id.as_str() == issue).then_some(source))
 }
 
 fn require_pushed_code(repo: &Path, issue: &str, branch: &str, commit: &str) -> OpsResult<()> {

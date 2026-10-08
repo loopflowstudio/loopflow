@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::process::Command;
 
 use loopflow::engine::planning_exchange::{
     PlanningChangeId, PlanningComment, PlanningDisposition, PlanningField, PlanningMembership,
@@ -254,16 +253,10 @@ fn portable_decode_rejects_execution_fields_and_invalid_causal_context() {
 fn causal_conflicts_and_resolution_survive_git_publication_and_fresh_repository() {
     let first = TestRepo::new();
     first.push();
-    let origin = Command::new("git")
-        .current_dir(first.path())
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .unwrap();
-    assert!(origin.status.success());
-    let origin = String::from_utf8(origin.stdout).unwrap();
+    let origin = first.bare_path().to_str().unwrap();
     let second = TestRepo::new();
-    let laptop = PlanningGit::new(first.path(), origin.trim()).unwrap();
-    let worker = PlanningGit::new(second.path(), origin.trim()).unwrap();
+    let laptop = PlanningGit::new(first.path(), origin).unwrap();
+    let worker = PlanningGit::new(second.path(), origin).unwrap();
     let initial = snapshot(task());
     let base = laptop
         .save(&initial.to_bytes().unwrap(), None, None)
@@ -321,7 +314,7 @@ fn causal_conflicts_and_resolution_survive_git_publication_and_fresh_repository(
     );
     // A fresh repository has no SQLite checkpoint or remembered merge base.
     let fresh = TestRepo::new();
-    let reader = PlanningGit::new(fresh.path(), origin.trim()).unwrap();
+    let reader = PlanningGit::new(fresh.path(), origin).unwrap();
     let recovered = reader.fetch().unwrap().unwrap();
     let mut recovered = PlanningSnapshot::from_bytes(&recovered.bytes).unwrap();
     assert_eq!(recovered, merged);

@@ -4,7 +4,7 @@
 //! This module never opens a store or uses the source branch, index or worktree.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
@@ -100,7 +100,7 @@ impl PlanningGit {
         // invocation's stale FETCH_HEAD or overwrite its temporary reference.
         let temporary = format!("refs/loopflow/planning-fetch-{}", uuid::Uuid::new_v4());
         let refspec = format!("{SHARED_REF}:{temporary}");
-        let fetched: Result<Option<PlanningDocument>> = (|| {
+        let fetched: Result<PlanningDocument> = (|| {
             self.checked(
                 "fetch",
                 &[
@@ -127,12 +127,12 @@ impl PlanningGit {
                 ],
                 &[],
             )?;
-            Ok(Some(document))
+            Ok(document)
         })();
         let cleanup = self.checked("release fetch ref", &["update-ref", "-d", &temporary], &[]);
         let document = fetched?;
         cleanup?;
-        Ok(document)
+        Ok(Some(document))
     }
 
     /// Save the exchange layer's reconciled bytes. Parents are causal inputs, not
@@ -366,7 +366,7 @@ impl GitOutput {
 }
 
 fn read_output(file: &mut File) -> Result<Vec<u8>> {
-    file.seek(SeekFrom::Start(0))?;
+    file.rewind()?;
     let mut bytes = Vec::new();
     file.take(MAX_DOCUMENT as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > MAX_DOCUMENT {

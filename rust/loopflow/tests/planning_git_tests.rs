@@ -52,8 +52,10 @@ fn concurrent_publication_preserves_both_revisions_and_all_source_bytes() {
     let first = TestRepo::new();
     first.push();
     let second = tempfile::tempdir().unwrap();
-    let origin = git(first.path(), &["remote", "get-url", "origin"]);
-    git(second.path(), &["clone", &origin, "."]);
+    git(
+        second.path(),
+        &["clone", first.bare_path().to_str().unwrap(), "."],
+    );
     dirty(first.path());
     dirty(second.path());
     let first_before = source_state(first.path());
@@ -117,7 +119,6 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
     let repo = TestRepo::new();
     repo.push();
     let online = transport(repo.path());
-    let remote = git(repo.path(), &["remote", "get-url", "origin"]);
     let saved = online
         .save(
             br#"{"task":"stable-id","comment":"stable-comment"}"#,
@@ -138,7 +139,10 @@ fn offline_changes_survive_and_fresh_clone_readback_recovers_lost_acknowledgemen
         &["ls-remote", "origin", "refs/loopflow/planning"],
     );
     let fresh = tempfile::tempdir().unwrap();
-    git(fresh.path(), &["clone", &remote, "."]);
+    git(
+        fresh.path(),
+        &["clone", repo.bare_path().to_str().unwrap(), "."],
+    );
     let recovered = transport(fresh.path());
     assert_eq!(recovered.fetch().unwrap(), Some(saved.clone()));
     assert_eq!(

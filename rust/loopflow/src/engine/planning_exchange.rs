@@ -52,8 +52,9 @@ impl<T: Clone + Ord> PlanningField<T> {
 
     /// None means conflicting values, never an absent/default planning value.
     pub fn resolved(&self) -> Option<&T> {
-        let values = self.values();
-        (values.len() == 1).then(|| *values.first().expect("one value"))
+        let mut values = self.current.values().flatten();
+        let first = values.next()?;
+        values.all(|value| value == first).then_some(first)
     }
 
     /// A writer can replay its current write, but cannot reuse a past identity.
@@ -62,16 +63,15 @@ impl<T: Clone + Ord> PlanningField<T> {
         change: PlanningChangeId,
         value: T,
     ) -> Result<(), PlanningExchangeError> {
+        let current = BTreeMap::from([(change.clone(), BTreeSet::from([value]))]);
+        if self.current == current {
+            return Ok(());
+        }
         if self.retired.contains(&change) || self.current.contains_key(&change) {
-            if self.current.len() == 1
-                && self.current.get(&change) == Some(&BTreeSet::from([value]))
-            {
-                return Ok(());
-            }
             return Err(PlanningExchangeError::ReusedChange);
         }
-        self.retired.extend(self.current.keys().cloned());
-        self.current = BTreeMap::from([(change, BTreeSet::from([value]))]);
+        let previous = std::mem::replace(&mut self.current, current);
+        self.retired.extend(previous.into_keys());
         Ok(())
     }
 

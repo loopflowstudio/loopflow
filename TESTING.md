@@ -317,6 +317,10 @@ participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
 
+After upgrading GhosttyKit or its bundled shell integration, run
+`scripts/test_desktop.sh --filter GhosttyShellBlockTests` to check the actual
+shell output for prompt headers, command boundaries and exit status.
+
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
 

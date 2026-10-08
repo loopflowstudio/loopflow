@@ -162,11 +162,11 @@ struct GhosttyShellBlockTests {
         let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
         try expectInOrder([
             "\u{1B}]133;A;cl=line\u{7}",
-            "\n\u{1B}]133;A;k=s\u{7}",
+            "\n\u{1B}]133;P;k=s\u{7}",
             "\u{1B}[8m\(GhosttyBlockHeader.marker)",
             home.lastPathComponent,
             "\u{1B}[28m",
-            "\n\u{1B}]133;A;k=s\u{7}",
+            "\n\u{1B}]133;P;k=s\u{7}",
             "\u{276F}",
             "\u{1B}]133;B\u{7}",
             "\u{1B}]133;C\u{7}",

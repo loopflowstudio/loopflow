@@ -8,7 +8,7 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 Jack Heart decided: zero or one PR per Task. Every merge requires follow-ups
 filed or “none needed” recorded before completion. End means completed;
-`task complete` may return as an alias for `task move end`, with identical checks
+`task complete` returns locally as an alias for `task move end`, with identical checks
 and no separate flag. Dependent PRs use stacked Tasks; research needs no PR.
 Jack accepted a waited landing Flow with follow-through, recovered by the next
 Task/Wave operation, without a new watcher. No schedule means no automatic wake.
@@ -21,12 +21,12 @@ Base `626789dcd` includes #1488: bare land already defaults to completion, while
 well as rotation; retain existing obligations and multi-PR history. LOO-385's
 no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.
 
-Process admission precedes `--task` placement; Started and Flow membership use
-recorded cwd. A disposable trigger probe rejected caller cwd and accepted target
-cwd; historical launches and the corrected CLI remain unverified. Stack sync
-preserves child code through parent updates/squash; scratch isolation requires
-child-specific handoff. Task operator guidance currently stops at landing and
-lacks an explicit completion call; update it to finish follow-through.
+Admission must record performed location after placement, retaining caller
+ancestry. The local fix makes Flow registration and Started atomic and shares
+membership predicates with inventory. Isolated mechanical CLI evidence is not
+installed or Desktop acceptance; historical rows remain unchanged. Stack sync
+preserves child code; scratch needs explicit handoff. Operator guidance still
+needs follow-through and completion beyond landing.
 
 ## Live Home reconciliation (2026-10-05)
 

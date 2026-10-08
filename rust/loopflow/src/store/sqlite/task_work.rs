@@ -70,6 +70,32 @@ pub(super) fn process_lfids(selector: &str) -> String {
         session_ids(selector), tasks(selector), checkout("ae.cwd"))
 }
 
+/// Prefer the deepest checkout when membership names more than one Task.
+/// Explicit Session bindings use the same association as Task inventory.
+pub(super) fn task_of_process(
+    conn: &rusqlite::Connection,
+    process: &ProcessLfid,
+) -> StoreResult<Option<String>> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            &format!(
+                "WITH members AS MATERIALIZED (
+                    SELECT session_id AS id FROM session_events INDEXED BY session_process_membership
+                        WHERE process_lfid=?1
+                    UNION SELECT id FROM agent_sessions WHERE driver_process_lfid=?1)
+                 SELECT tw.id FROM tasks tw JOIN processes e ON e.lfid=?1
+                 WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
+                    WHERE a.id IN (SELECT id FROM members) AND ({}))
+                 ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
+                checkout("e.cwd"), session_membership("a")
+            ),
+            [process],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub(super) fn flows_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
@@ -1195,5 +1221,20 @@ mod tests {
             ["history"]
         );
         assert!(work.flows.is_empty());
+
+        // A Flow explicitly bound through a Session remains visible after the
+        // checkout disappears. Inventory and Task status use the same rule.
+        let bound_flow = store.test_flow("bound", "/elsewhere", &[], None);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload) VALUES('history','started','bound-flow',?1,3,'{}')", [&bound_flow]).unwrap();
+        }
+        let work = store.task_work(&task).unwrap();
+        assert_eq!(work.flows.len(), 1);
+        assert_eq!(work.flows[0].summary.id, bound_flow.as_str());
+        assert_eq!(work.flows[0].summary.task_id.as_ref(), Some(&task));
+        let (_, entry) = store.flow_process(bound_flow.as_str()).unwrap().unwrap();
+        assert_eq!(entry.summary.task_id.as_ref(), Some(&task));
+        assert_eq!(entry.summary.wave_id.as_ref(), Some(&wave));
     }
 }

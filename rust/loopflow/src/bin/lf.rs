@@ -993,10 +993,19 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
-            node,
+            reason,
+            force,
+            ..
+        }
+        | TaskCommand::Complete {
+            issue,
             reason,
             force,
         } => {
+            let node = match command {
+                TaskCommand::Move { node, .. } => node.as_str(),
+                _ => loopflow::engine::workflow::END,
+            };
             println!(
                 "{}",
                 loopflow::ops::task::workflow_set(
@@ -1341,7 +1350,7 @@ fn run() -> anyhow::Result<()> {
         })?;
     let args = reorder_args(normalize_ssh_args(normalized));
 
-    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
+    let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1454,10 +1463,40 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    // Process admission records this process's cwd. Each operation resolves the
-    // repository it needs after dispatch; machine inspection needs no Git.
+    // Resolve existing placement before recording where this Process performs
+    // work. A failed resolution is still observed at the directory it reached.
+    let mut direct_binding = None;
+    let mut _work_declaration = None;
+    let mut _bound_cwd = None;
+    let placement = (|| -> anyhow::Result<()> {
+        if let Some(name) = &cli.wt {
+            _bound_cwd = Some(CwdGuard::enter(
+                &loopflow::lf::commands::ops::resolve_worktree(name)?,
+            )?);
+        }
+        if let Some(task) = cli.task.as_ref() {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
+            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            if let Some(cwd) = cli.bound_cwd.clone() {
+                binding.cwd = cwd;
+            }
+            if cli.model.is_none() {
+                cli.model = binding.agent.clone();
+            }
+            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
+            binding.cwd = std::env::current_dir()?;
+            _work_declaration = Some(EnvGuard::set(
+                loopflow::lf::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            ));
+            direct_binding = Some(binding);
+        }
+        Ok(())
+    })();
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
+    placement?;
     {
         // Account flags before an SSH target shape the origin grant. Flags in the
         // remote lf arguments become preferences over its merged local/forwarded
@@ -1500,7 +1539,7 @@ fn run() -> anyhow::Result<()> {
         }
         debug!(?cli, "parsed CLI arguments");
 
-        dispatch(cli, &args, account_selection)
+        dispatch(cli, &args, account_selection, direct_binding)
     }
 }
 
@@ -1508,20 +1547,13 @@ fn dispatch(
     mut cli: Cli,
     args: &[String],
     account_selection: loopflow::provider_account::lease::AccountSelection,
+    mut direct_binding: Option<loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     // Every MachineId-addressed SSH hop proves it reached the intended authority
     // before reads or mutations dispatch. Raw-host bootstrap carries no
     // expectation and falls through.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
-    let mut direct_binding = None;
-    let mut _work_declaration = None;
-    let mut _bound_cwd = None;
-    if let Some(name) = &cli.wt {
-        _bound_cwd = Some(CwdGuard::enter(
-            &loopflow::lf::commands::ops::resolve_worktree(name)?,
-        )?);
-    }
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE run FLOW`.
     if let Some(Commands::Task {
@@ -1565,25 +1597,13 @@ fn dispatch(
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its Flow succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::flow::run_for_task(&cli, &task.plan.identifier, &flow)?;
+        loopflow::lf::commands::flow::run_for_task(
+            &cli,
+            &task.plan.identifier,
+            &flow,
+            &task.worktree,
+        )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task, &end)?);
-    }
-    if let Some(task) = cli.task.as_ref() {
-        let directory = loopflow::repo::working_directory()?;
-        let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
-        let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-        if let Some(cwd) = cli.bound_cwd.clone() {
-            binding.cwd = cwd;
-        }
-        if cli.model.is_none() {
-            cli.model = binding.agent.clone();
-        }
-        _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
-        _work_declaration = Some(EnvGuard::set(
-            loopflow::lf::WORK_DECLARATION_ENV,
-            format!("task:{}", binding.work.id()),
-        ));
-        direct_binding = Some(binding);
     }
     let explicit_wave = cli
         .wave

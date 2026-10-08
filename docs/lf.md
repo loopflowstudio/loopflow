@@ -232,9 +232,10 @@ for evidence or a scope decision; time and green CI never establish production
 success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
 requests without a stated outcome surface for an explicit scope decision.
 
-`lf task move EXP-12 end` records an explicit completion. Old Session turns,
-reserved inputs and unknown process exits cannot veto it. Execution history and
-live process controls remain intact; uncertain or occupied checkouts are retained.
+`lf task complete EXP-12` (equivalently, `lf task move EXP-12 end`) records an
+explicit completion. Old Session turns, reserved inputs and unknown process exits
+cannot veto it. Execution history and live process controls remain intact;
+uncertain or occupied checkouts are retained.
 Cancellation follows the same separation. Open PRs and additional committed work
 still need delivery or explicit abandonment.
 

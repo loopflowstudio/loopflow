@@ -823,6 +823,16 @@ pub enum TaskCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Complete a Task: the same transition and checks as `task move ISSUE end`
+    Complete {
+        issue: String,
+        /// Why, kept in the Task's workflow history
+        #[arg(long)]
+        reason: Option<String>,
+        /// Reach `end` although Linear already calls the active Task complete
+        #[arg(long)]
+        force: bool,
+    },
     /// Put a Task at a node of its workflow without running anything; `end` completes it
     Move {
         issue: String,
@@ -980,6 +990,7 @@ impl TaskCommand {
             Self::Checkout { issue, .. }
             | Self::Run { issue, .. }
             | Self::Move { issue, .. }
+            | Self::Complete { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }
@@ -2355,7 +2366,7 @@ mod tests {
     }
 
     #[test]
-    fn reaching_end_is_the_one_completion_command() {
+    fn complete_and_move_end_name_the_same_transition() {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
@@ -2370,6 +2381,19 @@ mod tests {
         assert!(matches!(cli.command,
             Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
                 if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
+        let cli = Cli::try_parse_from([
+            "lf",
+            "task",
+            "complete",
+            "LOO-42",
+            "--reason",
+            "Delivered",
+            "--force",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command,
+            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason, force: true } })
+                if issue == "LOO-42" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",
             "task",

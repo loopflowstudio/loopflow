@@ -106,7 +106,7 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// beneath this process. A Flow held for a person or a watcher, an interrupted
 /// one, and a launch refused before any Flow started are returned as they
 /// ended.
-pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
+pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, cwd: &Path) -> Result<()> {
     let mut args = cli.step_args();
     if !cli.batch {
         args.retain(|arg| arg != "--batch");
@@ -133,6 +133,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
         let mark = store.process_mark()?;
         let mut child = std::process::Command::new(&lf)
             .args(&args)
+            .current_dir(cwd)
             .spawn()
             .context("could not start the Task's Flow")?;
         ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
@@ -198,18 +199,16 @@ fn execute(
             .sqlite
             .lock_task_checkouts(&[driver.cwd], driver.task.as_ref())?;
         // The driver's one record of its Flow, written before any step runs.
-        driver.store.sqlite.record_flow_process(
-            &driver.process,
-            flow_name,
-            &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
-        )?;
-        // A conversation the Flow opens also starts its Task; a checkout the
-        // registry spells differently must not refuse the launch.
-        if let Some(task) = &task {
-            if let Err(error) = driver.store.sqlite.mark_task_started(task) {
-                tracing::warn!(%error, "Flow launch did not record its Task as started");
-            }
-        }
+        driver
+            .store
+            .sqlite
+            .record_flow_process(
+                &driver.process,
+                flow_name,
+                &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
+                task.as_ref(),
+            )
+            .context("could not record the Flow and start its Task; no steps launched")?;
         drop(admission);
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live

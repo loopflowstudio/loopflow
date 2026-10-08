@@ -1,8 +1,9 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 
 use loopflow_test_support::TestRepo;
 
@@ -200,6 +201,216 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             );
         }
         assert_eq!(support::recorded_flows(home.path()).len(), 3);
+    }
+}
+
+#[test]
+fn failed_placement_is_observed_without_starting_a_task() {
+    let task = WorkflowTask::new();
+    let output = task.run(&["--task", "missing-task", "run", "proof"]);
+    assert!(!output.status.success());
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let (cwd, outcome): (String, String) = db
+        .query_row(
+            "SELECT cwd,outcome FROM processes ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(Path::new(&cwd), task.repo.path().canonicalize().unwrap());
+    assert_eq!(outcome, "failed");
+    assert!(support::recorded_flows(task.home.path()).is_empty());
+    let started: Option<i64> = db
+        .query_row(
+            "SELECT started_at FROM tasks WHERE id=?1",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(started, None);
+}
+
+// Release the fixture even when an assertion fails, so no held child escapes.
+struct HeldFlow {
+    child: Child,
+    release: PathBuf,
+    caller: PathBuf,
+}
+
+impl Drop for HeldFlow {
+    fn drop(&mut self) {
+        let _ = fs::write(&self.release, "");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while self.child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = fs::remove_dir_all(&self.caller);
+    }
+}
+
+#[test]
+fn running_flows_belong_to_the_target_checkout_and_retain_their_caller() {
+    for launch in ["task", "direct", "checkout", "alias", "wt"] {
+        let task = WorkflowTask::new();
+        // A real sibling checkout, managed through the public placement command.
+        task.ok(&["wt", "create", "caller"]);
+        // Worktree discovery is read-only and does not select an ambient Home.
+        let caller = {
+            loopflow::engine::worktrees::list_worktrees(task.repo.path())
+                .unwrap()
+                .into_iter()
+                .find(|wt| wt.path != task.repo.path().canonicalize().unwrap())
+                .unwrap()
+                .path
+        };
+        let alias_root = tempfile::tempdir().unwrap();
+        let alias = alias_root.path().join("target");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(task.repo.path(), &alias).unwrap();
+        task.repo
+            .create_file(".lf/flows/proof.yaml", "- cmd: __telemetry-scorecard\n");
+        task.repo.create_file(
+            "scripts/lifecycle_scorecard.py",
+            r#"
+import json
+import os
+from pathlib import Path
+import time
+
+home = Path(os.environ['LF_HOME'])
+(home / 'ready.tmp').write_text(os.environ['LF_PROCESS_LFID'])
+(home / 'ready.tmp').replace(home / 'ready')
+while not (home / 'release').exists():
+    time.sleep(.02)
+print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
+"#,
+        );
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        let started = || {
+            db.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [task.registered.task.id.as_str()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+        };
+        // Explicit placement and passive inspection must not start the Task.
+        let read = command(
+            &caller,
+            task.home.path(),
+            &["--task", "INF-123", "task", "status", "INF-123", "--json"],
+        )
+        .output()
+        .unwrap();
+        assert!(
+            read.status.success(),
+            "{}",
+            String::from_utf8_lossy(&read.stderr)
+        );
+        assert!(started().is_none());
+        assert!(support::recorded_flows(task.home.path()).is_empty());
+
+        let parent = loopflow::id::ProcessLfid::new();
+        let trace = loopflow::id::TraceId::new();
+        db.execute("INSERT INTO processes(lfid,trace_id,cwd,command,started_at) VALUES(?1,?2,?3,'caller',1)",
+            rusqlite::params![parent, trace, caller.to_str().unwrap()]).unwrap();
+        let (cwd, args): (&Path, &[&str]) = match launch {
+            "task" => (&caller, &["-b", "task", "run", "INF-123", "proof"]),
+            "direct" => (&caller, &["-b", "--task", "INF-123", "run", "proof"]),
+            "wt" => (&caller, &["-b", "--wt", "launch-proof", "run", "proof"]),
+            "alias" => (&alias, &["-b", "run", "proof"]),
+            _ => (task.repo.path(), &["-b", "run", "proof"]),
+        };
+        let log_path = task.home.path().join("launch.log");
+        let log = fs::File::create(&log_path).unwrap();
+        let mut held = HeldFlow {
+            child: command(cwd, task.home.path(), args)
+                .env("LF_PROCESS_LFID", parent.as_str())
+                .env("LF_TRACE_ID", trace.as_str())
+                .stdout(log.try_clone().unwrap())
+                .stderr(log)
+                .spawn()
+                .unwrap(),
+            release: task.home.path().join("release"),
+            caller: caller.clone(),
+        };
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !task.home.path().join("ready").exists() {
+            assert!(
+                held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+                "{launch}: {}",
+                fs::read_to_string(&log_path).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(started().is_some(), "{launch}");
+        let status = task.status();
+        let flows = status["work"]["flows"].as_array().unwrap();
+        assert_eq!(flows.len(), 1, "{launch}: {status}");
+        assert_eq!(flows[0]["state"], "current");
+        assert_eq!(flows[0]["task_id"], task.registered.task.id.as_str());
+        let driver = flows[0]["id"].as_str().unwrap();
+        let recorded: (String, String) = db
+            .query_row(
+                "SELECT cwd,parent_process_lfid FROM processes WHERE lfid=?1",
+                [driver],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            Path::new(&recorded.0),
+            task.repo.path().canonicalize().unwrap()
+        );
+        let ancestor = if launch == "task" {
+            db.query_row(
+                "SELECT parent_process_lfid FROM processes WHERE lfid=?1",
+                [&recorded.1],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+        } else {
+            recorded.1
+        };
+        assert_eq!(ancestor, parent.as_str());
+        let original: String = db
+            .query_row("SELECT cwd FROM processes WHERE lfid=?1", [parent], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(Path::new(&original), caller);
+        let inventory = task.run(&[
+            "flow",
+            "list",
+            "--sessions",
+            "--for-task",
+            "INF-123",
+            "--json",
+        ]);
+        assert!(
+            inventory.status.success(),
+            "{}",
+            String::from_utf8_lossy(&inventory.stderr)
+        );
+        let inventory: loopflow::durable::FlowPage =
+            serde_json::from_slice(&inventory.stdout).unwrap();
+        assert_eq!(inventory.entries.len(), 1);
+        assert_eq!(inventory.entries[0].summary.id, driver);
+        assert_eq!(
+            inventory.entries[0].summary.task_id.as_ref(),
+            Some(&task.registered.task.id)
+        );
+        fs::write(&held.release, "").unwrap();
+        assert!(
+            held.child.wait().unwrap().success(),
+            "{}",
+            fs::read_to_string(&log_path).unwrap()
+        );
+        assert!(!fs::read_to_string(&log_path)
+            .unwrap()
+            .contains("did not record"));
+        println!("{launch}: Started; target status and inventory show current Flow; caller retained; exit 0");
     }
 }
 
@@ -662,7 +873,7 @@ fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
     assert!(text.contains("\nINF-123  done\n"), "{text}");
     task.ok(&["task", "move", "INF-123", "review"]);
     assert_eq!(task.state(), "active");
-    // The command `end` replaced is gone.
+    // The retired completion flags do not return with the alias.
     assert!(!task
         .run(&["task", "complete", "INF-123", "--summary", "x"])
         .status
@@ -691,6 +902,7 @@ fn end_is_refused_while_the_tasks_pr_is_unsettled() {
     for reach in [
         &["task", "run", "INF-123"][..],
         &["task", "move", "INF-123", "end"],
+        &["task", "complete", "INF-123"],
     ] {
         let error = refusal(task.run(reach));
         assert!(error.contains("unpublished pull request"), "{error}");
@@ -726,7 +938,7 @@ fn linear_completing_an_active_task_is_shown_and_holds_it_from_end() {
         assert_eq!(task.state(), "active");
     }
     task.ok(&[
-        "task", "move", "INF-123", "end", "--force", "--reason", "Agreed",
+        "task", "complete", "INF-123", "--force", "--reason", "Agreed",
     ]);
     assert_eq!(task.state(), "done");
     assert!(task.status()["planning_conflict"].is_null());
@@ -767,8 +979,12 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     )
     .unwrap();
     let sessions: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
-    for _ in 0..2 {
-        task.ok(&["task", "move", "INF-123", "end"]);
+    for args in [
+        &["task", "complete", "INF-123"][..],
+        &["task", "move", "INF-123", "end"][..],
+        &["task", "complete", "INF-123"][..],
+    ] {
+        task.ok(args);
         assert_eq!(task.state(), "done");
         assert!(task.repo.path().exists());
     }

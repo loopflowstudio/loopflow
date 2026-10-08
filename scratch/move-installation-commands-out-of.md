@@ -1,7 +1,9 @@
 # Installation command ownership — LOO-401
 
 Jack Heart's October 7 direction accepts `self` for installation, `config user`,
-and removal of screenshot without a replacement. Publication stops at PR review.
+and removal of screenshot without a replacement. After reviewing PR #1494 and
+the help-warning repair, Jack accepted the change and requested advancing the
+Task; the `ship` edge now follows the earlier publication-for-review boundary.
 Main already renamed Home to Machine and introduced `installation` (#1484).
 
 The implementation selects root `lf open` for opening/focusing the app; no
@@ -122,6 +124,15 @@ Checks: `cargo test -p loopflow --test cli_discovery --test process_ownership_te
 
 Review confirmed the warning stays at admission, compatible-ledger history is
 unchanged, and successful discovery asserts empty stderr. Recommended next
-action: publish for PR review with this repaired evidence. Installation proofs
-remain with isolated gate/CI; app launch was not exercised, and landing remains
-unauthorized. No further human acceptance is inferred from this repair.
+action at repair completion was publication for review with this evidence.
+Installation proofs remain with isolated gate/CI; app launch was not exercised.
+
+### Accepted review and next work
+
+Jack Heart reviewed PR #1494 and said “ok looks good keep advacning the task.”
+This accepts the review and requests the next workflow edge, superseding the
+earlier stop-before-landing boundary. The Task is at `code`'s `demo` node with
+no live Flow; its completed implementation and publication are retained history.
+Next: `lf task run LOO-401 ship` runs gate, then `pr land -c`. Include the committed
+help repair (`3f29ff57e`) in publication. Gate owns remaining automated proof;
+review acceptance does not claim installation or app-launch evidence.

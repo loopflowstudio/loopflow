@@ -176,7 +176,9 @@ and a short purpose for Task work. In cmux, the attached workspace and tab follo
 
 Published installs also add native naming hooks, preserving existing hooks. In
 repositories with `.lf`, plain Claude and Codex use the first request as a short
-name and preserve custom names. Review the installed hooks with Codex's `/hooks`.
+name when unnamed. Existing names stay, including instruction-derived titles;
+preservation during concurrent renames remains unproved. Review the installed
+hooks with Codex's `/hooks`.
 Codex naming requires its shared app-server; embedded launches and reconnecting
 to already-loaded unnamed threads are not covered. Claude can name an unnamed
 resume from its original request. Native providers own their terminal output.

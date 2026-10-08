@@ -3,12 +3,12 @@
 ## Session titles (LOO-439, 2026-10-08)
 
 Jack Heart authorized account-free demo, preserving windows; no landing.
-Native TUIs prove first-request naming and named resume with Codex defaults.
-Inspected 0.161.0 interfaces lack embedded naming, per-attach hooks, title provenance
-and conditional name writes. Existing names survive; concurrent renames are unproved.
-Provider changes or Jack's scope decision remain unselected.
-Callbacks prove no attach or installation. cmux denied creation;
-settings/windows remain unchanged, host agreement unproved.
+Native TUIs prove first-request naming and named resume with Codex defaults;
+Claude names unnamed resumes. Inspected 0.161.0 interfaces lack embedded naming,
+per-attach hooks, provenance and conditional writes. Instruction titles survive;
+concurrent renames remain unproved. Provider work or Jack's scope decision
+remains unselected. TUI success proves no shim,
+installation or host agreement. cmux denied creation; settings/windows unchanged.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)

@@ -62,6 +62,12 @@ Provider discovery now uses the existing executable PATH resolver, deleting the
 `--version` subprocess and its availability cache. Launch failures remain failures;
 an installed executable no longer needs a successful version command.
 
+Final input enforcement now uses the budget report's measured tokens and bytes.
+Delete the second CLI check and both enforcement-time recounts; standalone skills
+also skip the intermediate measurement used only to render an omitted notice.
+The final measurement still includes skill instructions, arguments and structured
+reply guidance. Permission setup after preparation changes none of those bytes.
+
 Previously removed queue, engine-restart, dispatch receipt and PTY/inbox machinery
 remains at `1e4ae02a5` and `7dd9819b2`; provider-only probes at `31e0640eb`;
 unreachable ClaudeHarness plugin state at `dd2cdba82`. Preserve the ordinary lf
@@ -98,7 +104,7 @@ not production latency. Before removal, equivalent-context serial pairs added
 3,029 request JSON bytes for Claude terminal and 2,248 for Codex headless.
 Budget and conversation guidance accounted for 2,154 and 2,126 bytes respectively.
 
-| Matching native launch | Extra JSON bytes | Added seconds, existing Machine | Added seconds, fresh Machine |
+| Before final budget compression | Extra JSON bytes | Added seconds, existing Machine | Added seconds, fresh Machine |
 | --- | ---: | ---: | ---: |
 | Claude terminal / internal-comms | 875 | 0.713 | 1.009 |
 | Codex headless / skill-installer | 122 | 0.748 | 1.112 |
@@ -122,6 +128,14 @@ The fixture now resets that state and distinguishes total time from first reques
 Residual cost prevents a blanket “strictly better” claim; gate and authored review
 own the remaining acceptance, including whether this tradeoff meets the outcome.
 
+After removing repeated budget counts, serial warm-Machine comparisons still pass
+source, arguments, user context and asset reads, with unchanged 875/122 extra JSON
+bytes. Added time is 0.988 s Claude and 0.702 s Codex; before provider startup it is
+0.606/0.626 s. Prompt preparation is 185/171 ms. These mixed single samples establish
+no latency improvement. The cut removes redundant work without changing submitted
+input or weakening enforcement; the 33 focused tests include token, byte and
+structured-reply limits. Prior check details remain at `68ff53aab` in this file.
+
 No new product decision is identified. Full gate and authored review remain.
 
 ## Evidence boundary
@@ -140,4 +154,4 @@ Release was the only immediate child Wave found; its goal and complete memory
 were read during realignment. Its operation-entry lesson applies: successful
 provider output alone cannot establish the requested launch behavior.
 
-Check (2026-10-08): build; isolated lib `engine::process_prompt` (29) and `cli_discovery_needs_an_executable` (1); pytest request mapping (9); contained native serial comparisons, terminal command mapping and captured-Flow launch; fmt, Ruff and all-target Clippy pass. Full affected verification belongs to gate; earlier evidence remains at `966af16fd`.
+Check (2026-10-08): isolated `cargo test -p loopflow --lib engine::process_prompt` (29) and `engine::context_budget` (4), `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, and contained `launch.py --warm-machine` native Claude-terminal/Codex-headless comparisons PASS; full affected verification belongs to gate.

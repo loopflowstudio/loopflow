@@ -922,7 +922,7 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_task(task.clone(), &pr, false).unwrap();
+        store.insert_task(task.clone(), &pr).unwrap();
         (dir, store, task_id)
     }
 
@@ -938,7 +938,7 @@ mod durable_store_tests {
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
-        store.insert_task(new_task.clone(), &pr, false).unwrap();
+        store.insert_task(new_task.clone(), &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
         assert!(!store.task_started(&task_id).unwrap());
         let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
@@ -961,9 +961,7 @@ mod durable_store_tests {
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
-        assert!(store
-            .insert_task(rejected.clone(), &rejected_pr, false)
-            .is_err());
+        assert!(store.insert_task(rejected.clone(), &rejected_pr).is_err());
         assert!(store.task(&rejected.id).unwrap().is_none());
         assert!(store.task_prs(&rejected.id).unwrap().is_empty());
         assert!(store.require_task_launch(&task_id).is_err());
@@ -1266,28 +1264,26 @@ mod durable_store_tests {
 
     #[test]
     fn descendant_admission_excludes_registration_of_a_missing_root() {
-        for initializing in [false, true] {
-            let (dir, store, existing) = store_with_task();
-            let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
-            let cwd = task.worktree.as_ref().unwrap().join("src/nested");
-            let admission = store.lock_checkout(&cwd).unwrap();
-            let mut earlier = unpublished_conversation(None, None, 1);
-            earlier.cwd = cwd;
-            earlier.work_source = None;
-            let register = || store.insert_task(task.clone(), &pr, initializing);
-            assert!(register().is_err());
-            assert!(store.task(&task.id).unwrap().is_none());
-            assert!(store.task_prs(&task.id).unwrap().is_empty());
-            drop(admission);
-            let earlier = store.create_session(earlier, None).unwrap();
-            register().unwrap();
-            assert_eq!(
-                store.session_task_ids(&earlier.id).unwrap(),
-                vec![task.id.clone()]
-            );
-            assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
-            assert!(!store.task_started(&task.id).unwrap());
-        }
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
+        let cwd = task.worktree.as_ref().unwrap().join("src/nested");
+        let admission = store.lock_checkout(&cwd).unwrap();
+        let mut earlier = unpublished_conversation(None, None, 1);
+        earlier.cwd = cwd;
+        earlier.work_source = None;
+        let register = || store.insert_task(task.clone(), &pr);
+        assert!(register().is_err());
+        assert!(store.task(&task.id).unwrap().is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        drop(admission);
+        let earlier = store.create_session(earlier, None).unwrap();
+        register().unwrap();
+        assert_eq!(
+            store.session_task_ids(&earlier.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        assert_eq!(store.session(&earlier.id).unwrap().unwrap(), earlier);
+        assert!(!store.task_started(&task.id).unwrap());
     }
 
     #[test]
@@ -1304,7 +1300,7 @@ mod durable_store_tests {
         assert!(store.session(&conversation.id).unwrap().is_none());
         drop(exclusion);
         let session = store.create_session(conversation, None).unwrap();
-        store.insert_task(task.clone(), &pr, true).unwrap();
+        store.insert_task(task.clone(), &pr).unwrap();
         assert_eq!(
             store.session_task_ids(&session.id).unwrap(),
             vec![task.id.clone()]
@@ -1322,7 +1318,7 @@ mod durable_store_tests {
         let _unrelated = store
             .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
             .unwrap();
-        store.insert_task(task.clone(), &pr, true).unwrap();
+        store.insert_task(task.clone(), &pr).unwrap();
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
@@ -1332,37 +1328,34 @@ mod durable_store_tests {
 
     #[test]
     fn checkout_exclusion_preserves_registration_and_retry() {
-        for initializing in [false, true] {
-            let (dir, store, existing) = store_with_task();
-            let (task, pr) =
-                unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
+        let (dir, store, existing) = store_with_task();
+        let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
 
-            let mut conversation = unpublished_conversation(None, None, 1);
-            conversation.cwd = task.worktree.as_ref().unwrap().join("src");
-            conversation.work_source = None;
-            let session = store.create_session(conversation, None).unwrap();
-            let exclusion = store
-                .lock_checkout(task.worktree.as_ref().unwrap())
-                .unwrap();
-            let register = || store.insert_task(task.clone(), &pr, initializing);
-            assert!(register().is_err());
-            assert!(store.task(&task.id).unwrap().is_none());
-            assert!(store.task_prs(&task.id).unwrap().is_empty());
-            assert!(store.session_task_ids(&session.id).unwrap().is_empty());
-            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-            drop(exclusion);
-            register().unwrap();
-            assert_eq!(
-                store.session_task_ids(&session.id).unwrap(),
-                vec![task.id.clone()]
-            );
-            assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
-            let work = store.task_work(&task.id).unwrap();
-            assert_eq!(work.sessions.len(), 1);
-            assert_eq!(work.sessions[0].id, session.id);
-            assert!(!store.task_started(&task.id).unwrap());
-            assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
-        }
+        let mut conversation = unpublished_conversation(None, None, 1);
+        conversation.cwd = task.worktree.as_ref().unwrap().join("src");
+        conversation.work_source = None;
+        let session = store.create_session(conversation, None).unwrap();
+        let exclusion = store
+            .lock_checkout(task.worktree.as_ref().unwrap())
+            .unwrap();
+        let register = || store.insert_task(task.clone(), &pr);
+        assert!(register().is_err());
+        assert!(store.task(&task.id).unwrap().is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        assert!(store.session_task_ids(&session.id).unwrap().is_empty());
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        drop(exclusion);
+        register().unwrap();
+        assert_eq!(
+            store.session_task_ids(&session.id).unwrap(),
+            vec![task.id.clone()]
+        );
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        let work = store.task_work(&task.id).unwrap();
+        assert_eq!(work.sessions.len(), 1);
+        assert_eq!(work.sessions[0].id, session.id);
+        assert!(!store.task_started(&task.id).unwrap());
+        assert!(store.chapter_task_evidence(&task.id).unwrap().begun);
     }
 
     #[test]

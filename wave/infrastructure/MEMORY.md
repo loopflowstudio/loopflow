@@ -46,16 +46,19 @@ investigation authorized without further approval. Safe outbound updates remain
 unproved; weakening preservation or automatic propagation would need a product
 decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
 
-Comment resolution retains both values and the choice; local creates one stable
-replacement UUID without overwriting the provider comment or repeating direction.
-`b3cd894f3` moves comments out of personal planning, sharing the transactional
-thread/pending/conflict read. Public resolution and composed reconnect remain unproved.
-Abandonment now saves decision and cancellation UUID atomically in both modes;
-provider-first `apply_abandon` and `begin_task_abandon` are deleted. Cleanup checks
-execution before provider access and never reverses the decision. Cancellation
-stays pending because safe delivery is unimplemented; this waives no propagation
-requirement. The full ownership/deletion cut, definitions, fields and unmapped
-export remain unfinished. Fixtures establish no installed or composed sync outcome.
+`b3cd894f3` shares transactional comment/thread/conflict storage outside personal
+planning. Resolution retains both values; local creates one retry-stable replacement
+UUID without overwriting the provider comment or repeating direction. `783305284`
+saves abandonment and cancellation identity atomically in both modes, deleting
+provider-first decision writers. Cleanup checks execution separately and cannot
+reverse the decision. Safe cancellation delivery remains unimplemented and pending.
+
+October 8's uncommitted placement reduction shares one transaction and restores
+the winning checkout/PR. Its queued writer retains the Wave lock after caller
+cancellation. Authority dispatch and mapped-only provider validation still survive:
+paired store fixtures prove no common offline command path. The ownership/deletion
+cut, definitions, fields and unmapped export remain unfinished. Public resolution,
+composed reconnect and installed acceptance remain unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -67,7 +70,6 @@ superseded split, proving no unified path or live/installed continuity. Implemen
 deletion recovery, selection-race repair and ten mixed-rotation failure points remain at
 `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-LOO-412 owns the selected Git-ref prototype; host callbacks remain outside this PR.
 The laptop authors; workers are disposable. Namespaces prove no privacy, callbacks
 no laptop-loss recovery, and mappings no concurrent-export uniqueness.
 

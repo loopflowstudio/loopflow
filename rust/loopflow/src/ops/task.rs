@@ -26,8 +26,7 @@ use crate::engine::git::{
 use crate::engine::naming::sanitize_for_branch;
 use crate::engine::workflow::{END, START};
 use crate::engine::worktrees::{
-    create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
-    WorktreeSegment,
+    plan_branch_placement, PlacementPlan, PlacementStrategy, WorktreeSegment,
 };
 use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
@@ -36,7 +35,6 @@ use crate::ops::workflow::WorkflowPosition;
 use crate::store::sqlite::EndMove;
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
-    StoreError,
 };
 use crate::work::task::{
     AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
@@ -892,7 +890,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         }
     }
     require_startable_issue(&resolved.item)?;
-    let prepared = block_on_task(prepare_new_task(
+    let prepared = block_on_task(prepare_task_placement(
         &main_repo,
         &resolved.item.name,
         Some(&resolved.item),
@@ -907,7 +905,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             end,
         },
     ))?;
-    create_prepared_task(main_repo, resolved, prepared)
+    place_prepared_task(main_repo, resolved, prepared)
 }
 
 /// Recover checkout files from retained Task placement without replacing history.
@@ -932,7 +930,7 @@ async fn place_unplaced_task(
         )
         .await?;
         require_startable_issue(&resolved.item)?;
-        let prepared = prepare_new_task(
+        let prepared = prepare_task_placement(
             &main,
             &resolved.item.name,
             Some(&resolved.item),
@@ -944,12 +942,12 @@ async fn place_unplaced_task(
             },
         )
         .await?;
-        return tokio::task::spawn_blocking(move || create_prepared_task(main, resolved, prepared))
+        return tokio::task::spawn_blocking(move || place_prepared_task(main, resolved, prepared))
             .await
             .map_err(task_error)?;
     }
     let wave = owning_wave(&store, task).await?;
-    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let acquisition = super::pm::lock_wave_planning(&wave).await?;
     let main = crate::engine::worktrees::main_repo_root(repo)?;
     if crate::repository::CanonicalRepo::discover(&main)
         .map_err(task_error)?
@@ -1013,8 +1011,8 @@ async fn place_unplaced_task(
         updated_at: now,
     };
     store
-        .sqlite
-        .place_task(&task.id, &plan.worktree_path, &slug, &pr)
+        .place_task(&task.id, &plan.worktree_path, &slug, &pr, Some(acquisition))
+        .await
         .map_err(task_error)
 }
 
@@ -1161,7 +1159,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
 }
 
 #[derive(Debug)]
-struct PreparedTask {
+struct TaskPlacement {
     plan: PlacementPlan,
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
@@ -1170,12 +1168,12 @@ struct PreparedTask {
     directive: Option<String>,
 }
 
-async fn prepare_new_task(
+async fn prepare_task_placement(
     main_repo: &Path,
     title: &str,
     item: Option<&crate::pm::PmItem>,
     options: &TaskProcessOptions,
-) -> OpsResult<PreparedTask> {
+) -> OpsResult<TaskPlacement> {
     let directive = options
         .directive
         .as_deref()
@@ -1194,7 +1192,7 @@ async fn prepare_new_task(
         .filter(|branch| !branch.is_empty());
     let mut plan = plan_branch_placement(main_repo, segment, branch)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
-    // Fail before filing an issue; execution checks again after provider work.
+    // Plan without touching an occupied checkout; restoration consumes the saved placement.
     if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
         return Err(task_error(format!(
             "worktree path already exists: {}",
@@ -1284,10 +1282,10 @@ async fn prepare_new_task(
         };
         base_commit = merge_base(main_repo, &base_commit, &branch_ref).map_err(task_error)?;
     }
-    // Provider creation can yield while another fetch advances the branch.
+    // A concurrent fetch can advance the branch before placement commits.
     // Place the checkout on the same commit recorded by its first PR.
     plan.base_ref = base_commit;
-    Ok(PreparedTask {
+    Ok(TaskPlacement {
         plan,
         workspace_slug,
         stack_parent,
@@ -1297,12 +1295,12 @@ async fn prepare_new_task(
     })
 }
 
-fn create_prepared_task(
+fn place_prepared_task(
     main_repo: PathBuf,
     resolved: crate::ops::task_pm::ResolvedTask,
-    prepared: PreparedTask,
+    prepared: TaskPlacement,
 ) -> OpsResult<Task> {
-    let PreparedTask {
+    let TaskPlacement {
         plan,
         workspace_slug,
         stack_parent,
@@ -1340,17 +1338,15 @@ fn create_prepared_task(
         }
         if task.worktree.is_some() {
             select_task_agent(&store, &mut task, requested_agent.as_deref()).await?;
+            restore_task_checkout(&store, &task).await?;
             return Ok(task);
         }
         let now = time::OffsetDateTime::now_utc();
-        task.worktree = Some(plan.worktree_path.clone());
-        task.workspace_slug = workspace_slug.clone();
-        task.agent = requested_agent;
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
             sequence: 1,
-            slug: workspace_slug,
+            slug: workspace_slug.clone(),
             branch: plan.branch.clone(),
             base_commit: plan.base_ref.clone(),
             parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
@@ -1371,48 +1367,23 @@ fn create_prepared_task(
             updated_at: now,
         };
 
-        let _checkout_lease = crate::engine::git::acquire_worktree_lease(
-            &main_repo,
-            task.worktree()?,
-            "Task checkout",
-        )?;
-        match store
-            .create_task_with_worktree(&task, &pr, Some(acquisition))
+        task = store
+            .place_task(
+                &task.id,
+                &plan.worktree_path,
+                &workspace_slug,
+                &pr,
+                Some(acquisition),
+            )
             .await
-        {
-            Ok(accepted) => {
-                task = accepted;
-                if let Some(direction) = directive.as_deref() {
-                    append_task_comment(&store, &task, direction, true)?;
-                }
-            }
-            Err(StoreError::Sqlite(_)) => {
-                if let Some(mut existing) = store
-                    .get_task_by_issue(&resolved.item.id)
-                    .await
-                    .map_err(|error| {
-                        task_error(format!("failed to recover task reservation: {error}"))
-                    })?
-                {
-                    if !matches!(
-                        task_work_status(&store, &existing).await?,
-                        WorkStatus::Done | WorkStatus::Abandoned
-                    ) {
-                        select_task_agent(&store, &mut existing, task.agent.as_deref()).await?;
-                        return Ok(existing);
-                    }
-                }
-                return Err(task_error(
-                    "task reservation collided with another task placement",
-                ));
-            }
-            Err(error) => {
-                return Err(task_error(format!(
-                    "failed to create Task planning state: {error}"
-                )))
-            }
+            .map_err(task_error)?;
+        select_task_agent(&store, &mut task, requested_agent.as_deref()).await?;
+        if let Some(direction) = directive.as_deref() {
+            append_task_comment(&store, &task, direction, true)?;
         }
-        if let Err(error) = create_from_placement_plan(&main_repo, &plan) {
+        // A competing reservation may have won. Restore its persisted placement,
+        // never the losing caller's plan or PR.
+        if let Err(error) = restore_task_checkout(&store, &task).await {
             if let Err(event_error) = store
                 .append_task_event(
                     &task.id,
@@ -1423,12 +1394,10 @@ fn create_prepared_task(
                 )
                 .await
             {
-                tracing::warn!(task = %task.id, %event_error, "worktree creation failed after Task planning state committed; failure event did not persist");
+                tracing::warn!(task = %task.id, %event_error, "checkout failed after placement committed; failure event did not persist");
             }
-            return Err(task_error(format!("failed to create task wt: {error}")));
+            return Err(error);
         }
-
-        finish_task_checkout(&store, &task, &pr).await?;
         Ok(task)
     })
 }
@@ -5700,7 +5669,7 @@ mod tests {
     }
 
     #[test]
-    fn prepared_registration_consumes_accepted_facts_before_checkout_or_execution() {
+    fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         for moved in [false, true] {
@@ -5751,15 +5720,12 @@ mod tests {
                     None,
                 ))
                 .unwrap();
-            let checkout = fixture._database.path().join("reserved-checkout");
-            if !moved {
-                std::fs::create_dir(&checkout).unwrap();
-            }
-            let prepared = super::PreparedTask {
+            let checkout = repo.path().join("reserved-checkout");
+            let prepared = |path| super::TaskPlacement {
                 plan: crate::engine::worktrees::PlacementPlan {
-                    base_ref: "retained-base".into(),
+                    base_ref: repo.head_sha(),
                     branch: "retained-branch".into(),
-                    worktree_path: checkout.clone(),
+                    worktree_path: path,
                     strategy: crate::engine::worktrees::PlacementStrategy::UseExistingWorktree,
                 },
                 workspace_slug: "reserved-checkout".into(),
@@ -5768,7 +5734,11 @@ mod tests {
                 requested_agent: None,
                 directive: None,
             };
-            let result = super::create_prepared_task(repo.path().to_path_buf(), resolved, prepared);
+            let result = super::place_prepared_task(
+                repo.path().to_path_buf(),
+                resolved.clone(),
+                prepared(checkout.clone()),
+            );
             if moved {
                 let error = result.unwrap_err().to_string();
                 assert!(
@@ -5795,7 +5765,31 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 assert_eq!(pr.branch, "retained-branch");
-                assert_eq!(pr.base_commit, "retained-base");
+                assert_eq!(pr.base_commit, repo.head_sha());
+                let events = runtime
+                    .block_on(fixture.store.task_events_after(&task.id, 0))
+                    .unwrap();
+                std::fs::remove_dir_all(&checkout).unwrap();
+                let losing_checkout = repo.path().join("another-candidate");
+                let restored = super::place_prepared_task(
+                    repo.path().to_path_buf(),
+                    resolved,
+                    prepared(losing_checkout.clone()),
+                )
+                .unwrap();
+                assert_eq!(restored, task);
+                assert!(checkout.join(".git").exists());
+                assert!(!losing_checkout.exists());
+                assert_eq!(
+                    runtime.block_on(fixture.store.task_prs(&task.id)).unwrap(),
+                    vec![pr]
+                );
+                assert_eq!(
+                    runtime
+                        .block_on(fixture.store.task_events_after(&task.id, 0))
+                        .unwrap(),
+                    events
+                );
             }
             assert!(runtime
                 .block_on(fixture.store.get_task(&fixture.task.id))
@@ -6944,7 +6938,7 @@ mod tests {
                 "directive cannot be empty",
             ),
         ] {
-            let error = super::prepare_new_task(repo.path(), "New task", None, &options)
+            let error = super::prepare_task_placement(repo.path(), "New task", None, &options)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains(message), "{error}");
@@ -6964,7 +6958,7 @@ mod tests {
             name: Some("existing-task".into()),
             ..Default::default()
         };
-        let planned = super::prepare_new_task(repo.path(), "New task", None, &options)
+        let planned = super::prepare_task_placement(repo.path(), "New task", None, &options)
             .await
             .unwrap();
         assert_eq!(planned.plan.base_ref, repo.head_sha());
@@ -6972,7 +6966,7 @@ mod tests {
         std::fs::create_dir_all(&planned.plan.worktree_path).unwrap();
         let authored = planned.plan.worktree_path.join("authored.txt");
         std::fs::write(&authored, "retain these bytes").unwrap();
-        let result = super::prepare_new_task(repo.path(), "New task", None, &options).await;
+        let result = super::prepare_task_placement(repo.path(), "New task", None, &options).await;
         assert!(result.unwrap_err().to_string().contains("already exists"));
         assert_eq!(
             std::fs::read_to_string(&authored).unwrap(),
@@ -6990,7 +6984,7 @@ mod tests {
         repo.commit("Local main work");
         repo.create_branch("local-feature");
         repo.create_file("dirty.txt", "uncommitted work");
-        let prepared = super::prepare_new_task(
+        let prepared = super::prepare_task_placement(
             repo.path(),
             "Clean task",
             None,
@@ -7015,7 +7009,7 @@ mod tests {
     #[tokio::test]
     async fn task_preparation_keeps_the_resolved_base_when_the_remote_ref_advances() {
         let repo = loopflow_test_support::TestRepo::new();
-        let prepared = super::prepare_new_task(
+        let prepared = super::prepare_task_placement(
             repo.path(),
             "Pinned base",
             None,
@@ -7059,7 +7053,7 @@ mod tests {
             .output()
             .unwrap();
         assert!(output.status.success());
-        let error = super::prepare_new_task(
+        let error = super::prepare_task_placement(
             repo.path(),
             "New task",
             None,
@@ -7094,7 +7088,7 @@ mod tests {
         let repo = loopflow_test_support::TestRepo::new();
         let fixture = task_fixture_at("FIX-1", repo.path().canonicalize().unwrap()).await;
         std::env::set_var("LF_HOME", fixture._database.path());
-        let result = super::prepare_new_task(
+        let result = super::prepare_task_placement(
             repo.path(),
             "Child",
             None,

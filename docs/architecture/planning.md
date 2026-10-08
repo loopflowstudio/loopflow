@@ -50,8 +50,11 @@ unique UUID prefix of at least seven digits; full IDs remain stable. References
 accept four or more case-insensitive hex digits, bare or after `lf-`/`task_`;
 ambiguous references return candidates instead of selecting a Task.
 
-Checkout allocation records the Task's first PR and placement before filesystem
-creation, so retry repairs the same allocation. Native launch and resume retain the
+Checkout allocation uses one placement transaction for retained Tasks in both modes.
+It records the first PR and checkout before filesystem creation, without rewriting
+planning fields. Competing reservations return the saved allocation; restoration
+uses that checkout and PR. The queued writer retains the Wave lock through commit,
+even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
 provider deletion evidence apply regardless of planning mode. Local completion
 records its decision and workflow arrival together.
@@ -59,6 +62,11 @@ GitHub delivery still requires confirmed merge evidence. Local chapter rotation 
 all selected personal Waves together, carrying started Tasks and preserving backlog.
 A mixed Local/Linear rotation retains each authority's recovery records; a SQLite
 transaction cannot make the external provider effects atomic.
+
+LOO-406's accepted replacement is one locally owned plan with repository-wide
+optional Linear synchronization. That cutover remains unfinished: placement still
+dispatches by authority and validates mapped Tasks against provider observations.
+The shared placement transaction alone does not provide identical offline operations.
 
 ## Connected Project selection
 

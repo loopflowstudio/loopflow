@@ -1657,7 +1657,13 @@ mod tests {
             let pr = make_task_pr(&task);
             let accepted = if initializing {
                 store
-                    .create_task_with_worktree(&task, &pr, None)
+                    .place_task(
+                        &task.id,
+                        task.worktree.as_ref().unwrap(),
+                        &task.workspace_slug,
+                        &pr,
+                        None,
+                    )
                     .await
                     .unwrap()
             } else {
@@ -1684,29 +1690,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn registration_rejects_changed_issue_ownership_without_reserving_work() {
-        for initializing in [false, true] {
-            for destination in [Some("other-project"), None] {
-                let (directory, store, wave) = planning_store().await;
+    async fn placement_retries_retain_the_first_checkout_pr_and_planning() {
+        for mapped in [false, true] {
+            let (directory, store, wave) = planning_store().await;
+            let task = if mapped {
                 let project = make_project(&wave);
                 store.create_project(&project).await.unwrap();
                 select_project(&store, &project);
-                let mut task = make_task(&wave, &project);
-                task.worktree = Some(directory.path().join("checkout"));
-                let pr = make_task_pr(&task);
+                let task = make_task(&wave, &project);
                 let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-                snapshot.snapshot.items[0].project_id = destination.map(str::to_string);
+                snapshot.snapshot.items[0].completed = false;
+                snapshot.snapshot.items[0].completed_at = None;
+                snapshot.snapshot.items[0].state = Some("unstarted".into());
                 store.put_pm_snapshot(snapshot, None).await.unwrap();
-                let result = if initializing {
-                    store.create_task_with_worktree(&task, &pr, None).await
-                } else {
-                    store.create_task(&task, &pr, None).await
-                };
-                assert!(result.unwrap_err().to_string().contains("changed Project"));
-                assert!(store.get_task(&task.id).await.unwrap().is_none());
-                assert!(store.task_prs(&task.id).await.unwrap().is_empty());
-                assert!(!task.worktree.as_ref().unwrap().exists());
-            }
+                store
+                    .get_task_by_issue(&task.plan.identifier)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            } else {
+                let project = store
+                    .sqlite
+                    .ensure_personal_project(wave.repo(), "inbox")
+                    .unwrap();
+                store
+                    .sqlite
+                    .create_local_task(&crate::planning::NewTask {
+                        id: TaskId::new(),
+                        project_id: project.id,
+                        title: "Retain this plan".into(),
+                        description: "Saved before placement".into(),
+                    })
+                    .unwrap()
+            };
+            let mut placed = task.clone();
+            placed.worktree = Some(directory.path().join("first"));
+            placed.workspace_slug = "first".into();
+            let first = make_task_pr(&placed);
+            let accepted = store
+                .place_task(
+                    &task.id,
+                    placed.worktree.as_ref().unwrap(),
+                    "first",
+                    &first,
+                    None,
+                )
+                .await
+                .unwrap();
+            let mut second = first.clone();
+            second.id = TaskPrId::new();
+            second.branch = "second".into();
+            second.slug = "second".into();
+            let retried = store
+                .place_task(
+                    &task.id,
+                    &directory.path().join("second"),
+                    "second",
+                    &second,
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(retried, accepted);
+            assert_eq!(retried.plan, task.plan);
+            assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![first]);
+            assert_eq!(store.task_events_after(&task.id, 0).await.unwrap().len(), 1);
+            assert!(!store.task_started(&task.id).await.unwrap());
+            assert!(!directory.path().join("second").exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn registration_rejects_changed_issue_ownership_without_reserving_work() {
+        for destination in [Some("other-project"), None] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let mut task = make_task(&wave, &project);
+            task.worktree = Some(directory.path().join("checkout"));
+            let pr = make_task_pr(&task);
+            let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+            snapshot.snapshot.items[0].project_id = destination.map(str::to_string);
+            store.put_pm_snapshot(snapshot, None).await.unwrap();
+            let result = store.create_task(&task, &pr, None).await;
+            assert!(result.unwrap_err().to_string().contains("changed Project"));
+            assert!(store.get_task(&task.id).await.unwrap().is_none());
+            assert!(store.task_prs(&task.id).await.unwrap().is_empty());
+            assert!(!task.worktree.as_ref().unwrap().exists());
         }
     }
 
@@ -1780,6 +1851,19 @@ mod tests {
             select_project(&store, &project);
             let mut task = make_task(&wave, &project);
             task.worktree = Some(directory.path().join("checkout"));
+            if initializing {
+                let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+                snapshot.snapshot.items[0].completed = false;
+                snapshot.snapshot.items[0].completed_at = None;
+                snapshot.snapshot.items[0].state = Some("unstarted".into());
+                store.put_pm_snapshot(snapshot, None).await.unwrap();
+                let imported = store
+                    .get_task_by_issue(&task.plan.identifier)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                task.id = imported.id;
+            }
             let pr = make_task_pr(&task);
             let path = directory.path().join("wave.lock");
             let acquisition = std::fs::File::create(&path).unwrap();
@@ -1798,7 +1882,13 @@ mod tests {
                 let acquisition = Some(std::sync::Arc::new(super::PlanningLocks::new(acquisition)));
                 if initializing {
                     writer_store
-                        .create_task_with_worktree(&input, &input_pr, acquisition)
+                        .place_task(
+                            &input.id,
+                            input.worktree.as_ref().unwrap(),
+                            &input.workspace_slug,
+                            &input_pr,
+                            acquisition,
+                        )
                         .await
                 } else {
                     writer_store
@@ -1812,7 +1902,11 @@ mod tests {
             writer.abort();
             assert!(writer.await.unwrap_err().is_cancelled());
             let excluded = fs2::FileExt::try_lock_exclusive(&competing).is_err();
-            let absent = store.get_task(&task.id).await.unwrap().is_none();
+            let unplaced = store
+                .get_task(&task.id)
+                .await
+                .unwrap()
+                .is_none_or(|task| task.worktree.is_none());
             release.send(()).unwrap();
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
                 loop {
@@ -1828,8 +1922,10 @@ mod tests {
                 excluded,
                 "cancellation released the Wave before registration committed"
             );
-            assert!(absent, "queued registration partially wrote its Task");
-            assert_eq!(store.get_task(&task.id).await.unwrap().unwrap(), task);
+            assert!(unplaced, "queued writer partially placed its Task");
+            let saved = store.get_task(&task.id).await.unwrap().unwrap();
+            assert_eq!(saved.worktree, task.worktree);
+            assert_eq!(saved.id, task.id);
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
             assert!(!store.task_started(&task.id).await.unwrap());
         }
@@ -2850,10 +2946,30 @@ mod tests {
             .unwrap();
         let mut task = make_task(&wave, &project);
         task.worktree = Some(directory.path().join("uncreated-child-worktree"));
+        let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+        snapshot.snapshot.items[0].completed = false;
+        snapshot.snapshot.items[0].completed_at = None;
+        snapshot.snapshot.items[0].state = Some("unstarted".into());
+        store.put_pm_snapshot(snapshot, None).await.unwrap();
+        let imported = store
+            .get_task_by_issue(&task.plan.identifier)
+            .await
+            .unwrap()
+            .unwrap();
+        let worktree = task.worktree.take();
+        task = imported;
+        task.worktree = worktree;
+        task.workspace_slug = "fixture-task".into();
         let pr = make_task_pr(&task);
 
         store
-            .create_task_with_worktree(&task, &pr, None)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
             .await
             .expect("generic Run identity is opaque provenance, not planning authority");
         let placement = store
@@ -2861,7 +2977,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(placement.machine_id, home);
-        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
+        let saved = store.get_task(&task.id).await.unwrap().unwrap();
+        assert_eq!(saved.id, task.id);
+        assert_eq!(saved.plan, task.plan);
+        assert_eq!(saved.worktree, task.worktree);
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)
                 .unwrap()

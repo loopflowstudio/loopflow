@@ -55,6 +55,9 @@ impl SqliteStore {
         }
         super::durable::require_selected_project(&tx, &task.project_id)?;
         require_task_not_deleted(&tx, &task)?;
+        if task.plan.linear_id.is_some() {
+            accept_registration_planning(&tx, &mut task)?;
+        }
         task.worktree = Some(worktree.to_path_buf());
         task.workspace_slug = workspace_slug.to_string();
         validate_initial_task_pr(&task, pr)?;
@@ -252,30 +255,12 @@ impl SqliteStore {
     // Durable Tasks: Linear identity, immutable placement, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
-    pub fn insert_task(
-        &self,
-        mut task: Task,
-        pr: &TaskPr,
-        initialize_worktree: bool,
-    ) -> StoreResult<Task> {
+    pub fn insert_task(&self, mut task: Task, pr: &TaskPr) -> StoreResult<Task> {
         let _admission = self.lock_checkout(task.worktree()?)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         accept_registration_planning(&transaction, &mut task)?;
         insert_initial_task(&transaction, &task, pr)?;
-        if initialize_worktree {
-            insert_task_event_in(
-                &transaction,
-                &task.id,
-                &TaskEventKind::WorktreeInitializing {
-                    pr_id: pr.id.clone(),
-                    sequence: pr.sequence,
-                    branch: pr.branch.clone(),
-                    path: task.worktree()?.display().to_string(),
-                    base_commit: pr.base_commit.clone(),
-                },
-            )?;
-        }
         let task = task_on(&transaction, &task.id)?
             .ok_or_else(|| StoreError::InvalidData("inserted Task is missing".into()))?;
         transaction.commit()?;

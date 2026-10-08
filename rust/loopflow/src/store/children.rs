@@ -63,21 +63,25 @@ impl Store {
         let task = task.clone();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(task, &pr, false)
+            store.insert_task(task, &pr)
         })
         .await
     }
 
-    pub async fn create_task_with_worktree(
+    pub async fn place_task(
         &self,
-        task: &Task,
+        task_id: &TaskId,
+        worktree: &std::path::Path,
+        workspace_slug: &str,
         pr: &TaskPr,
         acquisition: Option<Arc<super::PlanningLocks>>,
     ) -> StoreResult<Task> {
-        let task = task.clone();
+        let task_id = task_id.clone();
+        let worktree = worktree.to_path_buf();
+        let workspace_slug = workspace_slug.to_string();
         let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(task, &pr, true)
+            store.place_task(&task_id, &worktree, &workspace_slug, &pr)
         })
         .await
     }

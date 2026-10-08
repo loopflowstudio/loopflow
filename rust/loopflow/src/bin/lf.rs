@@ -844,11 +844,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             Ok(())
         }
         WaveCommand::UpdatePlan { wave, plan } => {
-            update_plan(
+            let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
                 serde_json::from_slice(&std::fs::read(plan)?)?,
-            )?;
+            ))?;
+            print_project_sync(&saved);
             Ok(())
         }
     }

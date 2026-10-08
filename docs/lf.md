@@ -176,10 +176,11 @@ lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
 lf project workflow set <project-id> review --file /tmp/review.yaml
 lf project workflow list --project <project-id> --json
 lf project workflow source <project-id> review
+lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
 
-Project names, summaries and Workflow selections save locally, including during a
-Linear outage. Connected repositories report pending sync; `lf project workflow
+Project names, summaries, Workflow selections and complete plan replacements save
+locally, including during a Linear outage. Connected repositories report pending sync; `lf project workflow
 show <project-id> --json` includes saved field changes and retained conflicts.
 Inbound refreshes preserve pending fields and accept unrelated changes. Project
 edit delivery remains unfinished while provider concurrency protection is unresolved.

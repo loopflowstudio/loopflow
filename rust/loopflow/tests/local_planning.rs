@@ -1104,6 +1104,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
             .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
             .unwrap();
         let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                rusqlite::params![wave.id(), id.as_str()],
+            )
+            .unwrap();
         if !mapped {
             rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
@@ -1153,11 +1160,20 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
             connected
         );
+        // An active writer cannot block inspection of the committed plan.
+        let writer = std::fs::File::open(
+            home.path()
+                .join("chapter-locks")
+                .join(format!("{}.lock", wave.id())),
+        )
+        .unwrap();
+        fs2::FileExt::lock_exclusive(&writer).unwrap();
         let saved = lf(
             repo.path(),
             home.path(),
             &["project", "workflow", "show", id.as_str(), "--json"],
         );
+        drop(writer);
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(saved["workflow"], "review");
@@ -1186,46 +1202,106 @@ fn project_edits_save_offline_in_both_connection_modes() {
             serde_json::to_value(store.pending_project_changes(&id).unwrap()).unwrap(),
             changes
         );
-        if !mapped {
-            assert!(store.list_tasks(None).unwrap().is_empty());
-            assert!(!repo.path().join("wave").exists());
-            assert!(!repo.path().join(".lf/workflows").exists());
-            continue;
+        if mapped {
+            let mut incoming = project.clone();
+            incoming.name = "Remote name".into();
+            incoming.workflow = "research".into();
+            incoming.revision = Some("2026-10-08T11:00:00Z".into());
+            incoming.krs[0].holds = true;
+            store
+                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 18)
+                .unwrap();
+            let read = lf(
+                repo.path(),
+                home.path(),
+                &["project", "workflow", "show", id.as_str(), "--json"],
+            );
+            assert_eq!(read["name"], "Saved");
+            assert_eq!(read["workflow"], "review");
+            assert_eq!(read["krs"][0]["holds"], true);
+            assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
+            let pending = read["pending_changes"].as_array().unwrap();
+            assert_eq!(pending[0]["id"], changes[0]["id"]);
+            assert_eq!(pending[0]["conflict"]["value"], "Remote name");
+            assert_eq!(pending[2]["conflict"]["value"], "research");
+            // Matching readback cannot erase an earlier conflict or acknowledge our unsent edit.
+            incoming.name = "Saved".into();
+            incoming.workflow = "review".into();
+            incoming.revision = Some("2026-10-08T12:00:00Z".into());
+            store
+                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 19)
+                .unwrap();
+            let read = lf(
+                repo.path(),
+                home.path(),
+                &["project", "workflow", "show", id.as_str(), "--json"],
+            );
+            assert_eq!(read["pending_changes"], Value::Array(pending.clone()));
         }
-        let mut incoming = project.clone();
-        incoming.name = "Remote name".into();
-        incoming.workflow = "research".into();
-        incoming.revision = Some("2026-10-08T11:00:00Z".into());
-        incoming.krs[0].holds = true;
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &incoming, 18)
-            .unwrap();
-        let read = lf(
+        let plan_file = home.path().join("plan.json");
+        let content = serde_json::json!({
+            "workflow": "review", "metric_targets": [],
+            "krs": [{"text": "Save the complete plan offline", "holds": false}]
+        });
+        std::fs::write(&plan_file, serde_json::to_vec(&content).unwrap()).unwrap();
+        let args = [
+            "wave",
+            "update-plan",
+            "--wave",
+            "product",
+            "--plan",
+            plan_file.to_str().unwrap(),
+        ];
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            connected
+        );
+        let saved = lf(
             repo.path(),
             home.path(),
             &["project", "workflow", "show", id.as_str(), "--json"],
         );
-        assert_eq!(read["name"], "Saved");
-        assert_eq!(read["workflow"], "review");
-        assert_eq!(read["krs"][0]["holds"], true);
-        assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
-        let pending = read["pending_changes"].as_array().unwrap();
-        assert_eq!(pending[0]["id"], changes[0]["id"]);
-        assert_eq!(pending[0]["conflict"]["value"], "Remote name");
-        assert_eq!(pending[2]["conflict"]["value"], "research");
-        // Matching readback cannot erase an earlier conflict or acknowledge our unsent edit.
-        incoming.name = "Saved".into();
-        incoming.workflow = "review".into();
-        incoming.revision = Some("2026-10-08T12:00:00Z".into());
-        store
-            .put_pm_project(wave.id(), "linear", "initiative", &incoming, 19)
-            .unwrap();
-        let read = lf(
+        assert_eq!(saved["krs"], content["krs"]);
+        assert_eq!(saved["workflow"], content["workflow"]);
+        assert_eq!(saved["name"], "Saved");
+        assert_eq!(saved["summary"], "");
+        assert_eq!(saved["pending_changes"].as_array().unwrap().len(), 4);
+        lf(repo.path(), home.path(), &args);
+        let repeated = lf(
             repo.path(),
             home.path(),
             &["project", "workflow", "show", id.as_str(), "--json"],
         );
-        assert_eq!(read["pending_changes"], Value::Array(pending.clone()));
+        assert_eq!(repeated, saved);
+        if mapped {
+            let mut incoming = project.clone();
+            incoming.revision = Some("2026-10-08T13:00:00Z".into());
+            incoming.krs[0].text = "Keep the concurrent provider plan".into();
+            store
+                .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
+                .unwrap();
+            let read = lf(
+                repo.path(),
+                home.path(),
+                &["project", "workflow", "show", id.as_str(), "--json"],
+            );
+            assert_eq!(read["krs"], content["krs"]);
+            let pending = read["pending_changes"].as_array().unwrap();
+            let change = pending
+                .iter()
+                .find(|change| change["field"] == "krs")
+                .unwrap();
+            assert_eq!(
+                change["conflict"]["value"][0]["text"],
+                "Keep the concurrent provider plan"
+            );
+        }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join("wave").exists());
         assert!(!repo.path().join(".lf/workflows").exists());

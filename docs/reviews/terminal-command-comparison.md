@@ -1,0 +1,299 @@
+# cmux, lf / Loopflow for Mac, and herdr
+
+Behavioral comparison for [LOO-427](https://linear.app/loopflow/issue/LOO-427),
+2026-10-07 Pacific. Jack Heart asked for command-by-command judgments after an
+agent arranged his work in cmux. **Direction: at most one repository window, spanning machines; expose its
+existing workspace to agents.** Jack selected the repository-window direction in
+this conversation. The command dispositions remain proposed product judgments.
+
+The missing loop is **identify → open → arrange → observe → target input → verify**.
+Loopflow already owns the work being arranged. It should not require an agent
+to reconstruct that work from tab names, or reconstruct Desktop from screenshots.
+
+**Have** = a sufficient counterpart for the stated job; **worse** = have it,
+but with a material gap; **want** = no adequate counterpart and worth building;
+**no** = do not add this capability to Loopflow. **★** marks the operations an
+agent needs to arrange Jack's work. “No” commonly means run lf inside cmux/herdr.
+Related variants share a row only when the judgment is the same.
+
+Commands in cmux/herdr columns omit the executable prefix. These are observed
+command names, not proposed lf spellings. `W`, `T`, `P`, `S` mean window,
+workspace, pane, surface IDs in cmux; herdr IDs belong to its own objects.
+Use returned IDs, not these placeholders. `—` means no counterpart found in the
+installed help or reviewed Desktop code, not proof that no external tool exists.
+
+## Evidence and version boundary
+
+- **P**: exercised locally, restricted to our disposable cmux window. cmux
+  **0.65.0 (108), dda24fbd2**. All nine `cmux help GROUP` screens, `--help`,
+  `guide` and individual command help were inspected. No host source, tests,
+  configuration or skill text was incorporated.
+- **H**: installed help only; advertised support, not runtime proof. herdr
+  **0.9.3** groups and relevant leaf help were inspected. `herdr status --json`
+  reported a compatible running server (protocol 22); no live herdr panes were
+  inspected or changed. Browser, remote, provider, account and restore commands
+  were not exercised.
+- **L**: installed lf **0.13.9** help/catalog and relevant reads; Desktop claims
+  are source inspection at **35e759aaf**, not a native Desktop trial. This
+  checkout already uses Machine, Process and global `--machine`, ahead of the
+  installed binary (`home`, `ssh`, `flow show --sessions`). Source also exposes
+  `flow show --processes`. Exact older commands below are explicitly the installed
+  baseline; they are not current design recommendations.
+- Public [cmux API](https://cmux.com/docs/api) and
+  [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
+  use the installed command discovery and our local observations. The public API
+  page's default socket differs from the installed CLI's state-directory socket;
+  neither path is an API requirement for Loopflow.
+
+## Current decisions that govern this comparison
+
+The LOO-387–430 briefs and their available non-progress comments were read on
+October 7; later comments override earlier brief wording. LOO-389's comment read
+failed because its Initiative was not bound to a local Wave; its brief was read.
+LOO-170's older planning read also failed on conflicting Project facts; its
+retained execution is abandoned. Neither failure was repaired as a prerequisite.
+
+- **Machine, not Home:** LOO-394 changed the concept throughout the model;
+  LOO-411 replaced `lf ssh` with `lf --machine LABEL COMMAND`. A machine is one
+  OS user and data directory; filesystem `LF_HOME` and historical opaque IDs keep
+  their meanings. No stable cross-version API or capability negotiation is wanted.
+- **One repository window across machines:** Jack's direction in this conversation.
+  Reopen/focus by repository; worktrees stay inside it. Closed repositories need
+  no window. Keep every machine's work identity, authority and observation age
+  explicit. This changes presentation, not LOO-394/417's separate execution state.
+  The implementation design must resolve corresponding repositories at different
+  paths; basename or Git remote alone must not silently merge unrelated clones.
+- **macOS-only Desktop operations:** Jack requested useful Linux errors for
+  Desktop launching. Opening/control must report the unsupported platform before
+  launching anything or changing Work, and offer the ordinary terminal path.
+  Linux still supports lf's Tasks, Sessions and machine routing. The Mac displaying
+  remote work is not the machine executing that work; preserve that distinction.
+- **Reuse the existing owners:** LOO-416 owns saved panes and reattachment;
+  LOO-402 owns Waiting navigation, including blocked shell panes (Sessions use
+  Rust's judgment; shell-only roll-up uses shared Swift). LOO-403 owns shortcuts
+  and palette, LOO-387 draft preparation. This comparison adds programmatic access.
+- **No new host:** LOO-415 owns a transparent per-Session relay, no emulation;
+  Codex keeps its engine socket. Desktop screen reads are of its actual terminal,
+  not a requirement to turn the relay into a terminal emulator. LOO-398 is the
+  status read half; emission is deferred to LOO-415, with LOO-422 interoperability.
+- **Current command/product boundaries:** LOO-401 selects `self`, `config user`,
+  app opening, and outright HTML screenshot removal. LOO-418 selects zero or one
+  PR per Task and follow-through as another Task. LOO-406's plan-store changes
+  remain exploration; they do not establish a new planning authority here.
+- **Known host failures have owners:** LOO-428 covers duplicate launch flags and
+  noisy output, retaining argument delivery in its slice. LOO-429's latest
+  decision moves *all* assembled context to the system file, with no split,
+  relaunch fallback or lf-side interactive error wording. LOO-420 uses native
+  invocation for native skills and translated ports for the other harness;
+  builtins stay inlined. No new wrapper or prompt workaround belongs here.
+
+## Open and arrange
+
+| Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
+|---|---|---|---|---|
+| Open on a supported platform | Mac app control; no Linux Desktop trial | Desktop is macOS; CLI works on Linux | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/431/432. |
+| ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | `lf desktop`; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
+| ★ Open the actual Task/conversation | `new-workspace --command CMD`; `new-surface --command CMD` (P) | `open 'loopflow://task/ISSUE?repo=PATH&session=ID'`; no installed `lf open ISSUE` | `tab create`, then `pane run P CMD` | **worse** — Task links already preserve Work identity, but lack the one-command entry; LOO-426. |
+| ★ Open everything waiting | `jump-to-unread` (H); notifications are not Work Waiting | `lf session list --waiting --json`; no batch Desktop open | `agent list`; no matching batch open found | **want** — open shared Waiting conversations once, not every completed Run; LOO-426. |
+| ★ Open/identify the repository window | `new-window`, `list-windows`, `current-window` (P except current-window) | Native windows; no addressable window inventory | `session list`; terminal-host windows are outside herdr | **want** — at most one window per repository across machines; repeated opens reuse it and commands address the repo; Desktop arrangement follow-up. |
+| ★ Focus an existing destination | `focus-window`, `select-workspace`, `focus-pane`, `focus-panel` (P for select-workspace) | Task link; sidebar, palette and pane click; no exact-window/pane CLI | `workspace focus`, `tab focus`, `pane focus --direction`, `agent focus` | **worse** — opening is addressable, existing pane focus is not; LOO-426 plus Desktop arrangement. |
+| ★ Add a companion pane/tab | `new-pane`, `new-surface`, `new-split` (P for last two) | **+** shell / Files / Flow log; split controls; no CLI | `tab create`, `pane split` | **want** — expose the existing Task workspace, not a parallel terminal hierarchy; Desktop arrangement. |
+| ★ Move/reorder within the workspace | `move-surface`, `split-off`, `drag-surface-to-split`, `reorder-surface` (H) | Retained multiplexer; no public programmatic placement | `pane move`, `pane swap` | **want** — rearrange existing views without restarting them; Desktop arrangement. |
+| ★ Promote a tab to a sidebar entry | `move-tab-to-new-workspace` (P) | Tasks already own sidebar placement; a Session belongs to its checkout's Task | `pane move P --new-workspace` | **no** — do not create Tasks by moving tabs; open/select the existing Task through LOO-426. |
+| Move entire workspaces between windows | `move-workspace-to-window` (H) | Window-local surface pools; another window may see a client elsewhere | `pane move P --workspace ID` is within a server, not an app-window transfer | **no** — no arbitrary multi-window workspace system; one repo window spans machines. LOO-424 owns client transfer. |
+| Arbitrarily reorder/pin/color sidebar entries | `reorder-workspace`, `reorder-workspaces`, `workspace-action` (H) | Work outline derives from Waves and started Tasks | Workspace focus/rename; no equivalent ordering CLI found | **no** — keep the Work hierarchy; run lf inside cmux for host organization. |
+| ★ Resize/zoom an existing layout | `resize-pane`, `resize-window`; `tab-action` (H; action-dependent) | Native resize and pane zoom; no CLI | `pane resize`, `pane zoom` | **want** — expose pane sizing/zoom; OS window geometry need not be cloned; Desktop arrangement. |
+| ★ Hide/close a view, then restore it | `close-surface`, `close-workspace`, `close-window` (P for window) | Close view / Undo; shell closure and app quit can end PTYs; no CLI | `pane close`, `tab close`, `workspace close` | **want** — explicitly separate reversible visibility from ending a shell/client; Desktop arrangement. |
+| Host navigation shortcuts | `next-window`, `previous-window`, `last-window`, `last-pane`, `find-window` (H) | Sidebar and ⌘K use Work names | `pane neighbor`, `pane edges`, directional focus | **no** — exact target focus is useful; tmux-shaped aliases are not a new Work API. |
+| Terminal maintenance/compatibility | `refresh-surfaces`, `swap-pane`, `break-pane`, `join-pane`, `respawn-pane`, `clear-history`, `copy-mode` (H) | Split/close/Undo and native selection; no matching CLI | `pane swap`, `pane move`, `pane close` | **no** — retain narrow arrange operations above; leave terminal administration to the host. |
+
+## Inspect identity, relationships and output
+
+| Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
+|---|---|---|---|---|
+| ★ Explain the command's target | `identify --json` (P) | Source: `lf machine id`; installed: `lf home id`; `lf task status --json`; `lf context` lacks full selection provenance | `pane current`, `agent explain` | **want** — one shared Work identity explanation; identity follow-up. |
+| ★ Inspect visual placement and selection | `tree --json`, `list-workspaces`, `list-panes`, `list-pane-surfaces`, `list-panels`, `current-workspace` (P for tree/workspaces/panels) | No Desktop tree read; Work membership is available via `lf task status` | `api snapshot`, `workspace get`, `tab get`, `pane list`, `pane get`, `pane layout` | **want** — join window/pane placement to Work IDs without replacing Work membership; Desktop arrangement. |
+| Inspect actual work/process ancestry | `top --processes`, `current`, `memory`, `surface-health` (H) | `lf ps --json`, `lf top`, `lf task status --json`; Task Flow log | `pane process-info`, `agent list`, `agent get` | **have** — Work-associated processes are already stronger than a terminal process tree; resource profiling stays with host tools. |
+| ★ Read the displayed terminal | `read-screen --surface S --lines N`, `capture-pane` (P for read-screen) | Native terminal display only; `lf monitor show ID --final` is a recorded conclusion, **not** the screen | `pane read P --source visible --lines N`; `agent read` | **want** — bounded passive reads of exact rendered surfaces; keep the relay byte-transparent under LOO-415. Terminal I/O follow-up. |
+| ★ Read selection or scrollback | `read-selection`, `read-screen --selection`, `read-screen --scrollback` (H) | Copy/selection and scrolling in UI; no targeted read API | `pane read --source recent`; no selection command found | **want** — useful for discussing what Jack is looking at; terminal I/O follow-up. |
+| Read durable conversation history | `sessions`, `vault sessions`, `vault search`, `vault checkpoints`, `recover` (H) | `lf session list --search TEXT`, `lf session history ID`, `lf monitor show ID --events` | `session list` is host lifetime, not provider history; `agent read` is terminal output | **worse** — shared history exists; outside-lf adoption/name-based continuation belongs to LOO-424. |
+| Capture a native window | `shot` (P); `record start/stop/status/note/list` (H) | AppleScript `capture screenshot` captures the key window, not an explicit target; `lf screenshot` captures HTML/URLs only | — | **worse** — current capture cannot establish which addressed window rendered; support explicit capture with Desktop inspection, not a video editor. |
+| Inspect patch/files beside work | `diff`, `markdown`, `open` (H) | `lf task diff ISSUE`, `lf task files ISSUE`, `lf task file ISSUE PATH`; Files/Diff pane | Shell/editor; no equivalent viewer command found | **have** — Task-backed file and diff identity is already useful; formatted Markdown is optional, not a new comparison Task. |
+| Review comments/findings | `comments list`, `review list`, `review show`, `review findings` (H) | `lf task comment ISSUE`, Task Description/comments, PR links, skills | Shell tools; no parallel review commands found | **have** — preserve authored Task/PR review; no host-specific review database. |
+| ★ Discover version support vs legal action | `capabilities`, `ping`, `version`, `socket-status` (P except socket-status) | `lf --version`, `lf list --json`; shared Session/Task action projections; no app capability read | `api schema`, `status --json` (P for status only) | **want** — local operation discovery and legal actions, without cross-version negotiation (LOO-411); Desktop arrangement and LOO-397. |
+
+## Send input and wait
+
+| Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
+|---|---|---|---|---|
+| ★ Insert text into an exact terminal | `send --surface S TEXT`, `paste`, `send-panel` (P for send) | Native typing/paste; no Desktop CLI | `pane send-text P TEXT` | **want** — explicit surface/content target; share LOO-387's draft preparation boundary. Terminal I/O follow-up. |
+| ★ Submit/interrupt with a key | `send-key --surface S KEY`, `send-key-panel`, `paste --submit` (P for send-key) | UI keys; `lf task interrupt ISSUE` is a provider action, not a general key API | `pane send-keys`, `pane run` | **want** — separate insertion from execution; no implicit Enter or transfer of client authority; terminal I/O follow-up. |
+| Continue a conversation semantically | `agent message`, `agent inbox`, `agent messages` (H; host messaging, not provider continuation) | `lf -b session resume ID MESSAGE`; ongoing interactive Session; Task steers via `lf task comment --steer` | `agent prompt TARGET TEXT` | **have** — durable conversation/steer path already exists; do not add another agent inbox. Live terminal input is the separate row above. |
+| Wait for a known outcome | `wait-for`; `pipe-pane --command CMD` (H) | `lf task wait ISSUE --until terminal --timeout N --json`; `lf monitor work --json --watch` for state changes | `pane wait-output --match TEXT --timeout MS`; `agent wait`; `agent prompt --wait` | **worse** — Task completion waits exist; terminal read/input needs bounded observation, not LM polling or a new completion authority. Terminal I/O follow-up. |
+| Host clipboard buffers and popups | `set-buffer`, `list-buffers`, `paste-buffer`, `popup`, `display-message` (H) | System clipboard and terminal paste; no buffer manager API | Native terminal clipboard | **no** — run lf inside cmux; do not add another clipboard store. |
+
+## Name things, status and attention
+
+| Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
+|---|---|---|---|---|
+| ★ Name the conversation | `rename-tab` (P), `rename-workspace`, `rename-window`, `tab-action --action rename` (H) | `lf session rename ID NAME`; Desktop inline Session rename | `agent rename`, `pane rename`, `tab rename`, `workspace rename` | **have** — durable Session name is the useful identity; avoid a competing pane-title database. Host propagation belongs to LOO-422. |
+| Rename the work itself | `rename-workspace` (H; a visual label) | `lf task edit ISSUE --title TITLE`, `lf wave rename`; different semantic effects | `workspace rename` (a visual label) | **have** — use existing Work mutations deliberately, never turn pane rename into Task rename. |
+| ★ Show current step/status | `set-status`, `clear-status`, `list-status`, `sidebar-state` (P for set/sidebar) | Task Workflow and Flow log; `lf monitor work --json --watch`; incomplete external-host propagation | `pane report-agent`, `report-agent-session`, `release-agent`, `report-metadata`; `workspace report-metadata` | **worse** — consume shared execution and Waiting; LOO-422 owns external-host fidelity, not arbitrary host-specific state writers. |
+| Set a workspace lane manually | `workspace status [set …]` (H) | `lf task move ISSUE NODE` changes Workflow position; not a visual label | Display metadata and lifecycle reports are distinct | **no** — never let a terminal lane overwrite Work lifecycle or Waiting. |
+| Show arbitrary percentage/logs | `set-progress`, `clear-progress`, `log`, `clear-log`, `list-log` (P for set-progress/log) | Recorded Process results and Session history; no arbitrary progress setter | Display metadata; no matching percentage/log CLI found | **no** — preserve observed step/status; do not invent percent-complete truth. Host-native decoration can remain in cmux. |
+| ★ Signal an actual request for input | `notify --desktop false`, `list-notifications`, `open-notification`, `jump-to-unread` (P for notify only) | Shared Waiting and `lf session list --waiting`; Desktop Waiting presentation | `notification show TITLE --sound request`; agent state | **worse** — LOO-402 owns sidebar/jump including blocked shell panes, LOO-426 opens waiting Sessions, LOO-422 external status. No new Task. |
+| Dismiss a host notification | `dismiss-notification`, `mark-notification-read`, `clear-notifications` (P for scoped clear) | No equivalent notification queue; Session/Task completion are not dismissals | No notification-history controls found | **no** — no second attention queue or “read means done” contract; host owns its notifications. |
+| Associate a pull request | `pr URL`, `pr clear` (H) | Recorded PR, `lf pr checks`, Task PR link; LOO-418 selects zero or one PR per Task | Display metadata / shell tools | **have** — keep typed PR ownership, not a second editable host PR authority. |
+
+## Agents, Sessions and resume
+
+| Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
+|---|---|---|---|---|
+| Start agent work | `new-surface --type agent-session`; `claude-teams`, `codex-teams`, `omo`, `omx`, `omc` (H) | `lf skill NAME`, `lf run FLOW`, `lf --task ISSUE : MESSAGE`; Desktop New Session | `agent start NAME --kind KIND --pane P` | **have** for lf-owned skills/Flows; LOO-420 owns native/cross-harness skill fidelity. LOO-428 owns known host launch failures; no team-runner clone. |
+| Detect/report the running agent | `hooks setup/uninstall`, `hooks AGENT install/uninstall/event`, `hooks feed` (H) | Owned provider streams plus terminal reports; host interoperability incomplete | `integration install/uninstall/status`, `agent explain`, lifecycle reporting | **worse** — LOO-422; do not install host hooks or create duplicate status authority here. |
+| Hibernate the agent/terminal | `agent-hibernation on/off/hibernate/wake` (H) | No equivalent transparent suspension; provider continuation is distinct | Persistent server and `agent attach`; not evidence of hibernation | **no** — leave host lifecycle in cmux/herdr; continuation work belongs to LOO-424. |
+| Resume saved provider work | `restore`, `surface resume set/show/get/clear`, `session restore`, `recover` (H) | `lf session resume ID`, `lf session connect ID`; Desktop Open / Move here | `agent attach`, `session attach NAME` retain a host terminal, not necessarily provider history | **worse** — LOO-424 owns adoption, names, directories and host portability. |
+| Fork/checkpoint a conversation | `fork`, `vault checkpoint`, `vault fork` (H) | `lf replay ID` repeats a captured request; not a provider-history fork | — | **no** — do not equate replay with fork; no demonstrated Work requirement for a checkpoint product here. |
+| Restore/export an entire host session | `restore-session --from/--export`; `local-tmux`, `tmux attach`, `local-zellij` (H) | Retained layout and durable Session identity; LOO-416 owns saved per-Task pane restoration and reattachment | `herdr --session NAME`, `session attach/stop/delete/list` | **no** to host export/tmux management — run lf inside the host; LOO-416 owns app restoration, LOO-415/424 continuity. |
+| Route models/accounts through host | `coderouter` / `cr`, `ai-accounts` (H) | `lf account` has its own provider-account model | Agent launch arguments/integrations | **no** — no CodeRouter/account upload integration from this comparison; never exercise real accounts in tests. |
+
+## Browser and remote
+
+Every entry in this section is **H**, not an exercised browser/remote workflow.
+These commands are inventoried because they are discoverable, not because their
+implementation or runtime quality was examined.
+
+| Job | cmux commands | lf / Desktop today (L) | herdr commands (H) | Judgment and owner |
+|---|---|---|---|---|
+| Own an embedded browser | `enable-browser`, `disable-browser`, `browser-status`; `browser enable/disable/status`, `open`, `open-split`, `tab new/list/switch/close` | No embedded browser; ordinary external links | — | **no** — run lf inside cmux or use the browser tool. |
+| Navigate and inspect a page | `browser goto/navigate/back/forward/reload`, `url/get-url`, `identify`, `snapshot`, `get`, `is`, `find`, `frame` | Installed `lf screenshot` is capture only; LOO-401 removes it without replacement | — | **no** — no second browser automation product in Desktop. |
+| Interact with page controls | `browser click/dblclick/hover/focus/check/uncheck/scroll-into-view`, `type/fill/press/keydown/keyup/select/scroll`, `wait`, `dialog` | External browser tooling | — | **no** — use the host's browser. |
+| Debug/customize web UI | `browser eval/repl`, `devtools`, `react-grab`, `focus-mode`, `design-mode`, `zoom`, `highlight`, `addinitscript/addscript/addstyle`, `console/errors` | External devtools | — | **no** — use the host's browser. |
+| Capture/download web results | `browser screenshot`, `download list/wait` | Installed `lf screenshot`; removal decided in LOO-401 | — | **no** — LOO-401 removes HTML capture without replacement; use available external tools. |
+| Own browser profiles/data | `browser profiles list/add/rename/clear/delete`, `import`, `cookies get/set/clear`, `storage`, `state save/load`, `history clear` | No Desktop browser account store | — | **no** — host owns it; no credentials/history read in this study. |
+| Run work on another machine | `ssh`, `mosh`, `mosh-tmux`, `ssh-tmux`, `remotes` / `remote` (H) | Source: `lf --machine LABEL COMMAND`, `lf machine add/list/status/rename/remove`; installed baseline still has `lf home ssh/observe` | `--remote TARGET`, `--machine LABEL`; `machine list/status/add/rename/remove/enable/disable/reconnect` | **have** for remote lf execution; host shells/tunnels remain with cmux/herdr. |
+| Continue a Session elsewhere | `session move`, `ssh-session-list`, `ssh-session-attach`, `ssh-session-cleanup` | Machine routing and provider resume pieces, not universal live transfer | `--remote`, `agent attach`, `session attach` | **worse** — LOO-424 owns experience; LOO-412–417 own machine/relay foundations. |
+| Own cloud machines | `auth status/login/logout/team`, `login/logout`; `vm` / `cloud` (all subcommands below) | Machine operations; no cmux Cloud product | Saved SSH machines; no cloud lifecycle group | **no** — no cloud-vendor platform in this Task; run lf on the provided machine. |
+| Drive mobile/simulator UI | `simulator`, `ios` | No equivalent Desktop terminal-host API | — | **no** to simulator control — LOO-396 separately owns phone access to waiting work. |
+| Diagnose remote transport | `remote-daemon-status`, `iroh-diag` | `lf doctor`, SSH errors | `machine status`, `status server/client` | **no** for another transport diagnostic stack; keep diagnostics with the transport owner. |
+
+The `vm`/`cloud` disposition covers every leaf advertised in top-level help:
+`base`, `new`, `ls`, `domains`, `tree`, `self`, `status`, `stats`, `resize`,
+`network`, `agent-updates`, `rename`, `pause`, `resume`, `snapshot`, `fork`,
+`restore`, `rm`, `run`, `route`, `agent`, `dev`, `prompt`, `exec`, `push`, `pull`,
+`wait`, `shell`, `tui`, `desktop`, `open`, `workspace`, `terminal`, `tab`,
+`layout`, `env`, `ports`, `tools`, `handoff`, `promote-template`, `attach`, `ssh`,
+`ssh-info`. Listing is not verification of these commands or their subtrees.
+
+## Automation, discovery and host administration
+
+| Job | cmux commands (H unless marked) | lf / Desktop today (L) | herdr commands (H) | Judgment and owner |
+|---|---|---|---|---|
+| Learn commands from the tool | `help`, `help GROUP`, `guide` / `--skill`, `docs` (P for help/guide) | `lf help --all`, `lf help PATH`, `lf list --json`; ambiguity/typo rough edges | `--help`, leaf help, `--skill`, `completion` | **worse** — LOO-397 owns learnability; do not clone another tool's help or skill text. |
+| Observe changing Work | `events` | `lf monitor work --json --watch`; `lf activity --json` | `api snapshot`; waits for pane/agent conditions | **have** — Work events already feed Desktop; a visual layout snapshot belongs in Desktop arrangement. |
+| Schedule/run automation | `automation list/show/test/enable/disable/logs/reload`, `set-hook` | `lf wave cron`, `lf run FLOW`, `lf task run` | Shell tooling; integration lifecycle hooks | **have** — existing Work automation suffices; no second host automation engine. |
+| Use a host-specific automation service | `glaeda request/observe` | No Glaeda-specific equivalent | — | **no** — run lf inside the host; no integration need was demonstrated. |
+| Keep an ad hoc host todo list | `todo add/list/check/uncheck/start/rm/clear` | `lf task create`, Task Workflow and Project plan | No todo group found | **no** — preserve Work planning; LOO-406 explores its store, not a terminal-local backlog. |
+| Customize terminal appearance | `themes list/set/clear`, `import`, `reload-config`, `shortcuts`, `bind-key`, `unbind-key` | Desktop Settings and fixed workspace composition; no general terminal configuration CLI | `config`, `server reload-config`, `channel`, `completion` | **no** to a host config clone — LOO-403 already owns discoverable Desktop shortcuts and palette actions. |
+| Replace host sidebars | `right-sidebar`, `sidebar templates/try/new/validate/reload/select/open` | Work outline, Files and Flow log panes | Workspaces/tabs/panes | **no** — expose existing Work views rather than build a sidebar extension platform. |
+| Host settings/onboarding/feedback | `welcome`, `settings`, `config doctor/check/validate/path/paths/docs/documentation/reload`, `feedback`, `feed tui/clear` | Settings, `lf doctor`, repository onboarding | `config`, `update`, `channel`, server lifecycle | **no** to host administration parity; Loopflow keeps its own installation/diagnostics. |
+| Raw RPC/debug controls | `rpc`, `debug-terminals`, `trigger-flash`, `set-app-focus`, `simulate-app-active`, `simulate-sidebar-drag` | Headless app tests and native fixtures; no general Desktop transport | `api schema`, `api snapshot` | **no** to a public debug-control clone; ship the explicit supported operations above. |
+| Privileged execution | `sudo run/pending/setup-touch-id` | Ordinary process/OS permissions | Ordinary shell | **no** — not needed to arrange Work; never build a privilege broker for this comparison. |
+
+## What the disposable exercise established
+
+The exercised command sequence used explicit window/workspace/surface IDs after
+creation: `new-window`; `rpc window.create`; `new-workspace`; `new-surface`;
+`select-workspace`; `send`; `send-key`; `read-screen`; `rename-tab`; `new-split`;
+`move-tab-to-new-workspace`; `set-status`; `set-progress`; `log`; `sidebar-state`;
+`identify`; `tree`; `notify --desktop false`; `shot`; `clear-notifications`;
+`close-window`. No command targeted Jack's existing terminal surfaces.
+
+- The first window command returned an ID which later returned “Window not
+  found.” Cause unknown; it was absent from the final inventory. A second
+  `rpc window.create` produced an inspectable separate window.
+- A harmless shell command emitted `LOO427_PROBE`. After moving its tab into
+  another sidebar workspace, the same surface retained the output. Sending
+  literal `LOO427_DRAFT`, switching away and reading that explicit surface
+  retained the unfinished draft. No provider was launched.
+- `identify` distinguished the explicitly addressed surface from the selected
+  workspace. `tree` reported three workspaces and the two-pane split. A hidden
+  surface could report `not_started` render health while its text remained
+  readable: a screen buffer is not proof of currently rendered content.
+- [The captured test window](terminal-command-comparison/cmux-disposable.png)
+  visibly shows the split, named sidebar entries, notice, status, log and progress.
+  It proves this rendered arrangement, not Desktop parity or provider readiness.
+- The text command's escaped newline was interpreted unexpectedly and produced
+  a continuation prompt before the marker. Future send contracts must distinguish
+  literal text from key/escape interpretation; do not infer byte fidelity from
+  an `OK` response.
+- Ordinary window close refused because our nested shells were running.
+  `close-window --window TEST_ID --force` removed only the test window after its
+  scoped notification was cleared. Final window inventory contained the original
+  window only, still with seven workspaces. Its selected workspace changed during
+  the study; no original selection was restored over Jack's concurrent activity.
+
+No comparable Desktop run, herdr pane exercise, provider continuation, browser,
+SSH/cloud/account operation or latency benchmark was performed. A test-window
+screen and command receipts do not meet the chapter's sustained-use KRs.
+
+## Follow-up ownership
+
+Existing Tasks retain their scope:
+
+- [LOO-397](https://linear.app/loopflow/issue/LOO-397): command map and discovery.
+- [LOO-426](https://linear.app/loopflow/issue/LOO-426): opening Task/Session and
+  Waiting conversations, building on the links; coordinate with
+  [LOO-401](https://linear.app/loopflow/issue/LOO-401)'s launch-command move.
+- [LOO-422](https://linear.app/loopflow/issue/LOO-422): host-visible titles/status
+  and standard terminal reports. It explicitly avoids a host-specific integration
+  when the host consumes none of the existing mechanisms. Arbitrary cmux progress
+  setters are not an extension of its scope.
+- [LOO-424](https://linear.app/loopflow/issue/LOO-424): history adoption and resume
+  across hosts/machines, with [LOO-415](https://linear.app/loopflow/issue/LOO-415)
+  and the machine Tasks providing transport.
+- [LOO-421](https://linear.app/loopflow/issue/LOO-421) and
+  [LOO-423](https://linear.app/loopflow/issue/LOO-423): actual lf-in-host trials
+  and their small repairs. This page's host-only exercise does not replace them.
+
+- [LOO-416](https://linear.app/loopflow/issue/LOO-416): saved pane arrangement
+  and restoring conversation attachments; not a second layout store here.
+- [LOO-402](https://linear.app/loopflow/issue/LOO-402),
+  [LOO-403](https://linear.app/loopflow/issue/LOO-403), and
+  [LOO-387](https://linear.app/loopflow/issue/LOO-387): Waiting navigation,
+  commands/shortcuts and native draft preparation.
+- [LOO-428](https://linear.app/loopflow/issue/LOO-428) and
+  [LOO-429](https://linear.app/loopflow/issue/LOO-429): observed host launch/output
+  problems and revised prompt placement, respecting their later comments.
+
+New outcomes are unstarted; filing does not launch implementation:
+
+1. **[Identity explanation · LOO-430](https://linear.app/loopflow/issue/LOO-430)** — the keystone: resolved Work context and why it was
+   selected, without environment/database archaeology.
+2. **[Repository window and arrangement · LOO-431](https://linear.app/loopflow/issue/LOO-431)** — reuse one window across machines,
+   address it by repo, inspect placement/capabilities/actions and arrange retained panes.
+3. **[Terminal observation and input · LOO-432](https://linear.app/loopflow/issue/LOO-432)** — bounded screen/selection reads
+   and explicit text/key delivery with retained draft and focus behavior.
+
+Each is independently useful; no implementation is launched by this comparison.
+Naming/transport and Session draft-conflict UX remain design questions. Browser,
+cloud, checkpoint vault, custom sidebars and host terminal administration earn
+no new Loopflow Tasks here.
+
+## Loopflow source anchors
+
+- [Task links and native controls](../../swift/README.md),
+  [link dispatch](../../swift/LoopflowMac/LoopflowApp.swift),
+  [destination handling](../../swift/LoopflowMac/WorkDestination.swift).
+- [Retained workspaces](../../swift/LoopflowMac/Views/SessionsView.swift),
+  [multiplexer](../../swift/Loopflow/Models/MultiplexerStore.swift),
+  [terminal input/read primitives](../../swift/LoopflowMac/Services/Ghostty/GhosttyTerminalView.swift).
+- [AppleScript dictionary](../../swift/LoopflowMac/Loopflow.sdef) and
+  [handler](../../swift/LoopflowMac/ScriptCommands.swift): key-window capture only.
+- [Shared bindings](../../rust/loopflow/src/ops/run.rs),
+  [context command](../../rust/loopflow/src/lf/commands/context.rs),
+  [RegistryQuery](../../swift/Loopflow/Services/RegistryQuery.swift).
+
+Review finding: transcript reads, Task membership and successful dispatch were
+initially tempting substitutes for screen reads, visual placement and usability.
+The comparison keeps each pair separate; no new runtime owner follows from it.

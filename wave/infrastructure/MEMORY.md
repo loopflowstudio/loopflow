@@ -7,7 +7,7 @@ lf writing only for pipe-driven work/Flow position. Reports override inference
 in Rust's single Waiting judgment; they grant no execution authority.
 Implement from the spec. LOO-384 remains for non-reporters; provider adoption is
 unverified. LOO-402 owns broader presentation.
-Jack authorized build and publication for review, not landing, and made LOO-394's
+Jack initially authorized build/publication for review and made LOO-394's
 absent relay a named follow-up. Its #1484 covers naming only.
 
 Jack approved the embedded patch at `a60e9e2a…`; both earlier patches survive
@@ -17,13 +17,20 @@ strip; Task-header intent remains for review. SQL/CLI/DTO/Swift proofs establish
 separate boundaries, not installed or composed native-pane acceptance. Provider
 generation and surface incarnation fence observations; viewer absence is not death.
 
-Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
-existing independent output paths cannot safely finish the escape before normal
-text. Flow children inherit terminal descriptors; a parent mutex cannot serialize
-them, and piping native children changes terminal behavior. Extending this Task
-with PTY transport or deferring emission to LOO-394 remains an unresolved choice,
-not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
-original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
+Jack Heart settled emission on October 7 (LOO-398 comments
+`007727f9-63a6-4d9e-958d-f5d20fcdbb7b` and
+`c0beacdf-d900-41d8-98de-216698abcdf0`): all lf-authored reporting, including
+single Runs and Flows, moves to LOO-415's relay. LOO-398 is the read half only;
+its thread records PR #1490 shipped. The 62-of-74-byte PTY short write explains
+why one terminal-output owner is needed; it is not unfinished LOO-398 scope.
+LOO-422 owns host interoperability against that output. Native provider reports
+pass through once. No arbitrary cross-process emitter is authorized.
+
+Jack's later Waiting decision includes blocked plain-shell panes in Desktop's
+sidebar, Task Waiting list and jump key (LOO-402). Shells have no Session row:
+shared Swift rolls up their reported status; Sessions keep Rust's Waiting
+judgment. `lf session list --waiting` remains Sessions only. Historical patch
+evidence: `c62c19f5c:scratch/read-and-write-program-status.md`.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
@@ -69,7 +76,10 @@ per-call repository override. Secret and agent-forwarding options require a
 machine. Account flags resolve on the target, not against origin-only accounts;
 inherited origin restrictions still constrain its grant. Jack Heart later requested
 landing; this repair is limited to syncing main, focused verification and publication,
-then stopping. No later slice is authorized. Local fixtures prove dispatch and
+then stopping. That was LOO-411's boundary, not a ban on later separately
+authorized Tasks: LOO-412 and LOO-413 now own their respective slices. Their
+October 7 comments record PR #1489 merged and require global `--machine`.
+Local fixtures prove dispatch and
 separate registries, not configured remote continuity or installation.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
@@ -224,23 +234,14 @@ remains separate from source fixtures and delivery.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377's autonomous repair; PR #1429 merged as c5dc238b0afb
-with hosted CI passing. Restart serializes review launch, fences writers and
-retains exact stop evidence for retry. Independent reviews remain protected.
-LOO-370's replacement Flow finished after recovery; its Task completed October 6
-under the opaque-root decision above.
-Installed acceptance remains unproved;
-LOO-373 owns the retained landing-placement reconciliation error.
-
-A review's service, Session driver and provider are distinct process owners.
-Record the service's exact Exec before child launch. Acquire the existing launch
-lock before the driver fence: reservation/spawn must settle before collecting
-owners, and reobserve the same Flow afterward. Retirement must fence review
-writers and retain captures/native history without recording successful review.
-Save exact process identities before signaling: native stop removes client receipts,
-so an interruption before replacement otherwise destroys retry evidence. The
-public restart fixture reproduces that boundary with no Session provider PID;
-retry uses saved identities. Unknown ownership and independent reviews still block.
+Jack Heart authorized LOO-377's repair; #1429 merged as `c5dc238b0afb`, CI passing.
+LOO-370 later completed; installed acceptance remained unproved and LOO-373 owned
+landing-placement reconciliation. The retired review-restart mechanism and fixture
+are archived at `35e759aaf:wave/infrastructure/MEMORY.md`, this heading.
+Retain its lessons: service, driver and provider are distinct owners. Settle
+launch reservation before collecting them; preserve exact identities before
+signaling removes receipts. Fence writers and retain history without claiming
+successful review. Unknown ownership never authorizes stopping independent work.
 
 ## Transient recovery (LOO-326, 2026-10-04)
 
@@ -567,13 +568,11 @@ configured checks are in [the pre-curation memory](https://github.com/loopflowst
 
 ### Legacy retirement completed (2026-10-04)
 
-Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
-The four installed stores, the unused root database and two demo databases are
-intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
-identities, signals and paths); seven earlier snapshots remain at
-`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
-identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
+Jack Heart authorized legacy-store retirement. All 37 identified processes exited
+with SIGTERM. Stores, demo databases and earlier snapshots remain under
+`~/.lf-retired/`; `~/.lf-dev` was removed without changing main identity.
+Exact paths, receipts and verification: `35e759aaf:wave/infrastructure/MEMORY.md`,
+this heading. Historical authorization permits no new cleanup.
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 

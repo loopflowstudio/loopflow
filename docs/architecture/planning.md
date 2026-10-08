@@ -52,8 +52,9 @@ ambiguous references return candidates instead of selecting a Task.
 
 Checkout allocation records the Task's first PR and placement before filesystem
 creation, so retry repairs the same allocation. Native launch and resume retain the
-ordinary Session and Process authority checks; only connected Tasks consult provider
-deletion evidence. Local completion records its decision and workflow arrival together.
+ordinary Session and Process authority checks. Local deletion receipts and retained
+provider deletion evidence apply regardless of planning mode. Local completion
+records its decision and workflow arrival together.
 GitHub delivery still requires confirmed merge evidence. Local chapter rotation commits
 all selected personal Waves together, carrying started Tasks and preserving backlog.
 A mixed Local/Linear rotation retains each authority's recovery records; a SQLite

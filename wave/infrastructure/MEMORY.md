@@ -11,27 +11,25 @@ and show pending sync. Preserve uncertain effects and concurrent edits; no resid
 or automatic turn/Flow retry. This supersedes the branch's mixed-authority design.
 
 Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
-independent inbound completion, Project membership and comments while outbound
-writes are pending and after reconnect. Preserve both values on field conflicts
-and all Workflow/Process authority boundaries. Source at `3a219561a` refreshes
-active-Task comments at launch and every 15 seconds, with 5-second steer polling;
-that query omits state/membership. No current Linear webhook receiver was found;
-Desktop watches committed local state. Historical ingress APIs prove no live
-webhook delivery. Keep existing triggers/cadence; operation-entry proofs for all
-three examples remain required.
+independent inbound completion, membership and comments during pending writes and
+after reconnect. At `73059ecd1`, launch refresh is shared, but only batch
+Codex/OpenCode start the 15-second comment refresher and 5-second steer polling.
+Native interactive and Claude subprocess paths do not. The query omits
+state/membership; Desktop only watches local commits. No current webhook receiver
+was found. Preserve triggers/cadence and cover each active connection lifetime.
+Merged #1500 preserves native Flow interaction; forced batch cannot fill this gap.
+Release's operation-entry lesson applies: helper success proves no caller drives it.
 
-Jack's comment `93690dc2-5526-4ecf-a203-5e248339b0c9` extends this to semi-live
-comments and completion: active CLI/Desktop connections save locally immediately
-and propagate without awaiting another agent turn, manual refresh or unrelated
-outbound drain. Incoming state, membership and comments enter the common store
-and visible planning on that active observation path. Disconnect retains pending
-changes; reconnect catches up without duplicate Tasks/comments. Stable mutation
-identities prevent echoes through the common writer, not per-operation callbacks.
-Remote completion cannot advance a captured local Workflow, signal Processes or
-clean checkouts. Delayed completion cannot overwrite newer explicit reopening;
-machine clocks alone prove no order. Preserve conflicts and prove these boundaries
-at operation entry. LOO-412 retains its under-review machine transport, sync scope
-and active-owner choices; this authorizes neither its restart nor replication here.
+Jack's comment `93690dc2-5526-4ecf-a203-5e248339b0c9` requires immediate local
+comment/completion saves and active CLI/Desktop propagation without another turn,
+manual refresh or unrelated outbound drain. Incoming facts enter the common store
+and visible plan. Disconnect retains pending changes; reconnect deduplicates Tasks
+and comments. Stable mutation identities prevent echoes through the common writer.
+Preserve both field-conflict values. Remote completion grants no captured Workflow
+movement, Process control or checkout cleanup; delayed completion cannot overwrite
+newer explicit reopening. Machine clocks prove no order. Operation-entry proofs
+remain required. LOO-412's machine transport, scope and active-owner choices remain
+under review; neither its restart nor replication here is authorized.
 
 Jack also selected Git-like Task prefixes: accept four or more hex digits, bare or
 prefixed, reject ambiguity, and retain full IDs. Display abbreviations can lengthen.

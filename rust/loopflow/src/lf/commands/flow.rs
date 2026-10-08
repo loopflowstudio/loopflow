@@ -193,13 +193,6 @@ fn execute(
             flow_name,
             &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
         )?;
-        // A conversation the Flow opens also starts its Task; a checkout the
-        // registry spells differently must not refuse the launch.
-        if let Some(task) = &task {
-            if let Err(error) = driver.store.sqlite.mark_task_started(task) {
-                tracing::warn!(%error, "Flow launch did not record its Task as started");
-            }
-        }
         drop(admission);
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live
@@ -466,6 +459,9 @@ impl Driver<'_> {
                 });
             }
         }
+        if self.launcher.verbose {
+            command.arg("--verbose");
+        }
         command.args(args);
         let mark = self.store.sqlite.process_mark()?;
         let admission = self
@@ -577,11 +573,7 @@ impl SkillExecutor for &Driver<'_> {
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let name = &skill.skill.name;
-        if let Some(progress) = ctx.progress {
-            print_skill_progress(progress, name);
-        } else {
-            print_nested_skill_progress(name);
-        }
+        print_step_progress(ctx.progress, name);
         let current = self.current();
         let output = current.as_ref().and_then(FlowOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
@@ -604,6 +596,8 @@ impl SkillExecutor for &Driver<'_> {
             message.push_str(&instructions);
         }
         let mut step_cli = self.launcher.process_options();
+        // spawn carries verbosity for skills, operations, and correction turns.
+        step_cli.verbose = false;
         step_cli.account.clear();
         step_cli.only_account.clear();
         step_cli.isolate = false;
@@ -678,10 +672,10 @@ impl SkillExecutor for &Driver<'_> {
     async fn run_command(
         &self,
         ops: &crate::engine::ConcreteCommand,
-        _ctx: ExecutionContext,
+        ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
-        eprintln!("op: {label}");
+        print_step_progress(ctx.progress, &label);
         let started = crate::store::rows::now_unix();
         // Authored spellings outlive the CLI's; the step runs today's.
         let args: Vec<String> = ops
@@ -705,27 +699,17 @@ impl SkillExecutor for &Driver<'_> {
     }
 }
 
-fn print_skill_progress(progress: StepProgress, skill_name: &str) {
+fn print_step_progress(progress: Option<StepProgress>, name: &str) {
+    let position = match progress {
+        Some(progress) => format!("{}/{}", progress.index + 1, progress.total),
+        None => "*".to_owned(),
+    };
     let colors = Colors::new();
     eprintln!(
-        "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
+        "{dim}[{position}]{reset} {bold}{name}{reset}",
         dim = colors.dim,
         reset = colors.reset,
         bold = colors.bold,
-        current = progress.index + 1,
-        total = progress.total,
-        name = skill_name,
-    );
-}
-
-fn print_nested_skill_progress(skill_name: &str) {
-    let colors = Colors::new();
-    eprintln!(
-        "{dim}[*]{reset} {bold}{name}{reset}",
-        dim = colors.dim,
-        reset = colors.reset,
-        bold = colors.bold,
-        name = skill_name,
     );
 }
 

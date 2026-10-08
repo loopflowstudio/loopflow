@@ -197,16 +197,6 @@ impl SqliteStore {
         Ok(Some((flow, entry)))
     }
 
-    /// A Flow process from a Task's checkout is work begun for that Task.
-    pub(crate) fn mark_task_started(&self, task: &TaskId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
-            params![task.as_str(), crate::store::rows::now_unix()],
-        )?;
-        Ok(())
-    }
-
     /// Flows run from `cwd`, oldest first.
     pub(crate) fn flows_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<FlowProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -220,11 +210,19 @@ impl SqliteStore {
         flow: &str,
         graph: &FlowGraph,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
             "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
             params![driver, flow, serde_json::to_string(graph)?],
         )?;
+        tx.execute(
+            "UPDATE tasks SET started_at=?2 WHERE started_at IS NULL AND worktree!=''
+             AND EXISTS(SELECT 1 FROM processes WHERE lfid=?1
+                 AND (cwd=rtrim(tasks.worktree,'/') OR instr(cwd,rtrim(tasks.worktree,'/')||'/')=1))",
+            params![driver, crate::store::rows::now_unix()],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

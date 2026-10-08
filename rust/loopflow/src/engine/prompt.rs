@@ -2823,8 +2823,10 @@ mod tests {
         assert!(path.to_string_lossy().contains(".lf/prompts/"));
         assert!(path.to_string_lossy().ends_with("-implement.md"));
 
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, prompt);
+        let next = write_prompt_log(repo.path(), "Next step", "implement", None).unwrap();
+        assert_ne!(path, next);
+        assert_eq!(fs::read_to_string(&path).unwrap(), prompt);
+        assert_eq!(fs::read_to_string(&next).unwrap(), "Next step");
     }
 
     #[test]

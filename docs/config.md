@@ -64,7 +64,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| Interactive terminal | direct TTY, `-i`, or `--tui` | — |
+| Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff patch` | `diff: true` |
@@ -457,11 +457,11 @@ assigned files.
 ### Interactive sessions
 
 ```bash
-lf --tui -a claude audit
+lf -a claude audit
 ```
 
 Interactive skills run in the current terminal. A direct TTY invocation is
-interactive by default; `--tui` also selects the terminal when input is piped.
+interactive by default; `-i` keeps interactive execution when input is piped.
 Use `-b` for headless execution.
 
 ### Summaries

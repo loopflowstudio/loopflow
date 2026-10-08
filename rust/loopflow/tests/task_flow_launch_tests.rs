@@ -150,6 +150,8 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // Flow; none continues another.
         for (launched, launch) in LAUNCHES.iter().enumerate() {
             let output = run(launch);
+            assert!(!String::from_utf8_lossy(&output.stderr)
+                .contains("Started requires recorded Task work"));
             assert!(
                 output.status.success(),
                 "{launch:?}: {}",
@@ -160,6 +162,9 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             assert!(flows
                 .iter()
                 .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
+            assert!(runtime
+                .block_on(registered.store.task_started(&registered.task.id))
+                .unwrap());
         }
         // However the Task was named, the Flow left the same Processes.
         let recorded = support::recorded_flows(home.path());

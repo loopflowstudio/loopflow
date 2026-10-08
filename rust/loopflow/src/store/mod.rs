@@ -2689,7 +2689,6 @@ mod tests {
             &[("commit -m work", Some("succeeded"))],
             None,
         );
-        store.sqlite.mark_task_started(&task.id).unwrap();
         assert!(store.chapter_task_evidence(&task.id).await.unwrap().begun);
         let flows = store.sqlite.task_flows(&task.id).unwrap();
         assert_eq!(flows.len(), 1);

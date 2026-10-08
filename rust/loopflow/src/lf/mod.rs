@@ -94,9 +94,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal
-    #[arg(long, conflicts_with = "batch")]
-    pub tui: bool,
+    /// Show context accounting and diagnostic logs
+    #[arg(short = 'v', long, global = true)]
+    pub verbose: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -186,12 +186,12 @@ impl Cli {
         for (flag, enabled) in [
             ("--batch", self.batch),
             ("--interactive", self.interactive),
-            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
+            ("--verbose", self.verbose),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -255,7 +255,7 @@ impl Cli {
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
-            tui: self.tui,
+            verbose: self.verbose,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -1820,10 +1820,12 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
-        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
-        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
-        assert!(error.to_string().contains("--ide"));
+    fn retired_surface_flags_are_rejected_for_a_valid_skill_command() {
+        for flag in ["--ide", "--tui"] {
+            let error = Cli::try_parse_from(["lf", flag, "skill", "debug"]).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains(flag));
+        }
     }
 
     #[test]

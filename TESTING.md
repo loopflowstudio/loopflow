@@ -77,6 +77,12 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+Changes to interactive/headless selection also run `default_conversation_tests`
+and `context_launch_tests` alongside `flow_tests`: bare `lf`, explicit `-b`, and a
+Flow invoking the `default` skill must preserve their distinct launch modes.
+Prompt fixtures read the harness's actual inputs, including context files and
+stdin, rather than assuming everything remains in argv.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
@@ -895,6 +901,21 @@ It exercises the real CLI, verified shell installer, store creation, repeat
 installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
+
+### Native Codex terminal capture
+
+```bash
+uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py \
+  --lf target/debug/lf --codex /path/to/native/codex
+```
+
+Use a native Codex binary supporting profile files. This headless PTY fixture
+uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+independently authored wrapper supplying trust plus SessionStart/Stop hooks.
+It verifies completed turns, exact native capture, both launch hooks, reconnect,
+unchanged configuration and temporary-profile cleanup. It uses no account or
+login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
+without lf. This proves launch composition, not cmux's actual tab tracking.
 
 ### Released capture-history preservation
 

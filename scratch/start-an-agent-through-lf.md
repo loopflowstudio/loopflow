@@ -47,11 +47,13 @@ Fixture preparation removes copied external account routes; the surviving Python
 regression verifies history and source preservation. Release child memory was
 read during reconciliation; its operation-entry and distinct-proof lessons apply.
 
-Remaining: final artifact/static check and publication for Jack Heart's review.
+Published [PR #1505](https://github.com/loopflowstudio/loopflow/pull/1505) for
+Jack Heart's review. Auto-merge is off; the Task remains open. Review and hosted
+CI remain.
 Do not infer hosted CI, installed performance, landing or Task completion from
 local success. Repeated Git discovery is a possible further optimization, not a
 proved gain; this pass stopped after the last attempted deletion lost its signal.
 
 Check: release build; network-denied startup smoke; focused attribution/reconnect/
-Wave checks; fmt/Clippy; fixture pytest — PASS. Final benchmark Ruff import fix
-and publication remain; broader hosted checks belong to CI.
+Wave checks; fmt/Clippy/Ruff; fixture pytest; SVG XML and sanitization — PASS.
+SVG visual review remains unproved; broader hosted checks belong to CI.

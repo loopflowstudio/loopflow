@@ -2,25 +2,27 @@
 
 ## Plan ownership exploration (LOO-406, 2026-10-07)
 
-Jack Heart requested exploration only. His leaning is a Git remote plan ref
-outside code branches, allowing pending local data;
-the laptop authors work and development machines remain disposable. Cover one
-person's machines, a startup sharing Linear, and independent company developers
-whose code remote may prohibit custom refs or private planning. Namespaces separate
-writes, not access; personal Wave definitions must not leak into shared repo files.
+Jack Heart selected the local lifecycle, Linear-compatible fields and stable IDs,
+then pursuit through review, not landing. Existing identities/history survive;
+UUID, selector and provider mapping remain distinct. Callback, Git and export
+are separate follow-ups. Draft: `scratch/explore-loopflow-s-own-store.md`.
 
-Jack proposed a connection back from `lf --machine X` to the host's task store.
-Host means origin in the draft; X retains execution. Jack questioned pending-update
-complexity and leans toward Linear authority when connected, through the host
-online. Disconnect retry and direct Linear fallback remain open. No resident or
-automatic turn/Flow retry is selected. A callback supplies no laptop-loss recovery.
+Jack leans toward a Git plan ref outside code branches, permitting pending local
+data; the laptop authors and workers remain disposable. Cover personal machines,
+shared Linear and independent company developers. Ref namespaces separate writes,
+not access; personal definitions must not leak into shared files. Jack's callback
+proposal interprets host as origin and retains execution on X. Connected Linear
+authority goes through the online host; disconnect/direct fallback remain open.
+No resident or automatic work retry is selected. Callbacks provide no laptop-loss
+recovery; write-once mappings provide no concurrent-export uniqueness.
 
-Jack selected local lifecycle first, echoing Linear APIs/fields with attention to
-ID generation, then requested pursuit through review, not landing.
-Draft: `scratch/explore-loopflow-s-own-store.md`; callback, Git and export follow
-separately. Existing IDs survive; UUID/selector/provider mapping remain distinct.
-Prior attempts are inventoried there. A write-once external ID alone cannot prevent
-concurrent export creation before assignment.
+Implementation inspection at `e7f8c4922` found the planned alias-table deletion
+loses provider recovery evidence. `task_issue_identities` can survive a lost
+deletion response without any Task, Project or cached issue. An in-memory released
+schema proof passes FK checks; the existing lost-response operation fixture was
+inspected, not rerun. Proposed amendment retains that table solely for deletion
+recovery, never ordinary Task resolution or mutation authority. Design returned
+to review before production edits; local lifecycle remains unimplemented.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

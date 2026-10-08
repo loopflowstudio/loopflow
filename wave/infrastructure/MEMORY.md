@@ -9,10 +9,10 @@ meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive;
 cron reads released JSON keys. Desktop discards version-1 caches, superseding
 translation. Jack Heart's October 7 LOO-401 steer supersedes
 `installation` with `self` for install, doctor and skill export; `config user`
-reads the display name. The implementation selects root `open`, removes screenshot
-and its supervisor, and preserves the GUI-browser capture prohibition. Desktop's
-native snapshot is independent. No aliases; short install/doctor/user commands
-stay. LOO-401 supplies LOO-397's command map; publication stops at review.
+reads the display name. Root `open` replaces desktop; screenshot and its supervisor
+are removed. The GUI-browser capture prohibition and independent Desktop snapshot
+remain. No aliases; short install/doctor/user commands stay. Jack Heart accepted PR #1494 and advancement through shipping. LOO-401
+supplies LOO-397's command map.
 Retain `~/.lf-machine/install` and the promotion lock path: released gates,
 receipts and jobs pin them. Retained binaries use the shared `install` shorthand. Exact-frontier
 fixtures seed released SQL without drafts. Local checks prove neither installed
@@ -20,7 +20,7 @@ migration nor remote continuity. Schedule ownership and activation stay intact. 
 operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Root words may resolve to authored skills; public lookup proves builtin removal.
-Corrected installation fixtures still require disposable OS-account isolation.
+Renamed installation entry proofs passed in disposable Linux OS accounts.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 

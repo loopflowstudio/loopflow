@@ -23,9 +23,11 @@ another landing watcher.
 
 Bare land and `lf arm` return after recording intent. `lf pr reconcile` checks
 recorded landings once; `lf ci watch` repairs actionable CI while installed and
-running. An unchanged incident receives one repair. `--wait` observes every
-15 seconds for at most 30 minutes, releasing the landing lock between checks.
-Timeout or interruption leaves intent intact and reports held, not merged.
+running. `--wait` observes and repairs its own PR every 15 seconds for at most
+30 minutes, including with Desktop closed. It shares the incident reservation
+with the watcher, so an unchanged incident receives one repair. Each check
+releases the landing lock. Timeout leaves intent intact and returns held;
+interruption returns stopped. Neither reports merge.
 A successful handoff proves neither merge nor Task completion.
 
 For a Task, verified merge leaves follow-through pending. The `ship` Flow runs
@@ -38,7 +40,9 @@ requires no synthetic Task or follow-up. Additional PR work needs another Task,
 stacked on this one when dependent; a Task never rotates to a second PR.
 
 If sync or CI fails, use the named recovery path in this checkout and retry.
-Rerunning land resumes a retained blocker without inventing an empty commit.
+Rerunning land retries a retained blocker without inventing an empty commit.
+For an already-merged Task PR it succeeds immediately and reports whether Task
+completion remains, preserving any finishing notes and edits.
 Preserve uncertainty about external effects. Reviewer-owned merge uses
 `lf submit`; report merge only from authoritative evidence, and completion only
 from Task status after the follow-through disposition is durable.

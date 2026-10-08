@@ -598,12 +598,26 @@ pub(crate) fn land_repo(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> Result<()> {
-    if options.wait
-        && crate::ops::task::reconcile_checkout_pr(repo_root)?
-            .is_some_and(|pr| pr.phase() == crate::work::task::PrPhase::Merged)
-    {
-        progress.status("Pull request already merged; follow-through can proceed.");
-        return Ok(());
+    let (checkout, _) = crate::ops::land::resolve_repos(repo_root, options.worktree.as_deref())?;
+    if !options.local {
+        if let Some((task, pr, state)) = crate::ops::task::reconcile_checkout_pr(&checkout)? {
+            if pr.phase() == crate::work::task::PrPhase::Merged {
+                let next = match state {
+                    crate::durable::TaskState::Done => {
+                        format!("Task {} is complete.", task.plan.identifier)
+                    }
+                    crate::durable::TaskState::Abandoned => {
+                        format!("Task {} is abandoned.", task.plan.identifier)
+                    }
+                    _ => format!(
+                        "Finish follow-through, then run lf task complete {}.",
+                        task.plan.identifier
+                    ),
+                };
+                progress.status(&format!("Pull request already merged. {next}"));
+                return Ok(());
+            }
+        }
     }
     // The wave home stays put on land.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {

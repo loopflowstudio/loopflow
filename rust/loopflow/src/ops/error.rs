@@ -20,6 +20,8 @@ pub enum OpsError {
     Parse(String),
     #[error("{0}")]
     Message(String),
+    #[error("checkout is busy: {0}")]
+    CheckoutBusy(String),
     #[error("release deferred: {reason}; continuation: {continuation}")]
     ReleaseDeferred {
         reason: String,

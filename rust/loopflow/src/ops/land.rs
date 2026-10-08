@@ -49,8 +49,7 @@ enum Integration {
 /// Prepare one PR: commit, sync onto main, clear scratch, mark it ready, and
 /// finalize per `finalize`. `arm` requests auto-merge; `submit` assigns the PR
 /// for the reviewer to merge. Neither rotates the worktree. Returns the resulting PR,
-/// or `None` for a local merge or direct Task completion over an already-merged
-/// PR.
+/// or `None` for a local merge.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -515,7 +514,7 @@ fn assign_to_me(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, PathBuf)> {
+pub(crate) fn resolve_repos(repo: &Path, worktree: Option<&str>) -> OpsResult<(PathBuf, PathBuf)> {
     let main_repo = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     let repo_root = if let Some(worktree) = worktree {
         let candidate = Path::new(worktree);

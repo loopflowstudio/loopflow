@@ -2661,7 +2661,7 @@ pub(crate) async fn reconcile_task_pr(
     reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await
 }
 
-pub(crate) fn reconcile_checkout_pr(repo: &Path) -> OpsResult<Option<TaskPr>> {
+pub(crate) fn reconcile_checkout_pr(repo: &Path) -> OpsResult<Option<(Task, TaskPr, TaskState)>> {
     block_on_task(async {
         let ManagedTask::Managed { store, mut task } = resolve_managed_task(repo).await? else {
             return Ok(None);
@@ -2675,7 +2675,8 @@ pub(crate) fn reconcile_checkout_pr(repo: &Path) -> OpsResult<Option<TaskPr>> {
         if let Observation::Degraded { reason, .. } = task.observation {
             return Err(task_error(reason));
         }
-        Ok(pr)
+        let state = store.sqlite.task_state(&task.id).map_err(task_error)?;
+        Ok(pr.map(|pr| (*task, pr, state)))
     })
 }
 

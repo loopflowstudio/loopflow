@@ -1,7 +1,7 @@
 //! Finite pull-request delivery reconciliation over durable landing intents.
 
 use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -285,7 +285,7 @@ fn admit_ci_fix(
                 &task.id,
                 reservation.session.as_deref(),
             )? {
-                return Err(repair_error(reason));
+                return Err(OpsError::CheckoutBusy(reason));
             }
         } else {
             for session in store
@@ -305,14 +305,15 @@ fn admit_ci_fix(
                         .session_has_pending_turn(&session.id)
                         .map_err(repair_error)?
                 {
-                    return Err(repair_error(format!(
+                    return Err(OpsError::CheckoutBusy(format!(
                         "Session {} has unresolved work",
                         session.id
                     )));
                 }
             }
-            if let Some(process) = live_checkout_process(&store, &landing.worktree)? {
-                return Err(repair_error(format!(
+            let waiting = super::task_automation::waiting_controllers(&store.sqlite, None)?;
+            if let Some(process) = live_checkout_process(&store, &landing.worktree, &waiting)? {
+                return Err(OpsError::CheckoutBusy(format!(
                     "Process {process} is live or unresolved"
                 )));
             }
@@ -479,6 +480,7 @@ fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
 fn live_checkout_process(
     store: &SharedStore,
     worktree: &Path,
+    waiting: &[crate::id::ProcessLfid],
 ) -> OpsResult<Option<crate::id::ProcessLfid>> {
     let caller = crate::journal::current_process_lfid();
     Ok(store
@@ -489,6 +491,7 @@ fn live_checkout_process(
         .find(|process| {
             process.cwd.as_deref() == worktree.to_str()
                 && Some(&process.lfid) != caller.as_ref()
+                && !waiting.contains(&process.lfid)
                 && crate::journal::process_evidence(&store.sqlite, &process.lfid)
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
@@ -1170,6 +1173,21 @@ async fn reconcile_claimed(
             })
             .await;
             if let Err(error) = repair {
+                if matches!(error, OpsError::CheckoutBusy(_)) {
+                    // Another observer's busy checkout is not a delivery
+                    // failure. In particular, a watcher must not stop a land
+                    // command that is itself about to admit this repair.
+                    persist_landing_state(
+                        store,
+                        landing,
+                        PrLandingState::Watching,
+                        head_sha,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    return Err(error);
+                }
                 return block_landing(store, landing, format!("ci-fix blocked: {error}")).await;
             }
             store
@@ -1317,7 +1335,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
     let has_conversation = sessions
         .iter()
         .any(|session| session.cwd == landing.worktree && session.completed_at.is_none());
-    let has_execution = live_checkout_process(store, &landing.worktree)?.is_some();
+    let has_execution = live_checkout_process(store, &landing.worktree, &[])?.is_some();
     if has_conversation || has_execution {
         eprintln!("PR merged; retained its checkout for associated work. Use lf wt delete after that work finishes.");
         return Ok(());
@@ -1343,11 +1361,7 @@ async fn create_landing(
     options: &LandOptions,
     pr: &PrInfo,
 ) -> OpsResult<PrLanding> {
-    let worktree = options
-        .worktree
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo.to_path_buf());
+    let (worktree, _) = super::land::resolve_repos(repo, options.worktree.as_deref())?;
     let worktree = std::fs::canonicalize(&worktree).map_err(|error| {
         OpsError::Message(format!(
             "resolve landing worktree {}: {error}",
@@ -1474,7 +1488,7 @@ pub struct DeliveryCheck {
     pub errors: Vec<String>,
 }
 
-/// Wait on the ordinary finite observer; each check releases its landing claim.
+/// Observe and repair this PR until it merges; each check releases its claim.
 pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsResult<()> {
     let initial = record_armed_pr(repo, options, pr)?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -1485,7 +1499,7 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
             let landing = store.get_pr_landing(&initial.id).await.map_err(repair_error)?
                 .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
             let observed = tokio::select! {
-                result = reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver { repairs: false, release: None })) => result?,
+                result = reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver { repairs: true, release: None })) => result?,
                 _ = tokio::time::sleep_until(deadline) => return Err(repair_error("Landing wait timed out; merge intent retained. Run lf pr reconcile or wait again.")),
             };
             match observed.state {

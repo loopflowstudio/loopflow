@@ -915,6 +915,42 @@ fn one_task_run_starts_its_flow_again_until_an_attempt_succeeds_or_attempts_run_
 }
 
 #[test]
+fn a_held_command_stops_the_task_run_without_repeating_the_flow() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let bin = tempfile::tempdir().unwrap();
+    let lf = bin.path().join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'flow show late'*) exit 3;; esac\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let output = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123", "gate"],
+    )
+    .env("LF_BIN", &lf)
+    .output()
+    .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"]["kind"], "edge");
+    assert_eq!(workflow["position"]["running"], false);
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("starting it again"));
+}
+
+#[test]
 fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
     let task = WorkflowTask::new();
     assert_eq!(task.state(), "not_ready");

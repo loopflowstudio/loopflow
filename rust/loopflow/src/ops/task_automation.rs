@@ -46,6 +46,7 @@ pub(crate) fn admission_blocker(
 ) -> OpsResult<Option<String>> {
     let work = store.task_work(task).map_err(error)?;
     let caller = crate::journal::current_process_lfid();
+    let waiting = waiting_controllers(store, Some(task))?;
     for session in &work.sessions {
         if Some(session.id.as_str()) == repair_session {
             continue;
@@ -65,7 +66,7 @@ pub(crate) fn admission_blocker(
         }
     }
     for process in &work.processes {
-        if caller.as_ref() == Some(&process.lfid) {
+        if caller.as_ref() == Some(&process.lfid) || waiting.contains(&process.lfid) {
             continue;
         }
         if process_evidence(store, &process.lfid) != ProcessIdentityEvidence::Dead {
@@ -76,6 +77,50 @@ pub(crate) fn admission_blocker(
         }
     }
     Ok(None)
+}
+
+/// Recorded Flow drivers synchronously wait for their child command. A Task run
+/// carrying that Flow also waits. These controllers do not compete with the
+/// child's repair; an arbitrary ancestor or provider conversation still does.
+pub(crate) fn waiting_controllers(
+    store: &crate::store::sqlite::SqliteStore,
+    task: Option<&crate::durable::TaskId>,
+) -> OpsResult<Vec<crate::id::ProcessLfid>> {
+    let mut waiting = Vec::new();
+    let Some(caller) = crate::journal::current_process_lfid() else {
+        return Ok(waiting);
+    };
+    let mut parent = store
+        .process(&caller)
+        .map_err(error)?
+        .and_then(|process| process.parent_process_lfid);
+    while let Some(id) = parent.as_ref() {
+        let Some((flow, _)) = store.flow_process(id.as_str()).map_err(error)? else {
+            break;
+        };
+        // The driver records a step shortly after spawn; its Process can ask
+        // for repair before that write. The Flow driver itself is already
+        // recorded, and every child command it starts is synchronously joined.
+        waiting.push(id.clone());
+        parent = flow.driver.parent_process_lfid;
+    }
+    if !waiting.is_empty() {
+        if let Some(task) = task {
+            if let Some(super::workflow::Workflow {
+                position: super::workflow::WorkflowPosition::Edge { process_lfid, .. },
+                ..
+            }) = store.workflow(task).map_err(error)?
+            {
+                if parent
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == process_lfid)
+                {
+                    waiting.extend(parent);
+                }
+            }
+        }
+    }
+    Ok(waiting)
 }
 
 pub(crate) fn session_engine_unresolved(

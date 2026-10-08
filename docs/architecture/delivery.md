@@ -202,8 +202,8 @@ read required checks on H1 once
    |      |      |          |
  pending pass  merged      fail
    |      |      |          |
- return return settle   record the incident; the CI watcher or a
-                        release reserves a detached repair under G
+ return return settle   record the incident; waited landing, the CI
+                        watcher or a release reserves one repair under G
 ```
 
 The next repository tick or `lf pr reconcile` repeats this from fresh evidence.
@@ -229,8 +229,9 @@ lf ci watch ──60 s, jitter──> REST, If-None-Match (304 costs no quota)
 with the same required-check projection as the landing check, then hands a
 failing landing to that check, which confirms the failure against GitHub, stays
 silent for a queued PR, and reserves the incident's one repair. The landing
-lock, landing generation and incident reservation are the claim, so a watcher,
-a scheduled check and a release cannot repeat a fix. The watcher fills the
+lock, landing generation and incident reservation are the claim, so waited
+landing, a watcher and a release cannot repeat a fix. Scheduled checks only
+observe. The watcher fills the
 incident's `provider_completed_at` from the check's `completed_at`, which makes
 detection latency measurable in `lf ci`.
 
@@ -245,7 +246,8 @@ open repository and stops it on quit. `<git-dir>/lf-ci-watch.lock` admits one
 live watcher per repository; a second copy stands by and takes over when the
 first exits. `<git-dir>/loopflow/ci-watch.json` carries its last poll, the PRs
 it saw and the repairs it started, read by `lf ci watch --status`. Correctness
-never depends on it: with no watcher, failures are recorded and wait.
+never depends on it: waited landing repairs its own PR. A returned bare landing
+waits for another waited landing or a watcher to repair failures.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
@@ -297,8 +299,13 @@ landing pending and the next check retries it.
 
 After verified merge the Task shows **Merged · Follow-through pending**.
 `ship` runs gate, `land --wait`, then follow-through. Waited landing uses the
-existing observation path every 15 seconds for at most 30 minutes, releasing
-its lock between reads. Timeout retains intent and returns held (exit 3);
+existing observation and CI repair path every 15 seconds for at most 30 minutes,
+releasing its lock between reads. Repair admission exempts only the calling
+command and its recorded Flow drivers and Task carrier, which wait for it;
+unrelated live Processes and unresolved provider turns still prevent editing.
+The same incident reservation deduplicates a concurrent watcher. Timeout
+retains intent and returns held (exit 3), propagated through the Flow without
+automatic retry;
 interruption retains intent and returns stopped (exit 130).
 Neither ordinary reconciliation nor a manual GitHub merge manufactures a verdict.
 Keep the checkout available for the finishing step.

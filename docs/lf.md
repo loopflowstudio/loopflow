@@ -225,8 +225,10 @@ lf sync --plan                     # preview integration with main or stack pare
 A Task has zero or one PR. Choose one delivery operation for the desired
 endpoint. Submit, arm and land own preparation and integration; publish does not
 sync. PR operations also work on ordinary branches without creating a Task.
-Arm and bare land return after recording delivery. `--wait` observes every 15
-seconds for up to 30 minutes; timeout or interruption leaves the intent intact.
+Arm and bare land return after recording delivery. `--wait` observes and repairs
+its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
+timeout or interruption leaves the intent intact. Repeating land for a merged
+Task PR succeeds and reports whether Task completion remains.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
 recover an existing PR whose GitHub identity is missing, without publishing.
 Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
@@ -304,7 +306,8 @@ with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
 failing PR nobody armed is reported, not repaired; so is a PR with no Task.
 Loopflow Desktop runs the same command for each open repository and stops it
 on quit. A second copy stands by behind a live one. Nothing depends on the
-watcher running: without it, failures are recorded and wait.
+watcher running during `land --wait`: waited landing admits the same repair.
+After bare land returns, failures wait for a watcher or another waited landing.
 An idle check launches no provider. Existing work and GitHub merge requests
 continue when the schedule is disabled or a Task is held.
 

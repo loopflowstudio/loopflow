@@ -2101,6 +2101,179 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
 }
 
 #[test]
+fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
+    use std::time::{Duration, Instant};
+
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    push_branch(&repo, "main");
+    let base = repo.head_sha();
+    let remote = "https://github.com/loopflowstudio/loopflow.git";
+    for args in [
+        vec![
+            "config".into(),
+            format!("url.{}.insteadOf", repo.bare_path().display()),
+            remote.into(),
+        ],
+        vec![
+            "remote".into(),
+            "set-url".into(),
+            "origin".into(),
+            remote.into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    repo.create_branch("waited-repair");
+    let worktree = repo.path().canonicalize().unwrap();
+    for (path, contents) in [
+        ("feature.txt", "keep the feature"),
+        (".lf/config.yaml", "agent: codex\npm:\n  provider: linear\n  linear_team: team-task-pr-tests\n"),
+        (".lf/workflows/delivery-proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"),
+        (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait --strict --title waited-repair --body Repair-without-Desktop\n- cmd: task follow-up INF-123 --none fixture-has-no-later-obligations\n"),
+    ] {
+        let path = worktree.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    for args in [
+        vec!["add", "."],
+        vec!["commit", "-m", "Feature and delivery fixture"],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(&worktree)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let home = tempfile::tempdir().unwrap();
+    let proof = home.path().join("repair-proof");
+    let launches = home.path().join("repair-launches");
+    let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false, false)
+        .replace("merge-head", "$head")
+        .replace("watched-land", "waited-repair");
+    let codex = codex_app_server_script(
+        r#"{"status":"published","summary":"The fixture check now passes."}"#, "",
+    ).replace("read -r turn_start\n", "read -r turn_start\necho repair >> \"$LF_TEST_REPAIR_LAUNCHES\"\ngit rev-parse HEAD > \"$LF_TEST_REPAIR_PROOF\"\n");
+    let _env = EnvGuard::with_lf_home(&[
+        ("gh", &gh), ("codex", &codex), ("open", noop_open_script()),
+        ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\n"),
+    ], home.path());
+    let fixture = register_task(home.path(), &worktree, "waited-repair", &base);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let unrelated = loopflow::id::ProcessLfid::new();
+    db.execute("INSERT INTO processes(lfid,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
+        rusqlite::params![unrelated, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+    let command = || {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            cmd.env_remove(name);
+        }
+        cmd.current_dir(&worktree)
+            .env("LF_HOME", home.path())
+            .env("LF_TEST_REPAIR_PROOF", &proof)
+            .env("LF_TEST_REPAIR_LAUNCHES", &launches);
+        cmd
+    };
+    let run = || {
+        let out = home.path().join("run.stdout");
+        let err = home.path().join("run.stderr");
+        let mut child = command()
+            .args(["-b", "task", "run", "INF-123", "delivery-proof"])
+            .stdout(fs::File::create(&out).unwrap())
+            .stderr(fs::File::create(&err).unwrap())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "waited Task did not finish: {}\n{}",
+                    fs::read_to_string(out).unwrap(),
+                    fs::read_to_string(err).unwrap()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        (
+            status,
+            fs::read_to_string(out).unwrap(),
+            fs::read_to_string(err).unwrap(),
+        )
+    };
+    let (status, _, error) = run();
+    assert_eq!(status.code(), Some(3), "{error}");
+    assert!(error.contains(unrelated.as_str()), "{error}");
+    assert!(!launches.exists(), "unrelated work must prevent repair");
+    assert_eq!(
+        support::recorded_flows(home.path()).len(),
+        1,
+        "held land must not replay gate"
+    );
+    // A concurrent watcher reports other work without poisoning the delivery
+    // that a foreground waiter will continue. Neither caller starts a repair.
+    let watched = command().args(["ci", "watch", "--once"]).output().unwrap();
+    assert!(
+        watched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&watched.stderr)
+    );
+    assert!(!launches.exists());
+    let landing_state: String = db
+        .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(landing_state, "watching");
+    db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE lfid=?1", [&unrelated]).unwrap();
+    let (status, output, error) = run();
+    assert!(status.success(), "{output}\n{error}");
+    assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
+    assert!(
+        output.contains("Pull request merged; follow-through can proceed"),
+        "{output}"
+    );
+    let workflow: (String, String) = db
+        .query_row(
+            "SELECT node,graph FROM task_workflows WHERE task_id=?1",
+            [fixture.task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(workflow.0, "review");
+    let status = command()
+        .args(["task", "status", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        status["execution"]["follow_through"]["reason"],
+        "fixture-has-no-later-obligations"
+    );
+    assert_eq!(
+        status["execution"]["status"], "active",
+        "filing alone must not complete a Task"
+    );
+    assert_eq!(support::recorded_flows(home.path()).len(), 2);
+}
+
+#[test]
 fn waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge() {
     use std::time::{Duration, Instant};
 
@@ -2382,7 +2555,12 @@ esac
         .contains("merged; follow-through can proceed"));
     pending();
     let mut failures = Vec::new();
-    for args in [&["pr", "reconcile"][..], &wait_args] {
+    fs::write(
+        worktree.join("scratch/retained.md"),
+        "keep the finishing notes",
+    )
+    .unwrap();
+    for args in [&["pr", "reconcile"][..], &wait_args, &["land"]] {
         let output = command().args(args).output().unwrap();
         if !output.status.success() {
             failures.push(format!(
@@ -2392,6 +2570,41 @@ esac
             ));
         }
         pending();
+    }
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch/retained.md")).unwrap(),
+        "keep the finishing notes"
+    );
+    let selected = command()
+        .current_dir(repo.path())
+        .args(["land", "--worktree", worktree.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    assert!(String::from_utf8_lossy(&selected.stdout).contains("already merged"));
+    // A completed Task must also make repeated landing harmless. This fixture
+    // supplies an already-completed Workflow; completion itself has separate tests.
+    database.execute(
+        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,
+        '{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
+        [fixture.task.id.as_str()],
+    ).unwrap();
+    for args in [&["land"][..], &["land", "--wait"]] {
+        let output = command().args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("Task INF-123 is complete"),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
     let pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))

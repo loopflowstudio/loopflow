@@ -408,7 +408,7 @@ struct Driver<'a> {
 /// How a step's process ended, before any answer is read.
 enum StepExit {
     Finished,
-    /// Interrupted: the Flow stops here.
+    /// Held or interrupted: the Flow stops here without an automatic retry.
     Stopped,
 }
 
@@ -503,7 +503,7 @@ impl Driver<'_> {
         let status = status.context("could not execute Flow step")?;
         match status.code() {
             Some(0) => Ok((StepExit::Finished, step)),
-            Some(130) => Ok((StepExit::Stopped, step)),
+            Some(3 | 130) => Ok((StepExit::Stopped, step)),
             _ => {
                 // The step's own conversation says how its turn ended.
                 for envelope in self.turn_events(step.as_ref())?.iter().rev() {

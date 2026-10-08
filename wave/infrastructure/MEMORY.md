@@ -1043,7 +1043,8 @@ Codex starts remaining waiting are unresolved.
 LOO-420: Jack Heart selected native same-harness invocation, translated ports,
 inlined builtins, `--agent`/`-a`, terminal/headless and same-conversation use through
 review, without landing. Missing transport/admission cannot narrow scope. One
-catalog replaces external/npx/rams and Flow resolvers. Retain source, declarations
+catalog replaces external/npx/rams and Flow resolvers; `920ada7b6` removes the
+CLI discovery layer. Retain source, declarations
 and arguments together; later rediscovery can change execution and attribution.
 Export preserves third-party files; `agent: Explore` never selects lf's harness.
 Jack removed `--ide` after installed
@@ -1083,20 +1084,19 @@ Completion/interruption stay distinct. Seven requests include two titles;
 historical expansion is not new application. This proves correlation, not idempotency,
 external effects or LF admission.
 
-October 8's two-client boundary race reads idle, then starts a competing turn.
-Codex joins it, retaining exactly one matching skill/path/arguments/context receipt
-without expansion; a fresh turn expands. Four fake-API requests prove the
-counterexample, not LF admission. Idle observation plus matching receipts cannot
-reserve a boundary. Existing driver fencing excludes stale writes, not competing
-starts; arbitration needs design before queue consumption. No scope reduction is
-selected.
+October 8's two-client race (`c91648d63`) starts a competing turn after reading
+idle. Codex joins it, retaining one exact skill/path/arguments/context receipt
+without expansion; a fresh turn expands. Four fake-API requests prove this
+counterexample, not admission. Retained bytes cannot prove writer exclusion.
+The LF fence excludes stale drivers;
+boundary arbitration must cover attached native clients too. No mechanism or
+scope reduction is selected.
 
-LF retains native ID/capture/input/provenance only for its first start per writer;
-later starts lack that mapping. Retry continuations get distinct IDs. Receipt
-content comparison leaves missing/duplicates uncertain; cross-capture ID reuse is
-rejected. Observation grants no authority or expansion proof. Controlled-client
-handoff preserves text/capture/siblings/ancestry without resubmission. Held-owner
-admission, LF dropped-ack/draft recovery, catalog/resources and Claude parity remain
-unfinished; resume clears structured invocation. Prior detail: `94006060f` under
-this heading.
+LF maps only its first start per writer to capture/input/provenance. Retry
+continuations get distinct native IDs; cross-capture reuse is rejected. Receipt
+comparison leaves missing/duplicates uncertain, granting no settlement.
+Controlled-client handoff preserves text/capture/siblings/ancestry without resending.
+Held-owner admission, LF dropped-ack/draft recovery,
+catalog/resources and Claude parity remain unfinished; resume clears structured
+invocation. Prior detail: `94006060f` under this heading.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

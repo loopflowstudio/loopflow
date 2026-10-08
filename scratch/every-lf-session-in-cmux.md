@@ -64,8 +64,9 @@ lf-owned conversations. Providers own native history and terminal output.
 Published installation merges UserPromptSubmit hooks under both standard homes.
 Existing hooks, settings, permissions and symlink destinations survive. Hooks act
 only beneath `.lf` directories. Codex's ordinary trust review remains. No native
-settings were installed on Jack's machine. Installation-entry acceptance belongs
-to gate; helper fixtures establish merging and repeated installation only.
+settings were installed on Jack's machine. The disposable promotion proof
+establishes installation-entry and retry behavior; helper fixtures separately
+establish merging. Jack's installed acceptance remains unproved.
 
 ## Demo coverage — October 8
 
@@ -114,23 +115,24 @@ denial. It retains native defaults, latest-OSC assertions and sequential manual
 rename preservation. Old unnamed/named resume probes and all resume-only naming
 code are removed.
 
-The twelve-launch public CLI fixture covers Task/taskless names, rename/reconnect
+The fourteen-launch public CLI fixture covers Task/taskless names, rename/reconnect
 and host failure in isolated homes, with stub providers and cmux. Only stderr has
-a PTY; this proves no native TUI or rendered host. Lifecycle/capture/attribution fixtures retain human precedence
-and request/Goal identity. Gate retains driver replacement, missing cmux executable,
-captured-Flow launch and installation-entry acceptance.
+a PTY; this proves no native TUI or rendered host. Lifecycle/capture/attribution
+fixtures retain human precedence and request/Goal identity. Driver replacement,
+missing cmux and captured-Flow naming proofs pass. Published installation-entry
+acceptance passes in a disposable container.
 
 Earlier October 8 attempts could not create an unfocused workspace; the later
 demo below supersedes that access blocker. Window-bar agreement, latest-message
 line, herdr and configured-shim behavior remain unobserved. Live lf rename updates
 workspace/tab names only; window-bar propagation needs observation. No
-unsynchronized terminal writer is planned. No publication, landing or human
-acceptance is claimed. Release's entry-point lesson applies: native callback, actual hook,
+unsynchronized terminal writer is planned. No landing or human acceptance is
+claimed. Release's entry-point lesson applies: native callback, actual hook,
 TUI/headless launch, installation and configured-host proofs are distinct.
-The installation helper is reached after published promotion when skill sync is
-enabled; its unit tests do not exercise that entry point or recovery. Gate's
-installation proof requires disposable OS-account isolation, as `account_home`
-does not follow fixture `HOME` or `LF_HOME`.
+The installation proof now exercises published promotion, preview, a malformed
+hook file, same-candidate retry, settings/permission/symlink preservation and
+idempotence in a disposable Docker OS account. Gate fixed the already-installed
+return that skipped hook repair. Jack's installed settings remain unchanged.
 
 ## Live cmux demo — October 8, 2026
 
@@ -157,8 +159,7 @@ or the window bar. A stand-in cannot prove cmux's native latest-message hooks.
 Task-prefix coverage remains the earlier CLI fixture. No design change was
 agreed. Recommended next action: visually inspect this workspace's sidebar,
 tab and window bar, then demonstrate a native fake-API conversation through
-configured shims to check the latest-message line. Plain terminal/herdr
-presentation and installation-entry acceptance retain their separate boundaries.
+configured shims to check the latest-message line. Plain terminal/herdr presentation and Jack's installed acceptance remain separate.
 
 ## Delete — do not maintain
 
@@ -177,9 +178,26 @@ readback. Hooks derive one title before provider work; empty requests need no
 database or socket. The interactive runner owns its observer directly. Review
 also fixed an outside-repository assertion previously masked by the generic trigger.
 
-Checks: `git diff --check` passes (October 8 realign, prose only); reuse `ca5a28b31` build, native-title units, twelve-launch CLI fixture, Claude/Codex TUI, fmt, Clippy and Ruff passes and `b1feca0eb` headless evidence; host judgment remains demo-owned, installation proof gate-owned.
+## Gate review — October 8, 2026
 
-Sync check (October 8): `cargo test -p loopflow --test session_cli_tests terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts -- --exact` passed after merging `24db5d4d6`; fixture now uses `-i` and answers the Codex launch probe; broader checks remain gate-owned.
+Main `24db5d4d6` is integrated without restoring `--tui`; the public fixture uses
+`-i` and answers the Codex launch probe. Review found that successful helper
+installation did not prove recovery: the already-installed return skipped hook
+repair. Hook installation now follows successful promotion/recovery, including
+same-candidate retries. The disposable public-entry proof preserves malformed
+input until repaired, existing hooks/settings, permissions and symlink targets.
+CI's installation job now runs it. Architecture ownership names the native callback
+and cmux subprocess; five prompt goldens include shared self-rename guidance.
+
+The changed-aware run retained its two failures: one stale golden in its earlier
+snapshot, then repaired and passed in a focused check; one macOS nested-sandbox
+refusal, then passed directly under the test's own network-denying sandbox.
+No whole-suite rerun is claimed. The added captured-Flow assertion initially used
+the default interactive filter; its corrected headless read passes. Release child
+memory's operation-entry and publication/installation distinctions informed this
+review; no release or configured installation was performed.
+
+Checks: `uv run python scripts/test.py --reuse-passing` — architecture/fmt/Clippy, 407 Python, 2,288 Rust and 76 website passes, with the golden/sandbox failures above; focused golden and captured-Flow checks plus direct sandbox test pass; `scripts/test_task_installation.py --native-titles`, four network-isolated `tests/e2e/native_titles.py` modes, final Clippy/Ruff and `git diff --check` pass; hosted CI and rendered/configured acceptance remain unobserved.
 
 Earlier request/Goal and Task-primary proof: `91c4d07f9:scratch/every-lf-session-in-cmux.md`.
 Earlier transport/demo plan: `04027f096:scratch/every-lf-session-in-cmux.md`.

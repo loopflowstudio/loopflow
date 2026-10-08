@@ -123,6 +123,12 @@ The probe uses native terminal-title defaults and checks the latest OSC title,
 so an earlier correct title cannot hide a later overwrite. The TUI probe does not
 cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
 
+`uv run python scripts/test_task_installation.py --native-titles` builds a
+release-shaped candidate only inside Docker and exercises published promotion
+under a disposable OS account. It checks preview, existing settings and symlinks,
+failed hook installation, same-candidate retry and repeated installation. CI's
+installation job runs this proof; it never touches the host installation.
+
 ```bash
 uv sync
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/

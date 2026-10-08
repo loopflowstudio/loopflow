@@ -191,7 +191,49 @@ fn rename_cmux(args: &[&str]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::display_title;
+    use super::{display_title, TerminalTitle};
+
+    #[test]
+    fn replaced_driver_stops_observing_session_names() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let process = crate::id::ProcessLfid::new();
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let driver = store
+            .claim_session_driver(&session.id, None, &process, true)
+            .unwrap();
+        let title = TerminalTitle {
+            store,
+            session: session.id,
+            driver: Some(driver.clone()),
+            name: session.title,
+            cmux: None,
+            checked: std::time::Instant::now(),
+        };
+        title
+            .store
+            .rename_session(
+                &title.session,
+                "Release notes",
+                crate::session::TitleSource::Human,
+            )
+            .unwrap();
+        assert_eq!(title.read_name().unwrap().as_deref(), Some("Release notes"));
+        title
+            .store
+            .claim_session_driver(&title.session, Some(&driver), &process, false)
+            .unwrap();
+        assert_eq!(title.read_name().unwrap(), None);
+    }
 
     #[test]
     fn task_first_and_short_purpose_without_duplicate_identifier() {

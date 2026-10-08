@@ -858,6 +858,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         ("claude", "cmux", false),
         ("codex", "cmux", true),
         ("claude", "absent", false),
+        ("claude", "missing", false),
         ("codex", "failure", false),
         ("claude", "timeout", false),
     ] {
@@ -955,6 +956,9 @@ printf '%s' "$1" > "$LF_HOME/$kind.tmp"
 mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
 "#,
         );
+        if host == "missing" {
+            fs::remove_file(bin.join("cmux")).unwrap();
+        }
 
         for name in ["Plan store migration", "Release notes"] {
             let first = id.is_empty();

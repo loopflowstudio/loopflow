@@ -3,12 +3,13 @@
 ## Session titles (LOO-439, 2026-10-08)
 
 Jack Heart requested shipping after review; complete after merge.
-`283fa7b5-3fdd-4457-9170-0de821534803` selects maximum supported future
-coverage: lf/plain, interactive/headless, Task/taskless. Existing conversations
-and provider work are out; resume-only code removed.
-Claude TUI/headless and shared-server Codex TUI name requests; embedded Codex/exec
-lack the endpoint. Live cmux workspace/tab rename passed with a stand-in
-(`/tmp/lf-cmux-demo-owapn43t/`); visual/shim/installation acceptance is unproved.
+`283fa7b5-3fdd-4457-9170-0de821534803` selects supported future lf/plain,
+interactive/headless, Task/taskless starts. Existing conversations and provider
+changes are out. Shared LOOPFLOW.md teaches self-renaming.
+Fake-API Claude TUI/headless and shared Codex TUI pass; embedded Codex/exec lack
+the endpoint. Live cmux workspace/tab rename passed with a stand-in
+(`/tmp/lf-cmux-demo-owapn43t/`). Docker promotion/retry preserves hooks, settings
+and symlinks; rendered host/shim/herdr and Jack's installation remain unproved.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)
@@ -182,9 +183,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-LOO-370's decision and preservation limits live under Capture cutover below.
-PR #1450 (`1af81fe03`) is integrated. Delegation and the exact Task steer remain
-at `2d333d18c:wave/infrastructure/MEMORY.md` under this heading.
+LOO-370's current decision is under Capture cutover. PR #1450 is integrated;
+exact earlier delegation/steer: `2d333d18c:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Project configuration and review direction (2026-10-05)
 

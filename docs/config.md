@@ -519,16 +519,19 @@ names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
 
 `lf -b -a claude audit` invokes a Claude bundle directly from its original
 folder through the native command parser, with gathered context separate from
-command arguments. Codex sources use native skill input on Codex and native
-skill links in its terminal command. Cross-harness launches translate argument
+command arguments. Terminal Claude uses a captured native plugin with the same
+declarations and exact arguments; gathered context stays in its user message.
+Codex sources use explicit native skill links on both surfaces, including sources
+outside Codex's discovered catalog. Cross-harness launches translate argument
 and tool-name instructions, retain declarations and identify the original asset
-directory. A warning names controls the launch does not enforce.
+directory. Codex custom prompts expand one-based positions and `NAME=value`
+arguments. A warning names declarations the launch does not enforce.
 
-Claude terminal launches currently use translated instructions; native invocation
-with separate user context remains unfinished. LF builtins remain inline.
-Captured Flow definitions survive source-file changes or removal: Claude uses a
-captured native definition, while Codex uses captured instructions. Both retain
-the original resource directory; resources removed with the bundle are not preserved.
+Ordinary third-party launches omit LOOPFLOW.md; attributed Work and captured Flow
+steps retain it. LF builtins remain inline. Captured Flow definitions survive
+source-file changes or removal: Claude uses a captured native definition, while
+Codex uses captured instructions. Both retain the original resource directory;
+resources removed with the bundle are not preserved.
 
 `lf sync-skills` exports personal sources and builtins, preserves third-party
 files at destination paths, and leaves repository skills local. Cross-harness

@@ -86,7 +86,16 @@ impl SkillInvocation {
         if !self.native_for("claude") || !self.native_declarations("claude") {
             return Ok((Vec::new(), self.translated_input("claude")));
         }
-        if self.unchanged_source() {
+        self.report_native_declarations("claude");
+        self.prepare_claude(config, None)
+    }
+
+    fn prepare_claude(
+        &self,
+        config: &crate::engine::agent::AgentConfig,
+        context: Option<&str>,
+    ) -> anyhow::Result<(Vec<String>, String)> {
+        if context.is_none() && self.unchanged_source() {
             let path = &self
                 .skill
                 .source
@@ -110,7 +119,23 @@ impl SkillInvocation {
             .prefix("skill-")
             .tempdir_in(Self::capture_directory(config)?)?
             .keep();
-        self.materialize_claude(&root.join("skills/invoke"))?;
+        let skill_path = self.materialize_claude(&root.join("skills/invoke"))?;
+        if let Some(context) = context {
+            // Native expansion applies to the whole skill body. Encode gathered
+            // text so literal argument and shell syntax remains user data.
+            let context = serde_json::to_string(context)?
+                .replace('$', "\\u0024")
+                .replace('!', "\\u0021")
+                .replace('\u{fffe}', "\\ufffe")
+                .replace('\u{ffff}', "\\uffff");
+            let text = std::fs::read_to_string(&skill_path)?;
+            std::fs::write(
+                &skill_path,
+                format!(
+                    "{text}\n\nAdditional user context (decode this JSON string):\n{context}\n"
+                ),
+            )?;
+        }
         let namespace = format!("lf-{}", uuid::Uuid::new_v4().simple());
         std::fs::create_dir(root.join(".claude-plugin"))?;
         std::fs::write(
@@ -125,36 +150,93 @@ impl SkillInvocation {
 
     fn codex_skill(&self) -> Option<(&Path, String)> {
         let source = self.skill.source.as_ref()?;
-        (self.native_for("codex") && self.native_declarations("codex") && self.unchanged_source())
-            .then(|| (source.path.as_path(), self.native_name()))
+        (self.native_for("codex")
+            && source
+                .path
+                .file_name()
+                .is_some_and(|name| name == "SKILL.md")
+            && self.native_declarations("codex")
+            && self.unchanged_source())
+        .then(|| (source.path.as_path(), self.native_name()))
+    }
+
+    fn codex_prompt(&self) -> String {
+        match self.codex_skill() {
+            // Explicit Markdown references resolve outside Codex's catalog too;
+            // a `skill` input item alone is silently ignored there.
+            Some((path, name)) => {
+                self.report_native_declarations("codex");
+                self.command(&format!("[${name}]({})", path.display()))
+            }
+            None => self.translated_input("codex"),
+        }
     }
 
     pub(crate) fn codex_input(&self) -> Vec<serde_json::Value> {
-        match self.codex_skill() {
-            Some((path, name)) => vec![
-                serde_json::json!({"type": "text", "text": self.command(&format!("${name}"))}),
-                serde_json::json!({"type": "skill", "name": name, "path": path}),
-            ],
-            None => {
-                vec![serde_json::json!({"type": "text", "text": self.translated_input("codex")})]
-            }
-        }
+        vec![serde_json::json!({"type": "text", "text": self.codex_prompt()})]
     }
 
     pub(crate) fn terminal_input(
         &self,
         harness: &str,
         config: &crate::engine::agent::AgentConfig,
-    ) -> String {
-        let prompt = (harness == "codex")
-            .then(|| self.codex_skill())
-            .flatten()
-            .map(|(path, name)| self.command(&format!("[${name}]({})", path.display())))
-            .unwrap_or_else(|| self.translated_input(harness));
-        format!(
-            "{prompt}\n\n{}\n\n{}",
-            config.system_prompt, config.task_prompt
-        )
+    ) -> anyhow::Result<(Vec<String>, String)> {
+        let context = format!("{}\n\n{}", config.system_prompt, config.task_prompt);
+        if self.native_for("claude") && harness == "claude" && self.native_declarations("claude") {
+            self.report_native_declarations("claude");
+            return self.prepare_claude(config, Some(&context));
+        }
+        let prompt = if harness == "codex" {
+            self.codex_prompt()
+        } else {
+            self.translated_input(harness)
+        };
+        Ok((Vec::new(), format!("{prompt}\n\n{context}")))
+    }
+
+    fn report_native_declarations(&self, harness: &str) {
+        let supported: &[&str] = match harness {
+            "claude" => &[
+                "name",
+                "description",
+                "argument-hint",
+                "arguments",
+                "allowed-tools",
+                "model",
+                "effort",
+                "context",
+                "agent",
+                "hooks",
+                "user-invocable",
+                "disable-model-invocation",
+                "license",
+                "compatibility",
+                "metadata",
+            ],
+            _ => &[
+                "name",
+                "description",
+                "metadata",
+                "license",
+                "compatibility",
+            ],
+        };
+        let fields = self.declarations();
+        let Some(fields) = fields.as_ref().and_then(serde_yaml_ng::Value::as_mapping) else {
+            return;
+        };
+        let unhandled: Vec<_> = fields
+            .keys()
+            .filter_map(serde_yaml_ng::Value::as_str)
+            .filter(|name| !supported.contains(name))
+            .collect();
+        if !unhandled.is_empty() {
+            eprintln!(
+                "warning: {} on {harness}: declarations not enforced by this launch: {}",
+                self.skill.name,
+                unhandled.join(", ")
+            );
+        }
     }
 
     fn translated_input(&self, harness: &str) -> String {
@@ -236,6 +318,21 @@ impl SkillInvocation {
             _ => Vec::new(),
         };
         let arguments = shlex::split(&self.arguments).unwrap_or_default();
+        let codex_prompt = self.skill.source.as_ref().is_some_and(|source| {
+            source.dialect == SkillDialect::Codex
+                && source
+                    .path
+                    .file_name()
+                    .is_some_and(|name| name != "SKILL.md")
+        });
+        let named_arguments: std::collections::BTreeMap<_, _> = if codex_prompt {
+            arguments
+                .iter()
+                .filter_map(|argument| argument.split_once('='))
+                .collect()
+        } else {
+            Default::default()
+        };
         let mut substituted = false;
         let expanded = ARGUMENT
             .replace_all(body, |capture: &regex::Captures<'_>| {
@@ -247,7 +344,9 @@ impl SkillInvocation {
                     .parse::<usize>()
                     .ok();
                 let named = names.iter().position(|name| name == token);
-                if token != "ARGUMENTS" && index.is_none() && named.is_none() {
+                let supplied = named_arguments.get(token).copied();
+                if token != "ARGUMENTS" && index.is_none() && named.is_none() && supplied.is_none()
+                {
                     return capture[0].to_string();
                 }
                 if &capture[1] == "\\" {
@@ -255,10 +354,19 @@ impl SkillInvocation {
                 }
                 let value = if token == "ARGUMENTS" {
                     Some(self.arguments.as_str())
+                } else if let Some(value) = supplied {
+                    Some(value)
                 } else if let Some(index) = named {
                     Some(arguments.get(index).map(String::as_str).unwrap_or_default())
                 } else {
-                    index.and_then(|index| arguments.get(index).map(String::as_str))
+                    index.and_then(|index| {
+                        let index = if codex_prompt {
+                            index.checked_sub(1)?
+                        } else {
+                            index
+                        };
+                        arguments.get(index).map(String::as_str)
+                    })
                 };
                 match value {
                     Some(value) => {
@@ -335,6 +443,25 @@ mod tests {
         assert_eq!(
             invocation.expand_arguments("No placeholders."),
             format!("No placeholders.\n\nARGUMENTS: {}", invocation.arguments)
+        );
+    }
+
+    #[test]
+    fn codex_prompts_expand_one_based_positions_and_named_assignments() {
+        let invocation = SkillInvocation {
+            skill: Skill {
+                source: Some(SkillOrigin {
+                    path: "/skills/prompts/audit.md".into(),
+                    dialect: SkillDialect::Codex,
+                    frontmatter: None,
+                }),
+                ..Skill::named("audit")
+            },
+            arguments: "\"hello world\" TARGET=\"the branch\"".into(),
+        };
+        assert_eq!(
+            invocation.expand_arguments("$1 | $TARGET | $ARGUMENTS"),
+            "hello world | the branch | \"hello world\" TARGET=\"the branch\""
         );
     }
 

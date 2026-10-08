@@ -1053,44 +1053,41 @@ subagent names do not select lf's harness. Independent fixes preserve saved Sess
 placement, active captures on refused continuation and unpublished reservations on
 publication failure. Launcher success proves no provider exit.
 
-Earlier native queue, custody, alias/catalog and PTY observations remain at
-`1e4ae02a5:wave/infrastructure/MEMORY.md` under this heading and its probe README.
-They establish neither ordinary LF launch fidelity nor a requirement to expand
-scope. The subsequent ordinary-launch evidence below supersedes that source audit's
-headless-Claude-only finding; resource links do not preserve deleted bundles.
-Release's operation-entry lesson applies: provider probes alone cannot establish
-`lf audit` acceptance. Ordinary Session continuity and historical bytes survive
-removing speculative dispatch machinery.
-
-October 8 compression removed per-dispatch identities/receipt recovery, exclusive
-queue/engine-restart and PTY/inbox probes. Baseline reconnect retained stale-client
-rejection and native/sibling history. Exact intermediate evidence survives at
-`754efacb2:wave/infrastructure/MEMORY.md`, this heading. That checkpoint also removes
-the provider-only probes retained at `31e0640eb`, keeping replay-argument checks in
-the ordinary lf fixture. Removing a path includes its probe dependencies;
-provider-only success cannot establish the operation boundary.
+Queue/custody and PTY observations remain historical at `1e4ae02a5`; compression
+at `754efacb2` removed dispatch receipt recovery, queues, engine restart and
+provider-only probes (`31e0640eb`). Baseline native/sibling history and stale-client
+rejection remain. Replay-argument checks moved to the ordinary lf fixture.
+Removing a path includes its exclusive probes; provider-only success proves no
+operation boundary. Deleted resource bundles are not preserved by links.
 
 The `dd2cdba82` compression removed unreachable ClaudeHarness plugin state;
-`48d145b78` preserves the subsequent source audit. October 8 implementation now
-prepares selected source/arguments on both harnesses and surfaces. Headless Claude
-loads the original bundle; Codex accepts native skill input and terminal skill
-links. Pinned unchanged Anthropic/OpenAI skills run through lf against local fake
-APIs, with default context, quoted/multiline arguments and actual provider asset
-reads. Native Claude model and removed-source Flow selection are separately
-proved. This establishes neither live model compliance nor native terminal UI.
+`48d145b78` preserves its source audit. Earlier launch and rejected-hook evidence
+is retained at `c6c75dc68` in this section. Current source prepares both harnesses
+and surfaces. Native Claude terminal uses a captured plugin with original
+declarations and exact arguments; gathered context is a lossless JSON literal
+in its user message. Native expansion must not interpret argument or shell syntax
+inside repository/Task context. Hooks put additional context in system messages;
+Claude 2.1.294 also rewrites shell preprocessing as a model tool instruction,
+which cannot provide first-request context. Both approaches were removed.
 
-Two entry-point counterexamples changed the approach. Claude 2.1.294 puts both
-startup and prompt-hook additional context in the API system field; those hooks
-were deleted. Claude terminal execution retains translated instructions, and
-native invocation with separate user context remains required, unimplemented work.
-Codex 0.160.1 ignored captured skill paths outside its catalog; captured instructions
-now preserve Flow selection without a catalog mount. Unchanged bytes and valid
-frontmatter alone do not establish native catalog discovery; the proved
-`.agents/skills` bundle does not cover every LF source folder. Concurrent fixtures add
-3.5–4 seconds and 8–13 KB of request JSON over plain native invocation; equal
-request counts establish no blanket performance improvement. The plain baseline
-checks exit and count, without the lf case's source/argument/asset assertions;
-equivalent behavior remains necessary before judging cost. The plan owns remaining
-fidelity and gate. Release was the only immediate child found; its goal and complete
-memory were read during realignment. Its operation-entry lesson applies here.
-No landing or Task completion occurred.
+Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
+explicit Markdown skill reference selects the original path on both surfaces.
+No catalog mount or second resolver is required. Single-file custom prompts keep
+one-based positions and named assignments; valid metadata does not make them skill
+bundles. Unfamiliar native declarations are reported, not silently discarded.
+
+Ordinary unbound third-party launches omit LOOPFLOW.md; attributed Work and captured
+Flow steps retain it. This reversible scope choice removes 6.6–6.7 KB of request
+JSON in the measured matching cases. In-memory invocation presence cannot identify
+a Flow: ordinary selection retains one too. The captured input supplies that distinction.
+
+Ordinary lf fixtures prove native terminal model/argument/context fidelity,
+single-file collisions, out-of-catalog Codex expansion, custom-prompt translation,
+and provider asset reads against local fake APIs. Plain baselines now assert the
+same source, arguments and returned asset contents before cost comparison.
+They establish neither live model compliance nor native terminal UI. Residual cost
+remains: about 2.3–3.1 KB of request JSON and 1.1 seconds in a serial fresh-machine
+sample; concurrent samples add 3.4–3.5 seconds. Neither is a production latency or
+blanket performance claim. Full acceptance and review remain in the plan.
+Release was the only immediate child found; its goal and complete memory were read.
+Its operation-entry lesson applies. No landing or Task completion occurred.

@@ -110,8 +110,45 @@ def _codex_response(path: Path, done: bool, shell: str) -> bytes:
     ).encode()
 
 
+def _fidelity(
+    requests: list[dict], status: int, body: str, argument: str, asset: Path, provider: str
+) -> dict[str, bool]:
+    first = requests[0] if requests else {}
+    items = first.get("messages", first.get("input", []))
+    user_text = json.dumps(
+        [item for item in items if item.get("role") == "user"], ensure_ascii=False
+    )
+    last = requests[-1] if requests else {}
+    results = (
+        [item for item in last.get("input", []) if item.get("type") == "function_call_output"]
+        if provider == "codex"
+        else [
+            block
+            for item in last.get("messages", [])
+            if isinstance(item.get("content"), list)
+            for block in item["content"]
+            if block.get("type") == "tool_result"
+        ]
+    )
+    asset_line = next(line for line in asset.read_text().splitlines() if len(line) > 40)
+    return {
+        "exit_zero": status == 0,
+        "one_turn_and_asset_read": len(requests) == 2,
+        "source_expanded": json.dumps(body[:100], ensure_ascii=False)[1:-1] in user_text,
+        "exact_arguments": json.dumps(argument)[1:-1] in user_text,
+        "provider_read_asset": json.dumps(asset_line)[1:-1] in json.dumps(results),
+    }
+
+
 def _probe(
-    lf: Path, provider: str, source: Path, asset_name: str, terminal: bool, flow: bool
+    lf: Path,
+    provider: str,
+    source: Path,
+    asset_name: str,
+    terminal: bool,
+    flow: bool,
+    folder: str | None = None,
+    custom_prompt: bool = False,
 ) -> bool:
     requests = []
     with tempfile.TemporaryDirectory(prefix="lf-installed-skill-", dir="/tmp") as directory:
@@ -121,15 +158,33 @@ def _probe(
             path.mkdir()
         dialect = "claude" if source.name == "internal-comms" else "codex"
         bundle = (
-            work / (".claude/skills" if dialect == "claude" else ".agents/skills") / source.name
+            work
+            / (folder or (".claude/skills" if dialect == "claude" else ".agents/skills"))
+            / source.name
         )
         shutil.copytree(source, bundle)
         asset = bundle / asset_name
-        source_bytes = (bundle / "SKILL.md").read_bytes()
+        skill_file = bundle / "SKILL.md"
+        skill_name = source.name
+        source_bytes = skill_file.read_bytes()
         marker = "CONTEXT_MUST_REMAIN_USER_INPUT"
         context = work / "context.md"
         context.write_text(marker)
         argument = '"quoted argument"\nsecond line'
+        if custom_prompt:
+            skill_name = "prompt-arguments"
+            skill_file = work / ".codex/prompts/prompt-arguments.md"
+            skill_file.parent.mkdir(parents=True, exist_ok=True)
+            skill_file.write_text(
+                "---\nname: prompt-arguments\n"
+                "description: A custom prompt, not a skill bundle.\n---\n"
+                "# Prompt argument fixture\n"
+                "Keep original bundled resources available "
+                "for this argument translation exercise.\n"
+                "position=<$1> named=<$TARGET> all=<$ARGUMENTS>\n"
+            )
+            source_bytes = skill_file.read_bytes()
+            argument += ' TARGET="named value"'
         assert not (work / ".lf").exists()
 
         class Handler(BaseHTTPRequestHandler):
@@ -208,14 +263,14 @@ enabled = false
         wrapper.write_text(f'#!/bin/sh\n{prefix}exec {shlex.quote(executable)}{flags} "$@"\n')
         wrapper.chmod(0o755)
         env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
-        target = [source.name, argument]
+        target = [skill_name, argument]
         if flow:
             flows = work / ".lf/flows"
             flows.mkdir(parents=True)
-            (flows / "proof.yaml").write_text(f"- {source.name}\n")
+            (flows / "proof.yaml").write_text(f"- {skill_name}\n")
             child = bin_dir / "lf"
             child.write_text(
-                f"#!/bin/sh\nrm -f {shlex.quote(str(bundle / 'SKILL.md'))}\n"
+                f"#!/bin/sh\nrm -f {shlex.quote(str(skill_file))}\n"
                 f'exec {shlex.quote(str(lf))} "$@"\n'
             )
             child.chmod(0o755)
@@ -246,38 +301,24 @@ enabled = false
                 first.get("system", first.get("instructions", ""))
             ) + json.dumps([item for item in items if item.get("role") in ("system", "developer")])
             body = source_bytes.decode().split("---", 2)[-1].strip()
-            last = requests[-1] if requests else {}
-            tool_results = (
-                [
-                    item
-                    for item in last.get("input", [])
-                    if item.get("type") == "function_call_output"
-                ]
-                if provider == "codex"
-                else [
-                    block
-                    for item in last.get("messages", [])
-                    if isinstance(item.get("content"), list)
-                    for block in item["content"]
-                    if block.get("type") == "tool_result"
-                ]
+            checks = _fidelity(requests, result.returncode, body, argument, asset, provider)
+            checks.update(
+                {
+                    "context_user_only": marker in user_text and marker not in privileged,
+                    "source_retained": (not skill_file.exists())
+                    if flow
+                    else skill_file.read_bytes() == source_bytes,
+                    "no_lf_configuration": not (work / ".lf/config.yaml").exists(),
+                    "operating_guidance_matches_scope": ("<lf:loopflow>" in json.dumps(first))
+                    == flow,
+                }
             )
-            # A distinctive literal from the actual file must return in a tool result.
-            asset_line = next(line for line in asset.read_text().splitlines() if len(line) > 40)
-            checks = {
-                "exit_zero": result.returncode == 0,
-                "one_turn_and_asset_read": len(requests) == 2,
-                "source_expanded": json.dumps(body[:100], ensure_ascii=False)[1:-1] in user_text,
-                "exact_arguments": json.dumps(argument)[1:-1] in user_text,
-                "context_user_only": marker in user_text and marker not in privileged,
-                "provider_read_asset": json.dumps(asset_line)[1:-1] in json.dumps(tool_results),
-                "source_retained": (not (bundle / "SKILL.md").exists())
-                if flow
-                else (bundle / "SKILL.md").read_bytes() == source_bytes,
-                "no_lf_configuration": not (work / ".lf/config.yaml").exists(),
-            }
+            if custom_prompt:
+                checks["custom_prompt_arguments"] = (
+                    "position=<quoted argument> named=<named value>" in user_text
+                )
             comparison = None
-            if dialect == provider and not flow:
+            if dialect == provider and not flow and not custom_prompt:
                 requests.clear()
                 if provider == "claude":
                     plain = [
@@ -293,14 +334,15 @@ enabled = false
                     plain = [
                         str(wrapper),
                         *([] if terminal else ["exec", "--skip-git-repo-check"]),
-                        f"${source.name} {argument}",
+                        f"[${source.name}]({bundle / 'SKILL.md'}) {argument}",
                     ]
                 started = time.monotonic()
                 baseline = _run(plain, work, env)
                 plain_seconds = time.monotonic() - started
-                checks["same_model_request_count_as_plain"] = (
-                    baseline.returncode == 0 and len(requests) == 2
+                baseline_checks = _fidelity(
+                    requests, baseline.returncode, body, argument, asset, provider
                 )
+                checks.update({f"plain_{key}": value for key, value in baseline_checks.items()})
                 comparison = {
                     "seconds": round(plain_seconds, 3),
                     "added_seconds": round(seconds - plain_seconds, 3),
@@ -332,7 +374,6 @@ enabled = false
                             "marker_in_user": marker in user_text,
                             "marker_in_privileged": marker in privileged,
                             "tools": [t.get("name") for t in first.get("tools", [])],
-                            "tool_results": tool_results,
                         }
                     )[:1800],
                     flush=True,
@@ -353,6 +394,12 @@ def main() -> int:
     parser.add_argument("--source", choices=tuple(SOURCES), default="internal-comms")
     parser.add_argument("--terminal", action="store_true")
     parser.add_argument("--flow", action="store_true")
+    parser.add_argument(
+        "--custom-prompt", action="store_true", help="Exercise Codex prompt placeholders"
+    )
+    parser.add_argument(
+        "--folder", help="Install the unchanged fixture in this relative skill folder"
+    )
     args = parser.parse_args()
     if args.fetch:
         _fetch(args.fixtures)
@@ -366,6 +413,8 @@ def main() -> int:
             SOURCES[args.source][3],
             args.terminal,
             args.flow,
+            args.folder,
+            args.custom_prompt,
         )
         else 1
     )

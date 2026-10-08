@@ -25,18 +25,24 @@ Sources are pinned in `launch.py`:
 Use either source with `--provider claude` or `--provider codex`. `--terminal`
 exercises lf's terminal command builder, substituting provider print/exec mode
 for unattended execution. It proves neither terminal rendering nor interactive
-behavior. Claude terminal currently uses translated instructions; passing that
-case does **not** establish native skill invocation. `--flow` removes the source
+behavior. Claude terminal exercises native expansion with separate gathered user
+context. `--flow` removes the source
 file after capture and checks that its instructions still reach the provider.
 
 Matching-provider cases also run a plain native skill for comparison. JSON reports
 startup seconds and request JSON size, plus exact quoted/multiline arguments,
 user-only context, source retention and actual asset reads. Request size is not
 a token measurement; local fake-API latency is not real API latency. Equal request
-counts do not establish a blanket performance improvement.
+counts do not establish a blanket performance improvement. Both the lf case and
+plain baseline must expand the source, preserve exact arguments and return the
+bundled asset through a provider tool. `--folder .codex/skills` exercises a source
+outside the automatically discovered catalog. `--custom-prompt` checks a synthetic
+Codex prompt's one-based positions and named arguments against the same API.
 
 `request_mapping.py` uses a synthetic Claude skill to test native argument parsing,
-model declaration application and separate user context. `--flow` removes its
+model declaration application, unknown-declaration reporting and separate user
+context. `--terminal --command` exercises a single-file command with a competing
+personal skill; JSON-decoded context must retain literal argument and shell syntax. `--flow` removes its
 source after capture and adds a same-name collision. Manifest bytes prove captured
 source retention. Its reference-file assertion is filesystem reachability only;
 `launch.py` supplies the actual provider tool read.
@@ -44,9 +50,11 @@ source retention. Its reference-file assertion is filesystem reachability only;
 Observed client boundaries: Claude 2.1.294 sends hook `additionalContext` in the
 API system field, including UserPromptSubmit hooks. Codex 0.160.1 ignores a native
 skill input whose path is outside its discovered catalog. Neither can be accepted
-from successful exit or assistant text alone. The implementation uses captured
-instructions for undiscovered Codex sources and keeps native Claude terminal
-invocation as remaining work.
+from successful exit or assistant text alone. Explicit Markdown skill links load
+Codex sources outside that catalog. Native Claude terminal snapshots encode context
+as a JSON literal in the skill's user message, preserving declarations and arguments.
+A shell preprocessing directive is insufficient: Claude 2.1.294 rewrites it as an
+instruction to call a tool, leaving the first request without its context.
 
 Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`;
 provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640eb`.

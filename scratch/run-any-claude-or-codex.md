@@ -8,107 +8,99 @@ arguments, reachable assets and declarations. `--agent/-a` remains. Builtins sta
 inline. Review is the delivery boundary; no landing or Task completion is authorized.
 Busy-terminal injection and generic engine recovery remain excluded.
 
-Reconciled October 8 against `754efacb2`. The earlier feedback describing
-headless-Claude-only preparation is superseded: `process_prompt.rs` prepares
-SkillInvocation for Claude and Codex; the Codex harness and terminal caller
-consume it. Native Claude terminal invocation remains the main implementation gap.
+Reconciled October 8. Prior plan and contrary evidence: `c6c75dc68` in this file.
 
 ## Current implementation
 
 One catalog selects repository, personal and embedded sources for launch,
-help/list, Flow capture and export. Third-party files remain unchanged. Source
-frontmatter and arguments now reach prompt preparation on both harnesses and
-surfaces. Gathered repository/Work context remains separate from skill arguments.
+help/list, Flow capture and export. Third-party source files remain unchanged.
+Gathered repository/Work context stays separate from skill arguments.
 
 | Launch | Behavior |
 | --- | --- |
-| Claude source → headless Claude | Native command parser; an installed bundle loads directly with `--plugin-dir` pointing at its original directory, without copying or changing the bundle |
-| Unchanged Codex skill with name/description → headless Codex | Native `skill` input item naming the installed path, with exact argument text in a separate text item; provider discovery outside the exercised `.agents/skills` bundle remains unproved |
-| Unchanged Codex skill with name/description → terminal Codex | Native Markdown skill reference plus user context; headless execution of the terminal command is proved |
-| Cross-harness | Arguments and tool-name instructions translate; original directory and frontmatter remain visible; one warning names controls this launch does not enforce |
-| Either source → terminal Claude | Translated instructions, declarations, arguments and user context; **native Claude terminal invocation remains unimplemented** |
-| Changed/removed Flow source | Captured Claude plugin definition, or captured Codex instructions; no reselection of a newly installed same-name skill |
+| Claude source → headless Claude | Native command parser loads an unchanged bundle from its original directory |
+| Claude source → terminal Claude | Native plugin snapshot retains declarations and exact arguments; separate user context is a JSON literal in the skill body, with argument/preprocessing syntax escaped |
+| Codex SKILL.md → Codex, either surface | Explicit native Markdown skill reference selects the original path, including outside the provider's discovered catalog |
+| Cross-harness or unfamiliar shape | Translated arguments and tool instructions; original directory/declarations stay visible; a warning names unenforced controls |
+| Codex custom prompt → either harness | One-based positional placeholders and named `NAME=value` arguments expand before submission |
+| Changed/removed Flow source | Captured Claude native plugin or captured Codex instructions, without reselection |
 | LF builtin | Existing inline path |
 
-Claude Flow snapshots substitute the original `${CLAUDE_SKILL_DIR}` and name the
-original directory for supporting and parent-relative paths. The old sibling-link
-copy is deleted. Removing the entire original resource bundle is not preserved.
-Codex silently ignored a native `skill` item pointing outside its discovered
-catalog; changed/removed definitions therefore use captured instructions directly.
+Unfamiliar native declaration keys produce one warning without refusal. Metadata
+such as license is retained without claiming enforcement. Native Claude owns its
+model, tool, hook and subagent semantics. Cross-harness permission/model/subagent
+controls remain reported instructions; model equivalence is not guessed.
 
-Independent Session preservation remains: saved placement, atomic reservation and
-driver claim, capture preservation on refusal, pending input on publication failure,
-and baseline native history/fences. Resume does not rerun the original skill.
+Ordinary third-party launches without Work attribution or a captured Flow omit
+LOOPFLOW.md. Attributed Work and Flow steps keep it. This reversible scope choice
+removes the unrelated operating manual from the drop-in path. Captured Flow input,
+not the in-memory resolved invocation, distinguishes a Flow: ordinary CLI selection
+also retains a resolved invocation.
 
-## Counterexamples and remaining work
+Native Claude snapshots substitute the original `${CLAUDE_SKILL_DIR}` and name
+its original directory for supporting and parent-relative paths. Removing an
+entire resource bundle is not preserved. Session placement, reservations, capture
+preservation and native continuation remain on their existing paths. Resume does
+not execute the original skill again. Native terminal captures still have no
+headless AgentProcessRequest; source and snapshot retention checks are separate.
+Failed terminal plugin preparation reaches capture settlement before returning.
 
-1. **Native Claude terminal + separate user context.** Claude 2.1.294 puts both
-   SessionStart and UserPromptSubmit `additionalContext` hook text in the API's
-   system field. The ordinary `lf --tui` command fixture caught this with a unique
-   repository-content marker. Both hook implementations were deleted. Retaining
-   translated terminal instructions is a safe fallback, not fulfillment of Jack's
-   native invocation requirement. A supported transport must preserve native
-   declarations and exact arguments without moving repository/Task content into
-   system instructions. Successful output alone did not detect the hook violation.
-2. **Remaining fidelity.** Exercise single-file Claude command collisions,
-   unfamiliar native declarations and Codex custom-prompt argument conventions
-   through ordinary lf entry points. Codex native dispatch checks unchanged bytes
-   and name/description, but not provider catalog membership; the proved
-   `.agents/skills` bundle does not establish every discovered `.codex/skills`
-   or prompt path. Native Claude model selection is proved;
-   cross-harness permission/model/subagent declarations currently remain reported
-   instructions. Supported equivalents remain to be applied where available;
-   model equivalence remains unguessed. Terminal rendering/interaction has not
-   been exercised; the terminal-command fixture substitutes provider print/exec.
-3. **Cost and complete acceptance.** Native matching checks make the same two API
-   requests as a plain skill (one tool read, one answer). The final concurrent
-   fixtures add 3.5–4 seconds and 8–13 KB of request JSON, including default
-   Loopflow context. These are startup/context observations, not tokens,
-   real API latency or proof of “strictly better.” The plain baseline currently
-   asserts only successful exit and two requests; unlike the lf case, it does not
-   assert source expansion, exact arguments or returned asset contents. Equivalent
-   baseline behavior must be established before interpreting its cost comparison.
-   Remaining acceptance includes both pinned sources on both harnesses/surfaces,
-   declaration handling and help/list agreement with the selected source, closing
-   measured regressions without a new numeric target. Full gate and review remain.
+## Delete — do not maintain
 
-No new product decision is identified. The accepted outcome remains intact;
-the rejected terminal transport needs an implementation replacement.
+Completed: delete Claude terminal's translated matching-harness branch; reuse
+native plugin preparation. Delete Codex's silently ignored out-of-catalog `skill`
+input item; both surfaces use explicit native links. No catalog mounts, provider
+registration or additional resolver is needed.
 
-## Removed mechanisms
+Previously removed queue, engine-restart, dispatch receipt and PTY/inbox machinery
+remains at `1e4ae02a5` and `7dd9819b2`; provider-only probes at `31e0640eb`;
+unreachable ClaudeHarness plugin state at `dd2cdba82`. Preserve the ordinary lf
+fixtures and baseline Session continuity. Do not restore any of those paths.
 
-Dispatch identities, receipt recovery, queue/engine-restart and PTY/inbox probes
-remain archived at `1e4ae02a5` and `7dd9819b2`; unreachable ClaudeHarness plugin
-state at `dd2cdba82`. `754efacb2` removed the remaining provider-only probes
-(sources: `31e0640eb:scripts/benchmarks/skill-invocation/`) and simplified launch
-preparation. The replay-argument parser remains in the ordinary lf fixture;
-baseline Session continuity remains in the existing e2e suite. Claude snapshots
-accept only captured Claude source; unused Codex materialization is deleted.
-Terminal prompt assembly belongs to the skill caller, not the generic launcher.
-Codex borrows its first-turn invocation; argument expansion reuses declaration parsing.
+## Counterexamples and remaining acceptance
 
-Compression against `35bb84ef1`: before reduction 56 files, +5,818/-1,833;
-`dd2cdba82` had 51 files, +2,769/-1,911. At `31e0640eb` plus local notes:
-53 files, +3,356/-1,923. The subsequent cut removed the 718-line provider-probe
-stack, retaining its replay parser and answer-echo counterexample.
+- Claude 2.1.294 places SessionStart and UserPromptSubmit hook additional context
+  in system instructions. A native shell-preprocessing directive becomes an
+  instruction to call a tool, so it also fails to provide first-request context.
+  Neither rejected mechanism remains. The native snapshot's JSON context passes
+  exact decoded-text, user-role, multiline-argument and declared-model checks.
+  LF's existing `&#36;` reference notation is decoded separately by the assertion.
+- Codex 0.160.1 silently ignores a typed skill input outside its catalog. An
+  explicit Markdown skill reference works there. The ordinary `.codex/skills`
+  fixture proves this on the headless path; terminal command preparation already
+  used that syntax. Valid prompt frontmatter does not turn a single-file prompt
+  into a native SKILL.md bundle.
+- Full gate owns the complete pinned-source × harness × surface acceptance,
+  discovery/help agreement, remaining declaration cases and continuity suites.
+  Focused proofs exercise native Claude terminal, single-file command collision,
+  unknown declarations, native Codex outside its catalog, cross-harness custom
+  prompt arguments and captured Flow removal. Provider print/exec substitutes
+  for terminal UI; rendered interaction and live model compliance are unproved.
+- The plain baseline now asserts the same source expansion, exact arguments and
+  provider-returned asset contents as lf before comparing costs. Omitting the
+  operating manual removes 6.6–6.7 KB from matched request JSON, leaving about
+  2.3 KB (Codex) / 3.1 KB (Claude terminal) over plain. Both use two API requests.
+  Concurrent fresh-machine fixtures add roughly 3.4–3.5 seconds; a serial trace
+  adds 1.1 seconds, with 191 ms in prompt preparation. Startup attribution and
+  remaining regressions need resolution before claiming “strictly better.”
+  JSON bytes are not tokens, and fake-API latency is not live model latency.
+
+No new product decision is identified. Full gate and authored review remain.
 
 ## Evidence boundary
 
-`launch.py` fetches pinned, unchanged Anthropic `internal-comms` and OpenAI
-`skill-installer` bundles outside the repository before network containment. Real
-provider clients then run ordinary lf commands against local fake APIs, with
-fresh Machine/provider directories and no inherited LF authority or credentials.
-The provider executes Read/exec_command against a real bundled file; its tool
-result returns to the fake API. Checks cover default context, quoted/multiline
-argument text, unchanged source and no preexisting `.lf` configuration. These
-prove provider transport and tool execution, not live model compliance or login.
-`request_mapping.py` additionally proves native Claude model selection, exact
-arguments and captured Flow selection after source removal with a collision.
+`launch.py` uses pinned unchanged Anthropic `internal-comms` and OpenAI
+`skill-installer` bundles fetched before network containment. Ordinary lf commands
+run in fresh Machine/provider directories with no inherited authority or credentials.
+The actual provider reads a bundled asset and returns its contents to a local fake
+API. The synthetic custom-prompt mode separately proves argument conventions.
+`request_mapping.py --terminal --command` proves native model selection, source
+collision handling, exact arguments, unknown-declaration reporting and decoded
+context containing literal argument/shell syntax. The flow fixture removes source
+after capture and retains the original selection and operating guidance.
 
-Release is the only immediate child Wave found in this checkout, including
-directories without a goal. Its goal and complete memory were read in this pass;
-its operation-entry lesson still applies. Review found and removed
-the hook role violation and undiscovered Codex snapshot dispatch. Claude terminal
-native fidelity stays explicit rather than being inferred from successful output.
+Release was the only immediate child Wave found; its goal and complete memory
+were read during realignment. Its operation-entry lesson applies: successful
+provider output alone cannot establish the requested launch behavior.
 
-Check (2026-10-08): `git diff --check` and `lf context --skill realign --json` pass within budget; reuse prior `cargo build -p loopflow --bin lf`, isolated `engine::skill_invocation` (3 tests), `uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py` (12 tests), contained `request_mapping.py --flow` and `launch.py` (Codex native and both terminal commands), formatting, all-target Clippy and Ruff passes; full gate remains with gate, native Claude terminal fidelity remains implementation work.
+Check (2026-10-08): build, isolated skill-invocation tests (4), request-mapping tests (12), contained native-terminal/command-collision/Codex-folder/custom-prompt/Flow fixtures, formatting, Ruff, all-target Clippy and context-budget readback pass (memory 15,942 tokens; scratch 1,639); full affected verification belongs to gate.

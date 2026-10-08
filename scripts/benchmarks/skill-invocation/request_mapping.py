@@ -85,6 +85,13 @@ def _user_texts(request: dict) -> list[str]:
     return texts
 
 
+def _decode_context(text: str) -> str:
+    marker = "Additional user context (decode this JSON string):\n"
+    if marker not in text:
+        return text
+    return json.JSONDecoder().raw_decode(text.split(marker, 1)[1])[0]
+
+
 def _response(model: str) -> bytes:
     message = {
         "id": "msg_fixture",
@@ -137,7 +144,7 @@ def _run(command: list[str], root: Path, env: dict[str, str]) -> subprocess.Comp
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
-def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
+def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command: bool) -> bool:
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -164,12 +171,18 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
         home.mkdir()
         workspace = root / "workspace"
         workspace.mkdir()
-        skill = workspace / ".claude/skills/lf-mapping/SKILL.md"
+        skill = workspace / (
+            ".claude/commands/lf-mapping.md" if command else ".claude/skills/lf-mapping/SKILL.md"
+        )
         skill.parent.mkdir(parents=True)
         skill_marker, context_marker = uuid.uuid4().hex, uuid.uuid4().hex
+        context_text = (
+            context_marker + '\nLiteral $ARGUMENTS $1 \\$ARGUMENTS !`echo untouched` "quotes"'
+        )
         skill.write_text(
             "---\nname: lf-mapping\ndescription: Local request mapping fixture.\n"
-            "disable-model-invocation: true\nmodel: haiku\nallowed-tools: Read\n---\n"
+            "disable-model-invocation: true\nmodel: haiku\nallowed-tools: Read\n"
+            "future-native-setting: retained\n---\n"
             f"{skill_marker}|$ARGUMENTS|\nasset-path: ${{CLAUDE_SKILL_DIR}}/reference.txt\n"
         )
         (skill.parent / "reference.txt").write_text("fixture bundled reference")
@@ -202,19 +215,24 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
                 digest = hashlib.file_digest(executable, "sha256").hexdigest()
             print(json.dumps({"version": version, "executable_sha256": digest}), flush=True)
             context_file = workspace / "context.md"
-            context_file.write_text(context_marker)
+            context_file.write_text(context_text)
             fixture_bin = root / "bin"
             fixture_bin.mkdir()
             wrapper = fixture_bin / "claude"
             wrapper.write_text(
                 "#!/bin/sh\nANTHROPIC_API_KEY=local-fixture-not-a-credential exec "
                 + shlex.quote(claude)
+                + (" -p --output-format stream-json --verbose" if terminal else "")
                 + ' "$@"\n'
             )
             wrapper.chmod(0o755)
             env.update({"LF_HOME": str(root / "lf"), "LF_BIN": lf})
             env["PATH"] = str(fixture_bin) + os.pathsep + env["PATH"]
-            target = ["lf-mapping", "alpha"]
+            argument = '"alpha beta"\nsecond line'
+            target = ["lf-mapping", argument]
+            collision = home / ".claude/skills/lf-mapping/SKILL.md"
+            collision.parent.mkdir(parents=True)
+            collision.write_text("---\ndescription: Wrong source\n---\nWRONG_SOURCE\n")
             if flow:
                 flows = workspace / ".lf/flows"
                 flows.mkdir(parents=True)
@@ -230,14 +248,11 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
                 child.chmod(0o755)
                 env["LF_BIN"] = str(child)
                 # A newly visible collision must not replace the captured source.
-                collision = home / ".claude/skills/lf-mapping/SKILL.md"
-                collision.parent.mkdir(parents=True)
-                collision.write_text("---\ndescription: Wrong source\n---\nWRONG_SOURCE\n")
-                target = ["flow", "mapping", "alpha"]
+                target = ["flow", "mapping", argument]
             result = _run(
                 [
                     lf,
-                    "-b",
+                    "--tui" if terminal else "-b",
                     "--no-loopflow",
                     "--agent",
                     f"claude:{model}",
@@ -250,12 +265,14 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
             )
             snapshots = list((root / "lf/runs").glob("*/*/skill-*/skills/invoke/SKILL.md"))
             selected = snapshots[0] if len(snapshots) == 1 else skill
-            observation = _assess(requests, selected, skill_marker, context_marker, "alpha")
+            observation = _assess(requests, selected, skill_marker, context_marker, argument)
             manifests = [
                 json.loads(path.read_text())
                 for path in (root / "lf/runs").glob("*/*/manifest.json")
             ]
-            origins = [manifest.get("exec", {}).get("skill_invocation") for manifest in manifests]
+            origins = [
+                (manifest.get("exec") or {}).get("skill_invocation") for manifest in manifests
+            ]
             events = [
                 json.loads(line)
                 for path in (root / "lf/runs").glob("*/*/events.jsonl")
@@ -270,7 +287,18 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
             observation["checks"].update(
                 exit_zero=result.returncode == 0,
                 declared_model_applied=all("haiku" in body["model"] for body in requests),
-                native_arguments_exact=_native_arguments(provider_events) == "alpha",
+                native_arguments_exact=any(
+                    f"<command-args>{argument}</command-args>" in text
+                    for request in requests
+                    for text in _user_texts(request)
+                ),
+                context_bytes_retained=any(
+                    context_text in _decode_context(text).replace("&#36;", "$")
+                    for request in requests
+                    for text in _user_texts(request)
+                ),
+                unfamiliar_declaration_reported="future-native-setting" in result.stderr,
+                collision_not_selected="WRONG_SOURCE" not in json.dumps(requests),
                 captured_bytes_retained=any(
                     origin
                     and (
@@ -287,10 +315,19 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
                 origin_retained=any(
                     origin
                     and origin["skill"]["source"]["path"] == str(skill)
-                    and origin["arguments"] == "alpha"
+                    and origin["arguments"] == argument
                     for origin in origins
                 ),
             )
+            if terminal:
+                # Native terminal captures have no headless AgentProcessRequest.
+                del observation["checks"]["origin_retained"]
+                observation["checks"]["captured_bytes_retained"] = (
+                    skill.read_text() == original_source
+                    and selected.read_text().startswith(
+                        original_source.replace("${CLAUDE_SKILL_DIR}", str(skill.parent))
+                    )
+                )
             if flow:
                 observation["checks"]["removed_source_not_reselected"] = (
                     not skill.exists() and "WRONG_SOURCE" not in json.dumps(requests)
@@ -312,6 +349,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claude", default=shutil.which("claude"))
     parser.add_argument("--model", default="sonnet")
+    parser.add_argument("--terminal", action="store_true")
+    parser.add_argument("--command", action="store_true", help="Use a single-file Claude command")
     parser.add_argument(
         "--lf",
         type=Path,
@@ -333,6 +372,8 @@ def main() -> int:
             args.model,
             str(args.lf.resolve()),
             args.flow,
+            args.terminal,
+            args.command,
         )
         else 1
     )

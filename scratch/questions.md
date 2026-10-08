@@ -9,7 +9,8 @@ order remain reversible choices. Cross-harness execution translates instructions
 without another catalog or conversation. Model/permission/subagent equivalence
 is not guessed; the launch reports declarations it does not enforce.
 
-Claude's native terminal hooks put additional context in system instructions.
-The rejected approaches are described in the design; neither may carry repository
-or Task text. Terminal Claude currently retains a declared inline fallback, and
-native invocation remains required work, not an accepted scope reduction.
+Ordinary third-party invocation without Work attribution or a captured Flow omits
+LOOPFLOW.md. This reversible implementation choice removes unrelated operating
+instructions from the drop-in path; attributed Work and Flow steps retain them.
+The native terminal snapshot carries separate gathered user context as a JSON
+literal so native argument/preprocessing syntax in that context stays inert.

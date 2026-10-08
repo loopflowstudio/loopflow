@@ -360,6 +360,17 @@ fn build_prompt_at(
             .then(crate::work::wave::context::resolve_ambient_wave_name)
             .flatten()
     });
+    // Ordinary third-party skills need their own instructions, not the Work
+    // operating manual. Captured Flows and attributed Work retain that guidance.
+    let standalone_native = task_input.is_none()
+        && wave.is_none()
+        && cli.skill_input.is_none()
+        && message_context.is_none()
+        && discovered_skill.as_ref().is_some_and(|skill| {
+            skill.source.as_ref().is_some_and(|source| {
+                source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+            })
+        });
     let prepared = prepare_process_prompt(
         &config,
         ProcessPromptInput {
@@ -371,7 +382,7 @@ fn build_prompt_at(
             wave,
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
-            no_loopflow: cli.no_loopflow,
+            no_loopflow: cli.no_loopflow || standalone_native,
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
@@ -531,19 +542,25 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
-        let skill_prompt = built
-            .agent_config
-            .skill_invocation
-            .as_ref()
-            .map(|skill| skill.terminal_input(&built.harness, &built.agent_config));
-        let result = launch_session(
-            &built.harness,
-            built.model.as_deref(),
-            &built.repo_root,
-            skill_prompt.as_deref().unwrap_or(&built.prompt),
-            &environment,
-            provider_session_id.as_deref(),
-        );
+        let result = (|| {
+            let mut config = built.agent_config.clone();
+            config.env = environment.clone();
+            let (flags, prompt) = config
+                .skill_invocation
+                .as_ref()
+                .map(|skill| skill.terminal_input(&built.harness, &config))
+                .transpose()?
+                .unwrap_or_else(|| (Vec::new(), built.prompt.clone()));
+            launch_session(
+                &built.harness,
+                built.model.as_deref(),
+                &built.repo_root,
+                &prompt,
+                &environment,
+                provider_session_id.as_deref(),
+                &flags,
+            )
+        })();
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?

@@ -167,6 +167,9 @@ lf session bind SESSION --task INF-123
 
 Claude and Codex terminal Sessions load assembled context from a system instructions
 file, keeping the initial command-line message short even with large Wave memory.
+New Session names use a short excerpt of the request, or the invoked skill when
+no request was supplied. Task conversations use the Task title when no specific
+purpose was supplied. Human-assigned names survive reconnects and suggestions.
 Interactive terminal titles use the Session name, with the Task identifier first
 and a short purpose for Task work. In cmux, the attached workspace and tab follow
 `lf session rename`; other terminals pick up a changed name on reconnect.

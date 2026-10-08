@@ -2,12 +2,12 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized demo, without provider accounts or driving his cmux windows;
-no landing. cmux denied workspace creation outside it. Native launch/reconnect
-and `run_agent` share pre-spawn OSC and cmux renames. Displaying stored names
-preserves bad names too; prompt suggestions cannot guarantee work-specific naming.
-LOO-429 is integrated, not native-naming proof. Taskless fake-host checks establish
-no Task/Flow, plain-native or visible host acceptance.
+Jack Heart authorized demo without provider accounts or driving his cmux windows;
+no landing. lf names use requests, skills or Task titles.
+Preserve request/Goal attribution; LOO-429's trigger is not the request. Human names survive. Account-free Task-bound
+Claude/Codex launch, rename and reconnect pass. Plain-native/resumed naming and
+visible agreement remain unfinished: Claude has title hooks; Codex documents
+app-server naming, not hook title output. cmux denied creation outside it.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)

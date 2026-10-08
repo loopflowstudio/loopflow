@@ -78,7 +78,7 @@ pub(crate) async fn ensure_task(
         "Task {task} has no checkout to hold a conversation"
     );
     let session = store
-        .ensure_primary_session(&scope, None, task_session(&binding, id))
+        .ensure_primary_session(&scope, None, task_session(store, &binding, id)?)
         .await?;
     start(store, session).await
 }
@@ -108,10 +108,11 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
                 .await?,
         ),
         PrimaryScope::Task(task) => task_session(
+            store,
             &crate::ops::resolve_work_binding(store, &previous.cwd, &format!("task:{task}"))
                 .await?,
             task,
-        ),
+        )?,
     };
     if !matches!(scope, PrimaryScope::Task(_)) {
         successor.cwd = ensure_scope_worktree(&successor.cwd, &scope)?.path;
@@ -184,14 +185,22 @@ fn wave_session(binding: &crate::ops::WorkBinding) -> AgentSession {
     }
 }
 
-fn task_session(binding: &crate::ops::WorkBinding, task: &crate::durable::TaskId) -> AgentSession {
-    let title = binding
-        .subjects
-        .iter()
-        .find_map(|subject| subject.strip_prefix("task:"))
-        .unwrap_or(task.as_str())
-        .to_string();
-    AgentSession {
+fn task_session(
+    store: &SharedStore,
+    binding: &crate::ops::WorkBinding,
+    task: &crate::durable::TaskId,
+) -> Result<AgentSession> {
+    let plan = store
+        .sqlite
+        .task(task)?
+        .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
+    let title = crate::session_record::generated_session_title(
+        None,
+        None,
+        Some(&plan.plan.title),
+        &binding.cwd,
+    );
+    Ok(AgentSession {
         task_id: Some(task.clone()),
         wave_id: Some(binding.wave_id.clone()),
         work_source: Some(WorkSource::Declared),
@@ -201,7 +210,7 @@ fn task_session(binding: &crate::ops::WorkBinding, task: &crate::durable::TaskId
             "task/session",
             title,
         )
-    }
+    })
 }
 
 fn repository_session(repo: &crate::repository::CanonicalRepo) -> AgentSession {

@@ -1663,6 +1663,73 @@ pub enum SessionTitleSource {
 
 const SESSION_TITLE_MAX_CHARS: usize = 80;
 
+pub(crate) fn generated_session_title(
+    context: Option<&crate::trace::PreparedTurnContext>,
+    skill: Option<&str>,
+    task: Option<&str>,
+    cwd: &Path,
+) -> String {
+    let request = context.and_then(|context| {
+        context
+            .system
+            .iter()
+            .chain(std::iter::once(&context.task))
+            .find_map(|channel| {
+                channel.assets.iter().find_map(|asset| {
+                    (asset.kind == crate::trace::ContextAssetKind::UserMessage)
+                        .then(|| {
+                            channel
+                                .text
+                                .get(asset.byte_start as usize..asset.byte_end as usize)
+                        })
+                        .flatten()
+                })
+            })
+            // Library callers have unassembled, separate system/task prompts.
+            .or_else(|| {
+                context
+                    .task
+                    .assets
+                    .iter()
+                    .all(|asset| asset.kind == crate::trace::ContextAssetKind::Assembly)
+                    .then_some(context.task.text.as_str())
+                    .filter(|text| *text != crate::engine::prompt::INITIAL_TURN_PROMPT)
+            })
+    });
+    let purpose = skill
+        .and_then(|skill| skill.rsplit('/').next())
+        .filter(|skill| !matches!(*skill, "session" | "operate"));
+    [
+        request,
+        purpose,
+        task,
+        cwd.file_name().and_then(|name| name.to_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|source| {
+        let title = source
+            .split_whitespace()
+            .map(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()))
+            .filter(|word| {
+                !word.is_empty()
+                    && !matches!(
+                        word.to_ascii_lowercase().as_str(),
+                        "please" | "the" | "a" | "an"
+                    )
+            })
+            .take(3)
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .filter(|ch| !ch.is_control())
+            .take(SESSION_TITLE_MAX_CHARS)
+            .collect::<String>();
+        (!title.is_empty()).then_some(title)
+    })
+    .unwrap_or_else(|| "Session".to_string())
+}
+
 /// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.
 pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
     let title = title.trim();
@@ -2291,7 +2358,7 @@ impl CaptureHandle {
             prepare_manifest(spec, artifact_key, caller_artifact_key, process, context)
                 .map_err(record_error)?;
         let dir = record_dir(lf_home, &manifest.artifact_key).expect("artifact key is a UUID");
-        let reserved = SessionCapture::record_row(&manifest, &dir, work)?;
+        let reserved = SessionCapture::record_row(&manifest, &dir, work, context)?;
         publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
         if let Some(session) = reserved {
             row_store(&dir)?.publish_capture(&session.id, session.captured)?;
@@ -2556,6 +2623,7 @@ impl SessionCapture {
         manifest: &SessionCaptureManifest,
         dir: &Path,
         work: Option<crate::session::SessionWork>,
+        context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Option<crate::session::AgentSession>> {
         let step = match &manifest.flow {
             Some(SessionFlowMembership::Step(step)) => Some(step),
@@ -2567,6 +2635,18 @@ impl SessionCapture {
             return Ok(None);
         }
         let store = row_store(dir)?;
+        let task = work
+            .as_ref()
+            .and_then(|work| work.task_id.as_ref())
+            .map(|id| store.task(id))
+            .transpose()?
+            .flatten();
+        let title = generated_session_title(
+            context,
+            manifest.skill.as_deref(),
+            task.as_ref().map(|task| task.plan.title.as_str()),
+            &manifest.cwd,
+        );
         let session = store.create_session(
             crate::session::AgentSession {
                 captured: None,
@@ -2587,9 +2667,7 @@ impl SessionCapture {
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,
-                title: manifest.skill.clone().unwrap_or_else(|| {
-                    crate::engine::naming::word_pair(manifest.artifact_key.as_str())
-                }),
+                title,
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
                 ready_summary: None,
@@ -3328,6 +3406,44 @@ mod tests {
     use crate::engine::{AgentCapabilities, AgentConfig};
 
     #[test]
+    fn generated_titles_use_work_and_never_the_system_trigger() {
+        let cwd = std::path::Path::new("/repo/terminal-titles");
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            "# Loopflow operating guide",
+            crate::engine::prompt::INITIAL_TURN_PROMPT,
+        );
+        assert_eq!(
+            super::generated_session_title(
+                Some(&context),
+                Some("demo"),
+                Some("Terminal titles"),
+                cwd
+            ),
+            "demo"
+        );
+        assert_eq!(
+            super::generated_session_title(
+                Some(&context),
+                Some("task/session"),
+                Some("Repair cmux titles"),
+                cwd
+            ),
+            "Repair cmux titles"
+        );
+        assert_eq!(
+            super::generated_session_title(Some(&context), Some("wave/operate"), None, cwd),
+            "terminal-titles"
+        );
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            "# Loopflow operating guide",
+            &format!("{} other words", "λ".repeat(100)),
+        );
+        let title = super::generated_session_title(Some(&context), None, None, cwd);
+        assert_eq!(title.chars().count(), super::SESSION_TITLE_MAX_CHARS);
+        assert!(super::validate_session_title(&title).is_ok());
+    }
+
+    #[test]
     fn terminal_attachment_probe() {
         let Ok(expected) = std::env::var("LF_TEST_TERMINAL_ATTACHMENT") else {
             return;
@@ -3565,7 +3681,7 @@ mod tests {
             .unwrap();
         let run = session.clone();
         assert!(!session.interactive);
-        assert_eq!(session.title, "implement");
+        assert_eq!(session.title, "repair failed operation");
         assert_eq!(run.provider.as_deref(), Some("proof"));
         assert_eq!(
             super::read_manifest(&capture.artifact_dir())

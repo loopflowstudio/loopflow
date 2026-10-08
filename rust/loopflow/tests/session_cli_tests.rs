@@ -1,3 +1,5 @@
+mod support;
+
 use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
@@ -805,17 +807,35 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
-    for (provider, host) in [
-        ("claude", "cmux"),
-        ("codex", "cmux"),
-        ("claude", "absent"),
-        ("codex", "failure"),
-        ("claude", "timeout"),
+    for (provider, host, bound) in [
+        ("claude", "cmux", true),
+        ("claude", "cmux", false),
+        ("codex", "cmux", true),
+        ("claude", "absent", false),
+        ("codex", "failure", false),
+        ("claude", "timeout", false),
     ] {
         let home = tempfile::tempdir().unwrap();
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        let (id, _, _) = prepare_conversation(home.path(), home.path(), provider, "Plan store");
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            "AGENTS.md",
+            "# Loopflow operating guide\nFollow the repository instructions.",
+        );
+        let task = bound.then(|| {
+            support::register_unrun_task(
+                home.path(),
+                &repo.path().canonicalize().unwrap(),
+                "main",
+                &repo.head_sha(),
+            )
+        });
+        let title = |name: &str| match &task {
+            Some(task) => format!("{} {name}", task.task.plan.identifier),
+            None => name.to_string(),
+        };
+        let mut id = String::new();
         let native = uuid::Uuid::new_v4().to_string();
         let transcript = if provider == "codex" {
             home.path()
@@ -829,7 +849,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         fs::create_dir_all(transcript.parent().unwrap()).unwrap();
         fs::write(
             transcript,
-            serde_json::json!({"cwd": home.path()}).to_string(),
+            serde_json::json!({"cwd": repo.path()}).to_string(),
         )
         .unwrap();
         let isolated_command = |args: &[&str]| {
@@ -837,7 +857,7 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
             command
                 .env_clear()
                 .args(args)
-                .current_dir(home.path())
+                .current_dir(repo.path())
                 .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
                 .env("LF_HOME", home.path())
                 .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
@@ -886,7 +906,9 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
 "#,
         );
 
-        for expected in ["Plan store", "Release notes"] {
+        for name in ["Plan store migration", "Release notes"] {
+            let first = id.is_empty();
+            let expected = title(name);
             let mut master = -1;
             let mut slave = -1;
             // SAFETY: valid output pointers, null selects default PTY settings.
@@ -906,7 +928,17 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
             let mut master = unsafe { fs::File::from_raw_fd(master) };
             // SAFETY: the fresh slave descriptor is owned only by this File.
             let slave = unsafe { fs::File::from_raw_fd(slave) };
-            let mut launch = isolated_command(&["session", "connect", &id]);
+            let mut launch = if first {
+                isolated_command(&[
+                    "--tui",
+                    "--agent",
+                    provider,
+                    ":",
+                    "Plan store migration for archived tasks",
+                ])
+            } else {
+                isolated_command(&["session", "connect", &id])
+            };
             launch
                 .env("TITLE_HOST", host)
                 .stdin(Stdio::piped())
@@ -942,6 +974,22 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                     output_reader.join().unwrap()
                 );
             }
+            if first {
+                let listed = inspect(&["session", "list", "--all", "--json"]);
+                assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+                id = listed[0]["id"].as_str().unwrap().to_string();
+                assert_eq!(listed[0]["title"], name);
+                if let Some(task) = &task {
+                    assert!(
+                        listed[0]["task_ids"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == task.task.id.as_str()),
+                        "{listed}"
+                    );
+                }
+            }
             let args = fs::read_to_string(home.path().join("args")).unwrap();
             if provider == "claude" {
                 assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
@@ -952,7 +1000,15 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
             }
-            if expected == "Plan store" {
+            if host == "cmux" {
+                for path in ["rename-workspace", "rename-tab"] {
+                    assert_eq!(
+                        fs::read_to_string(home.path().join(path)).unwrap(),
+                        expected
+                    );
+                }
+            }
+            if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
                 assert_eq!(renamed["title"], "Release notes");
             } else {
@@ -964,7 +1020,7 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
             let host_named = || {
                 ["rename-workspace", "rename-tab"].iter().all(|path| {
                     fs::read_to_string(home.path().join(path)).unwrap_or_default()
-                        == "Release notes"
+                        == title("Release notes")
                 })
             };
             if host == "cmux" {
@@ -972,7 +1028,7 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
                     std::thread::sleep(Duration::from_millis(20));
                 }
             }
-            if expected == "Plan store" {
+            if first {
                 let store =
                     loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
                         .unwrap();

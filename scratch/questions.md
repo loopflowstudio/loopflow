@@ -1,15 +1,14 @@
-# Open demo choices
+# Remaining naming decisions
 
-- October 8: Jack's no-provider-account constraint and cmux's process-origin
-  access policy leave native automatic naming and rendered title precedence
-  unobserved. No bypass or configuration change is authorized.
-- Preserve native terminal passthrough: live rename uses cmux's control channel;
-  other terminals pick up renames on reconnect. Extending live rename to every
-  host would need a provider naming API or terminal transport work.
-- A plain `claude`/`codex` process has no lf owner. Repository naming guidance
-  and the landed system-context fix cannot guarantee its title, especially when
-  resuming an old instruction-derived name. lf also preserves skill/word-pair
-  defaults until renamed. Reliable work-specific naming remains implementation
-  work; the requirement has not been waived.
-- With multiple Sessions in one cmux workspace, each surface keeps its name and
-  the workspace follows the most recent launch or rename. Review that choice.
+- October 8: new lf names use bounded request excerpts, then concrete skill,
+  Task title or workspace. This is a reversible implementation choice; semantic
+  refinement remains possible through generated suggestions, with human names kept.
+- Plain native starts/resumes still need a provider integration design. Claude's
+  documented title-setting hooks offer a path; Codex documents app-server naming
+  but no hook title output. Hook distribution, native human-name precedence and
+  live Codex TUI adoption are unresolved. No provider settings were installed.
+- Jack's no-account/no-existing-window boundary remains. cmux denied workspace
+  creation outside its process origin; no bypass or configuration change occurred.
+- Preserve native passthrough: cmux live rename uses its control channel; other
+  terminals update on reconnect. A workspace with several Sessions follows the
+  latest launch or rename, while each surface keeps its own name.

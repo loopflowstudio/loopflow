@@ -1,0 +1,282 @@
+{
+  "name": "study",
+  "source": null,
+  "graph": {
+    "name": "study",
+    "steps": [
+      {
+        "key": 0,
+        "id": null,
+        "label": "review",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 1,
+        "id": null,
+        "label": "review",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 2,
+        "id": null,
+        "label": "xor-route",
+        "kind": "xor",
+        "human": false,
+        "returns_to": null,
+        "paths": [
+          {
+            "name": "fix",
+            "description": "Fix it",
+            "steps": [
+              {
+                "key": 3,
+                "id": null,
+                "label": "implement",
+                "kind": "skill",
+                "human": false,
+                "returns_to": null,
+                "paths": [],
+                "sources": [
+                  "study"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "pass",
+            "description": "Continue",
+            "steps": []
+          }
+        ],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 4,
+        "id": null,
+        "label": "implement",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 5,
+        "id": null,
+        "label": "loop-or-next",
+        "kind": "skill",
+        "human": false,
+        "returns_to": 4,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 6,
+        "id": null,
+        "label": "demo",
+        "kind": "skill",
+        "human": false,
+        "returns_to": null,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      },
+      {
+        "key": 7,
+        "id": null,
+        "label": "loop-or-next",
+        "kind": "skill",
+        "human": false,
+        "returns_to": 4,
+        "paths": [],
+        "sources": [
+          "study"
+        ]
+      }
+    ],
+    "interactions": {
+      "stages": [],
+      "transitions": [
+        {
+          "from": "@start",
+          "to": "@end",
+          "nodes": [
+            "0",
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7"
+          ],
+          "routes": [
+            {
+              "from": "@start",
+              "to": "0",
+              "condition": null
+            },
+            {
+              "from": "0",
+              "to": "1",
+              "condition": null
+            },
+            {
+              "from": "1",
+              "to": "2",
+              "condition": null
+            },
+            {
+              "from": "2",
+              "to": "3",
+              "condition": "fix"
+            },
+            {
+              "from": "2",
+              "to": "4",
+              "condition": "pass"
+            },
+            {
+              "from": "4",
+              "to": "5",
+              "condition": null
+            },
+            {
+              "from": "5",
+              "to": "6",
+              "condition": "advance"
+            },
+            {
+              "from": "5",
+              "to": "4",
+              "condition": "repeat"
+            },
+            {
+              "from": "6",
+              "to": "7",
+              "condition": null
+            },
+            {
+              "from": "7",
+              "to": "@end",
+              "condition": "advance"
+            },
+            {
+              "from": "7",
+              "to": "4",
+              "condition": "repeat"
+            },
+            {
+              "from": "3",
+              "to": "4",
+              "condition": null
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "unavailable": null,
+  "composition": {
+    "revision": "fixture-study-composition",
+    "items": [
+      {
+        "kind": "group",
+        "id": "group-0",
+        "name": "repeat",
+        "items": [
+          {
+            "kind": "node",
+            "key": 0,
+            "paths": {}
+          }
+        ]
+      },
+      {
+        "kind": "group",
+        "id": "group-1",
+        "name": "repeat",
+        "items": [
+          {
+            "kind": "node",
+            "key": 1,
+            "paths": {}
+          }
+        ]
+      },
+      {
+        "kind": "group",
+        "id": "group-2",
+        "name": "empty",
+        "items": []
+      },
+      {
+        "kind": "node",
+        "key": 2,
+        "paths": {
+          "fix": [
+            {
+              "kind": "group",
+              "id": "group-3",
+              "name": "build",
+              "items": [
+                {
+                  "kind": "node",
+                  "key": 3,
+                  "paths": {}
+                }
+              ]
+            }
+          ],
+          "pass": []
+        }
+      },
+      {
+        "kind": "group",
+        "id": "group-4",
+        "name": "pursue",
+        "items": [
+          {
+            "kind": "node",
+            "key": 4,
+            "paths": {}
+          },
+          {
+            "kind": "node",
+            "key": 5,
+            "paths": {}
+          },
+          {
+            "kind": "node",
+            "key": 6,
+            "paths": {}
+          },
+          {
+            "kind": "node",
+            "key": 7,
+            "paths": {}
+          }
+        ]
+      }
+    ]
+  }
+}

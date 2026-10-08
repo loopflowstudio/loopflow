@@ -14,9 +14,7 @@ use time::OffsetDateTime;
 use crate::harness::opencode_runtime::{
     reap_selected_orphaned_opencode_servers_at, registered_opencode_servers_at, OpenCodeServerEntry,
 };
-use crate::journal::{
-    prune_exec_process_receipts_at, read_exec_process_receipts_at, ExecProcessReceipt,
-};
+use crate::journal::{prune_process_receipts_at, read_process_receipts_at, ProcessReceipt};
 use crate::lf::output::truncate;
 use crate::store::sqlite::SqliteStore;
 
@@ -29,7 +27,7 @@ const COMMAND_WIDTH: usize = 82;
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActivityNodeKind {
-    Exec,
+    Process,
     ProviderProcess,
 }
 
@@ -99,8 +97,8 @@ pub struct ProcessPruneReport {
     pub schema_version: u32,
     pub observed_at: i64,
     pub dry_run: bool,
-    pub stale_exec_receipt_pids: Vec<u32>,
-    pub removed_exec_receipts: u32,
+    pub stale_process_receipt_pids: Vec<u32>,
+    pub removed_process_receipts: u32,
     pub orphaned_opencode_process_groups: Vec<u32>,
     pub reaped_opencode_process_groups: u32,
     pub errors: u32,
@@ -108,7 +106,7 @@ pub struct ProcessPruneReport {
 
 #[derive(Debug, Clone)]
 struct ActivityData {
-    execs: Vec<ExecRecord>,
+    processes: Vec<ProcessRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,13 +123,13 @@ pub(crate) struct OsProcess {
 #[derive(Debug, Clone)]
 pub(crate) struct ProcessSnapshot {
     pub(crate) processes: Vec<OsProcess>,
-    pub(crate) receipts: Vec<ExecProcessReceipt>,
+    pub(crate) receipts: Vec<ProcessReceipt>,
     pub(crate) opencode_servers: Vec<OpenCodeServerEntry>,
 }
 
 #[derive(Debug, Clone)]
 struct OwnedProviderProcess {
-    exec_id: String,
+    process_lfid: String,
     process: OsProcess,
 }
 
@@ -143,21 +141,21 @@ pub struct LiveProviderProcess {
 }
 
 #[derive(Debug)]
-pub(crate) struct LiveExecProviders {
-    pub receipt: ExecProcessReceipt,
+pub(crate) struct LiveProcessProviders {
+    pub receipt: ProcessReceipt,
     pub providers: Vec<LiveProviderProcess>,
 }
 
 #[derive(Debug)]
 pub(crate) struct LiveSessionProcesses {
-    pub execs: Vec<LiveExecProviders>,
+    pub processes: Vec<LiveProcessProviders>,
     pub clients: Vec<(String, LiveProviderProcess)>,
     pub gaps: Vec<String>,
 }
 
 /// Session observations use the same process and ownership evidence as `ps`,
-/// without loading the Exec event ledger or provider output.
-pub(crate) fn live_exec_providers(
+/// without loading the Process event ledger or provider output.
+pub(crate) fn live_process_providers(
     snapshot: &ProcessSnapshot,
     clients: &[(String, crate::session_record::ProviderClientRef)],
 ) -> LiveSessionProcesses {
@@ -181,7 +179,7 @@ pub(crate) fn live_exec_providers(
         .collect::<Vec<_>>();
     let owners = receipts
         .iter()
-        .map(|receipt| (receipt.pid, receipt.exec_id.clone()))
+        .map(|receipt| (receipt.pid, receipt.process_lfid.clone()))
         .collect::<HashMap<_, _>>();
     let mut gaps = Vec::new();
     let (providers, unclaimed) = claim_provider_processes(snapshot, &by_pid, &owners);
@@ -197,7 +195,7 @@ pub(crate) fn live_exec_providers(
             .filter(|process| {
                 process.kind.is_none()
                     && !native_pids.contains(&process.pid)
-                    && nearest_exec_owner(process.ppid, &by_pid, &owners).is_some()
+                    && nearest_process_owner(process.ppid, &by_pid, &owners).is_some()
                     && process
                         .command
                         .split_whitespace()
@@ -206,14 +204,14 @@ pub(crate) fn live_exec_providers(
                         .is_some_and(|name| name == "opencode")
             })
             .count();
-    let execs = receipts
+    let processes = receipts
         .into_iter()
-        .map(|receipt| LiveExecProviders {
+        .map(|receipt| LiveProcessProviders {
             receipt: receipt.clone(),
             providers: providers
                 .iter()
                 .filter(|provider| {
-                    provider.exec_id == receipt.exec_id
+                    provider.process_lfid == receipt.process_lfid
                         && !native_pids.contains(&provider.process.pid)
                         && !provider.process.kernel_state.starts_with('Z')
                 })
@@ -232,19 +230,19 @@ pub(crate) fn live_exec_providers(
         .collect();
     if unclaimed > 0 {
         gaps.push(format!(
-            "{unclaimed} Home-owned provider processes have no verified Session attribution"
+            "{unclaimed} Machine-owned provider processes have no verified Session attribution"
         ));
     }
     gaps.sort();
     gaps.dedup();
     LiveSessionProcesses {
-        execs,
+        processes,
         clients: native,
         gaps,
     }
 }
 
-/// Exact recorded provider identity may survive its launching Exec.
+/// Exact recorded provider identity may survive its launching Process.
 /// A caller still needs a verified current driver or native client to display it.
 pub(crate) fn exact_provider_process(
     snapshot: &ProcessSnapshot,
@@ -304,10 +302,10 @@ impl ProcessKind {
 }
 
 #[derive(Debug, Clone)]
-struct ExecRecord {
+struct ProcessRecord {
     trace_id: String,
-    id: String,
-    parent_id: Option<String>,
+    lfid: String,
+    parent_process_lfid: Option<String>,
     label: String,
     repo: Option<String>,
     worktree: Option<String>,
@@ -347,23 +345,23 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let lf_home = crate::store::lf_home_dir();
     let processes = observe_processes(now, &lf_home)?;
-    let (stale_exec_receipt_pids, orphaned_opencode_process_groups) =
+    let (stale_process_receipt_pids, orphaned_opencode_process_groups) =
         resolve_prune_targets(&processes);
     let mut report = ProcessPruneReport {
         schema_version: SCHEMA_VERSION,
         observed_at: now,
         dry_run,
-        stale_exec_receipt_pids,
-        removed_exec_receipts: 0,
+        stale_process_receipt_pids,
+        removed_process_receipts: 0,
         orphaned_opencode_process_groups,
         reaped_opencode_process_groups: 0,
         errors: 0,
     };
     if !dry_run {
-        match prune_exec_process_receipts_at(&lf_home, &report.stale_exec_receipt_pids) {
-            Ok(removed) => report.removed_exec_receipts = removed,
+        match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
+            Ok(removed) => report.removed_process_receipts = removed,
             Err(error) => {
-                tracing::warn!(error = %error, "failed to prune stale Exec receipts");
+                tracing::warn!(error = %error, "failed to prune stale Process receipts");
                 report.errors += 1;
             }
         }
@@ -398,14 +396,14 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
         .iter()
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
-    let mut stale_exec_receipt_pids = processes
+    let mut stale_process_receipt_pids = processes
         .receipts
         .iter()
         .filter(|receipt| !receipt_matches_live_process(receipt, &process_by_pid))
         .map(|receipt| receipt.pid)
         .collect::<Vec<_>>();
-    stale_exec_receipt_pids.sort_unstable();
-    stale_exec_receipt_pids.dedup();
+    stale_process_receipt_pids.sort_unstable();
+    stale_process_receipt_pids.dedup();
 
     let mut orphaned_opencode_process_groups = processes
         .opencode_servers
@@ -423,7 +421,7 @@ fn resolve_prune_targets(processes: &ProcessSnapshot) -> (Vec<u32>, Vec<u32>) {
         .collect::<Vec<_>>();
     orphaned_opencode_process_groups.sort_unstable();
     orphaned_opencode_process_groups.dedup();
-    (stale_exec_receipt_pids, orphaned_opencode_process_groups)
+    (stale_process_receipt_pids, orphaned_opencode_process_groups)
 }
 
 /// Best-effort snapshot of directories currently owned by a live process.
@@ -456,49 +454,51 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
         .iter()
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
-    let live_execs = processes
+    let live_processes = processes
         .receipts
         .iter()
         .filter(|receipt| receipt_matches_live_process(receipt, &process_by_pid))
         .cloned()
         .collect::<Vec<_>>();
-    let data = read_activity_data(&path, &live_execs)?;
+    let data = read_activity_data(&path, &live_processes)?;
     collect_activity(data, processes, now)
 }
 
-fn read_activity_data(path: &Path, live_execs: &[ExecProcessReceipt]) -> Result<ActivityData> {
+fn read_activity_data(path: &Path, live_processes: &[ProcessReceipt]) -> Result<ActivityData> {
     if !path.exists() {
-        return Ok(ActivityData { execs: Vec::new() });
+        return Ok(ActivityData {
+            processes: Vec::new(),
+        });
     }
-    let store = SqliteStore::open_execs_read_only(path)
-        .map_err(|error| anyhow!("failed to read Exec history {}: {error}", path.display()))?;
-    Ok(store.read_exec_snapshot(|store| {
-        let mut execs = Vec::new();
-        for receipt in live_execs {
-            let id = crate::id::ExecId::parse(&receipt.exec_id)
+    let store = SqliteStore::open_processes_read_only(path)
+        .map_err(|error| anyhow!("failed to read Process history {}: {error}", path.display()))?;
+    Ok(store.read_process_snapshot(|store| {
+        let mut processes = Vec::new();
+        for receipt in live_processes {
+            let id = crate::id::ProcessLfid::parse(&receipt.process_lfid)
                 .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-            if let Some(exec) = store.exec(&id)? {
-                execs.push(ExecRecord {
-                    trace_id: exec.trace_id.to_string(),
-                    id: exec.id.to_string(),
-                    parent_id: exec.parent_exec_id.map(|id| id.to_string()),
-                    label: command_label(exec.command.as_deref()),
-                    repo: exec.repo,
-                    worktree: exec.cwd,
+            if let Some(process) = store.process(&id)? {
+                processes.push(ProcessRecord {
+                    trace_id: process.trace_id.to_string(),
+                    lfid: process.lfid.to_string(),
+                    parent_process_lfid: process.parent_process_lfid.map(|id| id.to_string()),
+                    label: command_label(process.command.as_deref()),
+                    repo: process.repo,
+                    worktree: process.cwd,
                     wave: None,
-                    started_at: exec.started_at,
+                    started_at: process.started_at,
                 });
             }
         }
-        Ok(ActivityData { execs })
+        Ok(ActivityData { processes })
     })?)
 }
 
 fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
     Ok(ProcessSnapshot {
         processes: sample_processes(now)?,
-        receipts: read_exec_process_receipts_at(lf_home)
-            .context("failed to read live Exec receipts")?,
+        receipts: read_process_receipts_at(lf_home)
+            .context("failed to read live Process receipts")?,
         opencode_servers: registered_opencode_servers_at(lf_home)
             .context("OpenCode ownership registry unavailable")?,
     })
@@ -600,7 +600,7 @@ fn collect_activity(
     processes: ProcessSnapshot,
     now: i64,
 ) -> Result<ActivitySnapshot> {
-    let ActivityData { execs } = data;
+    let ActivityData { processes: records } = data;
 
     let process_by_pid = processes
         .processes
@@ -608,33 +608,33 @@ fn collect_activity(
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
     let current_pid = std::process::id();
-    let receipt_evidence = execs
+    let receipt_evidence = records
         .iter()
-        .map(|exec| {
+        .map(|process| {
             (
-                exec.id.clone(),
-                receipt_evidence(exec, &processes.receipts, &process_by_pid),
+                process.lfid.clone(),
+                receipt_evidence(process, &processes.receipts, &process_by_pid),
             )
         })
         .collect::<HashMap<_, _>>();
-    let live_execs = execs
+    let live_processes = records
         .into_iter()
-        .filter(|exec| {
+        .filter(|process| {
             matches!(
-                receipt_evidence.get(&exec.id),
+                receipt_evidence.get(&process.lfid),
                 Some(ReceiptEvidence::Present(pid)) if *pid != current_pid
             )
         })
         .collect::<Vec<_>>();
-    let live_exec_ids = live_execs
+    let live_process_lfids = live_processes
         .iter()
-        .map(|exec| exec.id.clone())
+        .map(|process| process.lfid.clone())
         .collect::<HashSet<_>>();
     let owner_by_pid = receipt_evidence
         .iter()
-        .filter_map(|(exec_id, evidence)| match evidence {
-            ReceiptEvidence::Present(pid) if live_exec_ids.contains(exec_id) => {
-                Some((*pid, exec_id.clone()))
+        .filter_map(|(process_lfid, evidence)| match evidence {
+            ReceiptEvidence::Present(pid) if live_process_lfids.contains(process_lfid) => {
+                Some((*pid, process_lfid.clone()))
             }
             ReceiptEvidence::Absent | ReceiptEvidence::Missing => None,
             ReceiptEvidence::Present(_) => None,
@@ -644,28 +644,28 @@ fn collect_activity(
     let (owned_providers, provider_processes) =
         claim_provider_processes(&processes, &process_by_pid, &owner_by_pid);
     let mut nodes = Vec::new();
-    for exec in live_execs {
+    for process in live_processes {
         let evidence = receipt_evidence
-            .get(&exec.id)
+            .get(&process.lfid)
             .copied()
             .unwrap_or(ReceiptEvidence::Missing);
         nodes.push(ActivityNode {
-            id: exec_node_id(&exec.id),
-            parent_id: exec
-                .parent_id
+            id: process_node_id(&process.lfid),
+            parent_id: process
+                .parent_process_lfid
                 .as_deref()
-                .filter(|parent| live_exec_ids.contains(*parent))
-                .map(exec_node_id),
-            kind: ActivityNodeKind::Exec,
-            label: exec.label,
-            repo: exec.repo,
-            worktree: exec.worktree,
-            wave: exec.wave,
+                .filter(|parent| live_process_lfids.contains(*parent))
+                .map(process_node_id),
+            kind: ActivityNodeKind::Process,
+            label: process.label,
+            repo: process.repo,
+            worktree: process.worktree,
+            wave: process.wave,
             pid: match evidence {
                 ReceiptEvidence::Present(pid) => Some(pid),
                 ReceiptEvidence::Absent | ReceiptEvidence::Missing => None,
             },
-            started_at: exec.started_at,
+            started_at: process.started_at,
             state: match evidence {
                 ReceiptEvidence::Present(pid) => process_by_pid
                     .get(&pid)
@@ -674,7 +674,7 @@ fn collect_activity(
             },
         });
     }
-    let exec_context = nodes
+    let process_context = nodes
         .iter()
         .map(|node| {
             (
@@ -684,8 +684,8 @@ fn collect_activity(
         })
         .collect::<HashMap<_, _>>();
     for owned in owned_providers {
-        let parent_id = exec_node_id(&owned.exec_id);
-        let (repo, worktree, wave) = exec_context
+        let parent_id = process_node_id(&owned.process_lfid);
+        let (repo, worktree, wave) = process_context
             .get(&parent_id)
             .cloned()
             .unwrap_or((None, None, None));
@@ -729,7 +729,7 @@ fn command_label(command: Option<&str>) -> String {
         return "lf".to_string();
     };
     let grouped = [
-        "home", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
+        "machine", "repo", "pm", "pr", "project", "radio", "task", "wave", "work",
     ];
     let operation = grouped
         .contains(&command.as_str())
@@ -751,14 +751,13 @@ fn safe_command_word(value: &str) -> bool {
 }
 
 fn receipt_evidence(
-    exec: &ExecRecord,
-    receipts: &[ExecProcessReceipt],
+    process: &ProcessRecord,
+    receipts: &[ProcessReceipt],
     process_by_pid: &HashMap<u32, &OsProcess>,
 ) -> ReceiptEvidence {
-    let Some(receipt) = receipts
-        .iter()
-        .find(|receipt| receipt.exec_id == exec.id && receipt.trace_id == exec.trace_id)
-    else {
+    let Some(receipt) = receipts.iter().find(|receipt| {
+        receipt.process_lfid == process.lfid && receipt.trace_id == process.trace_id
+    }) else {
         return ReceiptEvidence::Missing;
     };
     if receipt_matches_live_process(receipt, process_by_pid) {
@@ -769,7 +768,7 @@ fn receipt_evidence(
 }
 
 fn receipt_matches_live_process(
-    receipt: &ExecProcessReceipt,
+    receipt: &ProcessReceipt,
     process_by_pid: &HashMap<u32, &OsProcess>,
 ) -> bool {
     process_by_pid.get(&receipt.pid).is_some_and(|process| {
@@ -803,13 +802,13 @@ fn claim_provider_processes(
         }
         let owner = registered_owner
             .and_then(|pid| owner_by_pid.get(&pid).cloned())
-            .or_else(|| nearest_exec_owner(process.ppid, process_by_pid, owner_by_pid));
+            .or_else(|| nearest_process_owner(process.ppid, process_by_pid, owner_by_pid));
         let Some(owner) = owner else {
             unclaimed.push(provider_process(process, ProviderClaim::Unclaimed));
             continue;
         };
         owned.push(OwnedProviderProcess {
-            exec_id: owner,
+            process_lfid: owner,
             process: process.clone(),
         });
     }
@@ -833,7 +832,7 @@ fn has_provider_ancestor(process: &OsProcess, process_by_pid: &HashMap<u32, &OsP
     false
 }
 
-fn nearest_exec_owner(
+fn nearest_process_owner(
     mut pid: u32,
     process_by_pid: &HashMap<u32, &OsProcess>,
     owner_by_pid: &HashMap<u32, String>,
@@ -927,15 +926,15 @@ fn fold_node(
         child_states.push(child.state);
     }
     let node = &mut nodes[node_index];
-    if node.kind == ActivityNodeKind::Exec {
-        node.state = fold_exec_state(node.state, &child_states);
+    if node.kind == ActivityNodeKind::Process {
+        node.state = fold_process_state(node.state, &child_states);
     }
     visiting.remove(id);
     done.insert(id.to_string());
     Ok(())
 }
 
-fn fold_exec_state(base: ActivityState, children: &[ActivityState]) -> ActivityState {
+fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> ActivityState {
     for state in [
         ActivityState::Working,
         ActivityState::Stalled,
@@ -948,8 +947,8 @@ fn fold_exec_state(base: ActivityState, children: &[ActivityState]) -> ActivityS
     base
 }
 
-fn exec_node_id(id: &str) -> String {
-    format!("exec:{id}")
+fn process_node_id(id: &str) -> String {
+    format!("process:{id}")
 }
 
 fn provider_node_id(pid: u32) -> String {
@@ -975,7 +974,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
     ));
     output.push_str("  ELAPSED       PID  STATE      CALL\n");
     if snapshot.nodes.is_empty() {
-        output.push_str("  no live call trees recorded in this Home\n");
+        output.push_str("  no live call trees recorded in this Machine\n");
     } else {
         let index = snapshot
             .nodes
@@ -1034,16 +1033,16 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     let action = if report.dry_run { "PREVIEW" } else { "PRUNED" };
     let mut output = format!("LOOPFLOW PROCESS PRUNE · {action}\n");
     output.push_str(&format!(
-        "{} stale Exec receipt PIDs · {} orphaned OpenCode process groups · {} errors\n",
-        report.stale_exec_receipt_pids.len(),
+        "{} stale Process receipt PIDs · {} orphaned OpenCode process groups · {} errors\n",
+        report.stale_process_receipt_pids.len(),
         report.orphaned_opencode_process_groups.len(),
         report.errors,
     ));
-    if !report.stale_exec_receipt_pids.is_empty() {
+    if !report.stale_process_receipt_pids.is_empty() {
         output.push_str(&format!(
-            "Exec receipt PIDs (unfinished receipts retained): {}\n",
+            "Process receipt PIDs (unfinished receipts retained): {}\n",
             report
-                .stale_exec_receipt_pids
+                .stale_process_receipt_pids
                 .iter()
                 .map(u32::to_string)
                 .collect::<Vec<_>>()
@@ -1064,7 +1063,7 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     if !report.dry_run {
         output.push_str(&format!(
             "removed {} receipts · reaped {} process groups\n",
-            report.removed_exec_receipts, report.reaped_opencode_process_groups,
+            report.removed_process_receipts, report.reaped_opencode_process_groups,
         ));
     }
     output
@@ -1153,17 +1152,17 @@ pub(crate) fn test_process(pid: u32, ppid: u32, started_at: i64, command: &str) 
 mod tests {
     use super::*;
 
-    fn exec_record(
+    fn process_record(
         trace: &str,
-        exec: &str,
+        process: &str,
         parent: Option<&str>,
         at: i64,
         command: &str,
-    ) -> ExecRecord {
-        ExecRecord {
+    ) -> ProcessRecord {
+        ProcessRecord {
             trace_id: trace.into(),
-            id: exec.into(),
-            parent_id: parent.map(str::to_owned),
+            lfid: process.into(),
+            parent_process_lfid: parent.map(str::to_owned),
             label: format!("lf {command}"),
             repo: Some("/src/loopflow".into()),
             worktree: Some("/src/loopflow".into()),
@@ -1184,46 +1183,46 @@ mod tests {
         }
     }
 
-    fn receipt(exec: &str, pid: u32, started_at: i64) -> ExecProcessReceipt {
-        ExecProcessReceipt {
+    fn receipt(process: &str, pid: u32, started_at: i64) -> ProcessReceipt {
+        ProcessReceipt {
             schema_version: 1,
             trace_id: "trace".to_string(),
-            exec_id: exec.to_string(),
+            process_lfid: process.to_string(),
             pid,
             started_at,
         }
     }
 
     #[test]
-    fn activity_reads_exact_exec_rows_without_replaying_command_events() {
+    fn activity_reads_exact_process_rows_without_replaying_command_events() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let exec = crate::id::ExecId::new();
-        let missing = crate::id::ExecId::new();
+        let record = crate::id::ProcessLfid::new();
+        let missing = crate::id::ProcessLfid::new();
         let trace = crate::id::TraceId::new();
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute(
-            "INSERT INTO execs(id,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
-            rusqlite::params![exec, trace, r#"["lf","implement"]"#],
+            "INSERT INTO processes(lfid,trace_id,command,repo,cwd,started_at) VALUES(?1,?2,?3,'/repo','/checkout',1000)",
+            rusqlite::params![record, trace, r#"["lf","implement"]"#],
         ).unwrap();
-        let recorded = store.exec(&exec).unwrap().unwrap();
+        let recorded = store.process(&record).unwrap().unwrap();
         assert_eq!(recorded.via_agent, None);
         assert_eq!(recorded.completed_at, None);
         assert_eq!(recorded.exit_code, None);
-        assert!(store.exec(&missing).unwrap().is_none());
+        assert!(store.process(&missing).unwrap().is_none());
         conn.execute(
-            "UPDATE execs SET completed_at=9000,outcome='failed',exit_code=42 WHERE id=?1",
-            [&exec],
+            "UPDATE processes SET completed_at=9000,outcome='failed',exit_code=42 WHERE lfid=?1",
+            [&record],
         )
         .unwrap();
-        let recorded = store.exec(&exec).unwrap().unwrap();
+        let recorded = store.process(&record).unwrap().unwrap();
         assert_eq!(recorded.completed_at, Some(9000));
         assert_eq!(recorded.outcome.as_deref(), Some("failed"));
         assert_eq!(recorded.exit_code, Some(42));
         assert_eq!(recorded.signal, None);
         // An observed command outcome cannot override an exact OS-live receipt.
-        let mut owned = receipt(exec.as_str(), 10, 1000);
+        let mut owned = receipt(record.as_str(), 10, 1000);
         owned.trace_id = trace.to_string();
         let mut unowned = receipt(missing.as_str(), 20, 1000);
         unowned.trace_id = trace.to_string();
@@ -1274,7 +1273,7 @@ mod tests {
             "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/lf implement",
         ] {
             let snapshot = collect_activity(
-                ActivityData { execs: vec![exec_record("trace", "worker", None, 1_000, "implement")] },
+                ActivityData { processes: vec![process_record("trace", "worker", None, 1_000, "implement")] },
                 ProcessSnapshot {
                     processes: vec![process(10, 1, 1_000, command), process(11, 10, 1_001, "codex app-server")],
                     receipts: vec![receipt("worker", 10, 1_000)],
@@ -1290,12 +1289,12 @@ mod tests {
     fn call_tree_uses_only_live_receipts_and_os_processes() {
         let now = 10_000;
         let data = ActivityData {
-            execs: vec![
-                exec_record("trace", "exec-5whys", None, 1_000, "5whys"),
-                exec_record(
+            processes: vec![
+                process_record("trace", "process-5whys", None, 1_000, "5whys"),
+                process_record(
                     "trace",
-                    "exec-implement",
-                    Some("exec-5whys"),
+                    "process-implement",
+                    Some("process-5whys"),
                     2_000,
                     "implement",
                 ),
@@ -1312,8 +1311,8 @@ mod tests {
                 process(40, 1, 9_000, "codex app-server"),
             ],
             receipts: vec![
-                receipt("exec-5whys", 10, 1_000),
-                receipt("exec-implement", 20, 2_000),
+                receipt("process-5whys", 10, 1_000),
+                receipt("process-implement", 20, 2_000),
             ],
             opencode_servers: Vec::new(),
         };
@@ -1322,7 +1321,7 @@ mod tests {
         let root = snapshot
             .nodes
             .iter()
-            .find(|node| node.id == "exec:exec-5whys")
+            .find(|node| node.id == "process:process-5whys")
             .unwrap();
         assert_eq!(root.state, ActivityState::Working);
         assert_eq!(root.repo.as_deref(), Some("/src/loopflow"));
@@ -1332,7 +1331,10 @@ mod tests {
             .iter()
             .find(|node| node.id == "provider:30")
             .unwrap();
-        assert_eq!(provider.parent_id.as_deref(), Some("exec:exec-implement"));
+        assert_eq!(
+            provider.parent_id.as_deref(),
+            Some("process:process-implement")
+        );
         assert_eq!(provider.kind, ActivityNodeKind::ProviderProcess);
         assert_eq!(provider.worktree.as_deref(), Some("/src/loopflow"));
         assert_eq!(provider.state, ActivityState::Working);
@@ -1361,9 +1363,9 @@ mod tests {
     fn dead_and_unknown_calls_are_absent_while_registered_orphans_remain_visible() {
         let now = 10_000;
         let data = ActivityData {
-            execs: vec![
-                exec_record("trace", "dead", None, 1_000, "old"),
-                exec_record("trace", "unknown", None, 2_000, "legacy"),
+            processes: vec![
+                process_record("trace", "dead", None, 1_000, "old"),
+                process_record("trace", "unknown", None, 2_000, "legacy"),
             ],
         };
         let processes = ProcessSnapshot {

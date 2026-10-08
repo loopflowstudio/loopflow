@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -52,8 +53,8 @@ ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
 LOOPFLOW_STREAM_LOG = DEV_LOG_DIR / f"{REPO_ROOT.name}.loopflow-run-debug.log"
 DEV_CONTROL_CONFIG = "LoopflowDevControl.json"
-GHOSTTY_REVISION = "4c838723173da757a16a2f3afd4c94f16732ef6a"
-GHOSTTY_ARTIFACT = "GhosttyKit-4c83872-lf3.xcframework.zip"
+GHOSTTY_REVISION = "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0"
+GHOSTTY_ARTIFACT = "GhosttyKit-a60e9e2-lf2.xcframework.zip"
 
 
 def _app_environment(repo: Path) -> dict[str, str]:
@@ -185,6 +186,21 @@ def cmd_test() -> int:
     return run(["swift", "test"], cwd=SWIFT_DIR, check=False).returncode
 
 
+def _normalize_ghostty_library(framework: Path) -> None:
+    """Give SwiftPM the static-library basename it requires."""
+    manifest = framework / "Info.plist"
+    info = plistlib.loads(manifest.read_bytes())
+    for library in info["AvailableLibraries"]:
+        directory = framework / library["LibraryIdentifier"]
+        original = library["LibraryPath"]
+        name = "libghostty.a"
+        if original != name:
+            (directory / original).rename(directory / name)
+        library["LibraryPath"] = name
+        library["BinaryPath"] = name
+    manifest.write_bytes(plistlib.dumps(info))
+
+
 def cmd_ghostty_build() -> int:
     """Build the pinned GhosttyKit with Loopflow's small embedder patch."""
     build_root = SWIFT_DIR / ".build" / "ghostty-kit"
@@ -208,7 +224,7 @@ def cmd_ghostty_build() -> int:
         print(f"Applying {patch.name}...")
         with patch.open("rb") as patch_input:
             result = subprocess.run(
-                ["patch", "-p1"],
+                ["patch", "--batch", "--forward", "-p1"],
                 cwd=source,
                 stdin=patch_input,
                 check=False,
@@ -216,7 +232,7 @@ def cmd_ghostty_build() -> int:
         if result.returncode != 0:
             return result.returncode
 
-    # The patch's own tests, plus upstream's prompt tests it changes.
+    # Patch behavior, the protocol parser it consumes, and the exported action ABI.
     result = run(
         [
             "zig",
@@ -225,6 +241,9 @@ def cmd_ghostty_build() -> int:
             "-Dtest-filter=command",
             "-Dtest-filter=semantic prompt",
             "-Dtest-filter=execCommand",
+            "-Dtest-filter=program status",
+            "-Dtest-filter=OSC 7501",
+            "-Dtest-filter=ghostty.h Action.Key",
         ],
         cwd=source,
         check=False,
@@ -232,7 +251,11 @@ def cmd_ghostty_build() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    result = run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=source, check=False)
+    result = run(
+        ["zig", "build", "-Doptimize=ReleaseFast", "-Demit-macos-app=false"],
+        cwd=source,
+        check=False,
+    )
     if result.returncode != 0:
         return result.returncode
 
@@ -245,6 +268,8 @@ def cmd_ghostty_build() -> int:
     )
     if result.returncode != 0:
         return result.returncode
+
+    _normalize_ghostty_library(local_framework)
 
     artifact.parent.mkdir(parents=True, exist_ok=True)
     artifact.unlink(missing_ok=True)
@@ -570,7 +595,7 @@ def _apply_dev_identity(plist: Path) -> None:
 def _copy_bundled_tools(app_macos_dir: Path) -> None:
     # The app is a live operator surface even when its Swift shell is a dev
     # build. Its bundled CLI forwards ordinary commands to the installed CLI;
-    # it has no authority to migrate the main Home.
+    # it has no authority to migrate the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",

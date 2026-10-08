@@ -1,13 +1,13 @@
-//! What a Task's most recently launched Flow is doing, read from its Execs and
+//! What a Task's most recently launched Flow is doing, read from its Processes and
 //! their processes. Observation only: no Flow is selected, claimed or resumed.
 
 use serde::{Deserialize, Serialize};
 
+use crate::durable::FlowProcessDetail;
 use crate::durable::TaskId;
 use crate::journal::ProcessIdentityEvidence;
-use crate::ops::flow_run::FlowExec;
-use crate::ops::task_flow::{LatestTaskFlow, TaskFlowRecord};
-use crate::session::FlowSummaryState;
+use crate::ops::flow_process::FlowProcess;
+use crate::session::FlowProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreResult};
 
@@ -39,11 +39,11 @@ pub(crate) async fn task_execution(
     Ok(task_execution_and_flow(store, task_id).await?.0)
 }
 
-/// Execution and the Flow record read from the same Execs.
+/// Execution and the Flow record read from the same Processes.
 pub(crate) async fn task_execution_and_flow(
     store: &SharedStore,
     task_id: &TaskId,
-) -> StoreResult<(TaskExecutionSnapshot, TaskFlowRecord)> {
+) -> StoreResult<(TaskExecutionSnapshot, Option<FlowProcessDetail>)> {
     let Some(flow) = store.sqlite.task_flows(task_id)?.pop() else {
         return Ok((
             TaskExecutionSnapshot {
@@ -53,17 +53,17 @@ pub(crate) async fn task_execution_and_flow(
                 step: None,
                 captured: None,
             },
-            TaskFlowRecord::None,
+            None,
         ));
     };
     let entry = store.sqlite.flow_entry(&flow)?;
-    let evidence = |exec: &crate::exec::Exec| match exec.completed_at {
+    let evidence = |process: &crate::process::Process| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::exec_process_evidence(&store.sqlite, &exec.id),
+        None => crate::journal::process_evidence(&store.sqlite, &process.lfid),
     };
-    let step = flow.latest().map(|step| &step.exec);
+    let step = flow.latest().map(|step| &step.process);
     let input = match step {
-        Some(step) => store.sqlite.exec_input(&step.id)?,
+        Some(step) => store.sqlite.process_input(&step.lfid)?,
         None => None,
     };
     let mut snapshot = project_execution(
@@ -88,36 +88,18 @@ pub(crate) async fn task_execution_and_flow(
             }
         }
     }
-    // An unfinished Flow is history once its Task is terminal. Independent
-    // Sessions remain discoverable through the Session inventory.
-    let status = store
-        .work_status(&crate::durable::WorkRef::Task(task_id.clone()))
-        .await?;
-    if status != crate::durable::WorkStatus::Ready {
-        snapshot.state = TaskExecutionState::Idle;
-        snapshot.reason = format!("Task is {status}");
-        snapshot.step = None;
-        snapshot.captured = None;
-    }
-    let record = if entry.summary.state == FlowSummaryState::Completed {
-        TaskFlowRecord::Finished {
-            flow: entry.summary.name,
-        }
-    } else {
-        TaskFlowRecord::Latest(LatestTaskFlow::new(flow.detail(entry), &snapshot))
-    };
-    Ok((snapshot, record))
+    Ok((snapshot, Some(flow.detail(entry))))
 }
 
 /// A Flow runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
-    flow: &FlowExec,
-    state: FlowSummaryState,
+    flow: &FlowProcess,
+    state: FlowProcessSummaryState,
     driver: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
 ) -> TaskExecutionSnapshot {
-    if state == FlowSummaryState::Completed {
+    if state == FlowProcessSummaryState::Completed {
         return TaskExecutionSnapshot {
             state: TaskExecutionState::Idle,
             reason: format!("Flow {} finished; nothing further is launched", flow.name),
@@ -125,16 +107,16 @@ fn project_execution(
             captured: None,
         };
     }
-    // A driver that has started no step is the Flow's only Exec so far.
-    let (label, exec) = match flow.latest() {
-        Some(latest) => (flow.label(latest), &latest.exec),
+    // A driver that has started no step is the Flow's only Process so far.
+    let (label, process) = match flow.latest() {
+        Some(latest) => (flow.label(latest), &latest.process),
         None => (flow.name.clone(), &flow.driver),
     };
     let label = &label;
     let (state, reason) = match (driver, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
-            format!("Step Exec {} is running {label}", exec.id),
+            format!("Step Process {} is running {label}", process.lfid),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,
@@ -142,16 +124,16 @@ fn project_execution(
         ),
         (ProcessIdentityEvidence::Unknown, _) | (_, ProcessIdentityEvidence::Unknown) => (
             TaskExecutionState::Unknown,
-            format!("Flow Execs at {label} have unknown process identity; inspect their effects before launching further work"),
+            format!("Flow Processes at {label} have unknown process identity; inspect their effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            if exec.outcome.as_deref() == Some("succeeded") {
+            if process.outcome.as_deref() == Some("succeeded") {
                 (
                     TaskExecutionState::Idle,
                     format!("Flow stopped after {label}; inspect its history and effects before launching fresh work"),
                 )
             } else {
-                let ended = match (&exec.error, exec.exit_code) {
+                let ended = match (&process.error, process.exit_code) {
                     (Some(error), _) => error.clone(),
                     (None, Some(code)) => format!("process exited with status {code}"),
                     (None, None) => "process left no exit record".to_string(),
@@ -175,7 +157,7 @@ fn project_execution(
 mod tests {
     use super::{project_execution, TaskExecutionState};
     use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
-    use crate::session::FlowSummaryState;
+    use crate::session::FlowProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -184,10 +166,11 @@ mod tests {
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();
         let flow = |outcome| {
             let driver = store.test_flow("feature", "/repo", &[("implement", outcome)], None);
-            store.flow_exec(driver.as_str()).unwrap().unwrap().0
+            store.flow_process(driver.as_str()).unwrap().unwrap().0
         };
-        let state =
-            |flow, driver, step| project_execution(flow, FlowSummaryState::Current, driver, step);
+        let state = |flow, driver, step| {
+            project_execution(flow, FlowProcessSummaryState::Current, driver, step)
+        };
         let running = flow(None);
         assert_eq!(
             state(&running, Live, Live).state,
@@ -214,7 +197,8 @@ mod tests {
             "{}",
             failed.reason
         );
-        let finished = project_execution(&succeeded, FlowSummaryState::Completed, Dead, Dead);
+        let finished =
+            project_execution(&succeeded, FlowProcessSummaryState::Completed, Dead, Dead);
         assert!(finished.step.is_none());
     }
 }

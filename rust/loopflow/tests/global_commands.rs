@@ -113,18 +113,15 @@ fn explicit_home_ignores_retired_control_home_pins() {
     let home = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();
     let store_path = home.path().join(".lf/loopflow.db");
-    SqliteStore::new(&store_path).unwrap();
+    let store = SqliteStore::new(&store_path).unwrap();
     let source_db = source.path().join("loopflow.db");
     fs::write(&source_db, b"source must not be opened").unwrap();
-    let marker = loopflow::durable::HomeId::new();
+    let marker = loopflow::durable::MachineId::new();
+    store
+        .add_machine(&marker, "ssh://proof@example.invalid", "proof", "~/project")
+        .unwrap();
     for args in [
-        vec![
-            "home",
-            "observe",
-            marker.as_str(),
-            "ssh://proof@example.invalid",
-            "--json",
-        ],
+        vec!["machine", "rename", "proof", "renamed"],
         vec!["monitor", "ps", "--json"],
     ] {
         let output = command(home.path(), home.path(), &args)
@@ -135,14 +132,14 @@ fn explicit_home_ignores_retired_control_home_pins() {
         success(output);
     }
     let connection = rusqlite::Connection::open(&store_path).unwrap();
-    let route: String = connection
+    let label: String = connection
         .query_row(
-            "SELECT route FROM homes WHERE id=?1",
+            "SELECT label FROM machines WHERE id=?1",
             [marker.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(route, "ssh://proof@example.invalid");
+    assert_eq!(label, "renamed");
     assert_eq!(fs::read(source_db).unwrap(), b"source must not be opened");
     assert_eq!(fs::read_dir(source.path()).unwrap().count(), 1);
 }
@@ -167,7 +164,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
         let mut cmd = command(
             home.path(),
             cwd,
-            &["home", "install", "promote", "--cli-target", "/unused/lf"],
+            &["self", "install", "promote", "--cli-target", "/unused/lf"],
         );
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
@@ -192,7 +189,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
         home.path(),
         repo.path(),
         &[
-            "home",
+            "self",
             "install",
             "promote",
             "--cli-target",
@@ -256,18 +253,18 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         .unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
-    let output = command(home.path(), cwd.path(), &["home", "id"])
+    let output = command(home.path(), cwd.path(), &["machine", "id"])
         .output()
         .unwrap();
     let identity = success(output);
     assert!(!identity.trim().is_empty());
     let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let commands: i64 = database
-        .query_row("SELECT count(*) FROM execs", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
         commands, 2,
-        "the failed sync and Home read each own an Exec"
+        "the failed sync and Machine read each own a process"
     );
     let output = command(
         home.path(),
@@ -363,7 +360,7 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
     let run = |args: &[&str]| {
         success(
-            command(home.path(), cwd.path(), &["home", "install", "schedule"])
+            command(home.path(), cwd.path(), &["self", "install", "schedule"])
                 .args(args)
                 .env("PATH", &bin)
                 .env("LF_INSTALL_DIR", home.path().join("installed & current"))
@@ -384,8 +381,8 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
         serde_json::from_str(&success(output)).unwrap()
     };
     let plist = read_plist();
-    assert_eq!(plist["ProgramArguments"][1], "home");
-    assert_eq!(plist["ProgramArguments"][2], "install");
+    assert_eq!(plist["ProgramArguments"][1], "install");
+    assert_eq!(plist["ProgramArguments"].as_array().unwrap().len(), 2);
     assert_eq!(
         plist["EnvironmentVariables"]["LF_INSTALL_DIR"],
         home.path().join("installed & current").to_str().unwrap()
@@ -431,7 +428,7 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["home", "install", "schedule", "monthly"],
+        &["self", "install", "schedule", "monthly"],
     )
     .env("PATH", &bin)
     .output()

@@ -160,7 +160,7 @@ fn read_steps(filter: WorkFilter) -> Result<Vec<Step>> {
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = crate::store::sqlite::SqliteStore::open_execs_read_only(&database)?;
+    let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
     let sessions = store.conversation_history(
         filter.wave,
         filter.project,

@@ -44,18 +44,18 @@ for candidates nor performs rotation; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
 `project_readiness` through `lf monitor work --watch --json`. Committed selection,
-accepted facts, transitions and exact activation Exec outcomes invalidate that reading.
-A pending transition or unfinished Exec is unresolved evidence, not proof of liveness.
+accepted facts, transitions and exact activation Process outcomes invalidate that reading.
+A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.
 
 The first explicit ensure, binding setup or applied rotation imports an existing
-`<Home>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
+`<Machine>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
 validation. SQLite commits the selected Project and original YAML bytes together in
 `project_binding_imports`; absent files are recorded too. Malformed files or failed
 provider reads leave import retryable and prohibit creation. After import, the file
 is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
 untouched. An imported completed Project stays selected history and cannot be reopened.
-Activation records its exact Exec on the Wave; that Exec remains the sole owner of
+Activation records its exact Process on the Wave; that Process remains the sole owner of
 its terminal outcome and error. Swift retains command transport feedback only.
 
 ## Rotate the plan, preserve the work
@@ -218,19 +218,19 @@ across the combined migration frontier remain unfinished.
 
 ```bash
 lf flow build
-lf flow show DRIVER_EXEC --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 ```
 
-A Flow is one driver Exec and the step Execs it starts; its ID is the driver
-Exec's. Starting one compiles its definition, including every router and
+A Flow is one lf process and the step processes it starts; its ID is the driver
+Process's. Starting one compiles its definition, including every router and
 alternative, into a graph the driver holds in memory. One cursor and its return
 counters identify loop passes. Subflows and passes are display lenses over the
-step Execs, with no separate record or driver.
+step processes, with no separate record or driver.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
 driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
-one again when that Flow exec fails. Flows hold autonomous
+one again when that Flow process fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
 complete Task Work.
@@ -245,22 +245,22 @@ row per Task: the graph as it was then, never edited, and the Task's
 position. A later edit to the YAML applies to Tasks that take it up
 afterwards; taking one up again starts over at `start`.
 
-Position is stored: at a node, or on an edge with the Exec carrying it.
-Whether that Exec still runs is read from the Exec, never stored. The store
+Position is stored: at a node, or on an edge with the Process carrying it.
+Whether that Process still runs is read from the Process, never stored. The store
 has one read and four writes, and every write appends to
 `task_workflow_moves`:
 
 | Call | Effect |
 | --- | --- |
 | take up | store the graph at `start` |
-| choose | from the edge's `from` node, or from a stopped edge that left it: on the edge, carried by the choosing Exec; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
-| arrive | the Exec that carried the edge, on success, puts the Task at `to` if it is still on that edge |
+| choose | from the edge's `from` node, or from a stopped edge that left it: on the edge, carried by the choosing Process; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
+| arrive | the Process that carried the edge, on success, puts the Task at `to` if it is still on that edge |
 | set | put the Task at a named node |
 
 `lf task run ISSUE [NAME]` chooses, then runs the edge's Flow in the same
 process, which arrives when the Flow succeeds. A Flow that stops leaves the
 Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
-while another runs. A move's author is its Exec's calling conversation, else
+while another runs. A move's author is its Process's calling conversation, else
 a person; an arrival is the edge's own.
 
 A Task's state is read from that position and stored nowhere else: not ready
@@ -275,14 +275,14 @@ kept in the move's note.
 
 ## Read each step's result
 
-Each executed skill or operation runs in its own child lf Exec as the plain
+Each executed skill or operation runs in its own child lf Process as the plain
 command: `lf -b skill <name> [message]`, or the operation's own command. The
 step is told nothing about its Flow. The driver owns navigation and the Flow's
-record, FlowExec: the Flow's name and graph as compiled at launch, then one
-appended row per step with its Exec, graph node key and per-edge iterations.
+record, FlowProcess: the Flow's name and graph as compiled at launch, then one
+appended row per step with its Process, graph node key and per-edge iterations.
 Nothing reads it back to resume. A step's result is how its process exited; a
 deciding or routing step also answers through the final answer of the Session
-turn its Exec captured. After an operation the driver stops the Flow when a
+turn its Process captured. After an operation the driver stops the Flow when a
 landing of its checkout is still being watched: neither failed.
 
 A deciding step's message asks for a JSON `decision`: `advance` or `iterate`
@@ -304,12 +304,12 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show DRIVER_EXEC --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```
 
-A killed driver leaves its Execs and FlowExec rows as history; the last step
+A killed driver leaves its Processes and FlowProcess rows as history; the last step
 row shows where it stood. Nothing restarts or resumes it. A Flow is `current` while its
 driver has no recorded exit, `completed` when the driver succeeded and `stopped`
 when it exited before the last step. Crash recovery
@@ -327,7 +327,7 @@ Task status and roadmap `execution` observe the Task's most recently launched
 Flow: `none`, `latest` or `finished`. Its only control is `start`, available
 whenever the Task can run, even when an earlier Flow exists.
 
-Automatic provider retries within one Exec retain earlier failure and usage and
+Automatic provider retries within one Process retain earlier failure and usage and
 select only an authorized successor. An uncertain mechanical effect requires
 inspection; moving a cursor does not establish exactly-once external effects.
 Missing process evidence is uncertainty, and causal ancestry grants no signal
@@ -345,7 +345,7 @@ review feedback remains Session evidence. No Ready/Complete operation closes the
 conversation or releases a Flow. The caller inspects outcomes and effects
 before selecting further work; pane closure and provider exit grant no authority.
 
-Saved handoffs retain executable, Home and database together. Renaming, binding
+Saved handoffs retain executable, Machine and database together. Renaming, binding
 and driver replacement retain conversation identity and feedback. Desktop reads
 the same record and keys its terminal surface on AgentSession identity.
 
@@ -367,7 +367,7 @@ Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite
 AgentSessions.
 
-Work reservation sets Task Started once; an inspection Exec does not. Constructors
+Work reservation sets Task Started once; an inspection Process does not. Constructors
 validate Task/Wave ancestry, and chapter transfers preserve historical event
 attribution. Task delivery separately owns Git/PR mutations. Conversation identity
 and Flow membership never substitute for that authority.

@@ -4,10 +4,11 @@
 uv run python scripts/loopflow-dev.py ghostty-build
 ```
 
-Runs the patch's Zig tests, builds the pinned upstream revision with the patch,
+Requires Zig 0.16.0. Runs the patches' Zig tests, builds the pinned upstream revision,
 and writes the framework under `swift/.build/local/` plus a versioned zip under
 `swift/.build/artifacts/`. The command prints the SwiftPM checksum; it does not
-publish the artifact.
+publish the artifact. Packaging normalizes the upstream static archive to
+`libghostty.a` and updates its plist paths so SwiftPM links it.
 
 The patch makes the terminal the owner of command blocks:
 
@@ -31,6 +32,43 @@ After the patch's relevant build and behavior checks pass, upload the zip to the
 credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
+
+## Program Status
+
+`0003-program-status.patch` forwards validated OSC 7501 reports from Ghostty's
+terminal parser through `GHOSTTY_ACTION_PROGRAM_STATUS` in the embedded runtime.
+It adds no parser, record store, notification policy, or process authority.
+The standalone runtime does not answer or forward these reports.
+
+The action union's `program_status` member points to
+`ghostty_action_program_status_s`. Copy it and every string before returning from
+the callback; the terminal thread copied the validated report before parser reuse.
+
+| Field | Values |
+| --- | --- |
+| `event` | `GHOSTTY_PROGRAM_STATUS_REPORT`, `PROMPT`, `RESET`, `EXIT` |
+| `state` | idle 0, working 1, done 2, blocked 3, error 4, clear 5; -1 for boundaries |
+| `kind` | permission 0, question 1, auth 2; -1 when absent |
+| `progress` | 0–100; -1 when absent |
+| `id` | NUL-terminated UTF-8; empty string is the root record |
+| `app`, `title`, `msg` | Optional NUL-terminated UTF-8; NULL means absent |
+
+Text is already decoded, control-checked by the upstream parser, and untrusted.
+Display it literally. Prompt events accompany OSC 133 A/P, reset accompanies RIS,
+and exit precedes the attached child's existing exit handling. The app owns
+record lifetimes: drop working/blocked at prompt or exit, clear on reset, and
+dismiss retained done/error on keyboard interaction. Focus is not interaction.
+DECSTR and alternate-screen switches do not send reset events.
+
+The embedded runtime answers `OSC 7501;?` using the request's BEL or ST terminator.
+The action is appended to the existing enum; its pointer fits the existing
+action union. The forwarding patch is separable from command-block and launch
+patches and can be removed when upstream supplies the equivalent action.
+
+Headless checks exercise the upstream parser, decoded payload ownership after
+parser reuse, absent fields, action-union conversion and the exported C layout.
+They also retain the command-block/reflow and embedded launch tests. They do not
+prove mounted app presentation or Session observation.
 
 ## Embedded macOS launch
 
@@ -60,7 +98,17 @@ It verifies login profile, environment, cwd, PTY input, terminal markers and
 retained identity. Restore the published URL/checksum before checkpointing.
 `--mounted` needs a native display; the default remains headless.
 
-The published `GhosttyKit-4c83872-lf3.xcframework.zip` has SwiftPM checksum
-`e490382b7f81f92b7bee8d303f8d8094b693d992f0e6fba2c820b7b370cf7ced`.
-Infrastructure verified the full public download on October 6; `Package.swift`
-selects that immutable artifact, including the embedded launch repair.
+The published `GhosttyKit-a60e9e2-lf2.xcframework.zip` has SwiftPM checksum
+`c2add4ae90d1e8f3394fb19b8d6f28b76318cbb497509c7534f3f6e8a59826a9`.
+The October 7 clean headless build passed the patch/protocol checks and produced
+both arm64 and x86_64 libraries. A full public download with curl matched the
+checksum; Python urllib received HTTP 403. Swift imported the new action header.
+`Package.swift`, packaged shell/terminfo resources and the runtime resource
+revision select the same upstream commit.
+
+This revision also changes the upstream clipboard callback ABI: reads return
+`ghostty_clipboard_read_result_e` and receive MIME candidates and a confirmation
+flag; completion takes `ghostty_clipboard_complete_s`; confirmation receives
+`ghostty_clipboard_confirm_s`. The app adopts those signatures and preserves length-delimited clipboard text.
+No mounted surface, pane presentation or Session observation is established by
+the framework build.

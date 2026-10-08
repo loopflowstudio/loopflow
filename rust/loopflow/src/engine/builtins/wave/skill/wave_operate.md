@@ -53,8 +53,8 @@ a suggestion to check against the rules below, not an instruction. No action is
 a valid result only when every started Task already holds a disposition above.
 
 - **Look for a live driver first.** Read `lf task status <issue> --json` and
-  check every Flow in `execution.work.flows` and every unfinished Exec in
-  `execution.work.execs` against `lf ps --json`. A live process makes the Task
+  check every Flow in `execution.work.flows` and every unfinished Process in
+  `execution.work.processes` against `lf ps --json`. A live process makes the Task
   moving, whoever launched it. Unknown liveness is not idle.
 - **Recover before reporting a blocker.** Read the failed step's log and
   inspect its effects. Repair a supported cause, then launch only the remaining
@@ -142,7 +142,7 @@ worktrees, placement and execution history.
   `{"metric_targets":[],"workflow":"feature","krs":[]}`. This edits the Wave's
   one In Progress Linear Project. Preserve the authored workflow and other plan fields.
 - Use supported Task/Work operations for changes, not raw stores, unclaimed
-  process signals or a competing worker on this Home. A missing Home stays an
+  process signals or a competing worker on this Machine. A missing Machine stays an
   explicit blocker.
 
 Distinguish completed effects, proposals, failed writes and unresolved readback;

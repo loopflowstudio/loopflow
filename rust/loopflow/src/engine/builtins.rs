@@ -301,14 +301,14 @@ mod tests {
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
-            "lf observe <home-id>",
-            "lf ssh <home-id> --wave <wave> wave/operate",
+            "lf machine add <ssh-target>",
+            "lf --machine <machine-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }
 
         assert!(init.contains("Loopflow is not primarily a prompt launcher"));
-        assert!(init.contains("Installed harnesses are a capability of this Home"));
+        assert!(init.contains("Installed harnesses are a capability of this Machine"));
         assert!(init.contains("team-wide repo configuration"));
         assert!(init.contains("wave/<name>/MEMORY.md"));
         assert!(!init.contains("lf memory"));
@@ -319,8 +319,8 @@ mod tests {
     #[test]
     fn execution_context_grants_delegation_by_tier() {
         assert!(LOOPFLOW_DOC.contains("Execute Here First"));
-        assert!(LOOPFLOW_DOC.contains("lf screenshot SOURCE -o OUTPUT"));
-        assert!(LOOPFLOW_DOC.contains("never launch a GUI browser executable"));
+        assert!(!LOOPFLOW_DOC.contains("lf screenshot"));
+        assert!(LOOPFLOW_DOC.contains("Never launch a GUI browser executable"));
         assert!(!LOOPFLOW_DOC.contains("lf pm show"));
         assert!(!LOOPFLOW_DOC.contains("--detach"));
 

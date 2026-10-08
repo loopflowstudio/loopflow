@@ -347,12 +347,12 @@ def _stage(
 
 
 def _admit_account(lf: str, environment: dict[str, str], home: Path, source: dict) -> None:
-    """Give the disposable Home the recorded login's routing row; credentials stay put."""
+    """Give the disposable Machine the recorded login's routing row; credentials stay put."""
     request = source[_request_key(source)]
     provider = request["agent"].split(":", 1)[0]
     if request.get("account_id") is None:
         return
-    # Any store-opening command creates and migrates the Home's database.
+    # Any store-opening command creates and migrates the Machine's database.
     subprocess.run(
         [lf, "account", "--cached", "--json"], env=environment, capture_output=True, check=True
     )
@@ -389,7 +389,7 @@ def replay(
         for name, value in os.environ.items()
         if not name.startswith(("LF_", "LOOPFLOW_", "CLAUDE", "CODEX"))
     }
-    # Nested `lf` calls resolve to the same binary and Home, so they cannot reach
+    # Nested `lf` calls resolve to the same binary and Machine, so they cannot reach
     # the real store and its PM grant. The binary must honor LF_HOME for its store.
     lf = str(Path(lf).resolve())
     environment["PATH"] = f"{Path(lf).parent}{os.pathsep}{environment.get('PATH', '')}"
@@ -508,7 +508,7 @@ def main() -> None:
     )
     launch.add_argument("capture")
     launch.add_argument("arm", choices=sorted(ARMS))
-    launch.add_argument("--out", type=Path, required=True, help="directory for disposable Homes")
+    launch.add_argument("--out", type=Path, required=True, help="directory for disposable Machines")
     launch.add_argument("--repo", type=Path, default=Path.cwd(), help="repository to clone")
     launch.add_argument(
         "--lf",

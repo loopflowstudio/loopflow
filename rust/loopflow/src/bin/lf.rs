@@ -13,7 +13,7 @@ use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
 
-use loopflow::ops::project::{update_plan, PlanChange};
+use loopflow::ops::project::update_plan;
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -128,50 +128,6 @@ fn first_target_index(args: &[String]) -> Option<usize> {
         index += 1;
     }
     None
-}
-
-/// Insert clap's internal `--` at the public `lf home ssh` target boundary.
-///
-/// The public syntax omits it, but making the boundary explicit before parsing
-/// prevents a remote `--account` from being consumed by the origin command.
-fn normalize_ssh_args(mut args: Vec<String>) -> Vec<String> {
-    if args.len() <= 1 {
-        return args;
-    }
-    let rest = &args[1..];
-    let Some(command_index) = first_target_index(rest) else {
-        return args;
-    };
-    let Some(home) = arg_tables().subcommands.get("home") else {
-        return args;
-    };
-    if rest[command_index] != "home" {
-        return args;
-    }
-    let path = selected_command_path(rest, command_index, home);
-    let Some(ssh) = path.get(1).filter(|selected| rest[selected.index] == "ssh") else {
-        return args;
-    };
-    let ssh_args = &ssh.args.direct;
-    let mut index = ssh.index + 2;
-    while index < args.len() {
-        let arg = &args[index];
-        if arg == "--" {
-            return args;
-        }
-        if arg.starts_with('-') {
-            let takes_value = ssh_args.takes_value(arg) || is_value_flag(arg);
-            if takes_value && !has_inline_value(arg) {
-                index += 1;
-            }
-            index += 1;
-            continue;
-        }
-
-        args.insert(index + 1, "--".to_string());
-        return args;
-    }
-    args
 }
 
 #[derive(Clone, Copy)]
@@ -311,18 +267,6 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return args;
     };
     if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        // `lf home ssh` has a deliberate positional boundary: origin options come
-        // before the target and every later token belongs to the remote lf.
-        // Moving global flags across that boundary changes which machine owns
-        // an account selection.
-        let path = selected_command_path(rest, target_index, command);
-        if rest[target_index] == "home"
-            && path
-                .get(1)
-                .is_some_and(|selected| rest[selected.index] == "ssh")
-        {
-            return args;
-        }
         return reorder_command_args(program, rest, target_index, command);
     }
 
@@ -518,14 +462,11 @@ fn execute_target(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::lease::AccountSelection,
 ) -> anyhow::Result<()> {
     use loopflow::engine::target::Target;
 
     match target {
-        Target::Command(command) => {
-            execute_command(&command, cli, args, binding, account_selection)
-        }
+        Target::Command(command) => execute_command(&command, cli, args, binding),
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
@@ -738,18 +679,18 @@ fn print_task_snapshot(
                 },
             );
         }
-        for flow in &snapshot.work.flows {
+        for flow in &snapshot.work.flow_processes {
             println!(
                 "  Flow: {}  {}  {:?}",
                 flow.summary.id, flow.summary.name, flow.summary.state,
             );
         }
-        for exec in &snapshot.work.execs {
+        for process in &snapshot.work.processes {
             println!(
-                "  Exec: {}  {}  {}",
-                exec.id,
-                exec.command.as_deref().unwrap_or("unknown command"),
-                exec.outcome.as_deref().unwrap_or("unknown")
+                "  Process: {}  {}  {}",
+                process.lfid,
+                process.command.as_deref().unwrap_or("unknown command"),
+                process.outcome.as_deref().unwrap_or("unknown")
             );
         }
         println!("  project: {}", snapshot.project_id);
@@ -868,20 +809,12 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
-        WaveCommand::UpdatePlan {
-            wave,
-            plan,
-            workflow,
-        } => {
-            let change = match plan {
-                Some(plan) => PlanChange::Replace(serde_json::from_slice(&std::fs::read(plan)?)?),
-                None => PlanChange::Workflow(
-                    workflow
-                        .clone()
-                        .expect("clap requires --plan or --workflow"),
-                ),
-            };
-            update_plan(repo, wave.as_deref(), change)?;
+        WaveCommand::UpdatePlan { wave, plan } => {
+            update_plan(
+                repo,
+                wave.as_deref(),
+                serde_json::from_slice(&std::fs::read(plan)?)?,
+            )?;
             Ok(())
         }
     }
@@ -932,6 +865,39 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        TaskCommand::FollowUp {
+            issue,
+            outcome,
+            evidence,
+            check_at,
+            clear,
+        } => {
+            let remaining = match (outcome, evidence, check_at) {
+                (Some(outcome), Some(evidence), Some(at)) => {
+                    Some(loopflow::work::task::TaskFollowUp {
+                        outcome: outcome.clone(),
+                        evidence: evidence.clone(),
+                        check_at: time::OffsetDateTime::parse(
+                            at,
+                            &time::format_description::well_known::Rfc3339,
+                        )?
+                        .unix_timestamp(),
+                    })
+                }
+                _ => None,
+            };
+            println!(
+                "{}",
+                loopflow::ops::task::task_follow_up(
+                    issue,
+                    remaining,
+                    clear
+                        .as_deref()
+                        .unwrap_or("Accepted work remains after delivery")
+                )?
+            );
+            Ok(())
+        }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
             issue,
             state == "on",
@@ -957,13 +923,32 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             )?;
             print_task(&task, *json)
         }
+        TaskCommand::Workflow { cmd } => match cmd {
+            loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
+                let workflow = loopflow::ops::task::workflow_show(issue)?;
+                println!("{}", serde_json::to_string_pretty(&workflow)?);
+                Ok(())
+            }
+            loopflow::lf::TaskWorkflowCommand::Restart { issue } => {
+                println!(
+                    "{}",
+                    loopflow::ops::task::workflow_set(
+                        repo,
+                        issue,
+                        "start",
+                        Some("Restart Workflow"),
+                        &loopflow::ops::task::EndOptions::default()
+                    )?
+                );
+                Ok(())
+            }
+        },
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
             node,
             reason,
             force,
-            accept_unknown_exec,
         } => {
             println!(
                 "{}",
@@ -972,10 +957,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     issue,
                     node,
                     reason.as_deref(),
-                    &loopflow::ops::task::EndOptions {
-                        force: *force,
-                        accept_unknown_exec: accept_unknown_exec.clone(),
-                    },
+                    &loopflow::ops::task::EndOptions { force: *force },
                 )?
             );
             Ok(())
@@ -1201,6 +1183,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             println!("{}: updated task {}", result.wave, result.id);
             Ok(())
         }
+        TaskCommand::Refile { issue, wave } => {
+            let result = loopflow::ops::task::task_refile(repo, issue, wave)?;
+            println!("{}: filed task {}", result.wave, result.id);
+            Ok(())
+        }
         TaskCommand::Comment {
             issue,
             message,
@@ -1270,7 +1257,7 @@ fn main() -> std::process::ExitCode {
     let code = journal::command_exit_code(&result);
     if let Err(error) = result {
         if error
-            .downcast_ref::<loopflow::exec::CommandExit>()
+            .downcast_ref::<loopflow::process::CommandExit>()
             .is_none()
         {
             eprintln!("Error: {error:?}");
@@ -1280,7 +1267,7 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    loopflow::machine_install::dispatch_entry_gate(&loopflow::machine_install::ArtifactRole::Cli)?;
+    loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1298,21 +1285,44 @@ fn run() -> anyhow::Result<()> {
         .without_time()
         .init();
 
-    // Reorder args so flags can appear after the skill name
-    let normalized =
-        loopflow::lf::navigation::normalize_args(std::env::args().collect()).map_err(|error| {
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some((remote, command)) = loopflow::lf::navigation::machine_invocation(&raw_args)
+        .map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            loopflow::exec::CommandExit(code)
-        })?;
-    let args = reorder_args(normalize_ssh_args(normalized));
+            loopflow::process::CommandExit(code)
+        })?
+    {
+        loopflow::installation::dispatch_default_cli()?;
+        ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        journal::admit_process(&std::env::current_dir()?, &raw_args);
+        loopflow::lf::commands::machine::validate_expected_machine_process()?;
+        return loopflow::lf::commands::ssh::run(
+            remote
+                .machine
+                .as_deref()
+                .expect("remote invocation has a machine"),
+            &remote.secret,
+            remote.forward_agent,
+            &command,
+        );
+    }
+
+    // Reorder args so flags can appear after the skill name
+    let normalized = loopflow::lf::navigation::normalize_args(raw_args).map_err(|error| {
+        let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+        let _ = error.print();
+        loopflow::process::CommandExit(code)
+    })?;
+    let args = reorder_args(normalized);
 
     let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
     };
     if cli.task.is_none() && cli.wt.is_none() {
@@ -1322,68 +1332,31 @@ fn run() -> anyhow::Result<()> {
     }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
-    let bypasses_machine_startup_gate = matches!(
+    let bypasses_installation_startup_gate = matches!(
         &cli.command,
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Install { .. }
-                | loopflow::lf::HomeCommand::Doctor {
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. }
+                | loopflow::lf::SelfCommand::Doctor {
                     planning: false,
                     ..
                 }
         })
     );
-    if !bypasses_machine_startup_gate
-        && !matches!(
-            &cli.command,
-            Some(
-                Commands::Home {
-                    cmd: loopflow::lf::HomeCommand::Screenshot { .. }
-                } | Commands::ScreenshotSupervisor { .. }
-            )
-        )
-    {
-        loopflow::machine_install::dispatch_default_cli()?;
+    if !bypasses_installation_startup_gate {
+        loopflow::installation::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
-    if matches!(
-        &cli.command,
-        Some(
-            Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Install { .. }
-                    | loopflow::lf::HomeCommand::Doctor {
-                        planning: false,
-                        ..
-                    }
-            } | Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Screenshot { .. }
-            } | Commands::ScreenshotSupervisor { .. }
-        )
-    ) {
+    if bypasses_installation_startup_gate {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Home, repository, account, or Session state. Its
-    // hidden supervisor must also be able to clean up after its public parent
-    // dies, so both forms dispatch before those unrelated boundaries.
-    match &cli.command {
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Screenshot { screenshot },
-        }) => {
-            return loopflow::lf::commands::screenshot::run(screenshot);
-        }
-        Some(Commands::ScreenshotSupervisor { screenshot }) => {
-            return loopflow::lf::commands::screenshot::run_supervisor(screenshot);
-        }
-        _ => {}
-    }
-
-    // Machine diagnosis must reach incompatible or uninitialized Homes without
+    // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
-    if let Some(Commands::Home {
+    if let Some(Commands::Self_ {
         cmd:
-            loopflow::lf::HomeCommand::Doctor {
+            loopflow::lf::SelfCommand::Doctor {
                 json,
                 planning: false,
             },
@@ -1395,10 +1368,10 @@ fn run() -> anyhow::Result<()> {
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
-    // trace/store capture. `lf home install` opens the store only read-only, inside
+    // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
-    if let Some(Commands::Home {
-        cmd: loopflow::lf::HomeCommand::Install { cmd },
+    if let Some(Commands::Self_ {
+        cmd: loopflow::lf::SelfCommand::Install { cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
@@ -1441,28 +1414,11 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    // Exec admission records this process's cwd. Each operation resolves the
+    // Process admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
     {
-        // Account flags before an SSH target shape the origin grant. Flags in the
-        // remote lf arguments become preferences over its merged local/forwarded
-        // catalog through LF_ACCOUNT_SELECTION.
-        let mut preferred_accounts = cli.account.clone();
-        let mut restricted_accounts = cli.only_account.clone();
-        if let Some(Commands::Home {
-            cmd:
-                loopflow::lf::HomeCommand::Ssh {
-                    origin_account,
-                    origin_only_account,
-                    ..
-                },
-        }) = &cli.command
-        {
-            preferred_accounts.extend(origin_account.iter().cloned());
-            restricted_accounts.extend(origin_only_account.iter().cloned());
-        }
         let _account_isolation = cli
             .isolate
             .then_some(true)
@@ -1470,8 +1426,8 @@ fn run() -> anyhow::Result<()> {
             .map(loopflow::provider_account::activation::isolation_env)
             .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
-            &preferred_accounts,
-            &restricted_accounts,
+            &cli.account,
+            &cli.only_account,
         )?;
         let _account_selection = if !account_selection.is_default() {
             Some(EnvGuard::set(
@@ -1487,19 +1443,13 @@ fn run() -> anyhow::Result<()> {
         }
         debug!(?cli, "parsed CLI arguments");
 
-        dispatch(cli, &args, account_selection)
+        dispatch(cli, &args)
     }
 }
 
-fn dispatch(
-    mut cli: Cli,
-    args: &[String],
-    account_selection: loopflow::provider_account::lease::AccountSelection,
-) -> anyhow::Result<()> {
-    // Every HomeId-addressed SSH hop proves it reached the intended authority
-    // before reads or mutations dispatch. Raw-host bootstrap carries no
-    // expectation and falls through.
-    loopflow::lf::commands::home::validate_expected_home_process()?;
+fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    // Remote commands prove they reached the saved machine before dispatch.
+    loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
     let mut direct_binding = None;
     let mut _work_declaration = None;
@@ -1524,19 +1474,16 @@ fn dispatch(
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions {
-            force: *force,
-            accept_unknown_exec: Vec::new(),
-        };
+        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
             &repo,
             issue,
-            loopflow::ops::task::TaskExecOptions {
+            loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
-                agent: cli.model.clone(),
+                agent: cli.agent.clone(),
                 name: name.clone(),
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
@@ -1565,8 +1512,8 @@ fn dispatch(
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
         }
-        if cli.model.is_none() {
-            cli.model = binding.agent.clone();
+        if cli.agent.is_none() {
+            cli.agent = binding.agent.clone();
         }
         _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
         _work_declaration = Some(EnvGuard::set(
@@ -1623,7 +1570,6 @@ fn dispatch(
             &cli,
             args,
             direct_binding.as_ref(),
-            &account_selection,
         ),
         None => match direct_binding.as_ref() {
             Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
@@ -1639,7 +1585,6 @@ fn execute_command(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::lease::AccountSelection,
 ) -> anyhow::Result<()> {
     let parsed = Cli::try_parse_from(command.argv())?;
     match &parsed.command {
@@ -1652,9 +1597,10 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(None, Some(&text), cli),
             })
         }
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Desktop,
-        }) => loopflow::lf::commands::desktop::run(),
+        Some(Commands::Open) => loopflow::lf::commands::open::run(),
+        Some(Commands::Config {
+            cmd: loopflow::lf::ConfigCommand::User { json },
+        }) => loopflow::lf::commands::config::print_user(*json),
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
@@ -1690,7 +1636,7 @@ fn execute_command(
             loopflow::lf::RepoCommand::Release { .. } => {
                 in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd))
             }
-            // The watcher admits repairs, which needs a recorded Exec.
+            // The watcher admits repairs, which needs a recorded Process.
             loopflow::lf::RepoCommand::Ci {
                 cmd:
                     Some(loopflow::lf::CiCommand::Watch {
@@ -1700,7 +1646,7 @@ fn execute_command(
                     }),
                 ..
             } => {
-                // It runs from the main checkout so its long-lived Exec never
+                // It runs from the main checkout so its long-lived Process never
                 // counts as live work in a Task's worktree.
                 let root = loopflow::engine::worktrees::main_repo_root(
                     &loopflow::lf::commands::util::find_repo_root()?,
@@ -1713,14 +1659,9 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
-        Some(Commands::Home {
-            cmd:
-                cmd @ (loopflow::lf::HomeCommand::User { .. }
-                | loopflow::lf::HomeCommand::Id { .. }
-                | loopflow::lf::HomeCommand::Observe { .. }),
-        }) => loopflow::lf::commands::home::run(cmd),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::SyncSkills { yes, no_prune },
+        Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
         Some(Commands::Wave {
             cmd:
@@ -1754,7 +1695,7 @@ fn execute_command(
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave { cmd }) => in_repo_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Pr { cmd }) => in_repo_runtime(args, |_| {
-            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.model.as_deref())
+            loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
         }),
         Some(Commands::Wt { cmd }) => {
             in_repo_runtime(args, |_| loopflow::lf::commands::ops::run_wt(cmd))
@@ -1770,7 +1711,7 @@ fn execute_command(
                 *push,
                 *no_add,
                 paths,
-                cli.model.as_deref(),
+                cli.agent.as_deref(),
             )
         }),
         Some(Commands::Sync(sync)) => {
@@ -1795,6 +1736,58 @@ fn execute_command(
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd),
+        Some(Commands::Project {
+            cmd: loopflow::lf::ProjectCommand::Workflow { cmd },
+        }) => {
+            let cwd = std::env::current_dir()?;
+            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+            match cmd {
+                loopflow::lf::ProjectWorkflowCommand::List { json } => {
+                    let entries = loopflow::engine::workflow::workflow_catalog(&repo)?;
+                    if *json {
+                        println!("{}", serde_json::to_string(&entries)?);
+                    } else {
+                        for entry in entries {
+                            println!(
+                                "{}{}",
+                                entry.name,
+                                entry
+                                    .unavailable
+                                    .map(|e| format!(" (unavailable: {e})"))
+                                    .unwrap_or_default()
+                            );
+                        }
+                    }
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Customize { name } => {
+                    println!(
+                        "{}",
+                        loopflow::engine::workflow::customize(name, &repo)?.display()
+                    );
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
+                    let selected = tokio::runtime::Runtime::new()?
+                        .block_on(loopflow::ops::project::workflow(&repo, project, None))?;
+                    if *json {
+                        println!("{}", serde_json::to_string_pretty(&selected)?);
+                    } else {
+                        println!("{} · Workflow {}", selected.name, selected.workflow);
+                    }
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::Set { project, name } => {
+                    with_runtime(&repo, args, || {
+                        tokio::runtime::Runtime::new()?.block_on(
+                            loopflow::ops::project::workflow(&repo, project, Some(name)),
+                        )?;
+                        println!("Project {project}: Workflow {name}");
+                        Ok(())
+                    })
+                }
+            }
+        }
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
@@ -1809,8 +1802,8 @@ fn execute_command(
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Doctor { json, planning },
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Doctor { json, planning },
         }) => {
             if *planning {
                 let repo = loopflow::repo::working_directory()?;
@@ -1838,46 +1831,19 @@ fn execute_command(
         }) => in_repo_runtime(args, |repo| {
             loopflow::lf::commands::discord::serve(repo, wave)
         }),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Install { .. },
+        Some(Commands::Self_ {
+            cmd: loopflow::lf::SelfCommand::Install { .. },
         }) => {
             unreachable!("install dispatches before home routing")
         }
-        Some(
-            Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Screenshot { .. },
-            }
-            | Commands::ScreenshotSupervisor { .. },
-        ) => {
-            unreachable!("screenshot dispatches before home routing")
-        }
-        Some(Commands::Home {
-            cmd:
-                loopflow::lf::HomeCommand::Ssh {
-                    target,
-                    repo,
-                    secret,
-                    forward_agent,
-                    origin_account: _,
-                    origin_only_account: _,
-                    lf_args,
-                },
-        }) => loopflow::lf::commands::ssh::run(
-            target,
-            repo.as_deref(),
-            secret,
-            *forward_agent,
-            account_selection,
-            lf_args,
-        ),
         Some(Commands::Flow { cmd }) => match cmd {
-            FlowCommand::List { json, inventory } if inventory.sessions => {
+            FlowCommand::List { json, inventory } if inventory.processes => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)
             }
             FlowCommand::Show {
                 name,
                 json,
-                sessions: true,
+                processes: true,
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },
@@ -1893,7 +1859,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
         if let Some(error) = error.downcast_ref::<clap::Error>() {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
         if matches!(
             error.downcast_ref::<loopflow::engine::LoadError>(),
@@ -1907,7 +1873,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
                 clap::Error::raw(clap::error::ErrorKind::InvalidSubcommand, error.to_string());
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            return Err(loopflow::exec::CommandExit(code).into());
+            return Err(loopflow::process::CommandExit(code).into());
         }
     }
     result
@@ -1915,7 +1881,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_task_pr_line, normalize_ssh_args, reorder_args, CwdGuard, EnvGuard};
+    use super::{format_task_pr_line, reorder_args, CwdGuard, EnvGuard};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PrCommand, TaskCommand};
@@ -1960,7 +1926,7 @@ mod tests {
 
         let (target, message) = resolve(&[
             "lf",
-            "-m",
+            "-a",
             "codex",
             "pr",
             "land",
@@ -2073,37 +2039,12 @@ mod tests {
     }
 
     #[test]
-    fn desktop_remains_an_explicit_app_command() {
-        let cli = Cli::try_parse_from(["lf", "home", "desktop"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Desktop
-            })
-        ));
-    }
-
-    #[test]
     fn reorder_args_flag_after_skill() {
         let args = vec!["lf".to_string(), "debug".to_string(), "-c".to_string()];
         let result = reorder_args(args);
         assert_eq!(result, vec!["lf", "-c", "debug"]);
     }
 
-    #[test]
-    fn ssh_help_prefers_home_identity() {
-        let help = Cli::try_parse_from(["lf", "home", "ssh", "--help"])
-            .expect_err("help exits through clap")
-            .to_string();
-
-        assert!(help.contains("<TARGET>"));
-        assert!(help.contains("HomeId (preferred), SSH alias, or user@host"));
-    }
-
-    /// `serve` is retired. The parser can't reject it outright — the
-    /// `external_subcommand` catch-all claims any unmatched verb — so the
-    /// property that actually holds is that it no longer names a built-in
-    /// command. The exec door denies `External` on top of that.
     #[test]
     fn old_serve_surface_is_no_longer_a_builtin_command() {
         let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
@@ -2128,15 +2069,15 @@ mod tests {
 
     #[test]
     fn reorder_args_value_flag_before_skill() {
-        // lf -m codex implement -> should stay the same (already correct order)
+        // lf -a codex implement -> should stay the same (already correct order)
         let args = vec![
             "lf".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "codex".to_string(),
             "implement".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-m", "codex", "implement"]);
+        assert_eq!(result, vec!["lf", "-a", "codex", "implement"]);
     }
 
     #[test]
@@ -2144,11 +2085,11 @@ mod tests {
         let args = vec![
             "lf".to_string(),
             "debug".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "codex".to_string(),
         ];
         let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "-m", "codex", "debug"]);
+        assert_eq!(result, vec!["lf", "-a", "codex", "debug"]);
     }
 
     #[test]
@@ -2184,13 +2125,13 @@ mod tests {
             "--interactive".to_string(),
             "implement".to_string(),
             "-c".to_string(),
-            "-m".to_string(),
+            "-a".to_string(),
             "claude".to_string(),
         ];
         let result = reorder_args(args);
         assert_eq!(
             result,
-            vec!["lf", "--interactive", "-c", "-m", "claude", "implement"]
+            vec!["lf", "--interactive", "-c", "-a", "claude", "implement"]
         );
     }
 
@@ -2229,68 +2170,6 @@ mod tests {
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
-    }
-
-    #[test]
-    fn reorder_args_preserves_the_ssh_target_boundary() {
-        let args = vec![
-            "lf".to_string(),
-            "home".to_string(),
-            "ssh".to_string(),
-            "build-vm".to_string(),
-            "--account".to_string(),
-            "remote@company".to_string(),
-            "task".to_string(),
-            "pursue".to_string(),
-        ];
-
-        assert_eq!(reorder_args(args.clone()), args);
-    }
-
-    #[test]
-    fn normalize_ssh_args_makes_the_target_a_hard_boundary() {
-        let args = [
-            "lf",
-            "home",
-            "ssh",
-            "--account",
-            "origin@example.com",
-            "build-vm",
-            "--account",
-            "remote@example.com",
-            "task",
-            "pursue",
-        ]
-        .map(str::to_string)
-        .to_vec();
-
-        let normalized = normalize_ssh_args(args);
-        assert_eq!(
-            normalized,
-            [
-                "lf",
-                "home",
-                "ssh",
-                "--account",
-                "origin@example.com",
-                "build-vm",
-                "--",
-                "--account",
-                "remote@example.com",
-                "task",
-                "pursue",
-            ]
-        );
-        let cli = Cli::try_parse_from(normalized).expect("parse normalized SSH command");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Home { cmd: loopflow::lf::HomeCommand::Ssh {
-                origin_account,
-                lf_args,
-                ..
-            } }) if origin_account == ["origin@example.com"]
-                && lf_args == ["--account", "remote@example.com", "task", "pursue"]
-        ));
     }
 
     #[test]
@@ -2346,11 +2225,11 @@ mod tests {
             })
         ));
 
-        let args: Vec<String> = ["lf", "pr", "-m", "codex", "open"]
+        let args: Vec<String> = ["lf", "pr", "-a", "codex", "open"]
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pr", "open", "-m", "codex"]);
+        assert_eq!(reordered, vec!["lf", "pr", "open", "-a", "codex"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Pr {

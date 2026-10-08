@@ -171,7 +171,7 @@ async fn native_feed_discovers_old_resumes_replacement_and_removal() {
 
 #[tokio::test]
 #[allow(clippy::await_holding_lock)] // Isolate capture admission from ambient storage.
-async fn missing_roots_and_replaced_home_never_become_false_empty() {
+async fn missing_roots_and_replaced_machine_never_become_false_empty() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
@@ -311,10 +311,10 @@ async fn discovery_cost_matrix() {
         started_at: time::OffsetDateTime::UNIX_EPOCH,
     };
     let native = serde_json::to_vec(&stale).unwrap();
-    let exec = serde_json::to_vec(&crate::journal::ExecProcessReceipt {
+    let process = serde_json::to_vec(&crate::journal::ProcessReceipt {
         schema_version: 1,
         trace_id: crate::id::TraceId::new().to_string(),
-        exec_id: crate::id::ExecId::new().to_string(),
+        process_lfid: crate::id::ProcessLfid::new().to_string(),
         pid: stale.pid,
         started_at: 0,
     })
@@ -349,7 +349,7 @@ async fn discovery_cost_matrix() {
             fs::write(
                 home.path()
                     .join(format!("runtime/exec-processes/{index}.json")),
-                &exec,
+                &process,
             )
             .unwrap();
         }

@@ -4,12 +4,12 @@ pub mod child;
 pub mod context_usage;
 pub mod durable;
 pub mod engine;
-pub mod exec;
 pub mod harness;
 pub mod id;
+pub mod installation;
 pub mod journal;
 pub mod lf;
-pub mod machine_install;
+pub mod process;
 pub mod task_work;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
 #[allow(dead_code)]
@@ -20,6 +20,7 @@ pub mod planning;
 pub mod pm;
 pub mod pr_landing;
 pub mod profile;
+pub mod program_status;
 pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;

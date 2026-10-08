@@ -69,7 +69,7 @@ migration that leaves a dangling reference rolls back as one unit.
 
 That is the only place stored rows are scanned for dangling references during
 ordinary use. Opening a store validates its migration ledger and schema and
-relies on per-connection enforcement; `lf home doctor` and installation
+relies on per-connection enforcement; `lf doctor` and installation
 preflight run the full `PRAGMA foreign_key_check`, which reads the whole database.
 
 Persisted JSON is schema too. Changing a required field, enum variant, or wire
@@ -79,11 +79,11 @@ deserializes every registered persisted JSON column into its current Rust type
 and reports all incompatible rows together; any failure rolls back the complete
 migration transaction.
 
-Retired Home landing supervision stays in `pr_landings.retired_supervisor_json`
-with its original Home, PID, heartbeat and generation. The migration advances
+Retired Machine landing supervision stays in `pr_landings.retired_supervisor_json`
+with its original Machine, PID, heartbeat and generation. The migration advances
 the claim generation and clears executable supervision without changing delivery
 intent, failures or terminal history. Older executables cannot acquire another
-Home claim. Historical PIDs are evidence only; they must never be signaled locally.
+Machine claim. Historical PIDs are evidence only; they must never be signaled locally.
 
 Before advancing an existing on-disk database, the runner takes a SQLite backup
 inside the same exclusive transaction and publishes it atomically beside the

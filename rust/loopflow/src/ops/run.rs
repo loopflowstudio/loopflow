@@ -57,11 +57,14 @@ pub(crate) fn render_task_context(
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = crate::engine::available_flow_names(repo)
-        .iter()
-        .map(|flow| format!("- {flow}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let flows = match crate::engine::available_flow_names(repo) {
+        Ok(names) => names
+            .iter()
+            .map(|flow| format!("- {flow}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(error) => format!("Flow catalog unavailable: {error}"),
+    };
     format!(
         "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable flows:\n{flows}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
     )
@@ -393,14 +396,14 @@ mod tests {
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
-            let prepared = crate::engine::exec::prepare_exec_prompt(
+            let prepared = crate::engine::process_prompt::prepare_process_prompt(
                 &crate::engine::config::Config {
                     diff_files: false,
                     diff: false,
                     paste: false,
                     ..Default::default()
                 },
-                crate::engine::exec::ExecPromptInput {
+                crate::engine::process_prompt::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
                     docs: vec!["wave/release/GOAL.md".into()],
@@ -417,7 +420,7 @@ mod tests {
                 prepared.prompt.matches("Keep rollback available.").count(),
                 1
             );
-            assert!(prepared.config.task_prompt.contains(goal));
+            assert!(prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -426,7 +429,9 @@ mod tests {
             );
             assert_eq!(
                 context
-                    .task
+                    .system
+                    .as_ref()
+                    .unwrap()
                     .assets
                     .iter()
                     .filter(|asset| {
@@ -521,8 +526,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt =
-                crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+            let prompt = crate::engine::format_prompt(&components);
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {
@@ -538,7 +542,7 @@ mod tests {
                 "Parent memory"
             }));
         }
-        // A new Home reconstructs the same identity from the authored files.
+        // A new Machine reconstructs the same identity from the authored files.
         let (_fresh_home, fresh) = test_store().await;
         let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
             .await
@@ -782,7 +786,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,

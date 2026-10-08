@@ -37,7 +37,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
+It bundles `lf`; open it explicitly with `lf open`. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -114,8 +114,8 @@ lf task run INF-123 --reason "reconcile all scratch first" # publish direction, 
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
 lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
-lf arm -c                                          # request exact-head auto-merge and return
-lf land -c                                         # hand off delivery; complete the Task after verified merge
+lf arm                                             # request exact-head auto-merge and return
+lf land                                            # complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
@@ -131,16 +131,16 @@ lf design                                             # author and review one de
 lf launch-plan                                        # keep the core here; launch independent Tasks
 ```
 
-Watch this repository and the current Home:
+Watch this repository and the current Machine:
 
 ```bash
-lf wave list                  # every durable Wave and its Home/runtime evidence
-lf user           # display name from Git or a personal Loopflow override
+lf wave list                  # every durable Wave and its Machine/runtime evidence
+lf user           # read config: display name from Git or a personal override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks
 lf activity            # durable work, delivery and steering history
-lf session list --json # conversations on this Home
+lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
 lf usage --days 30      # recorded provider usage
 lf usage --task LOO-265 # usage attributed to one Task
@@ -163,6 +163,9 @@ lf session rename SESSION "Release notes"
 lf session bind SESSION --task INF-123
 ```
 
+Claude and Codex terminal Sessions load assembled context from a system instructions
+file, keeping the initial command-line message short even with large Wave memory.
+
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
 show interactive conversations; explicit filters reveal headless or completed
@@ -180,15 +183,15 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | Object | What it does | Where it lives |
 | --- | --- | --- |
 | **Skill** | Gives the agent reusable instructions and context | `.lf/skills/*.md` |
-| **Flow** | Composes agent work and mechanical operations; a run is one driver Exec and the step Execs it starts | `.lf/flows/*.yaml` |
+| **Flow** | Composes agent work and mechanical operations; a run is one lf process and the step processes it starts | `.lf/flows/*.yaml` |
 | **Workflow** | Gives a Task nodes, where you take part in its conversation, joined by the Flows between them | `.lf/workflows/*.yaml` |
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and every Flow exec for it | Linear and local SQLite |
-| **Exec** | Records one actual lf process and its observed command outcome | Home-local SQLite |
-| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Home-local SQLite and provider-native storage |
-| **Home** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
+| **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
+| **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
+| **AgentSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
+| **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |
 
 The [execution contract and cutover status](docs/architecture-reference.md#cutover-status)
 separate this model from the remaining implementation. Existing historical commands

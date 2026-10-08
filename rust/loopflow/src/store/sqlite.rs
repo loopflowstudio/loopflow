@@ -24,11 +24,12 @@ mod chapters;
 mod children;
 mod ci_incidents;
 mod durable;
-mod execs;
 mod flow_inventory;
 mod metrics;
 mod planning;
 mod pr_landings;
+mod processes;
+mod program_status;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
@@ -40,7 +41,7 @@ mod task_work;
 pub(crate) use durable::task_state_sql;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use task_work::{EndMove, OpenExecs};
+pub(crate) use task_work::EndMove;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable
@@ -86,7 +87,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
     conn.path()
         .and_then(|path| Path::new(path).parent())
         .map(Path::to_path_buf)
-        .ok_or_else(|| StoreError::InvalidData("store has no owning Home path".into()))
+        .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
 /// Recorded checkout evidence remains usable without chapter metadata.
@@ -96,7 +97,7 @@ pub(crate) struct TaskCheckout {
     pub issue_id: String,
     pub issue_identifier: String,
     pub worktree: PathBuf,
-    pub home_id: Option<crate::durable::HomeId>,
+    pub machine_id: Option<crate::durable::MachineId>,
 }
 
 /// Stable identity fields for observation, independent of execution schema.
@@ -430,7 +431,7 @@ impl SqliteStore {
         )
     }
 
-    /// Open the shared store as `lf home install promote` — the single authorized
+    /// Open the shared store as `lf install promote` — the single authorized
     /// owner of the migration frontier. Applies pending migrations under the
     /// caller's exclusive promotion lock.
     pub(crate) fn open_as_promotion_boundary(path: &Path) -> StoreResult<Self> {
@@ -501,7 +502,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `lf home install`",
+                 install a published release with `lf install`",
                 path.display()
             )));
         }
@@ -535,7 +536,7 @@ impl SqliteStore {
                 return Err(StoreError::InvalidData(format!(
                     "shared store {} is at an older frontier than this lf (pending {pending}); \
                      an ordinary lf must not advance it — install a published release with \
-                     `lf home install`",
+                     `lf install`",
                     path.display()
                 )));
             }
@@ -553,31 +554,31 @@ impl SqliteStore {
         })
     }
 
-    /// Open only the Exec rows without schema or token writes.
+    /// Open only the Process rows without schema or token writes.
     /// Observability commands use this when a source build may be older than
     /// the machine's release-owned database.
-    pub(crate) fn open_execs_read_only(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_processes_read_only(path: &Path) -> StoreResult<Self> {
         let store = Self::open_read_only(path)?;
         {
             let conn = store.conn.lock().expect("store mutex poisoned");
-            validate_exec_schema(&conn)?;
+            validate_process_schema(&conn)?;
         }
         Ok(store)
     }
 
     /// Append process evidence to an existing compatible store, never initialize it.
-    pub(crate) fn open_existing_execs(path: &Path) -> StoreResult<Self> {
+    pub(crate) fn open_existing_processes(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
         crate::performance::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")?;
-        validate_exec_schema(&conn)?;
+        validate_process_schema(&conn)?;
         // An older ledger without the current process owner is not a writable
         // observation destination. Leave upgrade decisions to ordinary admission.
         conn.prepare(
-            "SELECT id, trace_id, started_at, completed_at, outcome, exit_code FROM execs LIMIT 0",
+            "SELECT lfid, trace_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -639,7 +640,7 @@ impl SqliteStore {
     /// the same connection lock while the connection-level transaction stays
     /// open. Observability callers create a private read-only store for this
     /// operation, so no unrelated reader can join the transaction.
-    pub(crate) fn read_exec_snapshot<T>(
+    pub(crate) fn read_process_snapshot<T>(
         &self,
         read: impl FnOnce(&Self) -> StoreResult<T>,
     ) -> StoreResult<T> {
@@ -865,9 +866,9 @@ fn validate_wave_parent(
     Ok(())
 }
 
-fn validate_exec_schema(conn: &Connection) -> StoreResult<()> {
+fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
     conn.prepare(
-        "SELECT id,trace_id,parent_exec_id,started_at,completed_at,outcome FROM execs LIMIT 0",
+        "SELECT lfid,trace_id,parent_process_lfid,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
     )?;
     Ok(())
 }
@@ -2137,27 +2138,27 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_exec(&self, exec: &crate::exec::Exec) -> StoreResult<()> {
+    pub fn record_process(&self, process: &crate::process::Process) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO execs(id,trace_id,parent_exec_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)
-             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            "INSERT INTO processes(lfid,trace_id,parent_process_lfid,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_provider_generation,completed_at,outcome,exit_code,signal,error,pid)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)
+             ON CONFLICT(lfid) DO UPDATE SET completed_at=excluded.completed_at,
                 outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
-             WHERE execs.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-            params![exec.id,exec.trace_id,exec.parent_exec_id,exec.command,exec.repo,exec.cwd,
-                exec.started_at,exec.via_agent,exec.caller_session_id,exec.caller_provider_generation,
-                exec.completed_at,exec.outcome,exec.exit_code,exec.signal,exec.error],
+             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+            params![process.lfid,process.trace_id,process.parent_process_lfid,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_provider_generation,
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid],
         )?;
         Ok(())
     }
 
-    /// Record an Exec, waiting at most `wait` for another writer; a zero wait
+    /// Record a process, waiting at most `wait` for another writer; a zero wait
     /// is one attempt.
-    pub(crate) fn record_exec_within(
+    pub(crate) fn record_process_within(
         &self,
-        exec: &crate::exec::Exec,
+        process: &crate::process::Process,
         wait: Duration,
     ) -> StoreResult<()> {
         let previous: u32 = {
@@ -2166,7 +2167,7 @@ impl SqliteStore {
             conn.busy_timeout(wait)?;
             previous
         };
-        let result = self.record_exec(exec);
+        let result = self.record_process(process);
         self.conn
             .lock()
             .expect("store mutex poisoned")
@@ -2174,10 +2175,10 @@ impl SqliteStore {
         result
     }
 
-    pub fn process_is_recorded(&self, process_id: &str) -> StoreResult<bool> {
+    pub fn process_is_recorded(&self, process_lfid: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM execs WHERE id=?1")?;
-        Ok(query.exists([process_id])?)
+        let mut query = conn.prepare("SELECT 1 FROM processes WHERE lfid=?1")?;
+        Ok(query.exists([process_lfid])?)
     }
 }
 
@@ -2235,12 +2236,12 @@ mod frontier_tests {
     /// The machine home whose `.lf/loopflow.db` `may_apply_migrations` treats as
     /// the shared release store. The regressions inject it so they never touch a
     /// developer's real `~/.lf`.
-    struct SharedHome {
+    struct SharedMachine {
         _dir: tempfile::TempDir,
         home: PathBuf,
     }
 
-    impl SharedHome {
+    impl SharedMachine {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let home = dir.path().to_path_buf();
@@ -2292,7 +2293,7 @@ mod frontier_tests {
 
     #[test]
     fn private_development_store_opens_with_the_current_work_schema() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.home.join("private/loopflow.db");
         let store = open(&path, ValidationOnly, &shared.home, Forbidden)
             .expect("private development store opens at the embedded draft frontier");
@@ -2318,13 +2319,13 @@ mod frontier_tests {
     /// would create the path and this fails.
     #[test]
     fn an_ordinary_open_never_creates_or_initializes_an_absent_shared_store() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
 
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("lf home install"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2340,7 +2341,7 @@ mod frontier_tests {
     /// returned a usable store instead of erroring, fails this test.
     #[test]
     fn an_ordinary_open_ahead_of_the_shared_frontier_refuses_without_advancing() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         let installed_frontier = frontier(&path).unwrap();
@@ -2352,7 +2353,7 @@ mod frontier_tests {
         let error = open(&path, Published, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("lf home install"),
+            error.to_string().contains("lf install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2378,7 +2379,7 @@ mod frontier_tests {
     /// (c) The promotion boundary owns both first initialization and advancement.
     #[test]
     fn the_promotion_boundary_initializes_and_advances_the_shared_store() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
 
         // Initialization from absent.
@@ -2398,7 +2399,7 @@ mod frontier_tests {
         );
 
         // Advancement from a prior-head store.
-        let advanced = SharedHome::new();
+        let advanced = SharedMachine::new();
         let advanced_path = advanced.shared_db();
         seed_shared_store_at_prior_head(&advanced_path);
         assert_eq!(
@@ -2418,7 +2419,7 @@ mod frontier_tests {
     /// Wave untouched; explicit promotion advances once and retains the Wave.
     #[test]
     fn branch_candidate_cannot_advance_shared_store_or_damage_current_state_outside_promotion() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         seed_shared_store_at_prior_head(&path);
         seed_current_wave(&path);
@@ -2458,10 +2459,10 @@ mod frontier_tests {
     }
 
     /// Opening the shared store reads its schema, never its rows: a dangling
-    /// reference is installation preflight's and `lf home doctor`'s to report.
+    /// reference is installation preflight's and `lf doctor`'s to report.
     #[test]
     fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
         let conn = rusqlite::Connection::open(&path).unwrap();
@@ -2483,7 +2484,7 @@ mod frontier_tests {
     /// the isolated dev escape the directive preserves.
     #[test]
     fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
-        let shared = SharedHome::new();
+        let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, ValidationOnly, &shared.home, Authorized)
             .expect_err("a validation-only build must never initialize the shared store");

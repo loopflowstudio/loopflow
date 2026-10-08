@@ -36,7 +36,7 @@ impl Drop for Watch {
     }
 }
 
-struct Home {
+struct Machine {
     dir: tempfile::TempDir,
     store: SqliteStore,
     wave: Wave,
@@ -58,7 +58,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
     command
 }
 
-impl Home {
+impl Machine {
     fn new() -> Self {
         let home = Self::at(tempfile::tempdir().unwrap());
         home.plan(0);
@@ -190,9 +190,9 @@ impl Home {
             .unwrap();
     }
 
-    fn execs(&self) -> i64 {
+    fn processes(&self) -> i64 {
         self.raw()
-            .query_row("SELECT COUNT(*) FROM execs", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM processes", [], |row| row.get(0))
             .unwrap()
     }
 
@@ -252,7 +252,7 @@ fn identifiers(roadmap: &RoadmapSnapshot) -> Vec<String> {
 }
 
 impl Watch {
-    /// Start the reader on a Home, which need not hold a store yet.
+    /// Start the reader on a Machine, which need not hold a store yet.
     fn open(home: &Path) -> Self {
         let mut child = lf(home, &["monitor", "work", "--watch", "--json"])
             .stdin(Stdio::piped())
@@ -395,7 +395,7 @@ fn stable(mut value: serde_json::Value) -> serde_json::Value {
 
 #[test]
 fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
-    let home = Home::new();
+    let home = Machine::new();
     let watch = home.watch();
     assert!(watch.planning(Duration::from_secs(30), |_| true).is_empty());
 
@@ -435,7 +435,7 @@ fn a_task_committed_elsewhere_appears_once_and_bursts_converge() {
 
 #[test]
 fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
-    let home = Home::new();
+    let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     let conn = home.raw();
@@ -464,9 +464,9 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
         assert_eq!(before.get(part), after.get(part), "{part} was read again");
     }
 
-    // An Exec can change a planning condition, so planning is read; nothing
+    // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
-    conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at,completed_at,outcome) VALUES('exec_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
+    conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()
@@ -491,7 +491,7 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
 /// fact that bumps nothing is never read again, by any clock.
 #[test]
 fn every_displayed_session_fact_committed_elsewhere_is_shown() {
-    let home = Home::new();
+    let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     watch.request(
@@ -536,8 +536,8 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
-         SELECT id,driver_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
+        "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
+         SELECT id,driver_generation,provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions WHERE id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");
@@ -570,7 +570,7 @@ fn a_store_created_after_the_reader_started_is_shown() {
     let watch = Watch::open(dir.path());
     assert!(watch.planning(Duration::from_secs(30), |_| true).is_empty());
 
-    let home = Home::at(dir);
+    let home = Machine::at(dir);
     home.plan(1);
     assert_eq!(
         watch.planning(Duration::from_secs(5), |tasks| !tasks.is_empty()),
@@ -599,7 +599,7 @@ fn a_store_that_cannot_be_opened_is_unavailable_not_empty() {
 
 #[test]
 fn a_steady_writer_is_shown_while_it_writes() {
-    let home = Home::new();
+    let home = Machine::new();
     let watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     let started = Instant::now();
@@ -628,7 +628,7 @@ fn a_steady_writer_is_shown_while_it_writes() {
 
 #[test]
 fn a_paused_reader_and_a_truncated_log_both_catch_up() {
-    let home = Home::new();
+    let home = Machine::new();
     let watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
 
@@ -649,7 +649,7 @@ fn a_paused_reader_and_a_truncated_log_both_catch_up() {
 
 #[test]
 fn scope_selects_sessions_and_idle_sends_nothing() {
-    let home = Home::new();
+    let home = Machine::new();
     let other = home.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
     let other = other.canonicalize().unwrap().display().to_string();
@@ -709,7 +709,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         );
     }
 
-    let execs = home.execs();
+    let processes = home.processes();
     // Process liveness is this machine's, observed on a clock; everything
     // read from the store stays silent.
     let idle: Vec<_> = watch
@@ -718,7 +718,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         .filter(|frame| !matches!(frame.content, WorkContent::Activity(_)))
         .collect();
     assert!(idle.is_empty(), "{idle:?}");
-    assert_eq!(home.execs(), execs);
+    assert_eq!(home.processes(), processes);
 
     watch.stdin = None;
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -733,7 +733,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
 #[cfg(target_os = "macos")]
 #[test]
 fn a_checkout_changed_on_disk_is_shown() {
-    let home = Home::at(tempfile::tempdir().unwrap());
+    let home = Machine::at(tempfile::tempdir().unwrap());
     home.plan(1);
     let worktree = home.checkout();
     let watch = home.watch();
@@ -751,7 +751,7 @@ fn a_checkout_changed_on_disk_is_shown() {
 /// follows it, and however often it moves that part is read once per rest.
 #[test]
 fn usage_rereads_only_wave_detail_and_not_for_every_row() {
-    let home = Home::new();
+    let home = Machine::new();
     let mut watch = home.watch();
     watch.planning(Duration::from_secs(30), |_| true);
     let conn = home.raw();
@@ -787,7 +787,7 @@ fn usage_rereads_only_wave_detail_and_not_for_every_row() {
 
 #[test]
 fn selection_only_commit_reaches_two_open_work_readers() {
-    let home = Home::new();
+    let home = Machine::new();
     let first = home.watch();
     let second = home.watch();
     let await_state = |watch: &Watch, expected| {

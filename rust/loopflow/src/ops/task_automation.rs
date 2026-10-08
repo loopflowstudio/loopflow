@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
-use crate::journal::{exec_process_evidence, ProcessIdentityEvidence};
+use crate::journal::{process_evidence, ProcessIdentityEvidence};
 use crate::store::SharedStore;
 use crate::work::task::Task;
 
@@ -38,14 +38,14 @@ pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
     })
 }
 
-/// No pending review, unknown provider, or unrelated live Exec is exempted.
+/// No pending review, unknown provider, or unrelated live Process is exempted.
 pub(crate) fn admission_blocker(
     store: &crate::store::sqlite::SqliteStore,
     task: &crate::durable::TaskId,
     repair_session: Option<&str>,
 ) -> OpsResult<Option<String>> {
     let work = store.task_work(task).map_err(error)?;
-    let caller = crate::journal::current_exec_id();
+    let caller = crate::journal::current_process_lfid();
     for session in &work.sessions {
         if Some(session.id.as_str()) == repair_session {
             continue;
@@ -64,12 +64,15 @@ pub(crate) fn admission_blocker(
             )));
         }
     }
-    for exec in &work.execs {
-        if caller.as_ref() == Some(&exec.id) {
+    for process in &work.processes {
+        if caller.as_ref() == Some(&process.lfid) {
             continue;
         }
-        if exec_process_evidence(store, &exec.id) != ProcessIdentityEvidence::Dead {
-            return Ok(Some(format!("Exec {} is live or unresolved", exec.id)));
+        if process_evidence(store, &process.lfid) != ProcessIdentityEvidence::Dead {
+            return Ok(Some(format!(
+                "Process {} is live or unresolved",
+                process.lfid
+            )));
         }
     }
     Ok(None)
@@ -90,11 +93,11 @@ pub(crate) fn session_engine_unresolved(
         .session_driver(session)
         .map_err(error)?
         .is_none_or(|driver| {
-            exec_process_evidence(store, &driver.provider_exec_id) != ProcessIdentityEvidence::Dead
+            process_evidence(store, &driver.provider_process_lfid) != ProcessIdentityEvidence::Dead
         }))
 }
 
-async fn repository_tasks(
+pub(crate) async fn repository_tasks(
     store: &SharedStore,
     repo: &crate::repository::RepoId,
 ) -> OpsResult<Vec<Task>> {
@@ -139,7 +142,7 @@ pub fn status(repo: &Path) -> OpsResult<AutomationStatus> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = super::pr_landing::landing_store().await?;
-        let local = store.local_home().await.map_err(error)?;
+        let local = store.local_machine().await.map_err(error)?;
         let key = super::cron::repository_cron_key(&root, &local.id);
         let jobs = super::cron::list_crons(
             &super::cron::default_launch_agents_dir()?,

@@ -3,7 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
-use loopflow::engine::{load_config, load_config_or_default, ExecTarget};
+use loopflow::engine::{load_config, load_config_or_default};
 use support::with_clean_home;
 use tempfile::TempDir;
 
@@ -156,44 +156,6 @@ exclude:
         .unwrap()
         .unwrap();
     assert_eq!(config.exclude, vec!["*.log", "node_modules/"]);
-}
-
-// =============================================================================
-// Session launch
-// =============================================================================
-
-#[test]
-fn config_session_launch_tui() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-session:
-  launch: tui
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(config.session.launch, ExecTarget::Tui);
-}
-
-#[test]
-fn config_session_launch_ide() {
-    let temp = TempDir::new().unwrap();
-    write_config(
-        temp.path(),
-        r#"
-session:
-  launch: ide
-"#,
-    );
-
-    let config = with_clean_home(|| load_config(Some(temp.path())))
-        .unwrap()
-        .unwrap();
-    assert_eq!(config.session.launch, ExecTarget::Ide);
 }
 
 // =============================================================================

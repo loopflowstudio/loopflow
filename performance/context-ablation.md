@@ -4,7 +4,7 @@
 # Weigh every source across recorded launches. No provider spend.
 uv run python -m scripts.context_ablation census --since 2026-10-01T00:00:00Z
 
-# Replay one recorded step without one source, in a disposable Home and checkout.
+# Replay one recorded step without one source, in a disposable Machine and checkout.
 cargo build -p loopflow --bin lf
 uv run python -m scripts.context_ablation arms run_b3b7dc529faa438ba98e4953738241e3
 uv run python -m scripts.context_ablation replay run_b3b7dc529faa438ba98e4953738241e3 \
@@ -160,7 +160,7 @@ remove. Those need their own instrument.
 and nested `lf` calls inside its replays reach the real store. Build this
 checkout's lf, or use a release that includes #1386. The collector stages the
 variant record, clones the repository with no remote, links provider logins,
-and admits the recorded login to the disposable Home.
+and admits the recorded login to the disposable Machine.
 
 Add records before trusting a verdict: several implement and compress steps
 per Wave, a repeat baseline for each, and a reviewer's judgment of whether

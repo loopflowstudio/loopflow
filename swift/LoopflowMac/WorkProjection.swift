@@ -356,7 +356,7 @@ struct SessionRenameDraft: Equatable {
 }
 
 /// One Task's in-flight `lf task run` or `lf task move` and its refusal.
-struct TaskFlowDraft: Equatable {
+struct TaskRunDraft: Equatable {
     var acting = false
     var error: String?
 }
@@ -369,12 +369,13 @@ final class WorkNavigation {
     enum Palette: Equatable {
         case search
         case flow(String)
+        case workflow(String)
     }
     var content: Content = .overview
     var palette: Palette?
     var recentDestinations: [WorkPaletteRow] = []
     /// Source revisions isolate disclosure from changed definitions and repositories.
-    var expandedTemplateGroups: [String: Set<String>] = [:]
+    var expandedCompositionGroups: [String: Set<String>] = [:]
     /// Show a launched repository shell while retaining the selected Task.
     var showsRetainedTerminals = false
     var showsActivity = false
@@ -395,7 +396,7 @@ final class WorkNavigation {
     var binding: SessionBindingDraft?
     var showsHeadlessSessions = false
     /// Flow drafts by planning Task id; they survive Task and Session navigation.
-    var flowDrafts: [String: TaskFlowDraft] = [:]
+    var taskRunDrafts: [String: TaskRunDraft] = [:]
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
@@ -406,8 +407,8 @@ final class WorkNavigation {
     var expandedHistory: Set<String> = []
     /// Wave planning notices whose Details are open, keyed by Task ID.
     var expandedNotices: Set<String> = []
-    /// Flow execs whose graph and steps are open, keyed by driver Exec.
-    var expandedFlowRuns: Set<String> = []
+    /// Flow processes whose graph and steps are open, keyed by driver Process.
+    var expandedFlowProcesses: Set<String> = []
     var repositoryCollapsed = false
     /// The orphan Session section's disclosure. `nil` follows the default:
     /// collapsed beside planned Work, open when orphans are all there is.

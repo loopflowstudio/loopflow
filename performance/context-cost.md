@@ -21,7 +21,7 @@ Wave's daily cron keeps the readings fresh.
 
 ## September 30 baseline
 
-Measured by hand from 1,349 run records in `~/.lf` and the pinned Home during
+Measured by hand from 1,349 run records in `~/.lf` and the pinned Machine during
 the LOO-298 speed research. The report recomputes its own baseline row from the
 store; where the two disagree, the difference is population, not drift.
 

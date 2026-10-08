@@ -99,8 +99,10 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 }
 
 #[test]
-fn wave_detail_preserves_flow_and_requires_home() {
+fn wave_detail_preserves_flow_and_requires_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    assert_eq!(snapshot.wave.machine.label.as_deref(), Some("mini"));
+    assert_eq!(snapshot.wave.machine.repo.as_deref(), Some("src/project"));
     assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready
@@ -129,9 +131,12 @@ fn wave_detail_preserves_flow_and_requires_home() {
         serde_json::to_value(&snapshot.projects).unwrap()
     );
 
-    let mut missing_home: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
-    missing_home["wave"].as_object_mut().unwrap().remove("home");
-    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_home).is_err());
+    let mut missing_machine: serde_json::Value = serde_json::from_str(WAVE_DETAIL).unwrap();
+    missing_machine["wave"]
+        .as_object_mut()
+        .unwrap()
+        .remove("machine");
+    assert!(serde_json::from_value::<WaveDetailSnapshot>(missing_machine).is_err());
 }
 
 #[test]
@@ -273,7 +278,7 @@ fn session_history_retains_receipts_and_unknown_driver() {
         events[1].kind,
         loopflow::session::SessionEventKind::Completed
     );
-    assert!(events[1].exec_id.is_none());
+    assert!(events[1].process_lfid.is_none());
     assert_eq!(events[0].payload["total"]["inputTokens"], 40);
     assert_eq!(
         events[2].kind,
@@ -309,33 +314,35 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 }
 
 #[test]
-fn exec_page_retains_outcomes_unknowns_and_continuation() {
-    let json = include_str!("../../../tests/fixtures/dto/exec_page.json");
-    let page: loopflow::exec::ExecPage = serde_json::from_str(json).unwrap();
+fn process_page_retains_outcomes_unknowns_and_continuation() {
+    let json = include_str!("../../../tests/fixtures/dto/process_page.json");
+    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
     assert_eq!(page.entries[0].exit_code, Some(42));
     assert_eq!(page.entries[0].via_agent, None);
+    assert_eq!(page.entries[0].pid, None);
+    assert_eq!(page.entries[1].pid, Some(4242));
     assert_eq!(
-        page.entries[1].parent_exec_id.as_ref(),
-        Some(&page.entries[0].id)
+        page.entries[1].parent_process_lfid.as_ref(),
+        Some(&page.entries[0].lfid)
     );
     assert_eq!(page.entries[1].outcome, None);
-    assert_eq!(page.next.as_ref().unwrap().id, page.entries[1].id);
+    assert_eq!(page.next.as_ref().unwrap().lfid, page.entries[1].lfid);
     assert_eq!(
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::exec::ExecPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
 }
 
 #[test]
-fn session_input_history_retains_distinct_native_results_and_unknown_exec() {
+fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
     )
     .unwrap();
     assert_eq!(value.providers.len(), 2);
     assert_eq!(value.providers[0].outcome.as_deref(), Some("failed"));
-    assert!(value.providers[0].exec_id.is_none());
+    assert!(value.providers[0].process_lfid.is_none());
     assert_eq!(value.providers[0].usage.input_tokens, None);
     assert_eq!(value.providers[1].usage.input_tokens, Some(0));
     assert_eq!(value.status(), "failed → completed");
@@ -402,14 +409,14 @@ fn task_status_preserves_planning_freshness_without_execution() {
 }
 
 #[test]
-fn flow_templates_round_trip_distinct_compositions_and_required_children() {
+fn flow_compositions_round_trip_distinct_compositions_and_required_children() {
     use loopflow::engine::flow_graph::FlowCatalogEntry;
-    let json = include_str!("../../../tests/fixtures/dto/flow_template.json");
+    let json = include_str!("../../../tests/fixtures/dto/flow_composition.json");
     let entry: FlowCatalogEntry = serde_json::from_str(json).unwrap();
     let value: serde_json::Value = serde_json::from_str(json).unwrap();
     assert_eq!(serde_json::to_value(&entry).unwrap(), value);
     let mut missing = value;
-    missing["template"]["items"][2]
+    missing["composition"]["items"][2]
         .as_object_mut()
         .unwrap()
         .remove("items");
@@ -418,7 +425,7 @@ fn flow_templates_round_trip_distinct_compositions_and_required_children() {
         "../../../tests/fixtures/dto/flow_catalog.json"
     ))
     .unwrap();
-    assert!(catalog[0].template.is_some() && catalog[1].template.is_none());
+    assert!(catalog[0].composition.is_some() && catalog[1].composition.is_none());
 }
 
 #[test]
@@ -426,7 +433,7 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
     let json = include_str!("../../../tests/fixtures/dto/task_checkout.json");
     let snapshot: loopflow::ops::task::TaskSnapshot = serde_json::from_str(json).unwrap();
     assert_eq!(
-        snapshot.home_id.as_ref().unwrap().as_str(),
+        snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
     assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
@@ -445,14 +452,14 @@ fn task_work_preserves_all_owners() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
-    assert_eq!(work.flows.len(), 1);
-    assert!(!work.execs.is_empty());
+    assert_eq!(work.flow_processes.len(), 1);
+    assert!(!work.processes.is_empty());
     let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
     assert_eq!(
         workflow.position,
         loopflow::ops::workflow::WorkflowPosition::Edge {
             edge: 2,
-            exec_id: work.flows[0].summary.id.clone(),
+            process_lfid: work.flow_processes[0].summary.id.clone(),
             running: true,
         }
     );
@@ -507,7 +514,7 @@ fn context_report_keeps_unknown_sources_distinct_from_zero() {
 #[test]
 fn flow_detail_keeps_its_launched_graph_and_every_step() {
     let input = include_str!("../../../tests/fixtures/dto/flow_detail.json");
-    let detail: loopflow::durable::FlowDetail = serde_json::from_str(input).unwrap();
+    let detail: loopflow::durable::FlowProcessDetail = serde_json::from_str(input).unwrap();
     assert_eq!(detail.steps.len(), 6);
     // The running step is the second pass of the node the loop returned to.
     let running = detail.steps.last().unwrap();
@@ -538,7 +545,7 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
     let WorkContent::Task(Some(task)) = &frames[6].content else {
         panic!("the read Task part carries its work and Flow runs");
     };
-    assert_eq!(task.work.flows.len(), task.flow_runs.len());
+    assert_eq!(task.work.flow_processes.len(), task.flow_processes.len());
     for field in ["sequence", "home", "part"] {
         let mut missing = source[0].clone();
         missing.as_object_mut().unwrap().remove(field);
@@ -547,4 +554,17 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
             "{field} must be required"
         );
     }
+}
+
+#[test]
+fn separate_workflow_catalog_preserves_invalid_sources() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/workflow_catalog.json"
+    ))
+    .unwrap();
+    let entries: Vec<loopflow::engine::workflow::WorkflowCatalogEntry> =
+        serde_json::from_value(value.clone()).unwrap();
+    assert!(entries[0].workflow.is_some());
+    assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());
+    assert_eq!(serde_json::to_value(entries).unwrap(), value);
 }

@@ -30,9 +30,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{
-    build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
-};
+use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
@@ -622,7 +620,7 @@ pub struct CodexHarness {
     session_driver: Option<(
         crate::store::sqlite::SqliteStore,
         String,
-        crate::exec::SessionDriver,
+        crate::process::SessionDriver,
     )>,
 }
 
@@ -837,10 +835,6 @@ impl Harness for CodexHarness {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
-                let system_prompt = system_prompt_with_structured_replies(launch);
-                if !system_prompt.trim().is_empty() {
-                    parts.push(system_prompt.trim().to_string());
-                }
                 if !launch.task_prompt.trim().is_empty() {
                     parts.push(launch.task_prompt.trim().to_string());
                 }
@@ -1095,7 +1089,7 @@ impl CodexHarness {
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
-        // machine installation, losing a development Session's executable/Home.
+        // installation, losing a development Session's executable/Machine.
         command.args([
             "-c",
             "allow_login_shell=false",
@@ -1106,7 +1100,7 @@ impl CodexHarness {
         // Codex's shell policy need not inherit arbitrary engine environment.
         // Tool authority belongs to this conversation, including when another
         // conversation later shares its engine. Pass only explicit launch and
-        // freshly resolved lf executable/Home values as thread configuration.
+        // freshly resolved lf executable/Machine values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
         // The engine can host another conversation. Only this thread receives
         // its caller/capture provenance; engine defaults must not lend it to a
@@ -1525,14 +1519,15 @@ impl CodexHarness {
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
-        thread_params.insert(
-            "config".into(),
-            json!({
-                "shell_environment_policy.set": tool_environment,
-                "allow_login_shell": false,
-                "features.shell_snapshot": false,
-            }),
-        );
+        let mut config = json!({
+            "shell_environment_policy.set": tool_environment,
+            "allow_login_shell": false,
+            "features.shell_snapshot": false,
+        });
+        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+            config["model_instructions_file"] = json!(path.to_string_lossy());
+        }
+        thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.
@@ -1589,20 +1584,20 @@ mod tests {
                 .unwrap();
         store.test_session("saved", &crate::session_record::new_artifact_key());
         let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-        let exec = crate::id::ExecId::new();
+        let process = crate::id::ProcessLfid::new();
         sql.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-            [exec.as_str()],
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [process.as_str()],
         )
         .unwrap();
         let old = store
-            .claim_session_driver("saved", None, &exec, true)
+            .claim_session_driver("saved", None, &process, true)
             .unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", "saved-thread")
             .unwrap();
         let driver = store
-            .claim_session_driver("saved", Some(&old), &exec, true)
+            .claim_session_driver("saved", Some(&old), &process, true)
             .unwrap();
         store
             .record_session_provider_launch("saved", &driver, false)
@@ -1627,7 +1622,7 @@ mod tests {
         assert!(!crate::session_record::conversation_engine_exited(&store, "saved").unwrap());
         let released = store.release_session_driver("saved", &driver).unwrap();
         let retry = store
-            .claim_session_driver("saved", Some(&released), &exec, true)
+            .claim_session_driver("saved", Some(&released), &process, true)
             .unwrap();
         store
             .record_session_provider_launch("saved", &retry, false)

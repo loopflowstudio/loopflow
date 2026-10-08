@@ -1,4 +1,4 @@
-use crate::engine::agent::{exec_agent, AgentCapabilities, ProcessConfig};
+use crate::engine::agent::{run_agent, AgentCapabilities, ProcessConfig};
 use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
@@ -10,8 +10,8 @@ use crate::engine::worktrees::{
     WorktreeSegment,
 };
 use crate::engine::{
-    prepare_exec_prompt, sync_skills, ContextSourceOverrides, ExecPromptInput, SkillSyncOptions,
-    Surface,
+    prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
+    SkillSyncOptions, Surface,
 };
 use crate::lf::commands::util::find_repo_root;
 use crate::lf::discovery::{discover_skill, resolve_definition, Target};
@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
+pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None => pr_status(),
@@ -51,16 +51,16 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
-        Some(PrCommand::Publish { model, title, body }) => publish_pr(
+        Some(PrCommand::Publish { agent, title, body }) => publish_pr(
             title.clone(),
             body.clone(),
-            model.as_deref().or(cli_model),
+            agent.as_deref().or(cli_agent),
             &progress,
         ),
-        Some(PrCommand::Open { model, title, body }) => open_pr(
+        Some(PrCommand::Open { agent, title, body }) => open_pr(
             title.clone(),
             body.clone(),
-            model.as_deref().or(cli_model),
+            agent.as_deref().or(cli_agent),
             &progress,
         ),
         Some(PrCommand::Submit {
@@ -83,7 +83,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
+                agent: cli_agent.map(str::to_string),
             },
             &progress,
         ),
@@ -117,7 +117,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
+                agent: cli_agent.map(str::to_string),
             },
             &progress,
         ),
@@ -170,15 +170,18 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                 for obligation in &history.obligations {
                     println!(
                         "{}/{} on {} ({})",
-                        obligation.wave, obligation.flow, obligation.home_id, obligation.timezone
+                        obligation.wave,
+                        obligation.flow,
+                        obligation.machine_id,
+                        obligation.timezone
                     );
                     for owner in obligation.closed_unsettled() {
                         println!(
-                            "blocked {}: obligation {} closed at {}; no future firing on original Home {}. Retained candidate: {}",
+                            "blocked {}: obligation {} closed at {}; no future firing on original Machine {}. Retained candidate: {}",
                             owner.id,
                             obligation.id,
                             obligation.closed_at.expect("closed owner has a closure timestamp"),
-                            obligation.home_id,
+                            obligation.machine_id,
                             owner.attempts.iter().rev().find_map(|a| a.selection.as_ref())
                                 .map(|s| format!("{} at {}", s.tag, s.commit))
                                 .unwrap_or_else(|| "none recorded".into())
@@ -194,7 +197,7 @@ pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
                                 disposition.owner, disposition.recorded_at, disposition.reason
                             );
                         }
-                        println!("  Record repair on that Home: lf cron disposition {} --wave {} --owner <task-work-id> --reason <repair-plan>", owner.id, obligation.wave);
+                        println!("  Record repair on that Machine: lf cron disposition {} --wave {} --owner <task-work-id> --reason <repair-plan>", owner.id, obligation.wave);
                     }
                     for opportunity in obligation
                         .opportunities
@@ -539,7 +542,7 @@ fn resolve_sync_conflict(
     }
     progress.status("Launching sync agent to resolve conflicts...");
     Ok(recover_sync(*recovery, |env| {
-        exec_skill_agent(
+        process_skill_agent(
             repo_root,
             "sync-conflicts",
             Some(&context),
@@ -1220,7 +1223,7 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                         cron.flow,
                         cron.schedule,
                         if cron.loaded { "loaded" } else { "not-loaded" },
-                        cron.home_id,
+                        cron.machine_id,
                         latest,
                     );
                 }
@@ -1233,9 +1236,9 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             let specs = cron_specs(&authority, wave)?;
             crate::ops::validate_cron_specs(wave, &specs)?;
             println!(
-                "cron preflight passed: {} jobs for Wave {wave} on Home {}",
+                "cron preflight passed: {} jobs for Wave {wave} on Machine {}",
                 specs.len(),
-                authority.local_home
+                authority.local_machine
             );
         }
         CronCommand::Sync {
@@ -1246,8 +1249,10 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
             if *repo {
                 require_release_cron_binary()?;
                 let authority = cron_authority("")?;
-                let key =
-                    crate::ops::cron::repository_cron_key(&authority.repo, &authority.local_home);
+                let key = crate::ops::cron::repository_cron_key(
+                    &authority.repo,
+                    &authority.local_machine,
+                );
                 if *disable {
                     crate::ops::remove_cron(&launch_agents_dir, "", &key, &SystemLaunchctl)?;
                 } else {
@@ -1317,8 +1322,8 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
                 &launch_agents_dir,
                 wave,
                 flow,
-                &authority.local_home,
-                &authority.placed_home,
+                &authority.local_machine,
+                &authority.placed_machine,
                 source,
             )?;
             println!(
@@ -1434,8 +1439,8 @@ pub fn cron_cmd(cmd: &CronCommand) -> Result<()> {
 #[derive(Debug)]
 struct CronAuthority {
     host: CronHost,
-    local_home: crate::durable::HomeId,
-    placed_home: crate::durable::HomeId,
+    local_machine: crate::durable::MachineId,
+    placed_machine: crate::durable::MachineId,
     repo: PathBuf,
 }
 
@@ -1445,8 +1450,8 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         let store = crate::store::open_registry_for_authority()
             .await
             .map_err(cron_registry_error)?;
-        let local = store.local_home().await?;
-        let (repo, placed_home) = if wave_name.is_empty() {
+        let local = store.local_machine().await?;
+        let (repo, placed_machine) = if wave_name.is_empty() {
             (main_repo_root(&repo_root)?, local.id.clone())
         } else {
             let wave = crate::work::wave::context::resolve_managed_wave(
@@ -1459,7 +1464,10 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
             let placement = store
                 .placement(&crate::durable::WorkRef::Wave(wave.id().clone()))
                 .await?;
-            (main_repo_root(Path::new(wave.repo()))?, placement.home_id)
+            (
+                main_repo_root(Path::new(wave.repo()))?,
+                placement.machine_id,
+            )
         };
         let path_env = std::env::var("PATH").map_err(|_| {
             anyhow!("PATH is absent; cannot install an unattended cron environment")
@@ -1471,12 +1479,12 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
         }
         Ok(CronAuthority {
             host: CronHost {
-                home_id: local.id.clone(),
+                machine_id: local.id.clone(),
                 lf_home: crate::store::lf_home_dir(),
                 path_env,
             },
-            local_home: local.id,
-            placed_home,
+            local_machine: local.id,
+            placed_machine,
             repo,
         })
     })
@@ -1485,28 +1493,28 @@ fn cron_authority(wave_name: &str) -> Result<CronAuthority> {
 fn cron_registry_error(error: RegistryUnavailable) -> anyhow::Error {
     match error {
         RegistryUnavailable::MissingFile { path } => anyhow!(
-            "Home registry is missing at {}; initialize or restore it before running cron",
+            "Machine registry is missing at {}; initialize or restore it before running cron",
             path.display()
         ),
         RegistryUnavailable::Unresolved { error } => {
-            anyhow!("Home registry path cannot be resolved: {error}")
+            anyhow!("Machine registry path cannot be resolved: {error}")
         }
         RegistryUnavailable::Incompatible { path, error } => anyhow!(
-            "Home registry at {} is incompatible: {error}; run `lf home doctor`",
+            "Machine registry at {} is incompatible: {error}; run `lf doctor`",
             path.display()
         ),
     }
 }
 
 fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
-    if authority.local_home == authority.placed_home {
+    if authority.local_machine == authority.placed_machine {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Home {}, not local Home {}; run `lf home ssh {} cron sync --wave {wave}`",
-        authority.placed_home,
-        authority.local_home,
-        authority.placed_home,
+        "Wave {wave} is placed on Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
+        authority.placed_machine,
+        authority.local_machine,
+        authority.placed_machine,
     ))
 }
 
@@ -1584,7 +1592,7 @@ fn cron_specs(authority: &CronAuthority, wave: &str) -> Result<Vec<CronSpec>> {
 #[cfg(test)]
 mod cron_catalog_tests {
     use super::{cron_specs, CronAuthority};
-    use crate::durable::HomeId;
+    use crate::durable::MachineId;
     use crate::ops::{CronHost, CronTargetKind};
     use std::fs;
 
@@ -1600,15 +1608,15 @@ mod cron_catalog_tests {
         .unwrap();
         let flow = repo.path().join(".lf/flows/release-run.yaml");
         fs::write(&flow, "- cmd: lf release run patch\n").unwrap();
-        let home = HomeId::new();
+        let home = MachineId::new();
         let authority = CronAuthority {
             host: CronHost {
-                home_id: home.clone(),
+                machine_id: home.clone(),
                 lf_home: repo.path().join("home"),
                 path_env: "/usr/bin:/bin".into(),
             },
-            local_home: home.clone(),
-            placed_home: home,
+            local_machine: home.clone(),
+            placed_machine: home,
             repo: repo.path().to_path_buf(),
         };
         let specs = cron_specs(&authority, "infrastructure").unwrap();
@@ -1659,7 +1667,7 @@ fn release_check_cmd(target_name: Option<&str>) -> Result<()> {
 
     if changes.commits.is_empty() {
         eprintln!("No commits in the target area since the last tag.");
-        return Err(crate::exec::CommandExit(1).into());
+        return Err(crate::process::CommandExit(1).into());
     }
 
     let is_tty = std::io::stdout().is_terminal();
@@ -2523,7 +2531,7 @@ fn write_shell_directive(command: &str) -> Result<bool> {
 ///
 /// Used when mechanical operations hit a situation that requires agent
 /// reasoning — e.g., sync conflicts that need conflict resolution.
-fn exec_skill_agent(
+fn process_skill_agent(
     repo_root: &Path,
     skill_name: &str,
     context: Option<&str>,
@@ -2533,9 +2541,9 @@ fn exec_skill_agent(
     let skill = discover_skill(repo_root, skill_name)?;
 
     let message = context.map(|value| value.to_string());
-    let prepared = prepare_exec_prompt(
+    let prepared = prepare_process_prompt(
         config,
-        ExecPromptInput {
+        ProcessPromptInput {
             repo_root: repo_root.to_path_buf(),
             skill: Some(skill_name.to_string()),
             resolved_skill: Some(skill),
@@ -2553,7 +2561,7 @@ fn exec_skill_agent(
                 diff: Some(false),
                 ..Default::default()
             },
-            ..ExecPromptInput::default()
+            ..ProcessPromptInput::default()
         },
     )?;
 
@@ -2582,7 +2590,7 @@ fn exec_skill_agent(
             work: None,
         },
         &context,
-        Some(crate::session_record::AgentExecRequest::from_prepared(
+        Some(crate::session_record::AgentProcessRequest::from_prepared(
             &prepared.config,
             &AgentCapabilities {
                 chrome: config.chrome,
@@ -2603,7 +2611,7 @@ fn exec_skill_agent(
         chrome: config.chrome,
     };
 
-    let result = exec_agent(&launch, &process, &capabilities);
+    let result = run_agent(&launch, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

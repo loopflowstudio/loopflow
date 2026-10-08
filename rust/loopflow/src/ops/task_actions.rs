@@ -13,7 +13,6 @@ pub enum TaskAction {
     Resume,
     OpenPr,
     StartNextPr,
-    Complete,
     NoAction,
 }
 
@@ -23,7 +22,6 @@ impl TaskAction {
             Self::Resume => "resume",
             Self::OpenPr => "open_pr",
             Self::StartNextPr => "start_next_pr",
-            Self::Complete => "complete",
             Self::NoAction => "no_action",
         }
     }
@@ -52,9 +50,19 @@ pub struct TaskActionEvidence<'a> {
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if !matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned)
-        && !evidence.abandon_intent
+    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
+        return action(TaskAction::NoAction, "Task is terminal");
+    }
+    if evidence.abandon_intent {
+        return action(TaskAction::NoAction, "Task is being abandoned");
+    }
+    if let Some(remaining) = evidence
+        .completion_refusal
+        .filter(|reason| reason.contains("Remaining work:"))
     {
+        return action(TaskAction::NoAction, remaining);
+    }
+    if evidence.latest_pr_phase != Some(PrPhase::Merged) {
         if let Some(execution) = evidence
             .execution
             .filter(|execution| execution.state != TaskExecutionState::Idle)
@@ -65,13 +73,7 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
             return action(TaskAction::NoAction, refusal);
         }
     }
-    let model = if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
-        action(TaskAction::NoAction, "Task is terminal")
-    } else if evidence.abandon_intent {
-        action(TaskAction::NoAction, "Task is being abandoned")
-    } else {
-        phase_action(evidence)
-    };
+    let model = phase_action(evidence);
     let model = apply_predecessor(model, evidence.predecessor_phase);
     apply_resume_refusal(model, evidence.resume_refusal)
 }
@@ -80,7 +82,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) if evidence.latest_pr_presentation_current == Some(false) => action(
             TaskAction::Resume,
-            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf pr land -c`",
+            "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf land`",
         ),
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing && !ci.only_land_time_preconditions() => {
@@ -88,7 +90,7 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
                 TaskAction::Resume,
-                "PR is published but settlement is not armed; run `lf pr land -c`",
+                "PR is published but settlement is not armed; run `lf land`",
             ),
             Some(ci) if ci.only_land_time_preconditions() || ci.state == CiState::Passing => {
                 let request = evidence
@@ -116,39 +118,29 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
         Some(PrPhase::Abandoned) => {
             action(TaskAction::StartNextPr, "PR abandoned; start the next PR")
         }
-        Some(PrPhase::Working) => body_action(evidence),
-        None if evidence.resume_refusal.is_some() => action(
-            TaskAction::NoAction,
-            evidence.resume_refusal.expect("checked above"),
+        Some(PrPhase::Working) | None => action(
+            TaskAction::Resume,
+            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
         ),
-        None => body_action(evidence),
     }
 }
 
 fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
+    if let Some(refusal) = evidence.completion_refusal {
+        return action(TaskAction::NoAction, refusal);
+    }
     match evidence
         .latest_pr_after_merge
         .expect("a merged Task PR has an after-merge disposition")
     {
-        AfterMerge::ContinueTask => action(
-            TaskAction::StartNextPr,
-            "PR merged; continue the Task on its next PR",
-        ),
-        AfterMerge::CompleteTask => match evidence.completion_refusal {
-            Some(refusal) => action(TaskAction::NoAction, refusal),
-            None => action(TaskAction::Complete, "PR merged; complete the Task"),
+        AfterMerge::ContinueTask => match evidence.latest_pr_merge_request.and_then(|request| request.next_slug.as_deref()) {
+            Some(next) => action(TaskAction::StartNextPr, format!("PR merged; remaining PR work: {next}")),
+            None => action(TaskAction::NoAction, "PR merged; earlier delivery kept the Task open without a recorded remaining outcome. Inspect accepted scope, then record `lf task follow-up` or move it to `end`"),
         },
-    }
-}
-
-fn body_action(evidence: &TaskActionEvidence) -> TaskActionModel {
-    if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
-        action(TaskAction::NoAction, "Task is terminal")
-    } else {
-        action(
-            TaskAction::Resume,
-            "run the next work with `lf task run`; inspect earlier Flows and independent Sessions first",
-        )
+        AfterMerge::CompleteTask => action(
+            TaskAction::NoAction,
+            "PR merged; delivery reconciliation completes the Task",
+        ),
     }
 }
 
@@ -159,12 +151,7 @@ fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> Ta
             "parent PR was abandoned; sync or abandon this stack",
         ),
         Some(PrPhase::Merged) | None => model,
-        Some(_)
-            if matches!(
-                model.recommended,
-                Some(TaskAction::Complete | TaskAction::StartNextPr)
-            ) =>
-        {
+        Some(_) if matches!(model.recommended, Some(TaskAction::StartNextPr)) => {
             action(TaskAction::NoAction, "waiting for parent PR to merge")
         }
         Some(_) => model,
@@ -234,6 +221,23 @@ mod tests {
     }
 
     #[test]
+    fn abandoned_parent_never_recommends_resuming_terminal_or_canceling_tasks() {
+        for (status, abandon_intent, reason) in [
+            (WorkStatus::Done, false, "Task is terminal"),
+            (WorkStatus::Abandoned, false, "Task is terminal"),
+            (WorkStatus::Ready, true, "Task is being abandoned"),
+        ] {
+            let mut evidence = evidence(PrPhase::Working, None, None);
+            evidence.status = status;
+            evidence.abandon_intent = abandon_intent;
+            evidence.predecessor_phase = Some(PrPhase::Abandoned);
+            let model = derive_task_actions(&evidence);
+            assert_eq!(model.recommended, Some(TaskAction::NoAction));
+            assert_eq!(model.reason, reason);
+        }
+    }
+
+    #[test]
     fn active_or_uncertain_execution_never_recommends_another_implementation() {
         for state in [
             TaskExecutionState::Starting,
@@ -259,33 +263,22 @@ mod tests {
     }
 
     #[test]
-    fn merged_continue_task_starts_the_next_pr_without_review_state() {
-        let model = derive_task_actions(&evidence(
-            PrPhase::Merged,
-            Some(AfterMerge::ContinueTask),
-            None,
-        ));
-
-        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
-        assert_eq!(model.reason, "PR merged; continue the Task on its next PR");
-    }
-
-    #[test]
-    fn invalid_lifecycle_suppresses_serial_pr_continuation() {
+    fn historical_continuation_needs_a_specific_remaining_outcome() {
         let mut evidence = evidence(PrPhase::Merged, Some(AfterMerge::ContinueTask), None);
-        evidence.predecessor_phase = Some(PrPhase::Abandoned);
-        evidence.resume_refusal = Some("Task has no active PR to resume");
-        evidence.launch_refusal = Some(
-            "Task INT-10 cannot launch: loop phase is missing autonomous_progress; abandon and replace it with valid flows",
-        );
-
         let model = derive_task_actions(&evidence);
-
         assert_eq!(model.recommended, Some(TaskAction::NoAction));
-        assert_eq!(
-            model.reason,
-            "Task INT-10 cannot launch: loop phase is missing autonomous_progress; abandon and replace it with valid flows"
-        );
+        assert!(model.reason.contains("recorded remaining outcome"));
+        let request = PrMergeRequest {
+            mode: PrMergeMode::Auto,
+            requested_at: OffsetDateTime::now_utc(),
+            head_sha: "delivered-head".into(),
+            after_merge: AfterMerge::ContinueTask,
+            next_slug: Some("second-part".into()),
+        };
+        evidence.latest_pr_merge_request = Some(&request);
+        let model = derive_task_actions(&evidence);
+        assert_eq!(model.recommended, Some(TaskAction::StartNextPr));
+        assert!(model.reason.contains("second-part"));
     }
 
     #[test]
@@ -319,7 +312,7 @@ mod tests {
         assert_eq!(model.recommended, Some(TaskAction::Resume));
         assert_eq!(
             model.reason,
-            "PR is published but settlement is not armed; run `lf pr land -c`"
+            "PR is published but settlement is not armed; run `lf land`"
         );
     }
 

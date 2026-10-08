@@ -48,7 +48,10 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
-    public let flow: TaskFlowSnapshot
+    public let workflowName: String?
+    public let latestFlowProcess: FlowProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -57,7 +60,10 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs, flow
+        case task, reference, runtime, directive, condition, actions, prs, execution
+        case workflowName = "workflow_name"
+        case latestFlowProcess = "latest_flow_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -135,8 +141,8 @@ public struct TaskReferenceSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
-    public let homeId: String?
-    public var identity: WorkspaceIdentity? { homeId.map { WorkspaceIdentity(homeId: $0, worktree: worktree) } }
+    public let machineId: String?
+    public var identity: WorkspaceIdentity? { machineId.map { WorkspaceIdentity(machineId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
     public let worktree: String
@@ -144,7 +150,7 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
-        case homeId = "home_id"
+        case machineId = "machine_id"
         case localExists = "local_exists"
     }
 }
@@ -165,12 +171,18 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let flow: TaskFlowSnapshot
+    public let workflowName: String?
+    public let latestFlowProcess: FlowProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, flow, section
+        case task, reference, runtime, condition, actions, execution, section
+        case workflowName = "workflow_name"
+        case latestFlowProcess = "latest_flow_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -221,7 +233,6 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
     case startNextPr = "start_next_pr"
-    case complete
     case noAction = "no_action"
 }
 

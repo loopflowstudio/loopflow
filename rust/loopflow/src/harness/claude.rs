@@ -106,7 +106,9 @@ impl ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let args = build_claude_stream_session_args(config, resume_id.as_deref());
+        let context_file = crate::engine::agent::write_system_prompt_file(config, "session")?;
+        let args =
+            build_claude_stream_session_args(config, resume_id.as_deref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);
@@ -629,10 +631,10 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(&database).unwrap();
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let exec = crate::id::ExecId::new();
+        let process = crate::id::ProcessLfid::new();
         conn.execute(
-            "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'trace',1)",
-            [&exec],
+            "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'trace',1)",
+            [&process],
         )
         .unwrap();
         let script = home.path().join("claude");
@@ -647,7 +649,9 @@ mod tests {
         let mut recorded = Vec::new();
         for id in ["first", "second"] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            let driver = store.claim_session_driver(id, None, &exec, true).unwrap();
+            let driver = store
+                .claim_session_driver(id, None, &process, true)
+                .unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
             let mut harness = ClaudeHarness::new(tx);
             let mut config = live_config();
@@ -659,7 +663,7 @@ mod tests {
                 store.session_provider_process(id).unwrap(),
             ));
             store.release_session_driver(id, &driver).unwrap();
-            // Retain the first process while the same Exec starts the next step.
+            // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
         for harness in &mut harnesses {
@@ -672,8 +676,6 @@ mod tests {
             assert!(start > 0);
         }
     }
-
-    // build_claude_session_turn_args coverage lives in engine::agent::tests.
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {

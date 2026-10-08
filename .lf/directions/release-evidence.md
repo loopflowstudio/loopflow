@@ -9,7 +9,7 @@ exact candidate ownership, intervention provenance, and failures. A collapsed
 row supplies no additional success toward the two-settlement commitment.
 
 The publisher host's launcher must retain the exact inherited release-lock
-file descriptor through exec. Preserve it through Python subprocesses too;
+file descriptor through process. Preserve it through Python subprocesses too;
 parent exit alone cannot authorize another publisher while a child survives.
 
 Required UI-host verification is separate from `--all` and native package

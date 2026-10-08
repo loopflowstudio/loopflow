@@ -63,13 +63,13 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
         (
             1,
             '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',
-            "cannot install into a fresh Home",
+            "cannot install into a fresh Machine",
         ),
         (0, "not JSON", "did not emit a promotion identity"),
         (
             1,
             '{"candidate":{"authority":"published"},"verdict":{"kind":"promote"}}',
-            "cannot install into a fresh Home",
+            "cannot install into a fresh Machine",
         ),
     ],
 )

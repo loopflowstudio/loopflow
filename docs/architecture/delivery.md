@@ -94,7 +94,7 @@ GitHub squash-merges the final PR tree into one commit on main. `arm` and `land`
 GitHub auto-merge, record the landing, and return. Success means handoff;
 `lf task reconcile` checks recorded repository landings once;
 `lf pr reconcile` uses its delivery-only path. `lf cron sync --repo` installs the
-finite minute check on this Home. Neither repairs CI; `lf ci watch` does. `submit` performs the
+finite minute check on this Machine. Neither repairs CI; `lf ci watch` does. `submit` performs the
 same preparation but leaves the exact-head merge to a person. These delivery
 commands inspect Task delivery state when present; they do not require a running
 Task Flow or certify that a particular Flow ran.
@@ -240,7 +240,7 @@ never depends on it: with no watcher, failures are recorded and wait.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair
-Session. Admission reserves that Session and launcher Exec atomically before
+Session. Admission reserves that Session and launcher Process atomically before
 starting its detached worker. A dead launch may retry once using the same
 conversation and native history; a completed blocked repair retains its outcome.
 The same incident failing again waits until the head or evidence changes.
@@ -286,9 +286,15 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge, bare `lf land` settles that PR and leaves the Task open.
-`lf land -c` completes the Task. `lf land --next <slug>` rotates the
-serial chain to a new branch from fetched main.
+After verified merge, `lf land` normally completes its Task. `lf task follow-up`
+records an explicit remaining outcome, evidence condition and next check in Task
+history; reconciliation keeps it open until that work is resolved. Overdue checks
+surface the unresolved decision, never success. `lf land --next <slug>` retains
+unfinished PR work and rotates the serial chain from fetched main.
+
+Task decisions never settle Session turns or process exits. Checkout cleanup and
+process control keep their own evidence and authority. Historical uncertainty
+cannot veto completion or cancellation; it can require retaining the checkout.
 
 ## Failure and recovery
 
@@ -316,7 +322,7 @@ serial chain to a new branch from fetched main.
 ## Next
 
 [Planning →](planning.md) separates the Task objective from exact Flow positions.
-[Homes and processes →](homes.md) owns the machine and process boundaries around
+[Machines and processes →](machines.md) owns the machine and process boundaries around
 delivery.
 
 

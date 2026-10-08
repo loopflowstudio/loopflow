@@ -1,4 +1,4 @@
-// WorkCache — the last workspace a refresh showed, kept inside the Home it
+// WorkCache — the last workspace a refresh showed, kept inside the Machine it
 // describes so a returning launch renders before any `lf` read.
 //
 // It holds the wire text of successful reads, restored through the decoder
@@ -12,6 +12,11 @@ import Foundation
 import Loopflow
 
 struct WorkSnapshot: Codable, Equatable, Sendable {
+    enum CodingKeys: String, CodingKey {
+        case machineId = "homeId"
+        case roadmap, waves, repositories
+    }
+
     struct Repository: Codable, Equatable, Sendable {
         /// The default interactive Session listing, one wire page each.
         var sessionPages: [String]?
@@ -19,8 +24,8 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
         var savedAt: Date
     }
 
-    /// The Home these reads came from. A different Home invalidates everything.
-    var homeId: String?
+    /// The Machine these reads came from. A different Machine invalidates everything.
+    var machineId: String?
     /// Wire text of the last successful planning reads.
     var roadmap: String?
     var waves: String?
@@ -29,7 +34,7 @@ struct WorkSnapshot: Codable, Equatable, Sendable {
 }
 
 final class WorkCache: @unchecked Sendable {
-    static let version = 1
+    static let version = 2
     /// Most-recently saved repositories kept; older ones are dropped.
     static let maxRepositories = 8
     /// One read larger than this is not kept; the launch reads it instead.
@@ -54,11 +59,11 @@ final class WorkCache: @unchecked Sendable {
         url = directory.appendingPathComponent("workspace.json", isDirectory: false)
     }
 
-    /// The cache of the Home this process's `lf` reads resolve to. Every window
+    /// The cache of the Machine this process's `lf` reads resolve to. Every window
     /// shares it, so one window's save never drops another's repository.
     static let home = WorkCache(directory: homeDirectory)
 
-    /// Where Desktop keeps what it saves inside the Home.
+    /// Where Desktop keeps what it saves inside the Machine.
     static var homeDirectory: URL {
         let home = ProcessInfo.processInfo.environment["LF_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".lf", isDirectory: true)
@@ -110,15 +115,15 @@ final class WorkCache: @unchecked Sendable {
         }
     }
 
-    /// Record the Home fresh reads come from. Text saved under another Home is discarded.
-    func confirmHome(_ id: String) {
+    /// Record the Machine fresh reads come from. Text saved under another Machine is discarded.
+    func confirmMachine(_ id: String) {
         queue.async { [self] in
-            guard snapshot.homeId != id else { return }
-            if snapshot.homeId != nil {
+            guard snapshot.machineId != id else { return }
+            if snapshot.machineId != nil {
                 snapshot = WorkSnapshot()
                 lastInput = [:]
             }
-            snapshot.homeId = id
+            snapshot.machineId = id
             write()
         }
     }
@@ -169,9 +174,10 @@ final class WorkCache: @unchecked Sendable {
         func quiet(_ value: Any) -> Any {
             if let array = value as? [Any] { return array.map(quiet) }
             guard var object = value as? [String: Any] else { return value }
-            if object["kind"] as? String == "latest", object["execution"] != nil {
-                object["execution"] = TaskFlowExecution.unknown.rawValue
-                object["reason"] = savedReason
+            if var execution = object["execution"] as? [String: Any] {
+                execution["state"] = TaskExecutionState.unknown.rawValue
+                execution["reason"] = savedReason
+                object["execution"] = execution
             }
             // A Task's condition describes what its worker was doing at the last read.
             if var condition = object["condition"] as? [String: Any], condition["state"] != nil {
@@ -179,13 +185,10 @@ final class WorkCache: @unchecked Sendable {
                 condition["reason"] = savedReason
                 object["condition"] = condition
             }
-            if let controls = object["controls"] as? [[String: Any]] {
-                object["controls"] = controls.map { control in
-                    var control = control
-                    control["unavailable"] = savedReason
-                    return control
-                }
+            if object["run_control"] != nil {
+                object["run_control"] = ["unavailable": savedReason]
             }
+
             return object.mapValues(quiet)
         }
         return rewrite(text, quiet)

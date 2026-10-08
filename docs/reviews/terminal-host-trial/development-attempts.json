@@ -1,0 +1,237 @@
+[
+  {
+    "attempt": "loo421-herdr-01",
+    "results": [
+      {
+        "host": "herdr",
+        "outcome": "blocked",
+        "errors": [
+          "Command '['/usr/bin/sandbox-exec', '-f', '/private/tmp/lf-host-trial-nn94jwk6/allowed/runtime.sb', '/private/tmp/lf-host-trial-nn94jwk6/allowed/bin/herdr']' timed out after 5 seconds"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-herdr-02",
+    "results": [
+      {
+        "host": "herdr",
+        "outcome": "blocked",
+        "errors": [
+          "herdr pane.read: {'code': 'invalid_request', 'message': 'invalid request: unknown variant `recent-unwrapped`, expected one of `visible`, `recent`, `recent_unwrapped`, `detection` at line 1 column 115'}"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-herdr-03",
+    "results": [
+      {
+        "host": "herdr",
+        "outcome": "blocked",
+        "errors": [
+          "'text'"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-herdr-04",
+    "results": [
+      {
+        "host": "herdr",
+        "outcome": "blocked",
+        "errors": [
+          "Command '['/usr/bin/sandbox-exec', '-f', '/private/tmp/lf-host-trial-5df9azqo/allowed/runtime.sb', '/private/tmp/lf-host-trial-5df9azqo/allowed/bin/herdr']' timed out after 5 seconds"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-herdr-05",
+    "results": [
+      {
+        "host": "herdr",
+        "outcome": "success",
+        "errors": []
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-01",
+    "results": [
+      {
+        "host": null,
+        "outcome": "blocked",
+        "errors": [
+          "[Errno 1] Operation not permitted"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-02",
+    "results": [
+      {
+        "host": null,
+        "outcome": "blocked",
+        "errors": [
+          "confinement not established; no host or lf trial launched"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-03",
+    "results": [
+      {
+        "host": null,
+        "outcome": "blocked",
+        "errors": [
+          "fixture git preparation failed"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-04",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-05",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-06",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-07",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-08",
+    "results": [
+      {
+        "host": null,
+        "outcome": "blocked",
+        "errors": [
+          "flow",
+          "fixture worktree preparation failed"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-09",
+    "outcome": "failure",
+    "note": "Harness exception before summary; partial receipts retained locally. Registered Task identifier fixture corrected in later attempts."
+  },
+  {
+    "attempt": "loo421-pty-10",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow",
+          "task-checkout",
+          "task-flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-11",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow",
+          "task-checkout",
+          "task-flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-12",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "flow",
+          "task-flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-13",
+    "results": [
+      {
+        "host": null,
+        "outcome": "failure",
+        "errors": [
+          "task-flow"
+        ]
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-14",
+    "results": [
+      {
+        "host": null,
+        "outcome": "success",
+        "errors": []
+      }
+    ]
+  },
+  {
+    "attempt": "loo421-pty-15",
+    "results": [
+      {
+        "host": null,
+        "outcome": "blocked",
+        "errors": [
+          "confinement not established; no host or lf trial launched"
+        ]
+      }
+    ]
+  }
+]

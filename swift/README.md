@@ -8,13 +8,13 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
 The development app bundles this checkout's CLI. Ordinary launches use the
-installed CLI and main Home. For a branch demo, launch with an explicit private
-`LF_HOME`; that uses the matching source CLI on disposable data. A copied Home
+installed CLI and main Machine. For a branch demo, launch with an explicit private
+`LF_HOME`; that uses the matching source CLI on disposable data. A copied Machine
 retains real checkout paths, so file edits still affect those checkouts.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
-A returning launch opens on the workspace saved at `<Home>/desktop-cache/workspace.json`
+A returning launch opens on the workspace saved at `<Machine>/desktop-cache/workspace.json`
 and shows **Updating…** until this launch's reads replace it. Saved rows open
 and navigate; Flow state, Task condition, Session state and every action except
 opening a Session wait for the fresh read. The Portfolio window opens from the
@@ -29,11 +29,11 @@ uv run python scripts/benchmarks/desktop-performance/timings.py   # how long you
 
 Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
-the Home. Durations and command names only; the files stay on this machine.
+the Machine. Durations and command names only; the files stay on this machine.
 
 Choose **Background progress** in the repository toolbar to enable minute
 checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
-continue with the app closed on the selected Home. Disabling stops scheduled
+continue with the app closed on the selected Machine. Disabling stops scheduled
 admission; already-running work and requested GitHub merges continue.
 
 While a repository is open, the app runs `lf ci watch` for it and stops it on
@@ -158,16 +158,16 @@ When Linear calls an active Task complete, the header shows that as an error wit
 up no workflow offers **Start**, which runs `lf -b task run ISSUE`.
 
 The toolbar's **+** changes what the multiplexer shows: **New shell**,
-**Files** or **Flow execs**. The Flow exec log lists every Flow exec in the
+**Files** or **Flow processes**. The Flow process log lists every Flow process in the
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Flow, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf flow show ID --sessions --json`). An exec whose driver exited early reads
+`lf flow show ID --processes --json`). A process whose driver exited early reads
 **stopped**. One whose driver was killed has no exit record and keeps reading
-as running. **Task details → Debug** lists the Task's raw Sessions and Execs.
+as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf flow list`); **Customize** or **Edit** opens its source in
+(`lf project workflow list`); **Customize** or **Edit** opens its source in
 your editor, writing a builtin to `.lf/` first.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
@@ -185,7 +185,7 @@ Wave → Task → Session: Wave and Task crumbs return to their details; the Tas
 issue ID links to Linear. With several Sessions, the final crumb chooses among
 them by name. The pencil renames the Session in place through `lf session
 rename`; the shown name is the shared readback, and a rejected name stays in the
-field with its error. A remote Flow Session's name lives on its Home and is not
+field with its error. A remote Flow Session's name lives on its Machine and is not
 renamed here. Beside the name, the Session shows its Flow step and iteration as
 quiet mono text, **Independent**, or why membership is unknown. On the right sit
 the Task's read-only worktree location and the Activity glyph.
@@ -196,13 +196,13 @@ focused pane's strip reveals split right, split down and close; the strip's
 context menu and the keybinds above offer the same plus zoom. Unfocused panes
 dim slightly; nothing draws a focus border.
 
-Files and the Flow exec log open beside retained Sessions and shells in the
+Files and the Flow process log open beside retained Sessions and shells in the
 same multiplexer. Split, resize, zoom, close and Undo work for all pane content.
 
 Press **⌘K** to search Waves, all planned Tasks, named Sessions and Flows in the
 selected repository. Empty search shows recent destinations first; arrows select,
 Return opens and Escape returns focus to the previous terminal. Flow entries
-inspect the template. **Flow execs of ISSUE** opens the Task's log pane.
+inspect the template. **Flow processes of ISSUE** opens the Task's log pane.
 The sidebar search remains a filter. Each repository retains up to 20 recent
 destinations for the window. Visited historical Tasks remain in recents after
 leaving their pages; opening one reads its exact identity again. This does not
@@ -233,7 +233,7 @@ missing or unrelated Session leaves the current workspace intact and offers Retr
 Opening a conversation does not complete a review or start a Task Flow.
 
 Wave details show the objective, current chapter plan/KRs, the current Project's
-Flow template, current Tasks and chapter history. Completed Tasks start hidden.
+Workflow, current Tasks and chapter history. Completed Tasks start hidden.
 **Completed** adds the last 7 days. Click **7 Days** to edit the number inline;
 Enter or clicking away applies it, Escape cancels. Enter **0** for **All Tasks**
 (successful completions of any age); click that label to edit again. The checkbox
@@ -406,13 +406,13 @@ so macOS permissions survive rebuilds. The app queries `lf` directly and starts
 only the selected Wave's `lf wave` process; it has no machine-wide service or
 remote-connection mode.
 
-The dev app uses the installed CLI and main `~/.lf` Home. Its bundled source
+The dev app uses the installed CLI and main `~/.lf` Machine. Its bundled source
 CLI forwards ordinary commands to that installation. Explicit `LF_HOME`
 experiments remain disposable and never become the app's default.
 
 For a branch UI demo, select a private `LF_HOME` explicitly so the bundled CLI
 and UI use this checkout’s wire protocol. Its recorded checkout paths still
-refer to real files. A copied Home does not prove live provider continuation.
+refer to real files. A copied Machine does not prove live provider continuation.
 
 | Command | What it does |
 | --- | --- |
@@ -482,7 +482,7 @@ lf monitor work --watch --json    # what a window shows, as it changes
 
 Each window keeps one such reader open through `RegistryQuery.watchWork()`.
 Its frames carry planning, the repository's Sessions, the shown Task's work
-with its Workflow and every Flow exec, the shown Wave's detail and activity.
+with its Workflow and every Flow process, the shown Wave's detail and activity.
 The Task page reads nothing else: after `lf task run` or `lf task move` the
 window asks the reader again and shows the frame that answers. A part arrives again only when a commit
 changed what it shows, so a Task created by `lf`, a worker or another window
@@ -515,16 +515,22 @@ Wave opening and Retry call `WorkModel.activateProject` from both WorkSurface an
 Portfolio. The command outlives the opened view; it never refreshes a view directly.
 Both surfaces show “Preparing Project…” while that Wave's local command is pending,
 retaining cached planning. Retry appears after failure. An unfinished persisted
-Exec without a pending local command remains an unknown outcome.
+Process without a pending local command remains an unknown outcome.
 The Work stream supplies `project_readiness`: selected Project, dated accepted
-facts, unresolved transition and the exact activation Exec's outcome. Empty default
+facts, unresolved transition and the exact activation Process's outcome. Empty default
 Flows render no template section. Command transport errors remain scoped to the Wave.
 
 Work observation and navigation project durable Waves, Projects and Tasks with
-associated Sessions and Execs; they introduce no additional Work kinds.
+associated Sessions and Processes; they introduce no additional Work kinds.
 `RepoView` shows one selected repository; `WorkModel` also serves Portfolio.
 `TaskProjection` and `WaveProjection` join planning with associated conversations.
 `TaskWorktreeSnapshot` describes a Task's Git worktree. `WorkspaceIdentity` and
 `SessionWorkspace` retain their names because primary Sessions can use a non-Git
 directory. Terminal workspaces own pane layouts. Saved cache paths, selection keys
 and placement JSON fields retain their existing bytes across these source renames.
+
+Definition search keeps Flow and Workflow destinations separate, even for the
+same name. Project selectors list only Workflows. Task reads expose
+`workflow_name`, `latest_flow_process`, `execution`, and `run_control` separately;
+completed Flow processes retain their graph and identity. The Task watch part
+supplies `flow_processes`, using the same execution details as CLI inspection.

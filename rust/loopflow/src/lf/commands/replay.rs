@@ -1,10 +1,10 @@
-//! Replay one self-contained Home-local capture request through the ordinary harness.
+//! Replay one self-contained Machine-local capture request through the ordinary harness.
 
 use anyhow::{anyhow, Context, Result};
 use std::io::Write;
 
 use crate::engine::{
-    check_cli_available, exec_agent, AgentCapabilities, AgentConfig, ProcessConfig, StreamFormat,
+    check_cli_available, run_agent, AgentCapabilities, AgentConfig, ProcessConfig, StreamFormat,
 };
 use crate::session_record::{AttributionSource, CaptureHandle, SessionCaptureSpec};
 
@@ -18,7 +18,7 @@ pub fn run(selector: &str) -> Result<()> {
 fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let (_, source) = crate::session_record::resolve_manifest(home, selector)
         .with_context(|| format!("cannot read capture {selector}"))?;
-    let mut request = source.exec.ok_or_else(|| {
+    let mut request = source.process.ok_or_else(|| {
         anyhow!(
             "capture {} did not record a replayable headless request",
             source.artifact_key
@@ -38,7 +38,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     if !check_cli_available(&harness) {
-        return Err(anyhow!("'{harness}' CLI is unavailable on this Home"));
+        return Err(anyhow!("'{harness}' CLI is unavailable on this Machine"));
     }
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),
@@ -100,7 +100,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = exec_agent(&config, &process, &capabilities);
+    let result = run_agent(&config, &process, &capabilities);
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",
@@ -123,7 +123,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::replay_at;
-    use crate::session_record::{AgentExecRequest, CaptureHandle, SessionCaptureSpec};
+    use crate::session_record::{AgentProcessRequest, CaptureHandle, SessionCaptureSpec};
 
     #[test]
     fn replay_uses_recorded_request_without_the_planning_store() {
@@ -154,7 +154,7 @@ mod tests {
         std::fs::create_dir(&decoy_home).unwrap();
         let registry = home.path().join("loopflow.db");
 
-        let request = AgentExecRequest {
+        let request = AgentProcessRequest {
             system_prompt: "recorded system".to_string(),
             task_prompt: "recorded task".to_string(),
             agent: "opencode:opencode/glm-5.2".to_string(),
@@ -184,7 +184,7 @@ mod tests {
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = crate::store::sqlite::SqliteStore::open_execs_read_only(&registry)
+        let session = crate::store::sqlite::SqliteStore::open_processes_read_only(&registry)
             .unwrap()
             .session_for_artifact(&source_id)
             .unwrap()
@@ -199,7 +199,7 @@ mod tests {
         let (child_dir, child) =
             crate::session_record::resolve_manifest(home.path(), child_id.as_str()).unwrap();
         assert_eq!(child.caller_artifact_key.as_ref(), Some(&source_id));
-        assert_eq!(child.exec.as_ref(), Some(&request));
+        assert_eq!(child.process.as_ref(), Some(&request));
         assert!(child_dir.join("terminal.json").is_file());
         assert!(!child_dir.join("owner.json").exists());
         assert!(!decoy_home.join("runs").exists());

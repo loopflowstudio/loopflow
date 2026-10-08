@@ -14,12 +14,12 @@ mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 mod durable;
-mod execs;
 mod metrics;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
 mod pr_landings;
+mod processes;
 pub(crate) mod project_transitions;
 pub mod rows;
 mod sessions;
@@ -114,7 +114,7 @@ impl StorageConfig {
 }
 
 fn machine_home_dir() -> PathBuf {
-    crate::machine_install::account_home()
+    crate::installation::account_home()
         .expect("resolve OS account home directory for the production store guard")
 }
 
@@ -145,7 +145,7 @@ pub fn default_db_path() -> PathBuf {
     lf_home_dir().join("loopflow.db")
 }
 
-/// The selected Home's database. A Home has exactly one, at a fixed name.
+/// The selected Machine's database. A Machine has exactly one, at a fixed name.
 pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     let path = default_db_path();
     guard_development_database(&path, crate::build_info::provenance(), &machine_home_dir())?;
@@ -179,7 +179,7 @@ fn guard_development_database(
 /// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must
 /// never be a side effect of an ordinary command: on 2026-07-17 a published
 /// candidate at `target/release/lf` did exactly that and stranded the installed
-/// binary. Only `lf home install promote`, under the exclusive promotion lock, opens
+/// binary. Only `lf install promote`, under the exclusive promotion lock, opens
 /// the store as `Authorized`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FrontierAdvance {
@@ -1303,7 +1303,7 @@ pub async fn open_existing_store() -> Option<Store> {
     match open_store(&cfg).await {
         Ok(store) => Some(store),
         Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf home doctor");
+            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
             None
         }
     }
@@ -1324,7 +1324,7 @@ pub enum RegistryUnavailable {
     /// development guard, or an IO failure before the file is even opened.
     Unresolved { error: String },
     /// The registry file exists but could not be opened: inaccessible, locked,
-    /// or schema-incompatible. Actionable via `lf home doctor`.
+    /// or schema-incompatible. Actionable via `lf doctor`.
     Incompatible { path: PathBuf, error: String },
 }
 
@@ -2002,9 +2002,9 @@ mod tests {
         let delayed = store.pm_snapshot(wave.id()).await.unwrap().unwrap();
         let predecessor_work = WorkRef::Project(predecessor.id.clone());
         let retained_placement = store.placement(&predecessor_work).await.unwrap();
-        let next_home = crate::durable::HomeId::new();
+        let next_home = crate::durable::MachineId::new();
         store
-            .observe_home(&next_home, "ssh://fixture")
+            .add_machine(&next_home, "ssh://fixture", "ssh://fixture", ".")
             .await
             .unwrap();
         store
@@ -2034,7 +2034,7 @@ mod tests {
                 .placement(&WorkRef::Project(transferred.project_id.clone()))
                 .await
                 .unwrap()
-                .home_id,
+                .machine_id,
             next_home
         );
         // A delayed response omits the now-known successor. Rejection must
@@ -2762,8 +2762,11 @@ mod tests {
         let project = make_project(&wave);
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
-        let home = crate::durable::HomeId::new();
-        store.observe_home(&home, "ssh://fixture").await.unwrap();
+        let home = crate::durable::MachineId::new();
+        store
+            .add_machine(&home, "ssh://fixture", "ssh://fixture", ".")
+            .await
+            .unwrap();
         store
             .place_work(&WorkRef::Project(project.id.clone()), &home)
             .await
@@ -2780,7 +2783,7 @@ mod tests {
             .placement(&WorkRef::Task(task.id.clone()))
             .await
             .unwrap();
-        assert_eq!(placement.home_id, home);
+        assert_eq!(placement.machine_id, home);
         assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task.clone()));
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)

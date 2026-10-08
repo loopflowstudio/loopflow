@@ -48,7 +48,7 @@ impl Fixture {
     pub(super) async fn planning_repo(&self) -> (PathBuf, Wave) {
         let repo = self.directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
-        // Local fixture history only; no installed Home or remote is touched.
+        // Local fixture history only; no installed Machine or remote is touched.
         for args in [
             vec!["init", "-q"],
             vec![

@@ -46,19 +46,19 @@ fn lf_json(repo: &Path, home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-/// Every Flow on this Home as `lf flow show --sessions --json` reads it back.
+/// Every Flow on this Machine as `lf flow show --processes --json` reads it back.
 fn flow_details(repo: &Path, home: &Path) -> Vec<serde_json::Value> {
     lf_json(
         repo,
         home,
-        &["flow", "list", "--sessions", "--all", "--json"],
+        &["flow", "list", "--processes", "--all", "--json"],
     )["entries"]
         .as_array()
         .unwrap()
         .iter()
         .map(|entry| {
             let id = entry["id"].as_str().unwrap();
-            lf_json(repo, home, &["flow", "show", id, "--sessions", "--json"])
+            lf_json(repo, home, &["flow", "show", id, "--processes", "--json"])
         })
         .collect()
 }
@@ -143,8 +143,8 @@ PYTHON
         assert_eq!(steps.len(), if upgrade { 1 } else { 2 });
         let executables: Vec<String> = conn
             .prepare(
-                "SELECT json_extract(e.command,'$[0]') FROM execs e
-                 JOIN flow_exec_steps s ON s.exec_id=e.id WHERE e.outcome='succeeded'",
+                "SELECT json_extract(e.command,'$[0]') FROM processes e
+                 JOIN flow_process_steps s ON s.process_lfid=e.lfid WHERE e.outcome='succeeded'",
             )
             .unwrap()
             .query_map([], |row| row.get(0))
@@ -175,12 +175,14 @@ PYTHON
             String::from_utf8_lossy(&output.stderr)
         );
         let driver: String = conn
-            .query_row("SELECT exec_id FROM flow_execs", [], |row| row.get(0))
+            .query_row("SELECT process_lfid FROM flow_processes", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["flow", "show", &driver, "--sessions", "--json"],
+            &["flow", "show", &driver, "--processes", "--json"],
             None,
         );
         assert!(
@@ -671,7 +673,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.get_task(&parent.id))
             .unwrap()
             .unwrap();
-        // A Flow exec from the checkout is this Task's work, never its upstream's.
+        // A Flow process from the checkout is this Task's work, never its upstream's.
         let ran = run_lf(
             repo.path(),
             home.path(),
@@ -689,7 +691,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
                 home.path(),
                 &["task", "status", issue, "--json"],
             );
-            status["execution"]["work"]["flows"]
+            status["execution"]["work"]["flow_processes"]
                 .as_array()
                 .unwrap()
                 .len()
@@ -801,6 +803,142 @@ fn flow_parsing_parity() {
             returns: None,
         }
     );
+}
+
+#[test]
+fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    use std::process::Stdio;
+
+    for (flags, stop) in [
+        (vec!["-i", "run", "conversation"], false),
+        (vec!["run", "conversation", "-i"], false),
+        (vec!["run", "conversation"], false),
+        (vec!["-i", "run", "conversation"], true),
+    ] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        for name in ["first", "second"] {
+            write_skill(repo.path(), name, "Ask for input, then exit.");
+        }
+        write_flow(repo.path(), "conversation", "- first\n- second\n");
+        write_executable(
+            &bin.join("claude"),
+            r#"#!/bin/sh
+set -eu
+if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
+context_file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
+        --append-system-prompt-file) context_file="$2"; shift;;
+    esac
+    shift
+done
+case "$(cat "$context_file")" in
+    *'<lf:skill:first>'*) step=first;;
+    *'<lf:skill:second>'*) step=second;;
+    *) exit 2;;
+esac
+touch "$LF_HOME/$step.ready"
+IFS= read -r answer
+printf '%s' "$answer" > "$LF_HOME/$step.answer"
+[ "$answer" != stop ] || exit 130
+"#,
+        );
+
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: valid output pointers; null selects default terminal settings.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two fresh independently owned descriptors.
+        let mut master = unsafe { fs::File::from_raw_fd(master) };
+        // SAFETY: slave is the other fresh descriptor returned by openpty.
+        let slave = unsafe { fs::File::from_raw_fd(slave) };
+        let log_path = home.path().join("output");
+        let log = fs::File::create(&log_path).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let mut child = lf_command(repo.path(), home.path(), &flags, Some(&path))
+            .args(["-a", "claude", "--no-loopflow"])
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("ANTHROPIC_API_KEY")
+            .stdin(Stdio::from(slave))
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut wait = |ready: &dyn Fn() -> bool| {
+            while !ready() {
+                let exited = child.try_wait().unwrap();
+                if exited.is_some() || std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "{flags:?}: {exited:?}\n{}",
+                        fs::read_to_string(&log_path).unwrap()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        wait(&|| home.path().join("first.ready").exists());
+        assert!(!home.path().join("second.ready").exists());
+        master
+            .write_all(if stop { b"stop\n" } else { b"blue\n" })
+            .unwrap();
+        if !stop {
+            wait(&|| home.path().join("second.ready").exists());
+            assert_eq!(
+                fs::read_to_string(home.path().join("first.answer")).unwrap(),
+                "blue"
+            );
+            master.write_all(b"green\n").unwrap();
+            wait(&|| home.path().join("second.answer").exists());
+        }
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() > deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!(
+                    "Flow did not finish: {}",
+                    fs::read_to_string(&log_path).unwrap()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert_eq!(
+            status.success(),
+            !stop,
+            "{}",
+            fs::read_to_string(log_path).unwrap()
+        );
+        if stop {
+            assert!(!home.path().join("second.ready").exists());
+        } else {
+            assert_eq!(
+                fs::read_to_string(home.path().join("second.answer")).unwrap(),
+                "green"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1397,7 +1535,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
         lf_json(
             repo.path(),
             home.path(),
-            &["flow", "show", &earlier, "--sessions", "--json"],
+            &["flow", "show", &earlier, "--processes", "--json"],
         )
     };
     let stopped = earlier_flow();
@@ -1407,7 +1545,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -1435,8 +1573,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
             "{args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
-        let prompts: Vec<_> = prompts.lines().collect();
+        let prompts = received_contexts(home.path());
         assert_eq!(
             prompts.len(),
             2,
@@ -1740,19 +1877,8 @@ fn builtin_deploy_uses_ops_land_item() {
     assert!(matches!(&items[1], ConcreteStep::Command(_)));
 }
 
-fn roadmap_flow(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0]["flow"].clone()
-}
-
-fn unavailable(flow: &serde_json::Value, kind: &str) -> Option<String> {
-    flow["controls"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|control| control["kind"] == kind)
-        .unwrap_or_else(|| panic!("{kind} control is projected"))["unavailable"]
-        .as_str()
-        .map(str::to_string)
+fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
+    lf_json(repo, home, &["roadmap", "--json"])["waves"][0]["tasks"]["items"][0].clone()
 }
 
 fn labels(graph: &serde_json::Value) -> Vec<&str> {
@@ -1761,6 +1887,20 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
         .unwrap()
         .iter()
         .map(|node| node["label"].as_str().unwrap())
+        .collect()
+}
+
+fn received_contexts(home: &Path) -> Vec<String> {
+    fs::read_to_string(home.join("prompts"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let thread: serde_json::Value = serde_json::from_str(line).unwrap();
+            let path = thread["params"]["config"]["model_instructions_file"]
+                .as_str()
+                .unwrap();
+            fs::read_to_string(path).unwrap()
+        })
         .collect()
 }
 
@@ -1782,7 +1922,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(
@@ -1805,7 +1945,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
-    // A Task's Flows are those whose Execs ran in its checkout, as Execs name it.
+    // A Task's Flows are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
     let task =
         support::register_unrun_task(home.path(), &checkout, "task-flow-read", &repo.head_sha());
@@ -1837,11 +1977,11 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     };
 
     // Before any Flow: the recommendation, Start, and no invented history.
-    let flow = roadmap_flow(repo.path(), home.path());
-    assert_eq!(flow["recommended"], "feature");
-    assert_eq!(flow["record"]["kind"], "none");
-    assert_eq!(unavailable(&flow, "start"), None);
-    assert_eq!(task_flow()["work"]["flows"], serde_json::json!([]));
+    let flow = roadmap_task(repo.path(), home.path());
+    assert_eq!(flow["workflow_name"], "feature");
+    assert!(flow["latest_flow_process"].is_null());
+    assert!(flow["run_control"]["unavailable"].is_null());
+    assert_eq!(task_flow()["work"]["flow_processes"], serde_json::json!([]));
 
     // The catalogue previews the authored topology through the shared loader.
     let catalog = lf_json(repo.path(), home.path(), &["flow", "list", "--json"]);
@@ -1884,28 +2024,29 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         String::from_utf8_lossy(&ran.stderr)
     );
 
-    // Read back from Execs alone: where it stopped and each edge's returns.
+    // Read back from Processes alone: where it stopped and each edge's returns.
     let execution = task_flow();
-    let flows = execution["work"]["flows"].as_array().unwrap();
+    let flows = execution["work"]["flow_processes"].as_array().unwrap();
     assert_eq!(flows.len(), 1, "{execution}");
     let id = flows[0]["id"].as_str().unwrap();
     assert_eq!(flows[0]["name"], "two-loops");
     assert_eq!(flows[0]["state"], "stopped");
     let sessions = execution["work"]["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), answers.len(), "one conversation per turn");
-    assert!(sessions.iter().all(|session| session["flow_id"] == id));
+    assert!(sessions
+        .iter()
+        .all(|session| session["flow_process_lfid"] == id));
     // The failed step is red and stays with the Flow for its caller.
     assert_eq!(execution["execution"]["state"], "blocked");
     assert_eq!(execution["execution"]["step"], "__telemetry-scorecard");
-    let flow = roadmap_flow(repo.path(), home.path());
-    let record = &flow["record"];
-    assert_eq!(record["kind"], "latest", "{flow}");
-    assert_eq!(record["invocation_id"], id);
-    assert_eq!(record["execution"], "blocked");
+    let flow = roadmap_task(repo.path(), home.path());
+    let record = &flow["latest_flow_process"];
+    assert_eq!(record["entry"]["id"], id);
+    assert_eq!(flow["execution"]["state"], "blocked");
     let shown = lf_json(
         repo.path(),
         home.path(),
-        &["flow", "show", id, "--sessions", "--json"],
+        &["flow", "show", id, "--processes", "--json"],
     );
     for read in [record, &shown] {
         assert_eq!(
@@ -1930,7 +2071,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
             ])
         );
     }
-    // Every pass is its own step Exec at the node and return counts it ran with.
+    // Every pass is its own step Process at the node and return counts it ran with.
     assert_eq!(
         step_fields(&shown, "key"),
         [0, 1, 2, 1, 2, 1, 2, 3, 4, 6, 1, 2, 3, 4, 6, 7]
@@ -1946,7 +2087,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
 
     // A stopped Flow is history: a fresh launch stays legal, and no command
     // restarts or resumes this one.
-    assert_eq!(unavailable(&flow, "start"), None);
+    assert!(flow["run_control"]["unavailable"].is_null());
     for removed in [
         vec!["task", "restart", "INF-123", "--flow", "two-loops"],
         vec!["--task", "INF-123", "flow", "start", "two-loops"],
@@ -1955,7 +2096,13 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         let rejected = run_lf(repo.path(), home.path(), &removed, Some(&path));
         assert!(!rejected.status.success(), "{removed:?}");
     }
-    assert_eq!(task_flow()["work"]["flows"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        task_flow()["work"]["flow_processes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
     let status = run_lf(
         repo.path(),
         home.path(),
@@ -1977,7 +2124,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let redrawn = lf_json(
         repo.path(),
         home.path(),
-        &["flow", "show", id, "--sessions", "--json"],
+        &["flow", "show", id, "--processes", "--json"],
     );
     assert_eq!(redrawn["graph"], shown["graph"]);
     assert_eq!(redrawn["current"], shown["current"]);
@@ -1987,7 +2134,7 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
         "nothing ran or was rewritten"
     );
     assert_eq!(
-        roadmap_flow(repo.path(), home.path())["record"]["current"],
+        roadmap_task(repo.path(), home.path())["latest_flow_process"]["current"],
         7
     );
 }
@@ -2062,7 +2209,9 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
         home.path(),
         &["task", "status", "INF-123", "--json"],
     );
-    let flows = status["execution"]["work"]["flows"].as_array().unwrap();
+    let flows = status["execution"]["work"]["flow_processes"]
+        .as_array()
+        .unwrap();
     assert_eq!(flows.len(), 1, "{status}");
     assert_eq!(flows[0]["state"], "completed");
     let shown = lf_json(
@@ -2072,7 +2221,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
             "flow",
             "show",
             flows[0]["id"].as_str().unwrap(),
-            "--sessions",
+            "--processes",
             "--json",
         ],
     );
@@ -2124,9 +2273,8 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
             "{args:?}: {}",
             String::from_utf8_lossy(&ran.stderr)
         );
-        fs::read_to_string(home.path().join("prompts"))
-            .unwrap()
-            .lines()
+        received_contexts(home.path())
+            .iter()
             .map(|prompt| prompt.contains("Keep the parser strict."))
             .collect::<Vec<_>>()
     };
@@ -2148,9 +2296,8 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
         "work-proof",
     ]);
     assert_eq!(given.last(), Some(&false));
-    let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
+    let prompts = received_contexts(home.path());
     assert!(prompts
-        .lines()
         .last()
         .unwrap()
         .contains("Report the first error only."));

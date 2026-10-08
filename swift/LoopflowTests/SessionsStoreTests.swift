@@ -251,14 +251,14 @@ private func session(id: String, state: String, replacing: Bool = false) -> Stri
       "ready_summary": \(state == "waiting" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "actions": \(sessionActionFixtureJSON(state: wire)),
-      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "terminal_ids": [],
+      "title_source": "generated", "task_primary": false, "flow_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "provider_generation": 1, "terminal_ids": [],
       "open_argv": ["lf", "session", "connect", "\(id)"\(replacing ? ", \"--replace\"" : "")]
     }
     """
 }
 
 private func runGit(_ args: [String], at directory: URL) throws {
-    let process = Process()
+    let process = Foundation.Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
     process.arguments = ["git", "-C", directory.path] + args
     process.standardOutput = Pipe()

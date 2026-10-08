@@ -10,20 +10,7 @@ import ViewInspector
 struct WorkCacheTests {
     private static let repo = "/src/loopflow"
 
-    @Test("The existing workspace cache file retains Home and selection after the naming change")
-    func readsExistingCacheBytes() throws {
-        let directory = try temporaryDirectory()
-        let url = directory.appendingPathComponent("workspace.json")
-        let bytes = Data(#"{"version":1,"snapshot":{"homeId":"home-a","repositories":{"/src/loopflow":{"selection":{"kind":"task","id":"issue-now"},"savedAt":0}}}}"#.utf8)
-        try bytes.write(to: url)
-
-        let saved = try #require(WorkCache(directory: directory).load())
-        #expect(saved.homeId == "home-a")
-        #expect(saved.repositories[Self.repo]?.selection == .task(id: "issue-now"))
-        #expect(try Data(contentsOf: url) == bytes)
-    }
-
-    @Test("A returning launch shows the saved workspace and selection before any read finishes")
+    @Test("A returning launch restores its cache before any read finishes")
     func returningLaunchRestores() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
@@ -33,18 +20,22 @@ struct WorkCacheTests {
         await first.refresh()
         #expect(first.workStatus == .current)
         first.select(.task(id: "issue-now"))
-        first.confirmHome("home-a")
+        first.confirmMachine("home-a")
         cache.flush()
+
+        let cacheURL = directory.appendingPathComponent("workspace.json")
+        let savedBytes = try Data(contentsOf: cacheURL)
 
         let offline = RegistryQuery { _, _ in throw RegistryQueryError("offline") }
         let returning = WorkModel(query: offline, repoPath: Self.repo, cache: WorkCache(directory: directory))
 
         #expect(returning.workStatus == .updating)
-        #expect(returning.savedHomeId == "home-a")
+        #expect(returning.savedMachineId == "home-a")
         #expect(returning.roadmap.value?.waves.map(\.wave.id) == first.roadmap.value?.waves.map(\.wave.id))
         #expect(returning.sessions.value?.map(\.id) == first.sessions.value?.map(\.id))
         #expect(returning.selection == .task(id: "issue-now"))
         #expect(returning.task(id: "issue-now") != nil)
+        #expect(try Data(contentsOf: cacheURL) == savedBytes)
     }
 
     @Test("Saved text never claims a live process or a legal mutation")
@@ -54,20 +45,20 @@ struct WorkCacheTests {
         let saving = WorkCache(directory: directory)
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
-        let liveFlow = try #require(first.task(id: "issue-now")?.task.flow)
-        guard case .latest(let live) = liveFlow.record else { Issue.record("fixture Flow has no latest record"); return }
-        #expect(live.execution == .running)
+        let liveTask = try #require(first.task(id: "issue-now")?.task)
+        let live = try #require(liveTask.latestFlowProcess)
+        #expect(liveTask.execution?.state == .running)
         #expect(first.sessions.value?.first?.state == .active)
         #expect(first.task(id: "issue-now")?.task.condition.reason != WorkCache.savedReason)
         saving.flush()
 
         let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: WorkCache(directory: directory))
-        let flow = try #require(returning.task(id: "issue-now")?.task.flow)
-        guard case .latest(let latest) = flow.record else { Issue.record("saved Flow has no latest record"); return }
-        #expect(latest.execution == .unknown)
+        let task = try #require(returning.task(id: "issue-now")?.task)
+        let latest = try #require(task.latestFlowProcess)
+        #expect(task.execution?.state == .unknown)
         #expect(latest.current == live.current)
-        #expect(flow.controls.allSatisfy { $0.unavailable == WorkCache.savedReason })
+        #expect(task.runControl.unavailable == WorkCache.savedReason)
         let conditions = returning.roadmap.value?.waves.flatMap { $0.tasks.items.map(\.condition) } ?? []
         #expect(!conditions.isEmpty)
         #expect(conditions.allSatisfy { $0.state == .unknown && $0.reason == WorkCache.savedReason })
@@ -98,10 +89,10 @@ struct WorkCacheTests {
         await source.recover()
         await returning.refresh()
         #expect(returning.workStatus == .current)
-        guard case .latest(let latest) = returning.task(id: "issue-now")?.task.flow.record else {
+        guard let execution = returning.task(id: "issue-now")?.task.execution else {
             Issue.record("fresh Flow has no latest record"); return
         }
-        #expect(latest.execution == .running)
+        #expect(execution.state == .running)
     }
 
     @Test("A first launch has one loading message")
@@ -119,7 +110,8 @@ struct WorkCacheTests {
         let file = directory.appendingPathComponent("workspace.json")
         #expect(WorkCache(directory: directory).load() == nil)
 
-        for text in ["{ not json", #"{"version":0,"snapshot":{"repositories":{}}}"#] {
+        for text in ["{ not json", #"{"version":0,"snapshot":{"repositories":{}}}"#,
+                     #"{"version":1,"snapshot":{"homeId":"home-a","repositories":{}}}"#] {
             try Data(text.utf8).write(to: file)
             #expect(WorkCache(directory: directory).load() == nil)
             #expect(!FileManager.default.fileExists(atPath: file.path))
@@ -131,21 +123,21 @@ struct WorkCacheTests {
         #expect(model.workStatus == .loading)
     }
 
-    @Test("A workspace saved under another Home is dropped")
-    func anotherHomeInvalidates() async throws {
+    @Test("A workspace saved under another Machine is dropped")
+    func anotherMachineInvalidates() async throws {
         let directory = try temporaryDirectory()
         let source = try Source()
         let saving = WorkCache(directory: directory)
         let first = WorkModel(query: source.query, repoPath: Self.repo, cache: saving)
         await first.refresh()
         first.select(.task(id: "issue-now"))
-        first.confirmHome("home-a")
+        first.confirmMachine("home-a")
         saving.flush()
 
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("offline") },
                                     repoPath: Self.repo, cache: cache)
-        returning.confirmHome("home-b")
+        returning.confirmMachine("home-b")
         cache.flush()
 
         #expect(returning.workStatus == .loading)
@@ -153,7 +145,7 @@ struct WorkCacheTests {
         #expect(returning.selection == nil)
         #expect(returning.task(id: "issue-now") == nil)
         let saved = try #require(WorkCache(directory: directory).load())
-        #expect(saved == WorkSnapshot(homeId: "home-b"))
+        #expect(saved == WorkSnapshot(machineId: "home-b"))
     }
 
     @Test("A Session read that finishes after a repository switch saves nothing")

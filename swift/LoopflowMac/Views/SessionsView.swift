@@ -83,14 +83,14 @@ final class SessionsWorkspaceRegistry {
     @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
     @ObservationIgnored private var layouts: [WorkspaceIdentity: WorktreeLayoutStore] = [:]
     let surfaces = GhosttySurfacePool()
-    private(set) var localHomeId: String?
-    private(set) var homeError: String?
+    private(set) var localMachineId: String?
+    private(set) var machineError: String?
 
-    init(localHomeId: String? = nil) { self.localHomeId = localHomeId }
+    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
 
-    func refreshHome(query: RegistryQuery) async {
-        do { localHomeId = try await query.localHomeId(); homeError = nil }
-        catch { homeError = error.localizedDescription }
+    func refreshMachine(query: RegistryQuery) async {
+        do { localMachineId = try await query.localMachineId(); machineError = nil }
+        catch { machineError = error.localizedDescription }
     }
 
     func layout(for repoPath: WorkspaceIdentity) -> WorktreeLayoutStore {
@@ -100,7 +100,7 @@ final class SessionsWorkspaceRegistry {
         return layout
     }
 
-    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) } }
+    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
 
     func path(containingShell id: String) -> WorkspaceIdentity? {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
@@ -207,6 +207,7 @@ final class SessionsStore: ObservableObject {
                 sessions.append(SessionItem(record: record, state: observedState))
             }
         }
+        surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
     private func recover(_ id: String, replacing: Bool = false) async {
@@ -352,13 +353,13 @@ struct SessionsView: View {
 
     var body: some View {
         Group {
-            if let home = workspaces.localHomeId {
+            if let home = workspaces.localMachineId {
                 SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
-                                    homeId: home, query: query)
+                                    machineId: home, query: query)
             } else {
                 HStack {
                     WorkNavigator(model: model, onOpenSession: { _ in })
-                    if let error = workspaces.homeError {
+                    if let error = workspaces.machineError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                     } else {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -367,16 +368,16 @@ struct SessionsView: View {
             }
         }
         .task {
-            await workspaces.refreshHome(query: query)
-            if let home = workspaces.localHomeId, workspaces.homeError == nil { model.confirmHome(home) }
+            await workspaces.refreshMachine(query: query)
+            if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
         }
     }
 }
 
 /// Unified Work navigation around the existing retained native workspace.
 struct SessionsContentView: View {
-    let homeId: String
-    private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: store.repoPath) }
+    let machineId: String
+    private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
     private var currentIdentity: WorkspaceIdentity {
         if navigation.showsRetainedTerminals {
             return worktreeLayout.focusedPath ?? rootIdentity
@@ -415,17 +416,17 @@ struct SessionsContentView: View {
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
     private var availablePaths: [WorkspaceIdentity] {
-        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) }
+        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) }
     }
 
     init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
-         homeId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
-        self.homeId = homeId
+         machineId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+        self.machineId = machineId
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath))
-        let store = workspaces.workspace(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
+        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath))
+        let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
         _store = ObservedObject(wrappedValue: store)
     }
 
@@ -461,7 +462,9 @@ struct SessionsContentView: View {
                             model: model,
                             crumb: model.breadcrumb,
                             onOpenSession: openSession,
-                            onTaskDetails: { workspace.showsDetails = true }
+                            onTaskDetails: { workspace.showsDetails = true },
+                            programStatus: focusedProgramStatus,
+                            programStatusError: focusedProgramStatusSurface?.observationError
                         ) {
                             if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
                             if terminalsVisible {
@@ -511,7 +514,7 @@ struct SessionsContentView: View {
                             .allowsHitTesting(terminalsVisible)
                             .accessibilityHidden(!terminalsVisible)
                             // Mounted only when shown: its readers ask `lf` and each
-                            // `lf` process records an Exec.
+                            // `lf` process records a process.
                             if !terminalsVisible {
                                 HSplitView {
                                     WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
@@ -551,8 +554,10 @@ struct SessionsContentView: View {
             set: { if !$0 { navigation.palette = nil } }
         )) {
             switch navigation.palette {
+            case .workflow(let name):
+                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
             case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.named(name), navigation: navigation)
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
                 WorkPalette(model: model, activate: navigate)
             case nil:
@@ -626,22 +631,22 @@ struct SessionsContentView: View {
     }
 
     /// One menu changes what the multiplexer shows: a shell, the Task's files
-    /// or its Flow exec log.
+    /// or its Flow process log.
     private var workspaceCreation: some View {
         Menu {
             Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
-                .disabled(taskIdentity?.homeId != homeId)
+                .disabled(taskIdentity?.machineId != machineId)
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
                     .accessibilityIdentifier("work-add-files")
-                Button("Flow execs", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
+                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
                     .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
         .menuStyle(.borderlessButton).fixedSize()
-        .help("Add a shell, files or the Flow exec log")
-        .accessibilityLabel("Add a shell, files or the Flow exec log")
+        .help("Add a shell, files or the Flow process log")
+        .accessibilityLabel("Add a shell, files or the Flow process log")
         .accessibilityIdentifier("work-create")
     }
 
@@ -698,6 +703,7 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
+        case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
@@ -757,7 +763,7 @@ struct SessionsContentView: View {
             openSession(primary)
             return
         }
-        guard identity.homeId == homeId, model.sessions.errorMessage == nil, model.sessions.value != nil,
+        guard identity.machineId == machineId, model.sessions.errorMessage == nil, model.sessions.value != nil,
               ensuredTasks.insert(task.task.id).inserted else { return }
         let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
         // The Task selector owns placement. Its recorded checkout can be gone
@@ -781,7 +787,7 @@ struct SessionsContentView: View {
     private func launchSessionSkill(_ launch: SessionSkillLaunch) {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
-            let identity = WorkspaceIdentity(homeId: homeId, worktree: launch.repoPath)
+            let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
             worktreeLayout.select(identity)
             navigation.showsRetainedTerminals = true
             navigation.content = .terminals
@@ -803,8 +809,8 @@ struct SessionsContentView: View {
     /// redirect the repository now on screen.
     private func launch(_ scope: ConversationScope, in navigation: WorkNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
-        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(homeId: homeId, worktree: scope.repoPath)
-        guard identity.homeId == homeId else { throw RegistryQueryError("Open a conversation on its owning Home") }
+        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(machineId: machineId, worktree: scope.repoPath)
+        guard identity.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         worktreeLayout.select(identity)
         navigation.content = .terminals
         workspaces.workspace(for: identity).multiplexer.newShell(
@@ -876,6 +882,26 @@ struct SessionsContentView: View {
         .help(path?.worktree ?? "Choose a worktree for this slot")
         .accessibilityLabel("Worktree")
         .accessibilityIdentifier("worktree-chip")
+    }
+
+    private var focusedProgramStatusSurface: ProgramStatusSurface? {
+        let pane = multiplexer.focusedPane
+        switch pane.content {
+        case .session(let id): return store.surfaces.programStatus(for: .session(id))
+        case .shell: return store.surfaces.programStatus(for: .shell(pane.id))
+        case .empty, .flowLog, .files: return nil
+        }
+    }
+
+    private var focusedProgramStatus: ProgramStatusRecords? {
+        guard terminalsVisible else { return nil }
+        if case .session(let id) = multiplexer.focusedPane.content {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        if let id = focusedProgramStatusSurface?.sessionId {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return focusedProgramStatusSurface?.snapshot
     }
 
     /// Sessions attached to the focused pane: a Session pane's own record, or
@@ -1240,6 +1266,14 @@ private struct SessionPaneView: View {
                 .font(Typography.code(11))
                 .foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1)
+            if let status = _programStatus, status.summary != nil {
+                ProgramStatusLabel(status: status)
+                    .foregroundStyle(TerminalPalette.dim)
+            }
+            if let error = _programStatusSurface?.observationError {
+                Image(systemName: "exclamationmark.circle")
+                    .help(error).accessibilityLabel(error)
+            }
             Spacer(minLength: 8)
             if bellRinging {
                 Image(systemName: "bell.fill")
@@ -1315,7 +1349,7 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// The conversation's shared state, or nothing for a shell, files or the Flow exec log.
+    /// The conversation's shared state, or nothing for a shell, files or the Flow process log.
     private var stateDot: Color {
         guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
         switch state {
@@ -1371,7 +1405,7 @@ private struct SessionPaneView: View {
             )
             .id(pane.id)
         case .flowLog(let taskId):
-            FlowExecLog(model: model, taskId: taskId)
+            FlowProcessLog(model: model, taskId: taskId)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         case .files(let taskId):
@@ -1519,9 +1553,21 @@ private struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
-        case .flowLog: "Flow execs"
+        case .flowLog: "Flow processes"
         case .files: "Files"
         }
+    }
+
+    private var _programStatusSurface: ProgramStatusSurface? {
+        _terminalIdentity.flatMap { sessions.surfaces.programStatus(for: $0) }
+    }
+
+    private var _programStatus: ProgramStatusRecords? {
+        if case .session = pane.content { return item?.record.programStatus }
+        if let id = _programStatusSurface?.sessionId {
+            return sessions.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return _programStatusSurface?.snapshot
     }
 
     private var _terminalIdentity: TerminalIdentity? {

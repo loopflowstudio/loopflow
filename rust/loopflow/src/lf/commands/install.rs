@@ -1,7 +1,7 @@
-//! `lf home install` — authorize global `lf` promotion against the shared migration
+//! `lf install` — authorize global `lf` promotion against the shared migration
 //! frontier.
 //!
-//! A branch-local build must never silently become the Home-global command:
+//! A branch-local build must never silently become the installed command:
 //! on 2026-07-17 a `--use` promotion repointed `~/.local/bin/lf` at a binary
 //! whose migration registry ended at `0.11.026` while the shared store was at
 //! `0.11.027`, and subsequent invocations hit a store their binary could not
@@ -11,7 +11,7 @@
 //! applied frontier and its own migration registry, applies its migrations to
 //! an isolated snapshot, resolves every placed open Work's
 //! executable lifecycle, and renders a verdict. `promote` consumes that verdict
-//! under the machine-global promotion lock, retains immutable rollback bytes,
+//! under the installation promotion lock, retains immutable rollback bytes,
 //! and activates the candidate before any migration advances the frontier.
 //!
 //! Compatibility is not re-derived: `classify_compatibility` calls the exact
@@ -40,7 +40,7 @@ use crate::store::migrations;
 mod published;
 pub use published::{latest, schedule};
 
-/// The candidate binary's identity. The process running `lf home install` *is* the
+/// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CandidateIdentity {
@@ -577,7 +577,7 @@ fn serde_authority(authority: MigrationAuthority) -> &'static str {
     }
 }
 
-/// Validate through a read-only preview. The CLI may append its Exec to an
+/// Validate through a read-only preview. The CLI may append its Process to an
 /// existing compatible process ledger, but observation never initializes or
 /// migrates it. A frontier-incompatible candidate still reaches this refusal.
 /// Exits non-zero on refusal so a caller can gate on it.
@@ -745,8 +745,8 @@ mod compatibility_tests {
         // promotion with "catalog root does not exist"; it must not, because the
         // ref can never execute again regardless of which binary is installed.
         let conn = rusqlite::Connection::open(&store).unwrap();
-        let home_id: String = conn
-            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+        let machine_id: String = conn
+            .query_row("SELECT id FROM machines WHERE route='local'", [], |row| {
                 row.get(0)
             })
             .unwrap();
@@ -758,9 +758,9 @@ mod compatibility_tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+            "INSERT INTO work_placements (wave_id, machine_id, enabled, placed_at)
              VALUES ('w-gone', ?1, 1, 0)",
-            [home_id],
+            [machine_id],
         )
         .unwrap();
         // Fold the write into the main db file so the backup-API copy sees it.
@@ -780,9 +780,14 @@ mod compatibility_tests {
     fn an_exact_store_is_validated_in_place() {
         let directory = tempfile::tempdir().unwrap();
         let store = directory.path().join("loopflow.db");
-        crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&store).unwrap();
+        // An exact installation has the canonical frontier, without local drafts.
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
         let compatibility = super::read_store_evidence(&store);
-        assert!(matches!(compatibility, Compatibility::Exact { .. }));
+        assert!(
+            matches!(compatibility, Compatibility::Exact { .. }),
+            "{compatibility:?}"
+        );
 
         let executable = super::_read_executable_compatibility(&store, &compatibility);
 
@@ -796,14 +801,14 @@ mod compatibility_tests {
 // -- Promotion publication (PR2) ---------------------------------------------
 //
 // The mutating half consumes the merged `decide()` verdict and performs every
-// machine-global install mutation under the same exclusive promotion lock.
+// installation mutation under the same exclusive promotion lock.
 // Python stages
 // branch-local artifacts only; Rust owns CLI activation, app replacement,
 // migration advancement, rollback validation, and post-commit skill sync.
 
-/// The machine-global, content-addressed binary store.
+/// The installation’s content-addressed binary store.
 fn lf_bin_dir() -> PathBuf {
-    crate::machine_install::account_home()
+    crate::installation::account_home()
         .expect("resolve OS account home directory for immutable install artifacts")
         .join(".lf/bin")
 }
@@ -815,11 +820,11 @@ fn binary_digest(path: &Path) -> Result<String> {
 }
 
 fn tree_digest(path: &Path) -> Result<String> {
-    crate::machine_install::tree_sha256(path)
+    crate::installation::tree_sha256(path)
 }
 
 fn artifact_set_digest(cli: &Path, app: Option<&Path>) -> Result<String> {
-    crate::machine_install::artifact_set_sha256(cli, None, app)
+    crate::installation::artifact_set_sha256(cli, None, app)
 }
 
 /// Copy `source` into `bin_dir` under its byte digest and return the path.
@@ -994,11 +999,11 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
 fn entry_gate_targets(
     root: &Path,
     cli_source: &Path,
-    activation: &crate::machine_install::ActivationTargets,
+    activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    let cli_gate = crate::machine_install::install_entry_gate(
+    let cli_gate = crate::installation::install_entry_gate(
         root,
-        &crate::machine_install::ArtifactRole::Cli,
+        &crate::installation::ArtifactRole::Cli,
         cli_source,
     )?;
     commit_cli_symlink(&activation.cli, &cli_gate)?;
@@ -1007,16 +1012,16 @@ fn entry_gate_targets(
 
 fn verify_entry_gate_targets(
     root: &Path,
-    activation: &crate::machine_install::ActivationTargets,
+    activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    let role = crate::machine_install::ArtifactRole::Cli;
+    let role = crate::installation::ArtifactRole::Cli;
     let target = &activation.cli;
-    let expected = fs::canonicalize(crate::machine_install::entry_gate_path(root, &role)?)?;
+    let expected = fs::canonicalize(crate::installation::entry_gate_path(root, &role)?)?;
     let actual = fs::canonicalize(target)
         .with_context(|| format!("resolve public CLI target {}", target.display()))?;
     if actual != expected {
         return Err(anyhow!(
-            "public CLI target {} bypasses machine entry gate {}",
+            "public CLI target {} bypasses installation entry gate {}",
             target.display(),
             expected.display()
         ));
@@ -1026,14 +1031,14 @@ fn verify_entry_gate_targets(
 
 fn verify_selected_app_bundle(
     app: &Path,
-    artifact_set: &crate::machine_install::ArtifactSet,
+    artifact_set: &crate::installation::ArtifactSet,
 ) -> Result<()> {
     let expected = artifact_set
-        .artifact(&crate::machine_install::ArtifactRole::App)
+        .artifact(&crate::installation::ArtifactRole::App)
         .ok_or_else(|| anyhow!("artifact set {} has no app executable", artifact_set.id))?;
     expected.verify()?;
-    let active = crate::machine_install::ArtifactIdentity::capture(
-        crate::machine_install::ArtifactRole::App,
+    let active = crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::App,
         &app.join("Contents/MacOS/Loopflow"),
     )?;
     if active.sha256 != expected.sha256 {
@@ -1044,8 +1049,8 @@ fn verify_selected_app_bundle(
         ));
     }
     let retained = bundle_for_app_artifact(&expected.path)?;
-    let retained_digest = crate::machine_install::tree_sha256(retained)?;
-    let active_digest = crate::machine_install::tree_sha256(app)?;
+    let retained_digest = crate::installation::tree_sha256(retained)?;
+    let active_digest = crate::installation::tree_sha256(app)?;
     if active_digest != retained_digest {
         return Err(anyhow!(
             "installed app {} resources do not match artifact set {}",
@@ -1056,9 +1061,9 @@ fn verify_selected_app_bundle(
     Ok(())
 }
 
-fn activate_prepared_machine_switch(
+fn activate_prepared_installation_switch(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
     prepared: &PreparedArtifacts,
     candidate: &CandidateIdentity,
     verdict: &Verdict,
@@ -1258,7 +1263,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["home", "install", "preflight", "--json"])
+        .args(["install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1273,7 +1278,7 @@ fn read_binary_preflight(binary: &Path) -> Result<BinaryPreflight> {
 
 fn isolate_candidate_command(command: &mut Command) {
     for name in [
-        crate::machine_install::INSTALL_SWITCH_ENV,
+        crate::installation::INSTALL_SWITCH_ENV,
         crate::session_record::CAPTURE_KEY_ENV,
         "LF_BIN",
         "LF_HOME",
@@ -1286,7 +1291,7 @@ fn read_binary_preview(binary: &Path) -> Result<PromotionPreview> {
     let mut command = Command::new(binary);
     isolate_candidate_command(&mut command);
     let output = command
-        .args(["home", "install", "preflight", "--json"])
+        .args(["install", "preflight", "--json"])
         .output()
         .with_context(|| format!("run binary {} preflight", binary.display()))?;
     serde_json::from_slice(&output.stdout).with_context(|| {
@@ -1366,7 +1371,7 @@ fn retained_binary_path(candidate: &Path, bin_dir: &Path) -> Result<PathBuf> {
 }
 
 fn app_executable_paths(
-    selection: &crate::machine_install::InstallSelection,
+    selection: &crate::installation::InstallSelection,
     app_target: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut paths = selection
@@ -1376,8 +1381,8 @@ fn app_executable_paths(
         .filter(|artifact| {
             matches!(
                 artifact.role,
-                crate::machine_install::ArtifactRole::App
-                    | crate::machine_install::ArtifactRole::AppHelper(_)
+                crate::installation::ArtifactRole::App
+                    | crate::installation::ArtifactRole::AppHelper(_)
             )
         })
         .map(|artifact| artifact.path.clone())
@@ -1396,28 +1401,23 @@ unsafe extern "C" {
     fn proc_pidpath(pid: libc::c_int, buffer: *mut libc::c_void, size: u32) -> libc::c_int;
 }
 
+/// Every process as `(pid, launched name, executable path)`. The path is absent
+/// when the kernel refuses it.
 #[cfg(target_os = "macos")]
-fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> {
     use std::ffi::CStr;
 
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names = paths
-        .iter()
-        .filter_map(|path| path.file_name())
-        .collect::<std::collections::HashSet<_>>();
     let output = Command::new("/bin/ps")
         .args(["-axo", "pid=,comm="])
         .output()
-        .context("enumerate macOS processes before app activation")?;
+        .context("enumerate macOS processes")?;
     if !output.status.success() {
         return Err(anyhow!(
-            "enumerate macOS processes before app activation: {}",
+            "enumerate macOS processes: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let mut matches = Vec::new();
+    let mut processes = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let mut fields = line.trim().splitn(2, char::is_whitespace);
         let Some(pid) = fields
@@ -1433,11 +1433,6 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
         else {
             continue;
         };
-        // `comm` is only a hint when the kernel refuses the executable path;
-        // exact path identity still has to be checked for every live process.
-        let command_may_match = Path::new(command)
-            .file_name()
-            .is_some_and(|name| names.contains(name));
         let mut buffer = vec![0_u8; 4096];
         // SAFETY: `buffer` is writable for its reported size and `pid` came
         // from the kernel-backed process table emitted by `/bin/ps`.
@@ -1448,20 +1443,47 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
                 buffer.len() as u32,
             )
         };
-        if length <= 0 {
+        let executable = if length <= 0 {
             // SAFETY: signal zero does not mutate the process and only probes
             // whether the pid observed above still exists.
-            let live = unsafe { libc::kill(pid, 0) } == 0;
-            if live && command_may_match {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                continue;
+            }
+            None
+        } else {
+            let executable = CStr::from_bytes_until_nul(&buffer)
+                .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
+            Some(PathBuf::from(executable.to_string_lossy().as_ref()))
+        };
+        processes.push((pid, command.to_string(), executable));
+    }
+    Ok(processes)
+}
+
+#[cfg(target_os = "macos")]
+fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = paths
+        .iter()
+        .filter_map(|path| path.file_name())
+        .collect::<std::collections::HashSet<_>>();
+    let mut matches = Vec::new();
+    for (pid, command, executable) in process_executables()? {
+        let Some(executable) = executable else {
+            // `comm` is only a hint when the kernel refuses the executable path;
+            // exact path identity still has to be checked for every live process.
+            if Path::new(&command)
+                .file_name()
+                .is_some_and(|name| names.contains(name))
+            {
                 return Err(anyhow!(
                     "cannot prove executable identity for live app/helper process {pid}"
                 ));
             }
             continue;
-        }
-        let executable = CStr::from_bytes_until_nul(&buffer)
-            .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
-        let executable = PathBuf::from(executable.to_string_lossy().as_ref());
+        };
         if paths.iter().any(|path| path == &executable) {
             matches.push((pid, executable));
         }
@@ -1526,22 +1548,19 @@ fn quiesce_app_processes(_paths: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-fn quiesce_switch_app(
-    root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
-) -> Result<()> {
+fn quiesce_switch_app(root: &Path, receipt: &mut crate::installation::SwitchReceipt) -> Result<()> {
     let paths = receipt
         .prior
         .as_ref()
         .map(|prior| app_executable_paths(prior, receipt.activation.app.as_deref()))
         .unwrap_or_default();
     receipt.app_was_running = !running_app_processes(&paths)?.is_empty();
-    crate::machine_install::write_switch(root, receipt)?;
+    crate::installation::write_switch(root, receipt)?;
     quiesce_app_processes(&paths)
 }
 
 #[cfg(target_os = "macos")]
-fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn resume_switch_app(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     if !receipt.app_was_running {
         return Ok(());
     }
@@ -1580,16 +1599,16 @@ fn resume_switch_app(receipt: &crate::machine_install::SwitchReceipt) -> Result<
 }
 
 #[cfg(not(target_os = "macos"))]
-fn resume_switch_app(_receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn resume_switch_app(_receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     Ok(())
 }
 
-fn required_machine_artifact_roles(has_app: bool) -> Vec<crate::machine_install::ArtifactRole> {
-    let mut roles = vec![crate::machine_install::ArtifactRole::Cli];
+fn required_installation_artifact_roles(has_app: bool) -> Vec<crate::installation::ArtifactRole> {
+    let mut roles = vec![crate::installation::ArtifactRole::Cli];
     if has_app {
         roles.extend([
-            crate::machine_install::ArtifactRole::App,
-            crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
+            crate::installation::ArtifactRole::App,
+            crate::installation::ArtifactRole::AppHelper("lf".to_string()),
         ]);
     }
     roles
@@ -1600,7 +1619,7 @@ fn retain_bundle_artifacts(
     root: &Path,
     set_id: &str,
     candidate: &CandidateIdentity,
-) -> Result<Vec<crate::machine_install::ArtifactIdentity>> {
+) -> Result<Vec<crate::installation::ArtifactIdentity>> {
     let Some(source) = source else {
         return Ok(Vec::new());
     };
@@ -1641,7 +1660,7 @@ fn retain_bundle_artifacts(
 fn capture_bundle_artifacts(
     bundle: &Path,
     candidate: &CandidateIdentity,
-) -> Result<Vec<crate::machine_install::ArtifactIdentity>> {
+) -> Result<Vec<crate::installation::ArtifactIdentity>> {
     let app = bundle.join("Contents/MacOS/Loopflow");
     let cli = bundle.join("Contents/MacOS/lf");
     let helper = read_binary_preflight(&cli)
@@ -1654,12 +1673,12 @@ fn capture_bundle_artifacts(
         ));
     }
     Ok(vec![
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::App,
+        crate::installation::ArtifactIdentity::capture(
+            crate::installation::ArtifactRole::App,
             &app,
         )?,
-        crate::machine_install::ArtifactIdentity::capture(
-            crate::machine_install::ArtifactRole::AppHelper("lf".to_string()),
+        crate::installation::ArtifactIdentity::capture(
+            crate::installation::ArtifactRole::AppHelper("lf".to_string()),
             &cli,
         )?,
     ])
@@ -1678,25 +1697,25 @@ fn verify_matching_bundles(source: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
-fn machine_artifact_set(
+fn installation_artifact_set(
     root: &Path,
-    source: crate::machine_install::InstallSource,
+    source: crate::installation::InstallSource,
     candidate: &CandidateIdentity,
     cli: &Path,
     app: Option<&Path>,
-) -> Result<crate::machine_install::ArtifactSet> {
+) -> Result<crate::installation::ArtifactSet> {
     let digest = artifact_set_digest(cli, app)?;
     let label = match source {
-        crate::machine_install::InstallSource::Published => "published",
-        crate::machine_install::InstallSource::Development => "development",
+        crate::installation::InstallSource::Published => "published",
+        crate::installation::InstallSource::Development => "development",
     };
     let id = format!("{label}-{digest}");
-    let mut artifacts = vec![crate::machine_install::ArtifactIdentity::capture(
-        crate::machine_install::ArtifactRole::Cli,
+    let mut artifacts = vec![crate::installation::ArtifactIdentity::capture(
+        crate::installation::ArtifactRole::Cli,
         cli,
     )?];
     artifacts.extend(retain_bundle_artifacts(app, root, &id, candidate)?);
-    let set = crate::machine_install::ArtifactSet {
+    let set = crate::installation::ArtifactSet {
         id,
         source,
         source_revision: candidate.source_revision.clone(),
@@ -1704,15 +1723,15 @@ fn machine_artifact_set(
         content_sha256: digest,
         artifacts,
     };
-    set.verify(&required_machine_artifact_roles(app.is_some()))?;
+    set.verify(&required_installation_artifact_roles(app.is_some()))?;
     Ok(set)
 }
 
 fn bootstrap_published_install(
     root: &Path,
     artifacts: &PromotionArtifacts<'_>,
-) -> Result<crate::machine_install::ActiveInstall> {
-    let repair = "run `lf home install`";
+) -> Result<crate::installation::ActiveInstall> {
+    let repair = "run `lf install`";
     let store = crate::store::production_database_path();
     if !store.is_file() {
         return Err(anyhow!(
@@ -1732,9 +1751,9 @@ fn bootstrap_published_install(
     validate_rollback_verdict(&preflight.verdict).with_context(|| {
         format!("the published fallback does not recognize its store; {repair}")
     })?;
-    let fallback = machine_artifact_set(
+    let fallback = installation_artifact_set(
         root,
-        crate::machine_install::InstallSource::Published,
+        crate::installation::InstallSource::Published,
         &preflight.candidate,
         &cli,
         artifacts.app_target,
@@ -1743,29 +1762,29 @@ fn bootstrap_published_install(
     let active_set = fallback.clone();
     if let Some(app_target) = artifacts.app_target {
         let retained_app = fallback
-            .artifact(&crate::machine_install::ArtifactRole::App)
+            .artifact(&crate::installation::ArtifactRole::App)
             .expect("complete published fallback has an app");
         verify_matching_bundles(bundle_for_app_artifact(&retained_app.path)?, app_target)?;
     }
-    let selection = crate::machine_install::InstallSelection {
+    let selection = crate::installation::InstallSelection {
         installation_id: format!("published-{}", &fallback.id[fallback.id.len() - 16..]),
-        source: crate::machine_install::InstallSource::Published,
+        source: crate::installation::InstallSource::Published,
         artifact_set: active_set,
         store,
     };
-    let active = crate::machine_install::ActiveInstall {
+    let active = crate::installation::ActiveInstall {
         schema_version: 1,
         selection,
         published_fallback: fallback.clone(),
         retained_published_sets: vec![fallback],
     };
-    crate::machine_install::write_active(root, &active)?;
+    crate::installation::write_active(root, &active)?;
     Ok(active)
 }
 
 fn active_selection_has_settled_receipt(
     root: &Path,
-    selection: &crate::machine_install::InstallSelection,
+    selection: &crate::installation::InstallSelection,
 ) -> Result<bool> {
     let receipts = match fs::read_dir(root.join("receipts")) {
         Ok(receipts) => receipts,
@@ -1780,9 +1799,9 @@ fn active_selection_has_settled_receipt(
             continue;
         }
         let bytes = fs::read(entry.path())?;
-        let receipt: crate::machine_install::SwitchReceipt = serde_json::from_slice(&bytes)
+        let receipt: crate::installation::SwitchReceipt = serde_json::from_slice(&bytes)
             .with_context(|| format!("parse settled install receipt {}", entry.path().display()))?;
-        if receipt.phase == crate::machine_install::SwitchPhase::Settled
+        if receipt.phase == crate::installation::SwitchPhase::Settled
             && receipt.active_selection_committed
             && receipt.target == *selection
         {
@@ -1794,7 +1813,7 @@ fn active_selection_has_settled_receipt(
 
 fn active_install_matches_candidate(
     root: &Path,
-    active: &crate::machine_install::ActiveInstall,
+    active: &crate::installation::ActiveInstall,
     artifacts: &PromotionArtifacts<'_>,
     candidate_binary: &Path,
     candidate: &CandidateIdentity,
@@ -1802,8 +1821,8 @@ fn active_install_matches_candidate(
     store: &Path,
 ) -> Result<bool> {
     let source = match candidate.authority {
-        MigrationAuthority::Published => crate::machine_install::InstallSource::Published,
-        MigrationAuthority::ValidationOnly => crate::machine_install::InstallSource::Development,
+        MigrationAuthority::Published => crate::installation::InstallSource::Published,
+        MigrationAuthority::ValidationOnly => crate::installation::InstallSource::Development,
     };
     if active.selection.source != source || active.selection.store != store {
         return Ok(false);
@@ -1832,10 +1851,10 @@ fn active_install_matches_candidate(
     if set.content_sha256 != digest {
         return Ok(false);
     }
-    set.verify(&required_machine_artifact_roles(
+    set.verify(&required_installation_artifact_roles(
         artifacts.app_source.is_some(),
     ))?;
-    let activation = crate::machine_install::ActivationTargets {
+    let activation = crate::installation::ActivationTargets {
         cli: artifacts.cli_target.to_path_buf(),
         daemon: None,
         app: artifacts.app_target.map(Path::to_path_buf),
@@ -1864,11 +1883,11 @@ fn active_install_matches_candidate(
 
 fn restore_before_advance(
     root: &Path,
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
     lock: crate::promotion_lock::PromotionLock,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let clear = crate::machine_install::clear_switch(root, &receipt.id);
+    let clear = crate::installation::clear_switch(root, &receipt.id);
     drop(lock);
     let app = resume_switch_app(receipt);
     match (clear, app) {
@@ -1900,7 +1919,7 @@ fn bundle_for_app_artifact(path: &Path) -> Result<&Path> {
 
 fn activate_switch_targets(
     root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
+    receipt: &mut crate::installation::SwitchReceipt,
     candidate: &CandidateIdentity,
 ) -> Result<()> {
     let mut superseded_app = None;
@@ -1910,7 +1929,7 @@ fn activate_switch_targets(
         let retained_app = receipt
             .target
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::App)
+            .artifact(&crate::installation::ArtifactRole::App)
             .ok_or_else(|| anyhow!("install switch {} target has no app", receipt.id))?;
         let retained_bundle = bundle_for_app_artifact(&retained_app.path)?.to_path_buf();
         let active_app = verify_selected_app_bundle(app_target, &receipt.target.artifact_set);
@@ -1945,8 +1964,8 @@ fn activate_switch_targets(
     Ok(())
 }
 
-fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
-    let recovery = if receipt.recovery_owner == crate::machine_install::RecoveryOwner::Coordinator
+fn delegate_switch_recovery(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
+    let recovery = if receipt.recovery_owner == crate::installation::RecoveryOwner::Coordinator
         && !receipt.target_store_advance_started
     {
         &receipt.coordinator
@@ -1960,8 +1979,10 @@ fn delegate_switch_recovery(receipt: &crate::machine_install::SwitchReceipt) -> 
     if current == recovery.path {
         return recover_switch(&receipt.id);
     }
+    // The pinned owner can predate the machine rename; resolve the operation
+    // without coupling recovery to its command group.
     let status = Command::new(&recovery.path)
-        .args(["home", "install", "recover-switch", "--switch", &receipt.id])
+        .args(["install", "recover-switch", "--switch", &receipt.id])
         .status()
         .with_context(|| {
             format!(
@@ -1982,14 +2003,12 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
     // a first installation has no selected runtime until this operation finishes.
     crate::promotion_lock::require_exclusive_holder()
         .context("verify the receipt-pinned promotion coordinator")?;
-    let root = crate::machine_install::root()?;
-    let mut receipt = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Switching(receipt)
-            if receipt.id == switch_id =>
-        {
+    let root = crate::installation::root()?;
+    let mut receipt = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Switching(receipt) if receipt.id == switch_id => {
             *receipt
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is active, not {switch_id}",
                 receipt.id
@@ -2008,12 +2027,12 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         ));
     }
     receipt.candidate.verify()?;
-    crate::machine_install::authorize_current_for_switch(
-        &crate::machine_install::ArtifactRole::Cli,
+    crate::installation::authorize_current_for_switch(
+        &crate::installation::ArtifactRole::Cli,
         Some(&receipt.id),
     )?;
-    if receipt.phase != crate::machine_install::SwitchPhase::Advancing
-        || receipt.recovery_owner != crate::machine_install::RecoveryOwner::Candidate
+    if receipt.phase != crate::installation::SwitchPhase::Advancing
+        || receipt.recovery_owner != crate::installation::RecoveryOwner::Candidate
         || !receipt.target_store_advance_started
     {
         return Err(anyhow!(
@@ -2034,10 +2053,10 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         ));
     }
     match receipt.target.source {
-        crate::machine_install::InstallSource::Development => {
-            return Err(anyhow!("development installations are retired; install a published release with `lf home install`"));
+        crate::installation::InstallSource::Development => {
+            return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
-        crate::machine_install::InstallSource::Published => {
+        crate::installation::InstallSource::Published => {
             if candidate.authority != MigrationAuthority::Published {
                 return Err(anyhow!(
                     "install switch {} published target lacks published candidate authority",
@@ -2049,17 +2068,14 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
         }
     }
     receipt.target_store_advanced = true;
-    crate::machine_install::write_switch(&root, &receipt)
+    crate::installation::write_switch(&root, &receipt)
 }
 
-fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Result<()> {
+fn run_switch_candidate(receipt: &crate::installation::SwitchReceipt) -> Result<()> {
     receipt.candidate.verify()?;
     let status = Command::new(&receipt.candidate.path)
-        .args(["home", "install", "advance-switch", "--switch", &receipt.id])
-        .env(
-            crate::machine_install::INSTALL_SWITCH_ENV,
-            receipt.id.as_str(),
-        )
+        .args(["install", "advance-switch", "--switch", &receipt.id])
+        .env(crate::installation::INSTALL_SWITCH_ENV, receipt.id.as_str())
         .status()
         .with_context(|| {
             format!(
@@ -2076,20 +2092,20 @@ fn run_switch_candidate(receipt: &crate::machine_install::SwitchReceipt) -> Resu
 
 fn advance_switch_store(
     root: &Path,
-    mut receipt: crate::machine_install::SwitchReceipt,
+    mut receipt: crate::installation::SwitchReceipt,
     verdict: &Verdict,
-) -> Result<crate::machine_install::SwitchReceipt> {
-    receipt.recovery_owner = crate::machine_install::RecoveryOwner::Candidate;
+) -> Result<crate::installation::SwitchReceipt> {
+    receipt.recovery_owner = crate::installation::RecoveryOwner::Candidate;
     receipt.target_store_advance_started = true;
     receipt.target_store_advanced = store_is_exact(verdict);
-    receipt.phase = crate::machine_install::SwitchPhase::Advancing;
-    crate::machine_install::write_switch(root, &receipt)?;
+    receipt.phase = crate::installation::SwitchPhase::Advancing;
+    crate::installation::write_switch(root, &receipt)?;
 
     if !receipt.target_store_advanced {
         run_switch_candidate(&receipt)?;
     }
-    match crate::machine_install::read_state(root)? {
-        crate::machine_install::MachineInstallState::Switching(current)
+    match crate::installation::read_state(root)? {
+        crate::installation::InstallationState::Switching(current)
             if current.id == receipt.id && current.target_store_advanced =>
         {
             Ok(*current)
@@ -2102,9 +2118,9 @@ fn advance_switch_store(
 }
 
 fn exact_published_switch_candidate(
-    receipt: &crate::machine_install::SwitchReceipt,
+    receipt: &crate::installation::SwitchReceipt,
 ) -> Result<Option<CandidateIdentity>> {
-    if receipt.target.source != crate::machine_install::InstallSource::Published {
+    if receipt.target.source != crate::installation::InstallSource::Published {
         return Ok(None);
     }
     let preflight = read_binary_preflight(&receipt.candidate.path)?;
@@ -2124,55 +2140,151 @@ fn exact_published_switch_candidate(
 }
 
 fn active_install_from_switch(
-    receipt: &crate::machine_install::SwitchReceipt,
-) -> crate::machine_install::ActiveInstall {
+    receipt: &crate::installation::SwitchReceipt,
+) -> crate::installation::ActiveInstall {
     let published_fallback = match receipt.target.source {
-        crate::machine_install::InstallSource::Published => receipt
+        crate::installation::InstallSource::Published => receipt
             .target_published_fallback
             .clone()
             .expect("validated published switch retains its target fallback"),
-        crate::machine_install::InstallSource::Development => receipt
+        crate::installation::InstallSource::Development => receipt
             .published_fallback
             .clone()
             .expect("validated development switch retains a published fallback"),
     };
-    let mut retained = vec![published_fallback.clone()];
-    if let Some(prior_fallback) = &receipt.published_fallback {
-        if prior_fallback != &published_fallback {
-            retained.push(prior_fallback.clone());
-        }
-    }
-    crate::machine_install::ActiveInstall {
+    crate::installation::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
+        retained_published_sets: retained_published_sets(
+            &published_fallback,
+            receipt.published_fallback.as_ref(),
+        ),
         published_fallback,
-        retained_published_sets: retained,
     }
+}
+
+/// A settled install keeps its published fallback and the one it replaced.
+fn retained_published_sets(
+    fallback: &crate::installation::ArtifactSet,
+    prior_fallback: Option<&crate::installation::ArtifactSet>,
+) -> Vec<crate::installation::ArtifactSet> {
+    let mut retained = vec![fallback.clone()];
+    retained.extend(prior_fallback.filter(|prior| *prior != fallback).cloned());
+    retained
 }
 
 fn settle_switch(
     root: &Path,
-    receipt: &mut crate::machine_install::SwitchReceipt,
-    active: &crate::machine_install::ActiveInstall,
+    receipt: &mut crate::installation::SwitchReceipt,
+    active: &crate::installation::ActiveInstall,
 ) -> Result<()> {
     receipt.published_fallback = Some(active.published_fallback.clone());
-    receipt.phase = crate::machine_install::SwitchPhase::Settled;
+    receipt.phase = crate::installation::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
-    crate::machine_install::write_switch(root, receipt)?;
-    crate::machine_install::settle_switch(root, receipt, active)
+    crate::installation::write_switch(root, receipt)?;
+    crate::installation::settle_switch(root, receipt, active)?;
+    prune_superseded_artifacts(root, &lf_bin_dir(), active);
+    Ok(())
+}
+
+fn is_content_addressed(name: &str, labels: &[&str]) -> bool {
+    name.split_once('-').is_some_and(|(label, digest)| {
+        labels.contains(&label)
+            && digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// Every install stages a CLI and an app bundle under their content address,
+/// and nothing removed them. Once a switch settles, only the active install's
+/// own sets can be selected again, so the rest goes: staged binaries (and the
+/// retired daemon's) and retained bundles that no set names and no live process
+/// executes. Other names are left alone. Failure leaves files for the next
+/// settlement and never fails the install.
+fn prune_superseded_artifacts(
+    root: &Path,
+    bin_dir: &Path,
+    active: &crate::installation::ActiveInstall,
+) {
+    let running = match running_executables() {
+        Ok(running) => running,
+        Err(error) => {
+            tracing::warn!(%error, "superseded install artifacts were kept: live executables are unknown");
+            return;
+        }
+    };
+    let kept: Vec<PathBuf> = [&active.selection.artifact_set, &active.published_fallback]
+        .into_iter()
+        .chain(&active.retained_published_sets)
+        .flat_map(|set| &set.artifacts)
+        .map(|artifact| artifact.path.clone())
+        .chain(running)
+        .map(|path| fs::canonicalize(&path).unwrap_or(path))
+        .collect();
+    for (directory, labels) in [
+        (bin_dir.to_path_buf(), ["lf", "lfd"]),
+        (root.join("artifacts"), ["published", "development"]),
+    ] {
+        let Ok(directory) = fs::canonicalize(&directory) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let superseded = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| is_content_addressed(name, &labels))
+                && !kept.iter().any(|kept| kept.starts_with(&path));
+            if !superseded {
+                continue;
+            }
+            match remove_path(&path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "removed superseded install artifact")
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "superseded install artifact was not removed")
+                }
+            }
+        }
+    }
+}
+
+/// Executable paths of every live process this account can see.
+#[cfg(target_os = "macos")]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    Ok(process_executables()?
+        .into_iter()
+        // A process whose path the kernel withholds keeps the name it was launched as.
+        .map(|(_, command, executable)| executable.unwrap_or_else(|| PathBuf::from(command)))
+        .collect())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    let mut running = Vec::new();
+    for entry in fs::read_dir("/proc").context("enumerate processes")? {
+        if let Ok(executable) = fs::read_link(entry?.path().join("exe")) {
+            running.push(executable);
+        }
+    }
+    Ok(running)
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock for install recovery")?;
-    let root = crate::machine_install::root()?;
-    let mut receipt = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Switching(receipt)
-            if receipt.id == switch_id =>
-        {
+    let root = crate::installation::root()?;
+    let mut receipt = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Switching(receipt) if receipt.id == switch_id => {
             *receipt
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is active, not {switch_id}",
                 receipt.id
@@ -2183,7 +2295,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     let current = fs::canonicalize(
         std::env::current_exe().context("resolve running install recovery owner")?,
     )?;
-    let expected = if receipt.recovery_owner == crate::machine_install::RecoveryOwner::Coordinator
+    let expected = if receipt.recovery_owner == crate::installation::RecoveryOwner::Coordinator
         && !receipt.target_store_advance_started
     {
         &receipt.coordinator
@@ -2200,17 +2312,18 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     }
     expected.verify()?;
 
-    if receipt.phase == crate::machine_install::SwitchPhase::Settled
+    if receipt.phase == crate::installation::SwitchPhase::Settled
         && receipt.active_selection_committed
     {
         let active = active_install_from_switch(&receipt);
-        crate::machine_install::settle_switch(&root, &receipt, &active)?;
+        crate::installation::settle_switch(&root, &receipt, &active)?;
+        prune_superseded_artifacts(&root, &lf_bin_dir(), &active);
         drop(lock);
         return Ok(());
     }
 
     if !receipt.target_store_advance_started {
-        crate::machine_install::clear_switch(&root, &receipt.id)?;
+        crate::installation::clear_switch(&root, &receipt.id)?;
         drop(lock);
         resume_switch_app(&receipt)?;
         return Ok(());
@@ -2218,17 +2331,17 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
 
     if !receipt.target_store_advanced {
         if exact_candidate.is_none() {
-            crate::machine_install::authorize_current_for_switch(
-                &crate::machine_install::ArtifactRole::Cli,
+            crate::installation::authorize_current_for_switch(
+                &crate::installation::ArtifactRole::Cli,
                 Some(&receipt.id),
             )?;
             match receipt.target.source {
-                crate::machine_install::InstallSource::Development => {
+                crate::installation::InstallSource::Development => {
                     return Err(anyhow!(
                         "development installations are disposable and cannot be recovered"
                     ));
                 }
-                crate::machine_install::InstallSource::Published => {
+                crate::installation::InstallSource::Published => {
                     crate::store::sqlite::SqliteStore::open_as_promotion_boundary(
                         &receipt.target.store,
                     )
@@ -2237,15 +2350,15 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
             }
         }
         receipt.target_store_advanced = true;
-        crate::machine_install::write_switch(&root, &receipt)?;
+        crate::installation::write_switch(&root, &receipt)?;
     }
 
     let activation_phase = matches!(
         receipt.phase,
-        crate::machine_install::SwitchPhase::Advancing
-            | crate::machine_install::SwitchPhase::TargetPrepared
-            | crate::machine_install::SwitchPhase::Quiesced
-            | crate::machine_install::SwitchPhase::Planned
+        crate::installation::SwitchPhase::Advancing
+            | crate::installation::SwitchPhase::TargetPrepared
+            | crate::installation::SwitchPhase::Quiesced
+            | crate::installation::SwitchPhase::Planned
     );
     let mut paths = receipt
         .prior
@@ -2262,8 +2375,8 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     let candidate = exact_candidate.unwrap_or_else(CandidateIdentity::current);
     activate_switch_targets(&root, &mut receipt, &candidate)?;
     if activation_phase {
-        receipt.phase = crate::machine_install::SwitchPhase::Activated;
-        crate::machine_install::write_switch(&root, &receipt)?;
+        receipt.phase = crate::installation::SwitchPhase::Activated;
+        crate::installation::write_switch(&root, &receipt)?;
     }
 
     let active = active_install_from_switch(&receipt);
@@ -2276,7 +2389,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn promote_published_from_machine_install(
+fn promote_published_from_installation(
     artifacts: PromotionArtifacts<'_>,
     candidate_binary: &Path,
     sync_skills: bool,
@@ -2284,31 +2397,31 @@ fn promote_published_from_machine_install(
 ) -> Result<()> {
     let lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
-    let root = crate::machine_install::root()?;
-    let mut prior = match crate::machine_install::read_state(&root)? {
-        crate::machine_install::MachineInstallState::Settled(active) => Some(*active),
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+    let root = crate::installation::root()?;
+    let mut prior = match crate::installation::read_state(&root)? {
+        crate::installation::InstallationState::Settled(active) => Some(*active),
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} became active while waiting for the promotion lock; rerun promotion to recover it",
                 receipt.id
             ))
         }
-        crate::machine_install::MachineInstallState::Legacy => None,
+        crate::installation::InstallationState::Legacy => None,
     };
     if let Some(prior) = &prior {
         prior
             .selection
             .artifact_set
-            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
+            .verify(&[crate::installation::ArtifactRole::Cli])?;
         prior
             .published_fallback
-            .verify(&[crate::machine_install::ArtifactRole::Cli])?;
+            .verify(&[crate::installation::ArtifactRole::Cli])?;
     }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
     if preview.candidate.authority != MigrationAuthority::Published {
         return Err(anyhow!(
-            "only a published candidate may advance a machine-managed install"
+            "only a published candidate may advance a receipt-managed installation"
         ));
     }
     render_human(&preview);
@@ -2358,29 +2471,29 @@ fn promote_published_from_machine_install(
     }
     let switch_id = format!("switch-{}", Uuid::new_v4().simple());
     let prepared = prepare_artifacts(&artifacts, candidate_binary, &preview, &switch_id, None)?;
-    let target_set = machine_artifact_set(
+    let target_set = installation_artifact_set(
         &root,
-        crate::machine_install::InstallSource::Published,
+        crate::installation::InstallSource::Published,
         &preview.candidate,
         &prepared.cli_binary,
         artifacts.app_source,
     )?;
     let target_published_fallback = target_set.clone();
-    let target = crate::machine_install::InstallSelection {
+    let target = crate::installation::InstallSelection {
         installation_id: format!("published-{}", Uuid::new_v4().simple()),
-        source: crate::machine_install::InstallSource::Published,
+        source: crate::installation::InstallSource::Published,
         artifact_set: target_set,
         store: store_path.clone(),
     };
-    let mut switch = crate::machine_install::SwitchReceipt {
+    let mut switch = crate::installation::SwitchReceipt {
         schema_version: 1,
         id: switch_id,
         prior: prior.as_ref().map(|prior| prior.selection.clone()),
         target: target.clone(),
         published_fallback: prior.as_ref().map(|prior| prior.published_fallback.clone()),
         target_published_fallback: Some(target_published_fallback.clone()),
-        phase: crate::machine_install::SwitchPhase::Planned,
-        recovery_owner: crate::machine_install::RecoveryOwner::Coordinator,
+        phase: crate::installation::SwitchPhase::Planned,
+        recovery_owner: crate::installation::RecoveryOwner::Coordinator,
         target_store_advance_started: false,
         target_store_advanced: false,
         active_selection_committed: false,
@@ -2389,15 +2502,15 @@ fn promote_published_from_machine_install(
             .map(|prior| &prior.selection)
             .unwrap_or(&target)
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
-            .expect("validated machine install has a CLI")
+            .artifact(&crate::installation::ArtifactRole::Cli)
+            .expect("validated installation has a CLI")
             .clone(),
         candidate: target
             .artifact_set
-            .artifact(&crate::machine_install::ArtifactRole::Cli)
+            .artifact(&crate::installation::ArtifactRole::Cli)
             .expect("validated published candidate has a CLI")
             .clone(),
-        activation: crate::machine_install::ActivationTargets {
+        activation: crate::installation::ActivationTargets {
             cli: artifacts.cli_target.to_path_buf(),
             daemon: None,
             app: artifacts.app_target.map(Path::to_path_buf),
@@ -2406,39 +2519,36 @@ fn promote_published_from_machine_install(
         app_was_running: false,
         disposable_store_owned: false,
     };
-    crate::machine_install::write_switch(&root, &switch)?;
+    crate::installation::write_switch(&root, &switch)?;
     if let Err(error) = quiesce_switch_app(&root, &mut switch) {
         return Err(restore_before_advance(&root, &switch, lock, error));
     }
-    switch.phase = crate::machine_install::SwitchPhase::Quiesced;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
+    switch.phase = crate::installation::SwitchPhase::Quiesced;
+    if let Err(error) = crate::installation::write_switch(&root, &switch) {
         return Err(restore_before_advance(&root, &switch, lock, error));
     }
-    switch.phase = crate::machine_install::SwitchPhase::TargetPrepared;
-    if let Err(error) = crate::machine_install::write_switch(&root, &switch) {
+    switch.phase = crate::installation::SwitchPhase::TargetPrepared;
+    if let Err(error) = crate::installation::write_switch(&root, &switch) {
         return Err(restore_before_advance(&root, &switch, lock, error));
     }
     switch = advance_switch_store(&root, switch, &preview.verdict)?;
-    activate_prepared_machine_switch(
+    activate_prepared_installation_switch(
         &root,
         &switch,
         &prepared,
         &preview.candidate,
         &preview.verdict,
     )?;
-    switch.phase = crate::machine_install::SwitchPhase::Activated;
-    crate::machine_install::write_switch(&root, &switch)?;
-    let mut retained = prior
-        .map(|prior| prior.retained_published_sets)
-        .unwrap_or_default();
-    if !retained.iter().any(|set| set == &target_published_fallback) {
-        retained.push(target_published_fallback.clone());
-    }
-    let active = crate::machine_install::ActiveInstall {
+    switch.phase = crate::installation::SwitchPhase::Activated;
+    crate::installation::write_switch(&root, &switch)?;
+    let active = crate::installation::ActiveInstall {
         schema_version: 1,
         selection: target.clone(),
         published_fallback: target_published_fallback.clone(),
-        retained_published_sets: retained,
+        retained_published_sets: retained_published_sets(
+            &target_published_fallback,
+            prior.as_ref().map(|prior| &prior.published_fallback),
+        ),
     };
     settle_app_artifacts(&prepared)?;
     settle_switch(&root, &mut switch, &active)?;
@@ -2466,13 +2576,13 @@ pub fn promote(
     sync_skills: bool,
     preview_only: bool,
 ) -> Result<()> {
-    if let crate::machine_install::MachineInstallState::Switching(receipt) =
-        crate::machine_install::read_state(&crate::machine_install::root()?)?
+    if let crate::installation::InstallationState::Switching(receipt) =
+        crate::installation::read_state(&crate::installation::root()?)?
     {
         return delegate_switch_recovery(&receipt);
     }
     let current = fs::canonicalize(std::env::current_exe()?)?;
-    promote_published_from_machine_install(artifacts, &current, sync_skills, preview_only)
+    promote_published_from_installation(artifacts, &current, sync_skills, preview_only)
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight
@@ -2481,15 +2591,15 @@ pub fn promote(
 pub fn rollback(cli_target: &Path, candidate: &Path) -> Result<()> {
     let _lock = crate::promotion_lock::acquire_exclusive()
         .context("acquire the exclusive promotion lock")?;
-    match crate::machine_install::read_state(&crate::machine_install::root()?)? {
-        crate::machine_install::MachineInstallState::Legacy => {}
-        crate::machine_install::MachineInstallState::Settled(active) => {
+    match crate::installation::read_state(&crate::installation::root()?)? {
+        crate::installation::InstallationState::Legacy => {}
+        crate::installation::InstallationState::Settled(active) => {
             return Err(anyhow!(
-                "machine installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
+                "installation {} is receipt-managed; use published promotion or switch recovery instead of legacy rollback",
                 active.selection.installation_id
             ))
         }
-        crate::machine_install::MachineInstallState::Switching(receipt) => {
+        crate::installation::InstallationState::Switching(receipt) => {
             return Err(anyhow!(
                 "install switch {} is unsettled; legacy rollback is fenced",
                 receipt.id
@@ -2515,9 +2625,103 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 
 #[cfg(test)]
 mod artifact_tests {
-    use super::{commit_cli_symlink, copy_tree, stage_binary, tree_digest};
+    use super::{
+        commit_cli_symlink, copy_tree, prune_superseded_artifacts, retained_published_sets,
+        stage_binary, tree_digest,
+    };
+    use crate::installation::{
+        ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
+    };
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    fn published_set(id: &str, paths: &[&Path]) -> ArtifactSet {
+        ArtifactSet {
+            id: id.to_string(),
+            source: InstallSource::Published,
+            source_revision: id.to_string(),
+            source_identity: "release".to_string(),
+            content_sha256: id.to_string(),
+            artifacts: paths
+                .iter()
+                .map(|path| ArtifactIdentity {
+                    role: ArtifactRole::Cli,
+                    path: path.to_path_buf(),
+                    sha256: String::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_settled_install_keeps_only_what_it_can_select_or_is_running() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("install");
+        let bin = home.path().join("bin");
+        let artifacts = root.join("artifacts");
+        fs::create_dir_all(&bin).unwrap();
+        let binary = |label: &str, digit: char| {
+            let path = bin.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            fs::write(&path, label).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+            path
+        };
+        let bundle = |label: &str, digit: char| {
+            let path = artifacts.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            let helper = path.join("Loopflow.app/Contents/MacOS/lf");
+            fs::create_dir_all(helper.parent().unwrap()).unwrap();
+            fs::write(&helper, label).unwrap();
+            (path, helper)
+        };
+        let (selected, previous, superseded) =
+            (binary("lf", '1'), binary("lf", '2'), binary("lf", '3'));
+        let daemon = binary("lfd", '4');
+        let (selected_app, selected_helper) = bundle("published", '5');
+        let (superseded_app, _) = bundle("development", '6');
+        let running = bin.join(format!("lf-{}", "7".repeat(64)));
+        fs::copy("/bin/sleep", &running).unwrap();
+        let mut process = std::process::Command::new(&running)
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let by_hand = bin.join("hotfix-61609c56");
+        fs::write(&by_hand, "hotfix").unwrap();
+        let unfinished = artifacts.join("published-partial");
+        fs::create_dir_all(&unfinished).unwrap();
+
+        let fallback = published_set("new", &[&selected, &selected_helper]);
+        let prior = published_set("prior", &[&previous]);
+        let active = ActiveInstall {
+            schema_version: 1,
+            selection: InstallSelection {
+                installation_id: "published-new".to_string(),
+                source: InstallSource::Published,
+                artifact_set: fallback.clone(),
+                store: home.path().join("loopflow.db"),
+            },
+            retained_published_sets: retained_published_sets(&fallback, Some(&prior)),
+            published_fallback: fallback,
+        };
+        prune_superseded_artifacts(&root, &bin, &active);
+        let survived = running.exists();
+        process.kill().unwrap();
+        process.wait().unwrap();
+
+        assert!(selected.exists() && previous.exists() && selected_app.exists());
+        assert!(survived, "a binary a live process executes was removed");
+        assert!(by_hand.exists() && unfinished.exists());
+        assert!(!superseded.exists() && !daemon.exists() && !superseded_app.exists());
+    }
+
+    #[test]
+    fn a_reinstalled_fallback_is_retained_once() {
+        let fallback = published_set("new", &[]);
+        assert_eq!(
+            retained_published_sets(&fallback, Some(&fallback)),
+            [fallback]
+        );
+    }
 
     #[test]
     fn staging_is_content_addressed_and_rejects_replaced_bytes() {

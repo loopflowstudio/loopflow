@@ -70,10 +70,10 @@ enum LocalWaveAgentLauncher {
         [lfPath, "task", "interrupt", issue]
     }
 
-    /// Return the CLI that owns the Home this Mac client controls.
+    /// Return the CLI that owns the Machine this Mac client controls.
     ///
     /// Use an explicitly configured helper when present; otherwise use the
-    /// bundled CLI, which shares the app's protocol and selects its own Home.
+    /// bundled CLI, which shares the app's protocol and selects its own Machine.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         developmentConfig: URL? = Bundle.main.url(
@@ -113,7 +113,7 @@ enum LocalWaveAgentLauncher {
 
     /// Run an `lf` query verb (`list`, `status`, `monitor`, …) and return its
     /// stdout. Backs `RegistryQuery` on macOS: the wave dashboard reads durable
-    /// facts by shelling the daemonless Home `lf` over the local store, not
+    /// facts by shelling the daemonless Machine `lf` over the local store, not
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) throws -> String {
         let lfPath = try controlLfPath()
@@ -170,8 +170,8 @@ enum LocalWaveAgentLauncher {
 
     // MARK: - Process plumbing
 
-    static func queryProcess(_ args: [String], cwd: String? = nil) -> Process {
-        let process = Process()
+    static func queryProcess(_ args: [String], cwd: String? = nil) -> Foundation.Process {
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
         process.environment = GUIProcessEnvironment.enriched(ProcessInfo.processInfo.environment)

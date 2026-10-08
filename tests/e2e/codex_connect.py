@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["websockets>=15,<16"]
 # ///
-"""Exercise a real Codex engine with credential-free local Responses and private Homes."""
+"""Exercise a real Codex engine with credential-free local Responses and private Machines."""
 
 import argparse
 import base64
@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
                 "type": "function_call",
                 "id": "fc_provenance",
                 "call_id": "call_provenance",
-                "name": "exec_command",
+                "name": "process_command",
                 "arguments": json.dumps(
                     {
                         "cmd": "printf sibling-only"
@@ -224,7 +224,7 @@ def main() -> None:
     server = Responses()
     if not args.launch:
         assert args.lf_home and args.control, (
-            "lf ownership proof needs a private Home and control directory"
+            "lf ownership proof needs a private Machine and control directory"
         )
         server.command = shlex.join([str(args.lf), "session", "list", "--all", "--json"])
     serving = threading.Thread(target=server.serve_forever, daemon=True)
@@ -256,14 +256,14 @@ enabled = false
 [feedback]
 enabled = false
 """)
-            # Never inherit credentials, execution authority, or the real provider Home.
+            # Never inherit credentials, execution authority, or the real provider Machine.
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(root), CODEX_HOME=str(home), LF_HOME=str(root / "lf"))
             if args.shared_provider_home:
                 del env["CODEX_HOME"]
             if args.launch:
                 # Pin bytes: another contributor may build the source path while
-                # this private-Home proof is running.
+                # this private-Machine proof is running.
                 binary = root / "bin" / "lf"
                 binary.parent.mkdir()
                 shutil.copy2(args.lf, binary)
@@ -297,8 +297,12 @@ enabled = false
                         )
                         return
                     if args.public_connect:
-                        results["public_connect"] = _live_driver_contract(binary, work, env, server, shared_engine=True)
-                        results["owner_exit"] = _live_driver_contract(binary, work, env, server, shared_engine=False)
+                        results["public_connect"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=True
+                        )
+                        results["owner_exit"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=False
+                        )
                         return
                     if args.flow_decision_retry:
                         _flow_decision_retry_contract(
@@ -551,7 +555,9 @@ def _public_connection_contract(
         engine.call("thread/resume", {"threadId": thread})
         sibling = None
         if shared_engine:
-            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})["thread"]["id"]
+            sibling = engine.call("thread/start", {"cwd": str(work), "approvalPolicy": "never"})[
+                "thread"
+            ]["id"]
             engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
         for label in ["first", "second"]:
@@ -569,8 +575,8 @@ def _public_connection_contract(
         assert headless.returncode == 130, headless.returncode
         with sqlite3.connect(_database(env)) as database:
             outcome = database.execute(
-                "SELECT outcome FROM execs "
-                "WHERE id=(SELECT provider_exec_id FROM agent_sessions WHERE id=?)",
+                "SELECT outcome FROM processes "
+                "WHERE lfid=(SELECT provider_process_lfid FROM agent_sessions WHERE id=?)",
                 (session,),
             ).fetchone()[0]
         assert outcome == "interrupted", outcome
@@ -601,12 +607,15 @@ def _public_connection_contract(
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
         if sibling:
-            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
+            assert (
+                engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
+                == "active"
+            )
         # Explicit client replacement must use the same live-engine path as
         # ordinary connect, with the current turn and shared sibling untouched.
         with sqlite3.connect(_database(env)) as database:
             before_prepare = database.execute(
-                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
+                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
@@ -621,7 +630,7 @@ def _public_connection_contract(
         assert all(previous.poll() is None for previous in processes)
         with sqlite3.connect(_database(env)) as database:
             after_prepare = database.execute(
-                "SELECT driver_exec_id,driver_generation,provider_endpoint,provider_thread,"
+                "SELECT driver_process_lfid,driver_generation,provider_endpoint,provider_thread,"
                 "provider_generation FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
@@ -634,7 +643,10 @@ def _public_connection_contract(
             engine.call("thread/read", {"threadId": thread})["thread"]["status"]["type"] == "active"
         )
         if sibling:
-            assert engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"] == "active"
+            assert (
+                engine.call("thread/read", {"threadId": sibling})["thread"]["status"]["type"]
+                == "active"
+            )
         with sqlite3.connect(_database(env)) as database:
             retained_connection = database.execute(
                 "SELECT provider_endpoint,provider_thread,provider_generation "
@@ -642,11 +654,11 @@ def _public_connection_contract(
                 (session,),
             ).fetchone()
             driver, observed_generation, interactive = database.execute(
-                "SELECT driver_exec_id,provider_generation,interactive "
+                "SELECT driver_process_lfid,provider_generation,interactive "
                 "FROM agent_sessions WHERE id=?",
                 (session,),
             ).fetchone()
-            before = {row[0] for row in database.execute("SELECT id FROM execs")}
+            before = {row[0] for row in database.execute("SELECT lfid FROM processes")}
         assert observed_generation == generation and interactive == 1
         assert retained_connection == (endpoint, thread, generation)
         assert driver != before_prepare[0]
@@ -654,8 +666,8 @@ def _public_connection_contract(
         engine.wait_turn(active)
         with sqlite3.connect(_database(env)) as database:
             after = database.execute(
-                "SELECT id,parent_exec_id,caller_session_id,caller_provider_generation "
-                "FROM execs WHERE via_agent=1"
+                "SELECT lfid,parent_process_lfid,caller_session_id,caller_provider_generation "
+                "FROM processes WHERE via_agent=1"
             ).fetchall()
         children = [row for row in after if row[0] not in before]
         assert len(children) == 1, children
@@ -689,7 +701,8 @@ def _public_connection_contract(
             assert processes[2].returncode == 0, error.decode()
             with sqlite3.connect(_database(env)) as database:
                 closed = database.execute(
-                    "SELECT provider_endpoint,provider_thread,driver_exec_id FROM agent_sessions WHERE id=?",
+                    "SELECT provider_endpoint,provider_thread,driver_process_lfid "
+                    "FROM agent_sessions WHERE id=?",
                     (session,),
                 ).fetchone()
             assert closed == (None, thread, None), closed
@@ -721,7 +734,9 @@ def _public_connection_contract(
                     child.wait(timeout=5)
 
 
-def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool) -> dict:
+def _live_driver_contract(
+    binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool
+) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
     with sqlite3.connect(_database(env)) as database:
@@ -730,7 +745,7 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
     server.release.clear()
     log = tempfile.TemporaryFile(mode="w+t")
     child = subprocess.Popen(
-        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        [str(binary), "--mode", "batch", "--agent", "codex", ":", "held conversation"],
         stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
@@ -743,7 +758,9 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             child.terminate()
             stdout, stderr = child.communicate(timeout=10)
             log.seek(0)
-            raise AssertionError(f"headless provider never reached held upstream: {stdout}\n{log.read()}")
+            raise AssertionError(
+                f"headless provider never reached held upstream: {stdout}\n{log.read()}"
+            )
         with sqlite3.connect(_database(env)) as database:
             sessions = [
                 row[0]
@@ -752,7 +769,9 @@ def _live_driver_contract(binary: Path, work: Path, env: dict[str, str], server:
             ]
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
-        _public_connection_contract(binary, work, env, server, result, headless=child, shared_engine=shared_engine)
+        _public_connection_contract(
+            binary, work, env, server, result, headless=child, shared_engine=shared_engine
+        )
         return result
     finally:
         server.release.set()
@@ -832,7 +851,7 @@ def _shared_provider_home_contract(
     def converse(*flags: str, prompt: str = "say hi") -> tuple[str, list[dict]]:
         """Run one headless conversation; its provider id and engine launches."""
         known, before = conversations(), len(launches())
-        lf(*flags, "--mode", "batch", "--model", "codex", ":", prompt)
+        lf(*flags, "--mode", "batch", "--agent", "codex", ":", prompt)
         started = [id for id in conversations() if id not in known]
         assert len(started) == 1, started
         engines = [launch for launch in launches()[before:] if "app-server" in launch["argv"]]
@@ -989,7 +1008,7 @@ def _shared_provider_home_contract(
     known, before = conversations(), len(launches())
     log = tempfile.TemporaryFile(mode="w+t")
     running = subprocess.Popen(
-        [str(binary), "--mode", "batch", "--model", "codex", ":", "held conversation"],
+        [str(binary), "--mode", "batch", "--agent", "codex", ":", "held conversation"],
         stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
@@ -1002,7 +1021,9 @@ def _shared_provider_home_contract(
             running.terminate()
             stdout, stderr = running.communicate(timeout=10)
             log.seek(0)
-            raise AssertionError(f"the running agent never reached the provider: {stdout}\n{log.read()}")
+            raise AssertionError(
+                f"the running agent never reached the provider: {stdout}\n{log.read()}"
+            )
 
         def alive() -> set[int]:
             pids = {
@@ -1128,30 +1149,30 @@ def _flow_decision_retry_contract(
         (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
     (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
     (work / ".lf/flows/native-proof.yaml").write_text(
-        "- step:\n    id: work\n    name: native-proof\n"
-        "- loop: work\n  step: native-proof\n"
+        "- step:\n    id: work\n    name: native-proof\n- loop: work\n  step: native-proof\n"
     )
     server.fail_request = 4
     server.invalid_decision_output = not replace
     server.commands[3] = "printf failed-turn-work"
     server.commands[5] = "printf retry-work"
     command = _command(
-        [str(binary), "--model", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
+        [str(binary), "--agent", "codex", "flow", "native-proof", "-b", "--no-loopflow"],
         work=work,
         env=env,
         timeout=90,
     )
     results.update(command_exit=command.returncode, command_stderr=command.stderr)
     with sqlite3.connect(_database(env)) as db:
-        # A Flow is its driver Exec and the step Execs that driver recorded.
+        # A Flow is its driver Process and the step Processes that driver recorded.
         results["flow"] = db.execute(
-            "SELECT d.outcome FROM flow_execs f JOIN execs d ON d.id=f.exec_id"
+            "SELECT d.outcome FROM flow_processes f JOIN processes d ON d.lfid=f.process_lfid"
         ).fetchone()
         results["history"] = db.execute(
             "SELECT seq,kind,provider_turn,payload FROM session_events ORDER BY seq"
         ).fetchall()
         results["steps"] = db.execute(
-            "SELECT e.command FROM flow_exec_steps s JOIN execs e ON e.id=s.exec_id ORDER BY s.seq"
+            "SELECT e.command FROM flow_process_steps s "
+            "JOIN processes e ON e.lfid=s.process_lfid ORDER BY s.seq"
         ).fetchall()
     outputs = [
         item["output"]
@@ -1171,7 +1192,7 @@ def _flow_decision_retry_contract(
         if replace
         else ["completed", "failed", "completed", "completed", "completed"]
     )
-    # The failed turn decided nothing. Each correction is another step Exec
+    # The failed turn decided nothing. Each correction is another step Process
     # resuming the conversation that gave the invalid answer.
     corrections = [command for (command,) in results["steps"] if '"session","resume"' in command]
     if replace:

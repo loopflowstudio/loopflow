@@ -1,7 +1,7 @@
 """Prove capture preservation with published v0.13.3 and a source candidate.
 
 Only ordinary commands run, in a temporary LF_HOME with stub providers. No
-installation, account import, production Home access or layout conversion.
+installation, account import, production Machine access or layout conversion.
 """
 
 import argparse
@@ -229,7 +229,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
         assert feedback == "Keep this released feedback"
         assert completed is not None
     # A provider-issued nested direct invocation gets its own Session and the
-    # parent's exact Exec, without conflating either with the capture key.
+    # parent's exact Process, without conflating either with the capture key.
     (home / "tool-command.json").write_text(
         json.dumps(
             {
@@ -237,7 +237,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
                     str(candidate),
                     "--mode",
                     "tui",
-                    "--model",
+                    "--agent",
                     "opencode",
                     ":",
                     "Nested work",
@@ -246,11 +246,11 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
             }
         )
     )
-    _command(candidate, env, repo, "--mode", "tui", "--model", "opencode", ":", "Parent work")
+    _command(candidate, env, repo, "--mode", "tui", "--agent", "opencode", ":", "Parent work")
     assert json.loads((home / "tool-result.json").read_text())["code"] == 0
     with sqlite3.connect(database) as db:
         parents = db.execute(
-            "SELECT e.parent_exec_id,s.provider_exec_id FROM execs e "
+            "SELECT e.parent_process_lfid,s.provider_process_lfid FROM processes e "
             "JOIN agent_sessions s ON s.id=e.caller_session_id"
         ).fetchall()
         assert parents and all(parent == owner for parent, owner in parents)
@@ -262,7 +262,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     assert not (home / "captures").exists()
     print(
         "PASS: released history, paths, native resume, replay, review feedback/settlement "
-        "and nested Exec ancestry preserved"
+        "and nested Process ancestry preserved"
     )
 
 

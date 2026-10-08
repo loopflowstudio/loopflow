@@ -163,7 +163,7 @@
   "cwd": "/src/loopflow.task",
   "steps": [
     {
-      "exec_id": "00000001-0000-4000-8000-000000000000",
+      "process_lfid": "00000001-0000-4000-8000-000000000000",
       "label": "implement",
       "key": 0,
       "iterations": [
@@ -173,11 +173,11 @@
       ],
       "started_at": 10,
       "completed_at": 20,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
-      "exec_id": "00000002-0000-4000-8000-000000000000",
+      "process_lfid": "00000002-0000-4000-8000-000000000000",
       "label": "compress",
       "key": 1,
       "iterations": [
@@ -187,11 +187,11 @@
       ],
       "started_at": 20,
       "completed_at": 30,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
-      "exec_id": "00000003-0000-4000-8000-000000000000",
+      "process_lfid": "00000003-0000-4000-8000-000000000000",
       "label": "sync",
       "key": 2,
       "iterations": [
@@ -201,11 +201,11 @@
       ],
       "started_at": 30,
       "completed_at": 40,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
-      "exec_id": "00000004-0000-4000-8000-000000000000",
+      "process_lfid": "00000004-0000-4000-8000-000000000000",
       "label": "realign",
       "key": 3,
       "iterations": [
@@ -215,11 +215,11 @@
       ],
       "started_at": 40,
       "completed_at": 50,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
-      "exec_id": "00000005-0000-4000-8000-000000000000",
+      "process_lfid": "00000005-0000-4000-8000-000000000000",
       "label": "loop-or-next",
       "key": 4,
       "iterations": [
@@ -229,11 +229,11 @@
       ],
       "started_at": 50,
       "completed_at": 60,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
-      "exec_id": "00000006-0000-4000-8000-000000000000",
+      "process_lfid": "00000006-0000-4000-8000-000000000000",
       "label": "implement",
       "key": 0,
       "iterations": [

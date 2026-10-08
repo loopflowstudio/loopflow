@@ -6,8 +6,8 @@ title: Architecture
 # Architecture
 
 Loopflow records commands, preserves agent conversations, and drives Flows.
-Exec owns a process and AgentSession a conversation; a Flow is one driver Exec
-and the step Execs it starts.
+Process records an lf command and its outcome; AgentSession records a conversation; a Flow is one lf process
+and the step processes it starts.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](architecture-reference.md#cutover-status), the remaining work
@@ -25,7 +25,7 @@ lf implement
 ```
 
 That command discovers `implement`, assembles its context, chooses a provider,
-records its Exec, reserves an AgentSession, captures the input, then launches the
+records its Process, reserves an AgentSession, captures the input, then launches the
 provider. It needs no Wave, Project, Task, or daemon. The conversation persists
 after that command exits; a later command can connect to the same AgentSession.
 
@@ -40,14 +40,14 @@ lf CLI --> Skill discovery --> prompt --> provider route --> harness
                                                + immutable input/output artifacts
 ```
 
-Before the provider starts, the current Home has the conversation reservation
+Before the provider starts, the current Machine has the conversation reservation
 and its immutable input. SQLite owns identity, attribution, driver authority and
 history references; payload files retain large captured inputs and output.
 Admission failure stops before provider launch. General command logging has a
 different boundary: unavailable/bootstrap stores leave explicitly unrecorded
-Execs rather than bypassing installation authority to create a receipt.
+Processes rather than bypassing installation authority to create a receipt.
 
-AgentSession history records provider outcomes, retries and usage. Exec records
+AgentSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
 missing. The [execution contract](architecture-reference.md#core-models-and-apis)
@@ -62,7 +62,7 @@ The implementation follows the same order as the diagram:
 | Assemble context | [`engine/prompt.rs`](../rust/loopflow/src/engine/prompt.rs) | System and task prompts |
 | Select credentials and route | [`provider_account.rs`](../rust/loopflow/src/provider_account.rs) | Harness, account, model, credential |
 | Launch and normalize | [`harness/`](../rust/loopflow/src/harness/) | Provider output and usage events |
-| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Exec completion, AgentSession history and immutable payloads |
+| Record command and conversation evidence | [`journal/`](../rust/loopflow/src/journal/) and the store | Process completion, AgentSession history and immutable payloads |
 
 [Follow the complete execution path →](architecture/execution.md)
 
@@ -84,7 +84,7 @@ one Skill run
     |
     +-- Controllers: pursue Work end to end using the layers above
     |
-    +-- Home: place execution, credentials, services, files, and locks
+    +-- Machine: place execution, credentials, services, files, and locks
     |
     `-- Views: project planning, command, conversation, provider, Git, and OS evidence
 ```
@@ -94,7 +94,7 @@ one Skill run
 | Execution | Skill discovery, prompt assembly, provider routing, harnesses, command and conversation history | [Execution](architecture/execution.md) |
 | Planning | Flow composition, Wave/Task Work, Steer, questions, review FlowSteps | [Planning](architecture/planning.md) |
 | Delivery | Managed worktrees, commits, one active Task branch/PR, CI repair, merge | [Delivery](architecture/delivery.md) |
-| Homes | Placement, SSH routing, machine install | [Homes and processes](architecture/homes.md) |
+| Machines | Placement, SSH routing, installation | [Machines and processes](architecture/machines.md) |
 | Data | Truth owners, SQLite, files, external systems, projections, consistency | [Data and persistence](architecture/data.md) |
 | Codebase | Source territories, public surfaces, processes, extension points | [Codebase map](architecture/codebase.md) |
 
@@ -167,15 +167,15 @@ user / agent --> lf CLI --------+----------+-----------+
               discovery / prompt / route / harness
                               |
                               v
-                        Exec / AgentSession
+                        Process / AgentSession
                               |
                               v
                   status / roadmap / usage / app
 
-another machine is another Home; cross it explicitly with `lf ssh`
+another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
-There is no central Loopflow server. A Home owns its processes, credentials,
+There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
 definitions and memory. Linear and GitHub keep shared planning and delivery
 truth. Readers join those sources; they do not replace them with a universal
@@ -187,29 +187,29 @@ ledger.
 Repository
   `-- Wave                    enduring objective, memory and cadence
         `-- Linear Project    status + shared chapter name + Flow + KRs
-              `-- Task        identity, worktree, PR and every Flow exec for it
+              `-- Task        identity, worktree, PR and every Flow process for it
 
-Exec                          one actual lf process; immutable causal parent
-AgentSession                  one conversation; nullable current driver Exec
+Process                          one actual lf process; immutable causal parent
+AgentSession                  one conversation; nullable current driver Process
   `-- history                 provider starts, outcomes, retries and usage
-Flow                          one driver Exec; cursor in its memory, graph in FlowExec
-  `-- step Execs              plain commands; the driver records each one's node
+Flow                          one lf process; cursor in its memory, graph in FlowProcess
+  `-- step processes              plain commands; the driver records each one's node
 ```
 
 | Model | Represents | Primary truth |
 | --- | --- | --- |
 | Skill | Reusable instructions and declared context | Repository, builtin or installed Markdown |
 | Flow | Reusable graph of agent, mechanical and routing steps | Repository or builtin YAML |
-| Exec | One actual lf process, its caller and command completion | `execs` |
+| Process | One actual lf process, its caller and command completion | `processes` |
 | AgentSession | An interactive or headless conversation across drivers and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
-| Running Flow | One driver process and the steps it starts, including taskless execution | The driver Exec and its child step Execs in `execs` |
+| Running Flow | One driver process and the steps it starts, including taskless execution | The driver Process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and Linear Initiative membership |
 | Chapter | Shared name of each Wave's In Progress Project | Linear Project statuses; no Chapter row or packet |
 | Project | A Wave's plan, KRs, targets and workflow | Linear Project and its synchronized `projects` row |
 | Task | A concrete change, investigation or document | `tasks`, Linear Issue, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
-| Home | A machine's store, credentials and exact process authority | Home identity and observed route |
-| Placement | Where a Work executes | `(WorkRef, HomeId)` |
+| Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
+| Placement | Where a Work executes | `(WorkRef, MachineId)` |
 
 An AgentSession keeps its ID, name, feedback and native conversation when its
 command process changes. Its `interactive` field is independent of purpose,
@@ -224,22 +224,22 @@ replace the provider generation or interrupt an existing turn. Client replacemen
 leaves the engine alive and never authorizes killing a shared engine
 for one thread. Engine PID, client PID and conversation driver are distinct.
 
-Exec ancestry records the actual lf caller. A direct child names its parent's
-Exec; an agent-issued child also records `via_agent` and AgentSession provenance.
+Process ancestry records the actual lf caller. A direct child names its parent's
+Process; an agent-issued child also records `via_agent` and AgentSession provenance.
 The provider's generation resolves to the current driver at child admission.
 A delayed command from a replaced provider retains historical provenance; old
-Exec parents are never rewritten. Causal ancestry grants no control authority.
+Process parents are never rewritten. Causal ancestry grants no control authority.
 
 Every Flow naming a Task, or run in its checkout, is equally its work;
 none is privileged. `task run` always runs a fresh one.
 Taskless and Task-owned Flows use the same driver. It holds the compiled graph
 and cursor in memory; template composition compiles into the graph, and loop
-passes are positions in it. Each step is a real child Exec whose argv carries
+passes are positions in it. Each step is a real child Process whose argv carries
 the Flow name, launch sequence and position. A step's result is how its process
 exited; a deciding or routing step also answers through the Session turn its
-Exec captured. Mechanical work creates no agent conversation. A Session reaches
-its Flow through the step Exec that captured its input. A killed driver leaves
-its Execs as history; nothing resumes it, and its caller launches fresh work.
+Process captured. Mechanical work creates no agent conversation. A Session reaches
+its Flow through the step Process that captured its input. A killed driver leaves
+its Processes as history; nothing resumes it, and its caller launches fresh work.
 
 Task implies Wave. Constructors fill omitted ancestors and reject mismatches.
 Bind fills an unassigned conversation's Task once. CLI states the permanent
@@ -249,14 +249,14 @@ usage retains its recorded owner; binding affects subsequent work, and uncertain
 mid-turn allocation remains unknown.
 
 `tasks.started_at` is set once when actual Task work is reserved or first bound.
-Recording an inspection command's Exec does not start a Task. Chapter retirement
+Recording an inspection command's Process does not start a Task. Chapter retirement
 also checks authored work, PRs and Flows; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh Linear facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
 The [reference](architecture-reference.md#core-models-and-apis) owns the field and
-write contracts and the current-state conversion boundary. Exec and AgentSession
+write contracts and the current-state conversion boundary. Process and AgentSession
 are the execution owners; Run has no separate lifecycle.
 
 ## Follow the common paths
@@ -310,11 +310,11 @@ conversation.
 ### Another machine
 
 ```bash
-lf ssh build-home session list --json
-lf ssh build-home --wave product wave/operate
+lf --machine build-home session list --json
+lf --machine build-home --wave product wave/operate
 ```
 
-The origin transports one command. The target resolves its own Home state and
+The origin transports one command. The target resolves its own Machine state and
 runs the same `lf`. Reads are local unless this hop is explicit.
 
 ## How to read the code
@@ -328,7 +328,7 @@ the behavior.
 | provider launch, retries, usage, or telemetry | [Execution](architecture/execution.md) |
 | Flow semantics, Work state, Steer, questions, review FlowSteps, chapter rotation and Task advancement | [Planning](architecture/planning.md) |
 | worktrees, commits, PR ranges, checks, or landing | [Delivery](architecture/delivery.md) |
-| remote execution, placement, process control, promotion | [Homes and processes](architecture/homes.md) |
+| remote execution, placement, process control, promotion | [Machines and processes](architecture/machines.md) |
 | schema, files, projections, DTOs, or consistency | [Data and persistence](architecture/data.md) |
 | module ownership, APIs, binaries, routes, or code size | [Codebase map](architecture/codebase.md) |
 

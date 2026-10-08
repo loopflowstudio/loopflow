@@ -3,7 +3,7 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Home, HomeId, Placement, ProjectId, Steer, SteerComment, TaskId,
+    AbandonReceipt, Author, Machine, MachineId, Placement, ProjectId, Steer, SteerComment, TaskId,
     TaskState, ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
@@ -69,54 +69,85 @@ impl SqliteStore {
         .map_err(Into::into)
     }
 
-    pub fn home_by_id(&self, home_id: &HomeId) -> StoreResult<Option<Home>> {
+    pub fn machine_by_id(&self, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        map_home_by_id(&conn, home_id)
+        map_machine_by_id(&conn, machine_id)
     }
 
-    pub fn local_home(&self) -> StoreResult<Home> {
+    pub fn local_machine(&self) -> StoreResult<Machine> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        map_local_home(&conn)
+        map_local_machine(&conn)
     }
 
-    pub fn observe_home(&self, home_id: &HomeId, route: &str) -> StoreResult<Home> {
-        let route = route.trim();
-        if route.is_empty() {
+    pub fn add_machine(
+        &self,
+        machine_id: &MachineId,
+        target: &str,
+        label: &str,
+        repo: &str,
+    ) -> StoreResult<Machine> {
+        if target.is_empty() || target == "local" || label.trim().is_empty() || repo.is_empty() {
             return Err(StoreError::InvalidData(
-                "Home route cannot be empty".to_string(),
+                "machine target, label and repository must be nonempty; local is reserved".into(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if map_machine_by_id(&tx, machine_id)?.is_some_and(|machine| machine.route == "local") {
+            return Err(StoreError::InvalidData(
+                "cannot add the local machine as a remote".into(),
+            ));
+        }
+        let now = now_unix();
+        tx.execute(
+            "INSERT INTO machines (id, route, label, repo, created_at, observed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(id) DO UPDATE SET route=excluded.route, label=excluded.label,
+                repo=excluded.repo, observed_at=excluded.observed_at",
+            params![machine_id.as_str(), target, label, repo, now],
+        ).map_err(|error| StoreError::InvalidData(format!("could not save machine: {error}; choose another label or remove the old connection")))?;
+        let machine = map_machine_by_id(&tx, machine_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(machine)
+    }
+
+    pub fn machines(&self) -> StoreResult<Vec<Machine>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, route, created_at, observed_at, label, repo
+             FROM machines WHERE label IS NOT NULL ORDER BY label",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(map_machine_row(row)))?;
+        rows.map(|row| row?).collect()
+    }
+
+    pub fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
+        if name.trim().is_empty() {
+            return Err(StoreError::InvalidData(
+                "machine label cannot be empty".into(),
             ));
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if map_home_by_id(&conn, home_id)?
-            .is_some_and(|home| home.route == "local" && route != "local")
+        if conn.execute(
+            "UPDATE machines SET label=?2 WHERE label=?1",
+            params![label, name],
+        )? == 0
         {
-            return Err(StoreError::InvalidData(format!(
-                "cannot replace local Home {home_id} with remote route {route:?}"
-            )));
+            return Err(StoreError::NotFound);
         }
-        let existing_id = conn
-            .query_row("SELECT id FROM homes WHERE route=?1", [route], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()?;
-        if existing_id
-            .as_deref()
-            .is_some_and(|id| id != home_id.as_str())
+        Ok(())
+    }
+
+    pub fn remove_machine(&self, label: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE machines SET label=NULL, repo=NULL WHERE label=?1",
+            [label],
+        )? == 0
         {
-            return Err(StoreError::InvalidData(format!(
-                "Home route {route:?} is already observed for {}",
-                existing_id.expect("checked as present")
-            )));
+            return Err(StoreError::NotFound);
         }
-        let now = now_unix();
-        conn.execute(
-            "INSERT INTO homes (id, route, created_at, observed_at)
-             VALUES (?1, ?2, ?3, ?3)
-             ON CONFLICT(id) DO UPDATE SET
-                route=excluded.route, observed_at=excluded.observed_at",
-            params![home_id.as_str(), route, now],
-        )?;
-        map_home_by_id(&conn, home_id)?.ok_or(StoreError::NotFound)
+        Ok(())
     }
 
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
@@ -124,22 +155,26 @@ impl SqliteStore {
         placement_in(&conn, work)
     }
 
-    pub(crate) fn place_work(&self, work: &WorkRef, home_id: &HomeId) -> StoreResult<Placement> {
+    pub(crate) fn place_work(
+        &self,
+        work: &WorkRef,
+        machine_id: &MachineId,
+    ) -> StoreResult<Placement> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_ready_work(&tx, work)?;
         tx.query_row(
-            "SELECT 1 FROM homes WHERE id=?1",
-            [home_id.as_str()],
+            "SELECT 1 FROM machines WHERE id=?1",
+            [machine_id.as_str()],
             |_| Ok(()),
         )?;
         if let Some(current) = find_placement_in(&tx, work)? {
-            if current.home_id == *home_id {
+            if current.machine_id == *machine_id {
                 tx.commit()?;
                 return Ok(current);
             }
         }
-        write_placement(&tx, work, home_id, now_unix())?;
+        write_placement(&tx, work, machine_id, now_unix())?;
         let placement = placement_in(&tx, work)?;
         tx.commit()?;
         Ok(placement)
@@ -426,62 +461,39 @@ impl SqliteStore {
     }
 }
 
-fn map_local_home(conn: &Connection) -> StoreResult<Home> {
+fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM homes WHERE route='local'",
+        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
         [],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
-    )
-    .map_err(StoreError::from)
-    .and_then(|(id, route, created_at, observed_at)| {
-        Ok(Home {
-            id: HomeId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+        |row| Ok(map_machine_row(row)),
+    )?
 }
 
-fn map_home_by_id(conn: &Connection, home_id: &HomeId) -> StoreResult<Option<Home>> {
+fn map_machine_by_id(conn: &Connection, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM homes WHERE id=?1",
-        [home_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
+        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE id=?1",
+        [machine_id.as_str()],
+        |row| Ok(map_machine_row(row)),
     )
-    .optional()
-    .map_err(StoreError::from)?
-    .map(|(id, route, created_at, observed_at)| {
-        Ok(Home {
-            id: HomeId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+    .optional()?
     .transpose()
+}
+
+fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
+    Ok(Machine {
+        id: MachineId::parse(&row.get::<_, String>(0)?).map_err(invalid_durable)?,
+        route: row.get(1)?,
+        created_at: OffsetDateTime::from_unix_timestamp(row.get(2)?).map_err(invalid_durable)?,
+        observed_at: OffsetDateTime::from_unix_timestamp(row.get(3)?).map_err(invalid_durable)?,
+        label: row.get(4)?,
+        repo: row.get(5)?,
+    })
 }
 
 fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
     find_placement_in(conn, work)?.ok_or_else(|| {
         StoreError::InvalidData(format!(
-            "{} {} has no Home placement",
+            "{} {} has no Machine placement",
             work.kind(),
             work.id()
         ))
@@ -491,26 +503,26 @@ fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {
 fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Placement>> {
     let row = match work {
         WorkRef::Wave(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE wave_id=?1",
+            "SELECT machine_id, placed_at FROM work_placements WHERE wave_id=?1",
             [id.as_str()],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
         WorkRef::Project(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE project_id=?1",
+            "SELECT machine_id, placed_at FROM work_placements WHERE project_id=?1",
             [id.as_str()],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
         WorkRef::Task(id) => conn.query_row(
-            "SELECT home_id, placed_at FROM work_placements WHERE task_id=?1",
+            "SELECT machine_id, placed_at FROM work_placements WHERE task_id=?1",
             [id.as_str()],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
         ),
     }
     .optional()?;
-    row.map(|(home_id, placed_at)| {
+    row.map(|(machine_id, placed_at)| {
         Ok(Placement {
             work: work.clone(),
-            home_id: HomeId::parse(&home_id).map_err(invalid_durable)?,
+            machine_id: MachineId::parse(&machine_id).map_err(invalid_durable)?,
             placed_at: OffsetDateTime::from_unix_timestamp(placed_at).map_err(invalid_durable)?,
         })
     })
@@ -520,30 +532,30 @@ fn find_placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Option<Pl
 fn write_placement(
     tx: &Transaction<'_>,
     work: &WorkRef,
-    home_id: &HomeId,
+    machine_id: &MachineId,
     placed_at: i64,
 ) -> StoreResult<()> {
     match work {
         WorkRef::Wave(id) => tx.execute(
-            "INSERT INTO work_placements (wave_id, home_id, enabled, placed_at)
+            "INSERT INTO work_placements (wave_id, machine_id, enabled, placed_at)
              VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(wave_id) DO UPDATE SET
-                home_id=excluded.home_id, placed_at=excluded.placed_at",
-            params![id.as_str(), home_id.as_str(), placed_at],
+                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
+            params![id.as_str(), machine_id.as_str(), placed_at],
         )?,
         WorkRef::Project(id) => tx.execute(
-            "INSERT INTO work_placements (project_id, home_id, enabled, placed_at)
+            "INSERT INTO work_placements (project_id, machine_id, enabled, placed_at)
              VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(project_id) DO UPDATE SET
-                home_id=excluded.home_id, placed_at=excluded.placed_at",
-            params![id.as_str(), home_id.as_str(), placed_at],
+                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
+            params![id.as_str(), machine_id.as_str(), placed_at],
         )?,
         WorkRef::Task(id) => tx.execute(
-            "INSERT INTO work_placements (task_id, home_id, enabled, placed_at)
+            "INSERT INTO work_placements (task_id, machine_id, enabled, placed_at)
              VALUES (?1, ?2, 1, ?3)
              ON CONFLICT(task_id) DO UPDATE SET
-                home_id=excluded.home_id, placed_at=excluded.placed_at",
-            params![id.as_str(), home_id.as_str(), placed_at],
+                machine_id=excluded.machine_id, placed_at=excluded.placed_at",
+            params![id.as_str(), machine_id.as_str(), placed_at],
         )?,
     };
     Ok(())
@@ -558,11 +570,11 @@ fn inherit_placement(
     if find_placement_in(tx, work)?.is_some() {
         return Ok(());
     }
-    let home_id = match parent {
-        Some(parent) => placement_in(tx, parent)?.home_id,
-        None => map_local_home(tx)?.id,
+    let machine_id = match parent {
+        Some(parent) => placement_in(tx, parent)?.machine_id,
+        None => map_local_machine(tx)?.id,
     };
-    write_placement(tx, work, &home_id, placed_at)
+    write_placement(tx, work, &machine_id, placed_at)
 }
 
 /// SQL for the state of Task row `t`, read from its Workflow position.
@@ -809,7 +821,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1037,7 +1049,7 @@ mod durable_store_tests {
     }
 
     fn conversation(
-        flow_id: Option<String>,
+        flow_process_lfid: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::AgentSession {
@@ -1055,7 +1067,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_id,
+            flow_process_lfid,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1678,7 +1690,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),

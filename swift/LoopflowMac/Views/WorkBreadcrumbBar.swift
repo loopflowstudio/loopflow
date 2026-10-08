@@ -12,6 +12,8 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
     let crumb: WorkBreadcrumb?
     let onOpenSession: (SessionRecord) -> Void
     var onTaskDetails: (() -> Void)? = nil
+    var programStatus: ProgramStatusRecords? = nil
+    var programStatusError: String? = nil
     @ViewBuilder var trailing: Trailing
     @Environment(\.palette) private var palette
 
@@ -19,6 +21,15 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         HStack(spacing: 10) {
             if let crumb { crumbs(crumb) }
             Spacer(minLength: 10)
+            if let programStatus, programStatus.summary != nil {
+                ProgramStatusLabel(status: programStatus)
+                    .foregroundStyle(palette.textSecondary)
+                    .accessibilityIdentifier("workspace-program-status")
+            }
+            if let programStatusError {
+                Image(systemName: "exclamationmark.circle")
+                    .help(programStatusError).accessibilityLabel(programStatusError)
+            }
             trailing
             if model.navigation.content == .details {
                 WorkGlyphButton(
@@ -141,9 +152,9 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
                     .accessibilityIdentifier("breadcrumb-session")
             }
             if session.titleSource == .unavailable {
-                Text("name on its Home")
+                Text("name on its Machine")
                     .foregroundStyle(palette.textSecondary)
-                    .help("This Session's canonical name lives on the Home that runs it.")
+                    .help("This Session's canonical name lives on the Machine that runs it.")
             } else {
                 Button {
                     model.beginSessionRename(session)
@@ -232,7 +243,7 @@ struct WorkBreadcrumbBar<Trailing: View>: View {
         case .step(_, _, _, _, _, .earlier):
             "This conversation belonged to an earlier step of the Flow's current run."
         case .step(_, _, _, _, _, .past):
-            "This conversation belonged to a Flow exec that has since finished or been followed by a newer one."
+            "This conversation belonged to a Flow process that has since finished or been followed by a newer one."
         case .independent:
             "This conversation is not part of a Flow."
         case .unknown(let reason):
@@ -279,5 +290,26 @@ struct WorkGlyphButton: View {
         .help(label)
         .accessibilityLabel(label)
         .accessibilityIdentifier(identifier)
+    }
+}
+
+/// Report text is always literal; the tooltip exposes the other bounded records.
+struct ProgramStatusLabel: View {
+    let status: ProgramStatusRecords
+
+    var body: some View {
+        if let report = status.summary {
+            Text(verbatim: report.displayText)
+                .font(Typography.code(11))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: 340, alignment: .leading)
+                .help(Text(verbatim: status.records.map { record in
+                    let source = ProgramStatusReport.displaySafe(record.id ?? "Program")
+                    let app = status.app(for: record).map { " (\(ProgramStatusReport.displaySafe($0)))" } ?? ""
+                    let title = record.title.map { " · \(ProgramStatusReport.displaySafe($0))" } ?? ""
+                    return "\(source)\(app): \(record.displayText)\(title)"
+                }.joined(separator: "\n")))
+        }
     }
 }

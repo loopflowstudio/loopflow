@@ -161,7 +161,7 @@ conversation does not by itself mean its Task is blocked.
 Use `lf session list --json` for all current conversations. Refresh after
 Session mutations; never rely on Session content remembered from an earlier
 turn or embedded in the launch prompt. Compare CLI and Desktop only against
-the same runtime/Home; a failed read is not an empty list.
+the same runtime/Machine; a failed read is not an empty list.
 
 The list is scoped to the repository this conversation runs in: worktrees
 collapse to their main checkout, and review steps from other repositories are hidden.
@@ -292,11 +292,11 @@ Use shared readers: `lf wave list --json` for the repository, `lf wave status <w
 for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
-A Work names a stable Home authority. Placement changes through `lf wave place <wave-id> <home-id>`.
+A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.
 Use `lf id`, then `lf --wave <wave> wave/operate` locally or
-`lf ssh <home-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
+`lf --machine <machine-id> --wave <wave> wave/operate` at its placement. `lf --machine` runs the target's `lf`;
 its SSH route may change without moving Work. Foreground provider accounts can
-be forwarded; background Flows use credentials installed on their Home.
+be forwarded; background Flows use credentials installed on their Machine.
 
 Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or

@@ -25,7 +25,7 @@ public enum SessionActionKind: String, Codable, Sendable, Hashable {
 
 /// Who chose a Session's title. Rust never lets a generated suggestion
 /// replace a human-assigned name. `unavailable` means the canonical name lives
-/// on another Home; the title is only a local label.
+/// on another Machine; the title is only a local label.
 public enum SessionTitleSource: String, Codable, Sendable, Hashable {
     case generated
     case human
@@ -36,7 +36,7 @@ public enum SessionTitleSource: String, Codable, Sendable, Hashable {
 /// this from the Flow position or the Session's recorded capture; Swift never
 /// infers it from Task, checkout, provider, or skill.
 public enum SessionFlowMembership: Codable, Sendable, Hashable {
-    case step(flow: String, invocationId: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
+    case step(flow: String, flowProcessLfid: String, step: String, node: UInt32?, iterations: [[UInt32]]?,
               occurrence: SessionFlowOccurrence)
     case independent
     case unknown(reason: String)
@@ -45,7 +45,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case kind, flow, step, iterations, occurrence, reason
-        case invocationId = "invocation_id"
+        case flowProcessLfid = "flow_process_lfid"
         case node
     }
 
@@ -55,7 +55,7 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
         case .step:
             self = .step(
                 flow: try container.decode(String.self, forKey: .flow),
-                invocationId: try container.decode(String.self, forKey: .invocationId),
+                flowProcessLfid: try container.decode(String.self, forKey: .flowProcessLfid),
                 step: try container.decode(String.self, forKey: .step),
                 node: try container.decodeIfPresent(UInt32.self, forKey: .node),
                 iterations: try container.decodeIfPresent([[UInt32]].self, forKey: .iterations),
@@ -71,10 +71,10 @@ public enum SessionFlowMembership: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .step(flow, invocationId, step, node, iterations, occurrence):
+        case let .step(flow, flowProcessLfid, step, node, iterations, occurrence):
             try container.encode(Kind.step, forKey: .kind)
             try container.encode(flow, forKey: .flow)
-            try container.encode(invocationId, forKey: .invocationId)
+            try container.encode(flowProcessLfid, forKey: .flowProcessLfid)
             try container.encode(step, forKey: .step)
             try container.encode(node, forKey: .node)
             try container.encode(iterations, forKey: .iterations)
@@ -137,15 +137,15 @@ public struct SessionAction: Codable, Sendable, Hashable {
 }
 
 public struct SessionWorkspace: Codable, Sendable, Hashable {
-    public var identity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: worktree) }
-    public let homeId: String
+    public var identity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: worktree) }
+    public let machineId: String
     public let worktree: String
     public let taskId: String?
     public let unavailable: String?
 
     enum CodingKeys: String, CodingKey {
         case worktree, unavailable
-        case homeId = "home_id"
+        case machineId = "machine_id"
         case taskId = "task_id"
     }
 }
@@ -155,6 +155,8 @@ public struct SessionWorkspace: Codable, Sendable, Hashable {
 public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let primaryScope: String?
     public let attention: SessionAttention?
+    public let programStatus: ProgramStatusRecords?
+    public let providerGeneration: Int64
     /// Its Task names it as the Task's primary conversation.
     public let taskPrimary: Bool
     public let taskIds: [String]
@@ -170,7 +172,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let flowMembership: SessionFlowMembership
     public let detail: String
     /// Provider harness recorded on the Session's capture manifest; nil when the
-    /// capture is on another Home or its manifest is unreadable.
+    /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
     public let cwd: String
     public let state: SessionState
@@ -195,6 +197,8 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, interactive, work, workspace, title, detail, provider, cwd, state, attention
+        case programStatus = "program_status"
+        case providerGeneration = "provider_generation"
         case primaryScope = "primary_scope"
         case taskPrimary = "task_primary"
         case waveId = "wave_id"

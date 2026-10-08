@@ -3,10 +3,15 @@ import Foundation
 /// Rust owns checkout association; membership grants no execution authority.
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
-    public let flows: [TaskFlowMember]
-    public let execs: [Exec]
+    public let flowProcesses: [FlowProcessInventoryEntry]
+    public let processes: [Process]
     /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
     public let workflow: Workflow?
+
+    enum CodingKeys: String, CodingKey {
+        case sessions, processes, workflow
+        case flowProcesses = "flow_processes"
+    }
 }
 
 /// A Task's Workflow: the definition it took up, where the Task stands on it,
@@ -45,7 +50,7 @@ public struct Workflow: Codable, Sendable, Equatable {
         public let to: String
         public let edge: Int?
         /// The `lf` process that made the move; `nil` when none was registered.
-        public let execId: String?
+        public let processLfid: String?
         public let actor: Actor
         public let sessionId: String?
         public let note: String?
@@ -53,20 +58,20 @@ public struct Workflow: Codable, Sendable, Equatable {
 
         enum CodingKeys: String, CodingKey {
             case workflow, kind, from, to, edge, actor, note, at
-            case execId = "exec_id"
+            case processLfid = "process_lfid"
             case sessionId = "session_id"
         }
     }
 
     /// At a node the Task waits on a person. On an edge its Flow's driver
-    /// Exec carries it; one that no longer runs has stopped and holds the Task.
+    /// Process carries it; one that no longer runs has stopped and holds the Task.
     public enum Position: Codable, Sendable, Equatable {
         case node(String)
-        case edge(index: Int, execId: String, running: Bool)
+        case edge(index: Int, processLfid: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
             case kind, node, edge, running
-            case execId = "exec_id"
+            case processLfid = "process_lfid"
         }
 
         public init(from decoder: Decoder) throws {
@@ -77,7 +82,7 @@ public struct Workflow: Codable, Sendable, Equatable {
             case "edge":
                 self = .edge(
                     index: try container.decode(Int.self, forKey: .edge),
-                    execId: try container.decode(String.self, forKey: .execId),
+                    processLfid: try container.decode(String.self, forKey: .processLfid),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
                 throw DecodingError.dataCorruptedError(
@@ -91,10 +96,10 @@ public struct Workflow: Codable, Sendable, Equatable {
             case .node(let node):
                 try container.encode("node", forKey: .kind)
                 try container.encode(node, forKey: .node)
-            case .edge(let index, let execId, let running):
+            case .edge(let index, let processLfid, let running):
                 try container.encode("edge", forKey: .kind)
                 try container.encode(index, forKey: .edge)
-                try container.encode(execId, forKey: .execId)
+                try container.encode(processLfid, forKey: .processLfid)
                 try container.encode(running, forKey: .running)
             }
         }
@@ -113,22 +118,22 @@ public struct TaskSession: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
     public let interactive: Bool
-    /// Driver Exec of the Flow whose step opened the current input.
-    public let flowId: String?
+    /// Driver Process of the Flow whose step opened the current input.
+    public let flowProcessLfid: String?
     public let completedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case id, title, interactive
-        case flowId = "flow_id"
+        case flowProcessLfid = "flow_process_lfid"
         case completedAt = "completed_at"
     }
 }
 
-/// One Flow as its driver Exec records it; `id` is that Exec.
-public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
+/// One Flow as its driver Process records it; `id` is that Process.
+public struct FlowProcessInventoryEntry: Codable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
-    public let state: TaskFlowState
+    public let state: FlowProcessSummaryState
     public let taskId: String?
     public let waveId: String?
     public let updatedAt: Int64
@@ -145,6 +150,6 @@ public struct TaskFlowMember: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// `current` says nothing about a live process; `stopped` exited before the last step.
-public enum TaskFlowState: String, Codable, Sendable, Equatable {
+public enum FlowProcessSummaryState: String, Codable, Sendable, Equatable {
     case current, completed, stopped
 }

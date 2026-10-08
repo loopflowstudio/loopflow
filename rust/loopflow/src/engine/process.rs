@@ -75,7 +75,7 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
             return PathBuf::from(path);
         }
     } else if let Ok(Some(cli)) =
-        crate::machine_install::root().and_then(|root| crate::machine_install::installed_cli(&root))
+        crate::installation::root().and_then(|root| crate::installation::installed_cli(&root))
     {
         return cli.path;
     }
@@ -101,8 +101,7 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     if !crate::store::custom_home_selected() {
-        if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
-        {
+        if let Some(cli) = crate::installation::installed_cli(&crate::installation::root()?)? {
             // One read resolves this for every Task; hash unchanged bytes once.
             static VERIFIED: Mutex<Option<(PathBuf, String, u64, SystemTime)>> = Mutex::new(None);
             let metadata = std::fs::metadata(&cli.path)?;
@@ -144,12 +143,12 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
 /// may repoint it while a body is running, so the body carries the
 /// canonical target in `LF_BIN`. A later body launch deliberately
-/// resolves the current Home again and picks up the promoted binary.
+/// resolves the current Machine again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
     std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
 }
 
-/// Capture the resolved CLI and Home for a provider child.
+/// Capture the resolved CLI and Machine for a provider child.
 pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
     crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
@@ -210,7 +209,7 @@ pub(crate) async fn start_lf_session_inheriting(
         .stderr(log);
     inherit(&mut command);
     // SAFETY: setsid affects only the child and is async-signal-safe. The repair
-    // Exec keeps its own lifetime after the release controller exits.
+    // Process keeps its own lifetime after the release controller exits.
     unsafe {
         std::os::unix::process::CommandExt::pre_exec(&mut command, || {
             if libc::setsid() < 0 {
@@ -248,7 +247,7 @@ fn session_environment(
 ) -> Vec<(String, String)> {
     let inherited_context = [
         "LF_TRACE_ID",
-        "LF_PROCESS_ID",
+        "LF_PROCESS_LFID",
         crate::lf::WORK_DECLARATION_ENV,
     ]
     .into_iter()
@@ -355,7 +354,7 @@ pub(crate) async fn start_tmux_session(
     Ok(())
 }
 
-/// What one lf process is: its Home, binary, Exec, Flow step and claims. A new
+/// What one lf process is: its Machine, binary, Process, Flow step and claims. A new
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::lf::WORK_DECLARATION_ENV,
@@ -366,15 +365,15 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
-    crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_PROCESS_LFID_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
-    crate::exec::AGENT_CALLER_ENV,
+    crate::process::AGENT_CALLER_ENV,
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
-    crate::ops::flow_run::FLOW_ID_ENV,
-    crate::machine_install::INSTALL_SWITCH_ENV,
-    crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
+    crate::ops::flow_process::FLOW_ID_ENV,
+    crate::installation::INSTALL_SWITCH_ENV,
+    crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,
     "LF_TERMINAL_ID",
     "LF_TERMINAL_TTY",
     "LOOPFLOW_DIRECTIVE_FILE",
@@ -653,7 +652,7 @@ mod tests {
             &argv,
             &[
                 ("LF_TRACE_ID", "run-1"),
-                ("LF_PROCESS_ID", "process-1"),
+                ("LF_PROCESS_LFID", "process-1"),
                 ("LF_HOME", "/tmp/lf"),
             ],
         );
@@ -661,7 +660,7 @@ mod tests {
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
         assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
         assert!(command.ends_with(
-            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
+            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_LFID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));
     }
 }

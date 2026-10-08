@@ -136,7 +136,7 @@ local service credentials have separate sections: an expired local token says
 nothing about a managed account. Missing local tokens leave ambient auth
 uninspected. Cached inspection reads account state without starting a provider,
 decrypting local tokens or creating an encryption key. The CLI records the
-command's Exec in its Home; this can initialize an empty store, but creates no
+command's Process in its Machine; this can initialize an empty store, but creates no
 account, route or conversation. An inherited account lease carries no cached identity catalog:
 `--cached` reports forwarded identities as uninspected without contacting the
 origin broker. Local token metadata is cached evidence, not server acceptance;
@@ -202,7 +202,7 @@ and connect save that binding. Routing checks expected email, user UUID and
 duplicate logins, requesting a profile observation when the credential changed.
 Recorded Claude and Codex launches both require their owning account catalog.
 
-Account state remains in the Home database.
+Account state remains in the Machine database.
 
 Control automatic routing per account:
 
@@ -255,7 +255,7 @@ lf mon list <run-id> --events
 headless Task steps before a provider session ID is available. Later attempts
 retain earlier account evidence; a null account means ambient execution. Once
 the provider reports its native identity, continuation must retain that identity
-and selected account/native Home. Requested account and actual selection are
+and selected account/native Machine. Requested account and actual selection are
 different evidence. The event command above remains a transitional launch
 interface; [cutover status](architecture-reference.md#cutover-status) records the
 remaining history/account conversion.
@@ -288,17 +288,17 @@ lf --account claude=personal@ --account codex=work@ task run LOO-123
 A Flow carries these choices to its steps. `--account` keeps fallback routing;
 `--only-account` restricts the entire Flow. Run a fresh Flow to choose again.
 Steps have no account overrides. Native Session affinity remains authoritative within that selection.
-Local choices use the Home's catalog directly and survive the initiating CLI's
+Local choices use the Machine's catalog directly and survive the initiating CLI's
 exit; a forwarded SSH credential still needs its origin broker.
 
 ## Switch the shared account
 
 ```bash
-lf -m codex : "say hi"                    # runs in ~/.codex as the active account
+lf -a codex : "say hi"                    # runs in ~/.codex as the active account
 codex resume                              # plain Codex sees that conversation
 lf account codex use work@                # ~/.codex is now work@, for lf and codex
 lf account route                          # shows the mode and the active account
-lf --isolate --account codex=work@ -m codex : "say hi"   # stays in work@'s own home
+lf --isolate --account codex=work@ -a codex : "say hi"   # stays in work@'s own home
 lf account claude use work@               # the same for ~/.claude and plain claude
 ```
 
@@ -375,45 +375,30 @@ owns these outcomes and retry semantics.
 
 ## Use subscriptions over SSH
 
-`lf ssh` runs the target machine's `lf`. The target name is the argument
-boundary: selectors before it are resolved on the origin; everything after it
-is ordinary syntax for the target `lf`.
-
 ```bash
-# Offer all origin accounts and let the target lf choose.
-lf ssh my-company implement
-
-# Prefer this exact identity from the origin.
-lf ssh --account personal@ my-company implement
-
-# Resolve this preference from the target's combined catalog.
-lf ssh my-company --account work@ implement
+lf machine add my-company
+lf --machine my-company implement
+lf --machine my-company --account personal@ implement
 ```
 
-There is no explicit `-- lf`. `lf ssh` does not run arbitrary remote programs;
-use ordinary `ssh` for those. The target can be an SSH hostname or a Loopflow
-Home ID. A Home ID resolves its current SSH address and makes the reached
-machine prove its identity.
-
-Without an outer selector, the origin offers every connected managed identity,
-the facts governing its eligibility, and the current repository's account
-routes. The target merges those with its own identities and route.
+`--machine <label-or-id>` runs the whole command on the saved machine in its
+repository. Account selectors have the same meaning wherever they appear: they
+travel with the command and resolve against the target's combined local and
+forwarded catalog. The origin offers its eligible managed identities and repository
+routes, subject to any inherited account restriction.
 
 The target chooses in this order:
 
-1. target-side `--account` preferences;
-2. origin-side `--account` preferences;
-3. the target repository route;
-4. the forwarded origin repository route; and
-5. the remaining eligible target and forwarded accounts.
+1. explicit `--account` preferences;
+2. the target repository route;
+3. the forwarded origin repository route; and
+4. the remaining eligible target and forwarded accounts.
 
 Target-local accounts precede equivalent forwarded accounts when no explicit
 preference distinguishes them. Health and usage rules apply across the merged
 catalog.
 
-An origin-side `--only-account` is resolved against origin identities before
-SSH connects. The target can narrow that grant but cannot widen it. Account
-inspection shows `local` or `forwarded` provenance. Forwarded identities are
+`--only-account` restricts the target launch to the named identities. Account inspection shows `local` or `forwarded` provenance. Forwarded identities are
 read-only: connect, disconnect, and edit their routes on the machine that owns
 them.
 
@@ -422,8 +407,8 @@ on its own machine. Configure the target repository route for durable account
 choice:
 
 ```bash
-lf ssh my-company route set codex work@
-lf ssh my-company --wave shipper wave/operate
+lf --machine my-company route set codex work@
+lf --machine my-company --wave shipper wave/operate
 ```
 
 The origin does not copy account homes or refresh credentials. It advertises

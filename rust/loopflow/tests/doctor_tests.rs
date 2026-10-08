@@ -3,10 +3,10 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use chrono::{Local, Timelike};
-use loopflow::durable::{CronReceiptId, HomeId};
-use loopflow::exec::Exec;
+use loopflow::durable::{CronReceiptId, MachineId};
 use loopflow::id::WaveId;
 use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
+use loopflow::process::Process;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
@@ -35,7 +35,7 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .env("GIT_WORK_TREE", home)
         .env("GIT_ALLOW_PROTOCOL", "file")
         .env_remove("LF_TRACE_ID")
-        .env_remove("LF_PROCESS_ID")
+        .env_remove("LF_PROCESS_LFID")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_CAPTURE_KEY")
         .output()
@@ -53,12 +53,13 @@ fn continuity_check(output: &Output) -> serde_json::Value {
         .clone()
 }
 
-fn insert_exec(store: &SqliteStore, _id: &str, ts: i64) {
+fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
-        .record_exec(&Exec {
-            id: loopflow::id::ExecId::new(),
+        .record_process(&Process {
+            lfid: loopflow::id::ProcessLfid::new(),
+            pid: None,
             trace_id: loopflow::id::TraceId::new(),
-            parent_exec_id: None,
+            parent_process_lfid: None,
             via_agent: Some(false),
             caller_session_id: None,
             caller_provider_generation: None,
@@ -80,7 +81,7 @@ fn install_current_telemetry_obligation(home: &Path) {
     let scheduled = now - chrono::Duration::minutes(5);
     let schedule = format!("0 {} {} * * *", scheduled.minute(), scheduled.hour());
     let started_at = scheduled.with_second(0).unwrap().timestamp() + 10;
-    let home_id = HomeId::parse("home_11111111111111111111111111111111").unwrap();
+    let machine_id = MachineId::parse("home_11111111111111111111111111111111").unwrap();
     let launch_agents = home.join("Library/LaunchAgents");
     fs::create_dir_all(&launch_agents).unwrap();
     fs::write(
@@ -91,7 +92,7 @@ fn install_current_telemetry_obligation(home: &Path) {
 <key>LoopflowFlow</key><string>telemetry-daily</string>
 <key>LoopflowTargetKind</key><string>flow</string>
 <key>LoopflowSchedule</key><string>{schedule}</string>
-<key>LoopflowHomeId</key><string>{home_id}</string>
+<key>LoopflowHomeId</key><string>{machine_id}</string>
 <key>LoopflowActivatedAt</key><string>1787419431</string>
 <key>LoopflowRepo</key><string>{repo}</string>
 <key>LoopflowLfPath</key><string>/usr/local/bin/lf</string>
@@ -109,7 +110,7 @@ fn install_current_telemetry_obligation(home: &Path) {
         id: CronReceiptId::new(),
         runner_pid: 123,
         runner_started_at: None,
-        home_id,
+        machine_id,
         wave: "infrastructure".to_string(),
         flow: "telemetry-daily".to_string(),
         target_kind: CronTargetKind::Flow,
@@ -139,10 +140,10 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
     SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let fetch_head = home.path().join(".git/FETCH_HEAD");
     let before = fs::read(&fetch_head).ok();
-    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    let output = run_lf(home.path(), &["self", "doctor", "--json"]);
     assert!(
         output.status.success(),
-        "lf home doctor failed: {}",
+        "lf self doctor failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -163,7 +164,7 @@ fn doctor_json_reports_the_build_revision_and_freshness_check() {
 fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     let home = TestRepo::new();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    insert_exec(
+    insert_process(
         &store,
         "august-03",
         OffsetDateTime::parse(
@@ -182,11 +183,11 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     .unix_timestamp();
     let mut ordinal = 12;
     while timestamp <= now {
-        insert_exec(&store, &format!("after-gap-{ordinal}"), timestamp);
+        insert_process(&store, &format!("after-gap-{ordinal}"), timestamp);
         timestamp += 86_400;
         ordinal += 1;
     }
-    let original_events = store.execs_since(0).unwrap();
+    let original_events = store.processes_since(0).unwrap();
     install_current_telemetry_obligation(home.path());
     fs::create_dir_all(home.path().join(".lf/flows")).unwrap();
     fs::create_dir_all(home.path().join("scripts")).unwrap();
@@ -245,7 +246,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
         doctor.status.success(),
-        "lf home doctor failed: {}{}",
+        "lf self doctor failed: {}{}",
         String::from_utf8_lossy(&doctor.stdout),
         String::from_utf8_lossy(&doctor.stderr)
     );
@@ -268,7 +269,7 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
     assert!(report.contains("Lifecycle scorecard"), "{report}");
     assert!(report.contains("Recorded input elapsed"), "{report}");
     assert!(report.contains("Land request → merge"), "{report}");
-    let events_after_telemetry = store.execs_since(0).unwrap();
+    let events_after_telemetry = store.processes_since(0).unwrap();
     for original in original_events {
         assert!(events_after_telemetry.contains(&original));
     }
@@ -278,18 +279,18 @@ fn copied_production_history_does_not_block_the_telemetry_scorecard() {
 fn doctor_accepts_machine_commands_without_a_repository() {
     let home = TestRepo::new();
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    insert_exec(
+    insert_process(
         &store,
         "machine-command",
         OffsetDateTime::now_utc().unix_timestamp(),
     );
-    let mut event = store.execs_since(0).unwrap().pop().unwrap();
-    event.id = loopflow::id::ExecId::new();
+    let mut event = store.processes_since(0).unwrap().pop().unwrap();
+    event.lfid = loopflow::id::ProcessLfid::new();
     event.repo = None;
     event.command = Some("lf help".to_string());
-    store.record_exec(&event).unwrap();
+    store.record_process(&event).unwrap();
 
-    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    let output = run_lf(home.path(), &["self", "doctor", "--json"]);
     assert!(
         output.status.success(),
         "{}{}",
@@ -307,13 +308,13 @@ fn doctor_accepts_machine_commands_without_a_repository() {
     assert!(identity["detail"]
         .as_str()
         .unwrap()
-        .contains("2 Exec(s) without repository scope"));
+        .contains("2 Process(s) without repository scope"));
 }
 
 #[test]
 fn doctor_does_not_initialize_a_missing_database() {
     let home = TestRepo::new();
-    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    let output = run_lf(home.path(), &["self", "doctor", "--json"]);
     assert!(!output.status.success());
     assert!(!home.path().join("loopflow.db").exists());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -329,14 +330,14 @@ fn doctor_does_not_initialize_a_missing_database() {
 }
 
 #[test]
-fn doctor_reports_execs_and_scheduler_despite_an_unknown_migration() {
+fn doctor_reports_processes_and_scheduler_despite_an_unknown_migration() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     let store = SqliteStore::new(&path).unwrap();
-    insert_exec(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
+    insert_process(&store, "recent", OffsetDateTime::now_utc().unix_timestamp());
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection.execute("INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)", []).unwrap();
-    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    let output = run_lf(home.path(), &["self", "doctor", "--json"]);
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(report["store"]["migration_error"]
@@ -365,7 +366,7 @@ fn doctor_keeps_reporting_when_the_database_is_corrupt() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     fs::write(&path, b"not a sqlite database").unwrap();
-    let output = run_lf(home.path(), &["home", "doctor", "--json"]);
+    let output = run_lf(home.path(), &["self", "doctor", "--json"]);
     assert!(!output.status.success());
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(report["store"]["migration_error"].is_string());
@@ -373,7 +374,7 @@ fn doctor_keeps_reporting_when_the_database_is_corrupt() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|check| check["name"] == "execs" && check["status"] == "fail"));
+        .any(|check| check["name"] == "processes" && check["status"] == "fail"));
     assert_eq!(continuity_check(&output)["status"], "ok");
     assert_eq!(fs::read(path).unwrap(), b"not a sqlite database");
 }

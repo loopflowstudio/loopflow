@@ -49,7 +49,7 @@ pub fn load_user_name() -> Result<Option<String>, LoadError> {
         .and_then(normalize_user_name))
 }
 
-/// Resolve a direct invocation's participant before execution moves Homes.
+/// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {
         Ok(name) => match normalize_user_name(&name) {
@@ -108,21 +108,10 @@ fn default_summary_agent() -> String {
     default_agent().to_string()
 }
 
-/// Where interactive sessions launch.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecTarget {
-    #[default]
-    Tui,
-    Ide,
-}
-
 /// Interactive session launch configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionConfig {
-    #[serde(default)]
-    pub launch: ExecTarget,
-    /// Home-local terminal application used to present detached sessions.
+    /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
 }
@@ -443,7 +432,7 @@ pub fn load_config(repo_root: Option<&Path>) -> Result<Option<Config>, LoadError
     Ok(Some(config))
 }
 
-/// Load only Home-local user configuration.
+/// Load only Machine-local user configuration.
 pub fn load_global_config() -> Result<Option<Config>, LoadError> {
     let Some(value) = load_yaml_file(&global_config_path())? else {
         return Ok(None);
@@ -567,14 +556,13 @@ linear:
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
-        assert_eq!(config.session.launch, ExecTarget::Tui);
         assert!(config.release.targets.is_empty());
     }
 
     #[test]
     fn default_session_config() {
         let session = SessionConfig::default();
-        assert_eq!(session.launch, ExecTarget::Tui);
+        assert!(session.terminal.is_none());
     }
 
     // ==========================================================================
@@ -638,26 +626,6 @@ exclude:
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(config.exclude, vec!["*.log", "build/", "node_modules/"]);
-    }
-
-    #[test]
-    fn config_from_yaml_session_launch_tui() {
-        let yaml = r#"
-session:
-  launch: tui
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, ExecTarget::Tui);
-    }
-
-    #[test]
-    fn config_from_yaml_session_launch_ide() {
-        let yaml = r#"
-session:
-  launch: ide
-"#;
-        let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, ExecTarget::Ide);
     }
 
     #[test]

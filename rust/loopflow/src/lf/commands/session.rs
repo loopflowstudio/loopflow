@@ -24,6 +24,15 @@ pub fn run(command: &SessionCommand) -> anyhow::Result<()> {
 
 async fn run_async(command: &SessionCommand) -> anyhow::Result<()> {
     match command {
+        SessionCommand::ObserveStatus {
+            id,
+            terminal,
+            generation,
+        } => {
+            let store = open_shared_store().await?;
+            crate::ops::human_session::observe_program_status(&store, id, terminal, *generation)
+                .await
+        }
         SessionCommand::Resume { id, message } => {
             anyhow::ensure!(
                 message.is_none(),

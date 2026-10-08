@@ -50,6 +50,7 @@ fn success(output: Output) -> Vec<u8> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(output.stderr.is_empty(), "{output:?}");
     output.stdout
 }
 
@@ -71,6 +72,23 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
         vec![vec!["sync", "--help"], vec!["help", "sync"]],
         vec![vec!["help", "pr", "land"], vec!["pr", "land", "--help"]],
+        vec![vec!["self", "install", "--help"], vec!["install", "--help"]],
+        vec![
+            vec!["self", "sync-skills", "--help"],
+            vec!["help", "self", "sync-skills"],
+        ],
+        vec![
+            vec!["self", "install", "preflight", "--help"],
+            vec!["install", "preflight", "--help"],
+        ],
+        vec![
+            vec!["self", "install", "recover-switch", "--help"],
+            vec!["install", "recover-switch", "--help"],
+        ],
+        vec![
+            vec!["self", "install", "advance-switch", "--help"],
+            vec!["install", "advance-switch", "--help"],
+        ],
         vec![
             vec!["help", "account", "route"],
             vec!["account", "route", "--help"],
@@ -78,7 +96,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "paired"],
             vec!["paired", "--help"],
-            vec!["run", "paired", "-m", "unused", "--help"],
+            vec!["run", "paired", "-a", "unused", "--help"],
         ],
     ] {
         let expected = success(run(repo.path(), home.path(), &forms[0]));
@@ -458,10 +476,6 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
-        ["lf", "home", "ssh", "somewhere", "show", "--help"]
-    );
-    assert_eq!(
         normalized(&["lf", "run", "land", "--", "--help"]),
         ["lf", "run", "land", "--", "--help"]
     );
@@ -503,7 +517,7 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
         .subcommand(clap::Command::new("monitor"))
         .subcommand(clap::Command::new("landing"))
         .subcommand(clap::Command::new("__internal").hide(true))
-        .subcommand(clap::Command::new("home").subcommand(clap::Command::new("id")));
+        .subcommand(clap::Command::new("machine").subcommand(clap::Command::new("id")));
     let resolve = |name| loopflow::lf::navigation::resolve_child(&tree, name, &[]);
     assert_eq!(resolve("land").unwrap().unwrap(), ["task", "pr", "land"]);
     assert!(resolve("pr").is_err());
@@ -513,7 +527,7 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
     assert!(resolve("p").is_err());
     let collision = tree.clone().subcommand(clap::Command::new("money"));
     assert!(loopflow::lf::navigation::resolve_child(&collision, "mon", &[]).is_err());
-    assert_eq!(resolve("id").unwrap().unwrap(), ["home", "id"]);
+    assert_eq!(resolve("id").unwrap().unwrap(), ["machine", "id"]);
 }
 
 #[test]
@@ -579,6 +593,73 @@ fn repository_commands_have_one_owner_and_derived_shorthand() {
 }
 
 #[test]
+fn installation_configuration_and_app_commands_have_distinct_owners() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for (short, owner) in [("install", "self"), ("doctor", "self"), ("user", "config")] {
+        let help = success(run(repo.path(), home.path(), &[owner, short, "--help"]));
+        assert_eq!(
+            success(run(repo.path(), home.path(), &[short, "--help"])),
+            help
+        );
+        assert!(String::from_utf8_lossy(&help).contains(&format!("lf {owner} {short}")));
+    }
+    let tree = Cli::command();
+    let mut machine_commands: Vec<_> = tree
+        .find_subcommand("machine")
+        .unwrap()
+        .get_subcommands()
+        .map(|command| command.get_name())
+        .collect();
+    machine_commands.sort();
+    assert_eq!(
+        machine_commands,
+        ["add", "id", "list", "remove", "rename", "status"]
+    );
+    let help =
+        String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
+    for path in ["self install", "self doctor", "config user", "open"] {
+        assert!(help.contains(path), "{help}");
+    }
+    assert!(!help.contains("screenshot"));
+    assert!(!help.contains("machine desktop"));
+    success(run(repo.path(), home.path(), &["open", "--help"]));
+    // Root open must not change the explicit PR operation.
+    success(run(repo.path(), home.path(), &["pr", "open", "--help"]));
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn retired_installation_and_capture_paths_do_not_resolve() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for path in [
+        vec!["installation", "install"],
+        vec!["machine", "install"],
+        vec!["machine", "doctor"],
+        vec!["machine", "user"],
+        vec!["machine", "desktop"],
+        vec!["machine", "screenshot"],
+        vec!["self", "screenshot"],
+        vec!["desktop"],
+        vec!["screenshot"],
+        vec!["__screenshot-supervisor"],
+    ] {
+        let mut args = vec!["help"];
+        args.extend(&path);
+        let output = run(repo.path(), home.path(), &args);
+        assert_eq!(output.status.code(), Some(2), "{path:?}: {output:?}");
+        assert!(output.stdout.is_empty());
+        if Cli::command().find_subcommand(path[0]).is_some() {
+            let mut args = vec!["lf"];
+            args.extend(path);
+            assert!(Cli::try_parse_from(args).is_err());
+        }
+    }
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
 fn command_tree_has_no_registered_aliases() {
     fn check(command: &clap::Command) {
         assert_eq!(
@@ -632,7 +713,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains(expected), "{error}");
     }
-    for args in [vec!["home", "user", "name"], vec!["pr", "status"]] {
+    for args in [vec!["config", "user", "name"], vec!["pr", "status"]] {
         let output = run(repo.path(), home.path(), &args);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
@@ -667,4 +748,55 @@ fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
         .unwrap()
         .contains("Empty goal"));
     assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
+    use loopflow::lf::navigation::machine_invocation;
+    let args = [
+        "lf",
+        "--account",
+        "personal@",
+        "--machine=mini",
+        "--secret",
+        "SENTRY_AUTH_TOKEN",
+        "--forward-agent",
+        "--task",
+        "LOO-123",
+        "implement",
+        "--",
+        "--machine",
+        "literal",
+    ]
+    .map(String::from);
+    let (cli, command) = machine_invocation(&args).unwrap().unwrap();
+    assert_eq!(cli.machine.as_deref(), Some("mini"));
+    assert!(cli.account.is_empty());
+    assert_eq!(cli.secret, ["SENTRY_AUTH_TOKEN"]);
+    assert!(cli.forward_agent);
+    assert_eq!(
+        command,
+        [
+            "--account",
+            "personal@",
+            "--task",
+            "LOO-123",
+            "implement",
+            "--",
+            "--machine",
+            "literal"
+        ]
+    );
+    for args in [
+        vec!["lf", "commit", "-m", "--machine"],
+        vec!["lf", "--docs", "--machine", "status"],
+        vec!["lf", "skill", "--", "--machine", "literal"],
+    ] {
+        assert!(
+            machine_invocation(&args.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(machine_invocation(&["lf", "--machine"].map(String::from)).is_err());
 }

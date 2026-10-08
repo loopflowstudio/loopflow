@@ -41,16 +41,16 @@
     "flow_membership": {
       "kind": "step",
       "flow": "task-design",
-      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
       "step": "review-design",
       "occurrence": "current",
       "node": 1,
       "iterations": [
         []
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -58,7 +58,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": "waiting",
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -96,7 +98,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "implement",
       "occurrence": "earlier",
       "node": 6,
@@ -108,10 +109,11 @@
         [
           1
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -119,7 +121,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -164,7 +168,7 @@
       "kind": "independent"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -172,7 +176,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -212,7 +218,7 @@
       "reason": "Run run_00000000000000000000000000000004 predates recorded Flow membership"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -220,7 +226,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -258,7 +266,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f1",
       "step": "implement",
       "occurrence": "past",
       "node": 2,
@@ -267,10 +274,11 @@
           2,
           1
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f1"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -278,7 +286,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -316,14 +326,14 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f0",
       "step": "implement",
       "occurrence": "past",
       "node": null,
-      "iterations": null
+      "iterations": null,
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f0"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -331,7 +341,9 @@
     "interactive": true,
     "primary_scope": null,
     "attention": null,
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -371,7 +383,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "demo",
       "occurrence": "current",
       "node": 9,
@@ -380,10 +391,11 @@
           0,
           0
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
-      "home_id": "home_00000000000000000000000000000001",
+      "machine_id": "home_00000000000000000000000000000001",
       "worktree": "/src/loopflow.task",
       "task_id": "task_00000000000000000000000000000001",
       "unavailable": null
@@ -391,6 +403,8 @@
     "interactive": true,
     "primary_scope": null,
     "attention": "waiting",
-    "task_primary": false
+    "task_primary": false,
+    "program_status": null,
+    "provider_generation": 1
   }
 ]

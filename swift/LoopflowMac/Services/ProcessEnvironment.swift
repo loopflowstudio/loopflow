@@ -33,8 +33,8 @@ enum GUIProcessEnvironment {
         var copy = env
         copy["PATH"] = enrichedPath(from: env["PATH"])
         // The GUI is a new human control surface, not a continuation of the
-        // Work process that opened it. Preserve Home and account authority.
-        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_PREPARED_CAPTURE", "LF_HUMAN_SESSION_RUN", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",
+        // Work process that opened it. Preserve Machine and account authority.
+        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_PREPARED_CAPTURE", "LF_HUMAN_SESSION_RUN", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_LFID",
                     "LF_AS", "LF_FLOW_ID", "LF_HUMAN_SESSION", "LF_AGENT_CALLER",
                     "LF_GIT_OPERATION_ID", "LOOPFLOW_DIRECTIVE_FILE",
                     "LF_TERMINAL_ID", "LF_TERMINAL_TTY"] {

@@ -98,13 +98,13 @@ pub fn wait_for_interrupt_cleanup() {
     }
 }
 
-/// Provider result observed by the driving Exec.
+/// Provider result observed by the driving Process.
 #[derive(Debug, Clone, Default)]
-pub struct AgentExecResult {
+pub struct AgentProcessResult {
     pub exit_code: i32,
     pub stdout: String,
     pub stderr: String,
-    /// Opaque provider continuation token observed during this Exec.
+    /// Opaque provider continuation token observed during this Process.
     pub provider_session_id: Option<String>,
     /// Typed provider failure when the process output identifies one.
     pub failure: Option<AgentFailure>,
@@ -155,9 +155,9 @@ pub(crate) fn checkout_execution_boundary(
 }
 
 pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 6] = [
-    crate::exec::AGENT_CALLER_ENV,
+    crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
-    crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_PROCESS_LFID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_RUN_ID",
     "LF_RUN_DIR",
@@ -179,7 +179,7 @@ pub struct AgentConfig {
     pub resume_token: Option<String>,
     /// Stable managed account identity selected before durable capture.
     pub provider_account_id: Option<ProviderAccountId>,
-    /// Home whose deterministic account directory resolves a recorded account.
+    /// Machine whose deterministic account directory resolves a recorded account.
     /// This is launch authority, not a replay input, and is never serialized.
     pub provider_account_authority_home: Option<std::path::PathBuf>,
     /// Working directory.
@@ -201,7 +201,7 @@ pub struct AgentConfig {
     pub env: BTreeMap<String, String>,
     /// Exact conversational driver selected before provider launch. Never
     /// inherited by provider tools or serialized into replay input.
-    pub session_driver: Option<(String, crate::exec::SessionDriver)>,
+    pub session_driver: Option<(String, crate::process::SessionDriver)>,
 }
 
 impl AgentConfig {
@@ -296,6 +296,28 @@ fn resolve_account_route_blocking(
         });
     }
     Ok(route)
+}
+
+/// Retain provider instructions on disk so native resume can read the same context.
+pub(crate) fn write_system_prompt_file(
+    config: &AgentConfig,
+    name: &str,
+) -> Result<Option<PathBuf>, CoreError> {
+    let prompt = system_prompt_with_structured_replies(config);
+    if prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let cwd = config
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    Ok(Some(crate::engine::prompt::write_prompt_log(
+        &cwd,
+        &prompt,
+        &format!("{name}.context"),
+        None,
+    )?))
 }
 
 /// Build the effective system prompt including structured reply guidance.
@@ -613,9 +635,8 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
 
 /// Common Claude CLI arguments shared across engine and session paths.
 ///
-/// Both `build_claude_command` (engine one-shot) and the session harness
-/// `build_args` construct a `ClaudeArgs` and call `to_args()`, then add
-/// their mode-specific flags on top (`--print` for engine, `-p` for harness).
+/// The one-shot command and persistent stream driver add their mode-specific
+/// flags around these shared arguments.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
@@ -727,53 +748,11 @@ impl ClaudeArgs {
     }
 }
 
-/// Build CLI args for a Claude session turn (`claude -p ...`).
-///
-/// This is shared by session harnesses so session turn invocation stays aligned
-/// with engine-owned Claude argument conventions.
-fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs {
-    ClaudeArgs {
-        model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
-        system_prompt: Some(system_prompt_with_structured_replies(config)),
-        system_prompt_file: None,
-        add_dirs: provider_writable_roots(config),
-        skip_permissions: config.execution_boundary.is_some()
-            || (config.write_scope == AgentWriteScope::Configured
-                && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions)),
-        worktree_isolation: config.write_scope == AgentWriteScope::Worktree
-            && config.execution_boundary.is_none(),
-        max_turns: config.max_turns,
-        stream: true,
-        chrome: false,
-        resume_id: resume_id.map(str::to_string),
-    }
-}
-
-pub fn build_claude_session_turn_args(
-    content: &str,
-    config: &AgentConfig,
-    resume_id: Option<&str>,
-) -> Vec<String> {
-    let mut args = vec!["-p".to_string(), content.to_string()];
-    args.extend(claude_args_for(config, resume_id).to_args());
-    args.push(
-        if config.chrome {
-            "--chrome"
-        } else {
-            "--no-chrome"
-        }
-        .to_string(),
-    );
-    args
-}
-
-/// Args for the persistent stream-json driver: `-p --input-format stream-json`
-/// plus the shared session flags (`--output-format stream-json --verbose`, model,
-/// system prompt, writable roots, permissions, `--resume`). Turn content is fed
-/// on stdin as stream-json user messages, not as a positional argument.
+/// Args for the persistent stream-json driver; turn content arrives on stdin.
 pub fn build_claude_stream_session_args(
     config: &AgentConfig,
     resume_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -781,7 +760,28 @@ pub fn build_claude_stream_session_args(
         "--input-format".to_string(),
         "stream-json".to_string(),
     ];
-    args.extend(claude_args_for(config, resume_id).to_args());
+    args.extend(
+        ClaudeArgs {
+            model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
+            system_prompt: None,
+            system_prompt_file: context_file.map(Path::to_path_buf),
+            add_dirs: provider_writable_roots(config),
+            skip_permissions: config.execution_boundary.is_some()
+                || (config.write_scope == AgentWriteScope::Configured
+                    && claude_skip_permissions(
+                        config.cwd.as_deref(),
+                        true,
+                        config.skip_permissions,
+                    )),
+            worktree_isolation: config.write_scope == AgentWriteScope::Worktree
+                && config.execution_boundary.is_none(),
+            max_turns: config.max_turns,
+            stream: true,
+            chrome: false,
+            resume_id: resume_id.map(str::to_string),
+        }
+        .to_args(),
+    );
     args
 }
 
@@ -1163,11 +1163,11 @@ pub fn build_agent_command(
 }
 
 /// Launch an agent subprocess and wait for it to exit.
-pub fn exec_agent(
+pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
-) -> Result<AgentExecResult, CoreError> {
+) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
     launch.chrome = capabilities.chrome;
     if launch.resume_token.is_none() {
@@ -1210,11 +1210,11 @@ pub fn exec_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let result = _exec_with_transient_retries(
+    let result = _run_with_transient_retries(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _exec_agent_once(attempt, &process, capabilities, retry),
+        |attempt, retry| _run_agent_once(attempt, &process, capabilities, retry),
         thread::sleep,
     );
     if let Some(capture) = implicit_capture {
@@ -1233,19 +1233,19 @@ pub fn exec_agent(
 #[derive(Debug)]
 enum AgentAttempt {
     Finished {
-        result: AgentExecResult,
+        result: AgentProcessResult,
         can_failover: bool,
     },
     AccountUnavailable(CoreError),
 }
 
-fn _exec_with_transient_retries(
+fn _run_with_transient_retries(
     launch: &AgentConfig,
     process: &ProcessConfig,
     retry_delays: &[Duration],
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentAttempt, CoreError>,
     mut wait: impl FnMut(Duration),
-) -> Result<AgentExecResult, CoreError> {
+) -> Result<AgentProcessResult, CoreError> {
     let mut attempt_config = launch.clone();
     let mut attempt = 1;
     let mut account_failure = None;
@@ -1341,7 +1341,7 @@ fn _exec_with_transient_retries(
     }
 }
 
-fn _classify_agent_failure(harness: &str, result: &AgentExecResult) -> Option<AgentFailure> {
+fn _classify_agent_failure(harness: &str, result: &AgentProcessResult) -> Option<AgentFailure> {
     if result.exit_code == 0 {
         return None;
     }
@@ -1366,7 +1366,10 @@ pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
     .then_some(())
 }
 
-fn _find_provider_error<T>(result: &AgentExecResult, classify: fn(&str) -> Option<T>) -> Option<T> {
+fn _find_provider_error<T>(
+    result: &AgentProcessResult,
+    classify: fn(&str) -> Option<T>,
+) -> Option<T> {
     for line in result.stdout.lines() {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
@@ -1461,7 +1464,7 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-fn _account_limit_signal(harness: &str, result: &AgentExecResult) -> Option<RateLimitSignal> {
+fn _account_limit_signal(harness: &str, result: &AgentProcessResult) -> Option<RateLimitSignal> {
     let mut signal = result
         .stdout
         .lines()
@@ -1501,7 +1504,7 @@ fn _classify_subscription_limit(text: &str) -> Option<()> {
     .then_some(())
 }
 
-fn _provider_resume_token(result: &AgentExecResult) -> Option<String> {
+fn _provider_resume_token(result: &AgentProcessResult) -> Option<String> {
     result.provider_session_id.clone().or_else(|| {
         result.stdout.lines().find_map(|line| {
             let value: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -1550,7 +1553,7 @@ fn _begin_implicit_capture(
     let capture = if process.auto {
         CaptureHandle::begin_with_request(
             spec,
-            crate::session_record::AgentExecRequest::from_prepared(launch, capabilities),
+            crate::session_record::AgentProcessRequest::from_prepared(launch, capabilities),
         )
     } else {
         let context = crate::trace::PreparedTurnContext::from_prompts(
@@ -1571,7 +1574,7 @@ fn _begin_implicit_capture(
         })
 }
 
-fn _exec_harness_once(
+fn _run_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     model: Option<String>,
@@ -1582,7 +1585,7 @@ fn _exec_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _exec_harness_once(&launch, &process, model, retry))
+            .spawn(move || _run_harness_once(&launch, &process, model, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
@@ -1623,7 +1626,7 @@ fn _exec_harness_once(
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_exec(cwd, &config.env)
+        crate::ops::git_operation::prepare_agent_process(cwd, &config.env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1747,7 +1750,7 @@ fn _exec_harness_once(
             {
                 println!();
             }
-            Ok(AgentExecResult {
+            Ok(AgentProcessResult {
                 exit_code: exit_code.expect("event loop stops with an exit code"),
                 stdout,
                 stderr,
@@ -1779,7 +1782,7 @@ fn _exec_harness_once(
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         } else {
             route
-                .record_exec_blocking(result.provider_session_id.clone(), None)
+                .record_process_blocking(result.provider_session_id.clone(), None)
                 .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
@@ -1787,7 +1790,7 @@ fn _exec_harness_once(
     result
 }
 
-fn _exec_agent_once(
+fn _run_agent_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
     capabilities: &AgentCapabilities,
@@ -1796,7 +1799,7 @@ fn _exec_agent_once(
     let start = Instant::now();
     let (harness, model) = parse_agent(launch.agent());
     if matches!(harness.as_str(), "codex" | "opencode") && process.auto {
-        return _exec_harness_once(launch, process, model, retry);
+        return _run_harness_once(launch, process, model, retry);
     }
     let cmd_args = build_model_command(launch, process, capabilities);
     if cmd_args.is_empty() {
@@ -1807,7 +1810,7 @@ fn _exec_agent_once(
     let args = &cmd_args[1..];
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
-        "exec_agent prepared command"
+        "run_agent prepared command"
     );
     tracing::debug!(program, args = ?args, "spawning agent command");
 
@@ -1836,7 +1839,7 @@ fn _exec_agent_once(
     let scoped_env = launch.env.clone();
     let launch_worktree = launch.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_exec(cwd, &scoped_env)
+        crate::ops::git_operation::prepare_agent_process(cwd, &scoped_env)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     for name in EXECUTION_IDENTITY_ENV {
@@ -1924,7 +1927,7 @@ fn _exec_agent_once(
 
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
-        exec_streaming(
+        run_streaming(
             &mut cmd,
             process.stream_format,
             process.timeout,
@@ -1933,10 +1936,10 @@ fn _exec_agent_once(
         )
     } else if process.auto {
         // Batch mode: capture all output
-        exec_batch(&mut cmd, process.timeout, capture, activation)
+        run_batch(&mut cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        exec_interactive(&mut cmd, process.timeout, capture, activation)
+        run_interactive(&mut cmd, process.timeout, capture, activation)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -1960,7 +1963,7 @@ fn _exec_agent_once(
             let resume_token = _provider_resume_token(result);
             let signal = _account_limit_signal(&harness, result);
             let limited = signal.as_ref().is_some_and(|signal| signal.limited);
-            if let Err(error) = route.record_exec_blocking(resume_token, signal) {
+            if let Err(error) = route.record_process_blocking(resume_token, signal) {
                 tracing::warn!(%error, "failed to record provider account launch");
                 if limited {
                     can_failover = false;
@@ -1998,12 +2001,12 @@ fn spawn_agent_child(
     Ok(child)
 }
 
-fn exec_batch(
+fn run_batch(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
-) -> Result<AgentExecResult, CoreError> {
+) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
@@ -2069,7 +2072,7 @@ fn exec_batch(
         )));
     }
 
-    Ok(AgentExecResult {
+    Ok(AgentProcessResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::from_utf8_lossy(&stdout_bytes).to_string(),
         stderr: String::from_utf8_lossy(&stderr_bytes).to_string(),
@@ -2078,12 +2081,12 @@ fn exec_batch(
     })
 }
 
-fn exec_interactive(
+fn run_interactive(
     cmd: &mut Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
-) -> Result<AgentExecResult, CoreError> {
+) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
     let mut child = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
@@ -2102,7 +2105,7 @@ fn exec_interactive(
             format_timeout(timeout)
         )));
     }
-    Ok(AgentExecResult {
+    Ok(AgentProcessResult {
         exit_code: status.code().unwrap_or(1),
         stdout: String::new(),
         stderr: String::new(),
@@ -2111,13 +2114,13 @@ fn exec_interactive(
     })
 }
 
-fn exec_streaming(
+fn run_streaming(
     cmd: &mut Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
-) -> Result<AgentExecResult, CoreError> {
+) -> Result<AgentProcessResult, CoreError> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -2259,7 +2262,7 @@ fn exec_streaming(
         )));
     }
 
-    Ok(AgentExecResult {
+    Ok(AgentProcessResult {
         exit_code: status.code().unwrap_or(1),
         stdout: stdout_content,
         stderr: stderr_content,
@@ -2332,31 +2335,6 @@ pub fn check_cli_available(cli: &str) -> bool {
     }
 
     available
-}
-
-/// Agent runner trait for dependency injection in tests.
-pub trait Runner: Send + Sync {
-    fn exec(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Result<AgentExecResult, CoreError>;
-}
-
-/// Default agent runner that spawns actual processes.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DefaultRunner;
-
-impl Runner for DefaultRunner {
-    fn exec(
-        &self,
-        launch: &AgentConfig,
-        process: &ProcessConfig,
-        capabilities: &AgentCapabilities,
-    ) -> Result<AgentExecResult, CoreError> {
-        exec_agent(launch, process, capabilities)
-    }
 }
 
 #[cfg(test)]
@@ -3053,105 +3031,40 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_claude_session_turn_args_minimal() {
+    fn claude_stream_context_keeps_large_instructions_and_reply_guidance_off_argv() {
+        let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            agent: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: BTreeMap::new(),
-        };
-        let args = build_claude_session_turn_args("hello", &config, None);
-        assert_eq!(args[0], "-p");
-        assert_eq!(args[1], "hello");
-        assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--verbose".to_string()));
-        assert_eq!(
-            args.contains(&"--dangerously-skip-permissions".to_string()),
-            claude_skip_permissions(Some(Path::new("/tmp")), true, false)
-        );
-    }
-
-    #[test]
-    fn build_claude_session_turn_args_full() {
-        let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: "Be concise".to_string(),
-            task_prompt: "task".to_string(),
-            agent: Some("claude-sonnet-4-5-20250514".to_string()),
-            cwd: Some("/tmp".into()),
-            max_turns: Some(5),
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
+            system_prompt: "Keep the complete context.\n".repeat(6_000),
+            cwd: Some(home.path().to_path_buf()),
+            agent: Some("claude:sonnet".into()),
             skip_permissions: true,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: BTreeMap::new(),
-        };
-        let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_abc".to_string()));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
-        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--max-turns".to_string()));
-        assert!(args.contains(&"5".to_string()));
-        assert!(args.contains(&"--append-system-prompt".to_string()));
-        assert!(args.contains(&"Be concise".to_string()));
-    }
-
-    #[test]
-    fn build_claude_session_turn_args_appends_loopflow_guidance() {
-        let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: "Base prompt".to_string(),
-            task_prompt: "task".to_string(),
-            agent: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
+            max_turns: Some(5),
             structured_replies: vec![StructuredReply {
-                name: "suggest_actions".to_string(),
-                description: "Suggest actions".to_string(),
-                guidance: "Emit <lf:suggest_actions> JSON.".to_string(),
+                name: "suggest_actions".into(),
+                description: "Suggest actions".into(),
+                guidance: "Emit <lf:suggest_actions> JSON.".into(),
             }],
-            directive_relay: None,
-            env: BTreeMap::new(),
+            ..default_launch()
         };
-
-        let args = build_claude_session_turn_args("hello", &config, None);
-        let prompt_idx = args
-            .iter()
-            .position(|arg| arg == "--append-system-prompt")
-            .expect("expected --append-system-prompt");
-        let prompt = args
-            .get(prompt_idx + 1)
-            .expect("system prompt text should follow flag");
-        assert!(prompt.contains("Base prompt"));
-        assert!(prompt.contains("<lf:structured_replies>"));
-        assert!(prompt.contains("<lf:suggest_actions>"));
+        let path = write_system_prompt_file(&config, "session")
+            .unwrap()
+            .unwrap();
+        let args = build_claude_stream_session_args(&config, Some("sess_abc"), Some(&path));
+        assert!(args.iter().all(|arg| arg.len() < 122_880));
+        for (flag, value) in [
+            ("--append-system-prompt-file", path.to_str().unwrap()),
+            ("--input-format", "stream-json"),
+            ("--output-format", "stream-json"),
+            ("--model", "sonnet"),
+            ("--max-turns", "5"),
+            ("--resume", "sess_abc"),
+        ] {
+            assert!(args.windows(2).any(|pair| pair == [flag, value]));
+        }
+        let context = std::fs::read_to_string(path).unwrap();
+        assert!(context.contains(&config.system_prompt));
+        assert!(context.contains("<lf:structured_replies>"));
+        assert!(context.contains("<lf:suggest_actions>"));
     }
 
     #[test]
@@ -3184,15 +3097,15 @@ trust_level = "trusted"
         assert!(cmd.contains(&unknown_model.to_string()));
     }
 
-    fn managed_attempt(result: AgentExecResult) -> AgentAttempt {
+    fn managed_attempt(result: AgentProcessResult) -> AgentAttempt {
         AgentAttempt::Finished {
             result,
             can_failover: true,
         }
     }
 
-    fn failed_result(message: &str) -> AgentExecResult {
-        AgentExecResult {
+    fn failed_result(message: &str) -> AgentProcessResult {
+        AgentProcessResult {
             exit_code: 1,
             stdout: format!(r#"{{"type":"turn.failed","error":{{"message":"{message}"}}}}"#),
             ..Default::default()
@@ -3208,7 +3121,7 @@ trust_level = "trusted"
         };
         let process = auto_process();
         let mut results = vec![
-            AgentExecResult {
+            AgentProcessResult {
                 exit_code: 1,
                 stdout: concat!(
                     "{\"type\":\"thread.started\",\"thread_id\":\"thread-123\"}\n",
@@ -3219,7 +3132,7 @@ trust_level = "trusted"
                 provider_session_id: None,
                 failure: None,
             },
-            AgentExecResult {
+            AgentProcessResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3228,7 +3141,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let mut waits = Vec::new();
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3260,7 +3173,7 @@ trust_level = "trusted"
             ..Default::default()
         };
         let process = auto_process();
-        let failure = AgentExecResult {
+        let failure = AgentProcessResult {
             exit_code: 1,
             stdout: concat!(
                 "{\"type\":\"system\",\"session_id\":\"session-123\"}\n",
@@ -3280,7 +3193,7 @@ trust_level = "trusted"
         ));
         let mut results = vec![
             failure,
-            AgentExecResult {
+            AgentProcessResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3289,7 +3202,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let mut waits = Vec::new();
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &process,
             &[Duration::from_secs(30)],
@@ -3328,7 +3241,7 @@ trust_level = "trusted"
         );
         let mut results = vec![
             failure,
-            AgentExecResult {
+            AgentProcessResult {
                 exit_code: 0,
                 ..Default::default()
             },
@@ -3336,7 +3249,7 @@ trust_level = "trusted"
         .into_iter();
         let mut attempts = Vec::new();
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &auto_process(),
             &[Duration::from_secs(30)],
@@ -3369,7 +3282,7 @@ trust_level = "trusted"
         let process = auto_process();
         let mut attempts = 0;
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3401,7 +3314,7 @@ trust_level = "trusted"
             agent: Some("codex".to_string()),
             ..default_launch()
         };
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
@@ -3429,14 +3342,14 @@ trust_level = "trusted"
         };
         let mut attempts = 0;
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &auto_process(),
             &[Duration::ZERO],
             |_, _| {
                 attempts += 1;
                 Ok(managed_attempt(if attempts == 1 {
-                    let mut failed = AgentExecResult {
+                    let mut failed = AgentProcessResult {
                         exit_code: 1,
                         ..Default::default()
                     };
@@ -3445,7 +3358,7 @@ trust_level = "trusted"
                         .into();
                     failed
                 } else {
-                    AgentExecResult::default()
+                    AgentProcessResult::default()
                 }))
             },
             |_| {},
@@ -3464,7 +3377,7 @@ trust_level = "trusted"
         let process = auto_process();
         let mut attempts = 0;
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO],
@@ -3490,7 +3403,7 @@ trust_level = "trusted"
         let mut attempts = 0;
         let mut waits = 0;
 
-        let result = _exec_with_transient_retries(
+        let result = _run_with_transient_retries(
             &launch,
             &process,
             &[Duration::ZERO, Duration::ZERO],

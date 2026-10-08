@@ -166,7 +166,7 @@ enum RouteHome {
 /// account runs shared or isolated like a stored one.
 #[derive(Clone)]
 enum AccountLogin {
-    /// A profile in this Home's catalog. A shared launch signs the native
+    /// A profile in this Machine's catalog. A shared launch signs the native
     /// home in from it.
     Stored {
         store: SharedStore,
@@ -178,7 +178,7 @@ enum AccountLogin {
         catalog: SharedStore,
         profile: PathBuf,
     },
-    /// The origin of an `lf ssh` session owns the login and lends one access
+    /// The origin of an `lf --machine` session owns the login and lends one access
     /// token, which is never written here. Claude takes it from its
     /// environment; a Codex engine is handed it over its protocol.
     Lent {
@@ -277,7 +277,7 @@ impl ProviderAccountRoute {
         }
     }
 
-    /// A route on an account its `lf ssh` origin lent.
+    /// A route on an account its `lf --machine` origin lent.
     fn lent(
         client: lease::AccountLeaseClient,
         provider: Provider,
@@ -601,7 +601,7 @@ impl ProviderAccountRoute {
         Ok(())
     }
 
-    pub(crate) fn record_exec_blocking(
+    pub(crate) fn record_process_blocking(
         &self,
         provider_session_id: Option<String>,
         signal: Option<RateLimitSignal>,
@@ -957,7 +957,7 @@ pub(crate) async fn resolve_provider_account_exact(
         if let Some(account_id) = exact_account_id {
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
-                accounts: format!("'{account_id}' is not available on this Home"),
+                accounts: format!("'{account_id}' is not available on this Machine"),
             });
         }
         return Ok(None);
@@ -1653,7 +1653,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
 /// Resolve one recorded account without consulting current planning routes.
 ///
 /// A forwarded credential grant wins when it contains the exact account.
-/// Otherwise the account's deterministic credential Home on the Session's Home is
+/// Otherwise the account's deterministic credential Machine on the Session's Machine is
 /// the authority. This path deliberately does not apply current repository
 /// routing or account-health policy: replay names the account it requires.
 /// Both providers read the owning account catalog to check credential identity.
@@ -1702,7 +1702,7 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
                 return Err(ProviderAccountError::NoEligibleAccount {
                     provider,
                     accounts: format!(
-                        "'{account_id}' has no credential Home at {}",
+                        "'{account_id}' has no credential Machine at {}",
                         home.display()
                     ),
                 });
@@ -2104,7 +2104,7 @@ mod tests {
             ),
         ];
 
-        for (route, env_name, expected_home) in routes {
+        for (route, env_name, expected_machine) in routes {
             let mut command = Command::new(route.provider.as_str());
             route.apply(&mut command);
             let selected_home = command
@@ -2112,7 +2112,7 @@ mod tests {
                 .find(|(name, _)| *name == std::ffi::OsStr::new(env_name))
                 .and_then(|(_, value)| value)
                 .map(PathBuf::from);
-            assert_eq!(selected_home.as_deref(), Some(expected_home.as_path()));
+            assert_eq!(selected_home.as_deref(), Some(expected_machine.as_path()));
         }
     }
 
@@ -2871,7 +2871,7 @@ mod account_first_tests {
         std::env::set_var(name, mode);
     }
 
-    /// A Home with `provider` accounts `first` and `second` on the default
+    /// A Machine with `provider` accounts `first` and `second` on the default
     /// route and a native home signed in as `active`; `native` is a login no
     /// stored account holds.
     async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {

@@ -16,7 +16,6 @@ use std::path::Path;
 
 use crate::engine::execution::{ExecutionCursor, NestedCursor};
 use crate::engine::flow::ConcreteStep;
-use crate::engine::workflow::{self, WorkflowDefinition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowGraph {
@@ -68,41 +67,41 @@ pub struct FlowReturn {
 
 /// Disclosure structure from the same resolution that supplies the execution graph.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowTemplate {
+pub struct FlowComposition {
     /// Digest of resolved content and composition; unrelated to invocation identity.
     pub revision: String,
-    pub items: Vec<FlowTemplateItem>,
+    pub items: Vec<FlowCompositionItem>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum FlowTemplateItem {
+pub enum FlowCompositionItem {
     Node {
         key: u32,
-        paths: BTreeMap<String, Vec<FlowTemplateItem>>,
+        paths: BTreeMap<String, Vec<FlowCompositionItem>>,
     },
     Group {
         id: String,
         name: String,
-        items: Vec<FlowTemplateItem>,
+        items: Vec<FlowCompositionItem>,
     },
 }
 
-fn template_items(
+fn composition_items(
     items: &[ResolvedFlowItem],
     next: &mut u32,
     group: &mut usize,
-) -> Vec<FlowTemplateItem> {
+) -> Vec<FlowCompositionItem> {
     items
         .iter()
         .map(|item| {
             if let ResolvedFlowItem::Group { name, items } = item {
                 let id = format!("group-{}", *group);
                 *group += 1;
-                return FlowTemplateItem::Group {
+                return FlowCompositionItem::Group {
                     id,
                     name: name.clone(),
-                    items: template_items(items, next, group),
+                    items: composition_items(items, next, group),
                 };
             }
             let key = *next;
@@ -110,98 +109,75 @@ fn template_items(
             let paths = if let ResolvedFlowItem::Xor { paths, .. } = item {
                 paths
                     .iter()
-                    .map(|(name, path)| (name.clone(), template_items(&path.items, next, group)))
+                    .map(|(name, path)| (name.clone(), composition_items(&path.items, next, group)))
                     .collect()
             } else {
                 BTreeMap::new()
             };
-            FlowTemplateItem::Node { key, paths }
+            FlowCompositionItem::Node { key, paths }
         })
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CatalogKind {
-    Flow,
-    Workflow,
-}
-
-/// One Flow or workflow a Task can run, as it would be captured if started now.
+/// One autonomous Flow definition, as it would be captured if started now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FlowCatalogEntry {
     pub name: String,
-    pub kind: CatalogKind,
     /// The repository file that defines it; `None` for a builtin.
     pub source: Option<String>,
-    /// A Flow's topology; `None` for a workflow or an unusable definition.
+    /// Topology; `None` for an unusable definition.
     pub graph: Option<FlowGraph>,
-    pub template: Option<FlowTemplate>,
-    /// A workflow's nodes and edges; `None` for a Flow or an unusable definition.
-    pub workflow: Option<WorkflowDefinition>,
+    pub composition: Option<FlowComposition>,
     /// Why the definition is unusable; set exactly when it has no topology.
     pub unavailable: Option<String>,
 }
 
-/// Every Flow and workflow available in `repo`, each read through the shared
+/// Every Flow available in `repo`, each read through the shared
 /// loader. A file that does not load stays listed with the reason.
-pub fn flow_catalog(repo: &Path) -> Vec<FlowCatalogEntry> {
-    let source = |path: Option<std::path::PathBuf>| {
-        let path = path?;
-        let relative = path.strip_prefix(repo).unwrap_or(&path);
-        Some(relative.to_string_lossy().into_owned())
+pub fn flow_catalog(repo: &Path) -> Result<Vec<FlowCatalogEntry>, crate::engine::LoadError> {
+    crate::engine::available_flow_names(repo)?
+        .into_iter()
+        .map(|name| flow_catalog_entry(&name, repo))
+        .collect()
+}
+
+/// Read only the requested definition; invalid sources retain their diagnostic.
+pub fn flow_catalog_entry(
+    name: &str,
+    repo: &Path,
+) -> Result<FlowCatalogEntry, crate::engine::LoadError> {
+    let compiled = match crate::engine::flow::load_authored_flow(name, repo) {
+        Err(error @ crate::engine::LoadError::FlowNotFound(_)) => return Err(error),
+        loaded => loaded.and_then(|flow| {
+            let resolved = resolve_flow(&flow, repo)?;
+            let bytes = serde_json::to_vec(&(&flow.name, &resolved))
+                .expect("resolved Flow composition is serializable");
+            let composition = FlowComposition {
+                revision: hex::encode(Sha256::digest(bytes)),
+                items: composition_items(&resolved, &mut 0, &mut 0),
+            };
+            Ok((
+                FlowGraph::new(&flow.name, &flatten_resolved(&resolved)),
+                composition,
+            ))
+        }),
     };
-    let flows = crate::engine::available_flow_names(repo)
-        .into_iter()
-        .map(|name| {
-            let compiled = crate::engine::load_flow(&name, repo)
-                .map_err(|error| error.to_string())
-                .and_then(|flow| {
-                    let resolved = resolve_flow(&flow, repo).map_err(|error| error.to_string())?;
-                    let bytes = serde_json::to_vec(&(&flow.name, &resolved))
-                        .map_err(|error| error.to_string())?;
-                    let template = FlowTemplate {
-                        revision: hex::encode(Sha256::digest(bytes)),
-                        items: template_items(&resolved, &mut 0, &mut 0),
-                    };
-                    Ok((
-                        FlowGraph::new(&flow.name, &flatten_resolved(&resolved)),
-                        template,
-                    ))
-                });
-            let (topology, unavailable) = match compiled {
-                Ok(topology) => (Some(topology), None),
-                Err(reason) => (None, Some(reason)),
-            };
-            let (graph, template) = topology.unzip();
-            FlowCatalogEntry {
-                source: source(crate::engine::flow::find_flow_source_path(&name, repo)),
-                name,
-                kind: CatalogKind::Flow,
-                graph,
-                template,
-                workflow: None,
-                unavailable,
-            }
-        });
-    let workflows = workflow::available_workflow_names(repo)
-        .into_iter()
-        .map(|name| {
-            let (workflow, unavailable) = match workflow::load_workflow(&name, repo) {
-                Ok(workflow) => (workflow, None),
-                Err(error) => (None, Some(error.to_string())),
-            };
-            FlowCatalogEntry {
-                source: source(workflow::workflow_path(&name, repo)),
-                name,
-                kind: CatalogKind::Workflow,
-                graph: None,
-                template: None,
-                workflow,
-                unavailable,
-            }
-        });
-    flows.chain(workflows).collect()
+    let (graph, composition, unavailable) = match compiled {
+        Ok((graph, composition)) => (Some(graph), Some(composition), None),
+        Err(error) => (None, None, Some(error.to_string())),
+    };
+    Ok(FlowCatalogEntry {
+        name: name.to_string(),
+        source: crate::engine::flow::find_flow_source_path(name, repo).map(|path| {
+            path.strip_prefix(repo)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned()
+        }),
+        graph,
+        composition,
+        unavailable,
+    })
 }
 
 /// Participation stages and bounded references to the captured automated routes.
@@ -617,7 +593,7 @@ pub fn project_position(
 mod tests {
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
-        use super::{flow_catalog, FlowGraph, FlowTemplateItem};
+        use super::{flow_catalog, FlowCompositionItem, FlowGraph};
         use crate::engine::flow::{compile_flow, load_flow};
         let repo = tempfile::tempdir().unwrap();
         let flows = repo.path().join(".lf/flows");
@@ -649,11 +625,12 @@ mod tests {
         )
         .unwrap();
         let entry = flow_catalog(repo.path())
+            .unwrap()
             .into_iter()
             .find(|e| e.name == "study")
             .unwrap();
         assert!(entry.unavailable.is_none(), "{:?}", entry.unavailable);
-        let template = entry.template.unwrap();
+        let composition = entry.composition.unwrap();
         let expanded =
             compile_flow(&load_flow("study", repo.path()).unwrap(), repo.path()).unwrap();
         let graph = entry.graph.unwrap();
@@ -666,46 +643,50 @@ mod tests {
                 .count(),
             2
         );
-        let [FlowTemplateItem::Group { id: first, .. }, FlowTemplateItem::Group { id: second, .. }, FlowTemplateItem::Group { items: empty, .. }, FlowTemplateItem::Node { paths, .. }, ..] =
-            template.items.as_slice()
+        let [FlowCompositionItem::Group { id: first, .. }, FlowCompositionItem::Group { id: second, .. }, FlowCompositionItem::Group { items: empty, .. }, FlowCompositionItem::Node { paths, .. }, ..] =
+            composition.items.as_slice()
         else {
             panic!("expected distinct composition uses and XOR");
         };
         assert_ne!(first, second);
         assert!(empty.is_empty());
         assert_eq!(paths.len(), 2);
-        let FlowTemplateItem::Group { items, .. } = &paths["fix"][0] else {
+        let FlowCompositionItem::Group { items, .. } = &paths["fix"][0] else {
             panic!("expected nested group");
         };
-        assert!(matches!(&items[0], FlowTemplateItem::Node { key, .. } if *key == 3));
+        assert!(matches!(&items[0], FlowCompositionItem::Node { key, .. } if *key == 3));
         assert!(paths["pass"].is_empty());
         let reread = flow_catalog(repo.path())
+            .unwrap()
             .into_iter()
             .find(|e| e.name == "study")
             .unwrap();
         assert_eq!(
-            reread.template.as_ref().unwrap().revision,
-            template.revision
+            reread.composition.as_ref().unwrap().revision,
+            composition.revision
         );
         std::fs::write(skills.join("sample.md"), "Changed content").unwrap();
         let changed = flow_catalog(repo.path())
+            .unwrap()
             .into_iter()
             .find(|e| e.name == "study")
             .unwrap();
-        assert_ne!(changed.template.unwrap().revision, template.revision);
+        assert_ne!(changed.composition.unwrap().revision, composition.revision);
         std::fs::write(flows.join("piece.yaml"), "- flow: study\n").unwrap();
         let cyclic = flow_catalog(repo.path())
+            .unwrap()
             .into_iter()
             .find(|e| e.name == "study")
             .unwrap();
-        assert!(cyclic.graph.is_none() && cyclic.template.is_none());
+        assert!(cyclic.graph.is_none() && cyclic.composition.is_none());
         assert!(cyclic.unavailable.unwrap().contains("cycle"));
         std::fs::remove_file(flows.join("piece.yaml")).unwrap();
         let missing = flow_catalog(repo.path())
+            .unwrap()
             .into_iter()
             .find(|e| e.name == "study")
             .unwrap();
-        assert!(missing.graph.is_none() && missing.template.is_none());
+        assert!(missing.graph.is_none() && missing.composition.is_none());
         assert!(missing.unavailable.is_some());
     }
 
@@ -1074,7 +1055,7 @@ mod tests {
 
     #[test]
     fn numeric_wire_matches_captured_ids_across_nested_alternatives() {
-        use crate::ops::task_flow::{TaskFlowRecord, TaskFlowSnapshot};
+        use crate::durable::FlowProcessDetail;
 
         fn branch(paths: Vec<(&str, Vec<ConcreteStep>)>) -> ConcreteStep {
             ConcreteStep::Xor(ConcreteXor {
@@ -1115,13 +1096,10 @@ mod tests {
             ]),
             check(2),
         ];
-        let fixture: TaskFlowSnapshot = serde_json::from_str(include_str!(
+        let pinned: FlowProcessDetail = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/flow_numeric_nested.json"
         ))
         .unwrap();
-        let TaskFlowRecord::Latest(pinned) = fixture.record else {
-            panic!("launched Flow fixture")
-        };
         let graph = FlowGraph::new("nested", &steps);
         assert_eq!(graph, pinned.graph);
         // Root 0, XOR 1, alpha 2/3/(fix 4/5)/6, zeta 7/8, root 9.

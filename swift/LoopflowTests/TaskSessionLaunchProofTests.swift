@@ -28,7 +28,7 @@ struct TaskSessionLaunchProofTests {
             try FileManager.default.copyItem(at: executable, to: owned)
             try JSONSerialization.data(withJSONObject: ["lf_path": host.appendingPathComponent("fixture/lf").path])
                 .write(to: host.appendingPathComponent("LoopflowDevControl.json"))
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = owned
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: SessionLaunchBundleMarker.self).executablePath),
                                  "--testing-library", "swift-testing",
@@ -97,7 +97,7 @@ struct TaskSessionLaunchProofTests {
         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         try JSONSerialization.data(withJSONObject: ["lf_path": helper.path]).write(to: config)
         try #require(try LocalWaveAgentLauncher.controlLfPath() == helper.path)
-        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "home_id": fixtureHomeId]).write(
+        try JSONSerialization.data(withJSONObject: ["worktree": checkout.path, "machine_id": fixtureMachineId]).write(
             to: directory.appendingPathComponent("receipt.json"))
 
         let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -134,7 +134,7 @@ struct TaskSessionLaunchProofTests {
         let model = WorkModel(query: query, repoPath: repo)
         await model.refresh()
         let origin = model.navigation
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         workspace.multiplexer.newShell()
         let pane = workspace.multiplexer.focusedPaneId

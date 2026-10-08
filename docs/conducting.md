@@ -30,11 +30,11 @@ lf roadmap                             # tasks in this project, sorted by what t
 lf roadmap --all                       # every project on this computer
 lf top                                 # what is running right now
 lf usage --days 0 --wave infra                   # the record of each time the AI was started
-lf ssh <home-id> roadmap               # ask another computer the same question
+lf --machine <machine-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine
-at once; `lf ssh` is how you ask a different one.
+at once; `lf --machine` is how you ask a different one.
 
 ## See everything
 
@@ -106,13 +106,13 @@ lf usage --json    # current usage wire, newest first
 lf tokens          # lines and tokens per directory; --days walks history
 lf ci --since 7d   # how failed CI was detected, repaired, and landed
 lf ci watch --status # the CI watcher: live or not, last poll, what it started
-lf doctor          # check installation, Exec integrity and scheduled receipts
+lf doctor          # check installation, Process integrity and scheduled receipts
 ```
 
 `lf top` is the first move when work feels slow — live machine-health evidence.
 Use `lf ps --json` when another tool or agent needs one stable, parseable frame.
 Both contain only OS-live process trees; completed calls disappear. Run
-`lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Exec
+`lf mon prune --dry-run` before cleanup. Plain `lf mon prune` removes stale Process
 receipts and registered orphan OpenCode groups, never unclaimed provider PIDs.
 `lf ci` reads the local ledger, not GitHub: it reports how
 much of CI repair happened without a person.

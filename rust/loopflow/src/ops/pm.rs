@@ -422,7 +422,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf home ssh` resolves the PM
+    // A forwarded token wins over the local store: `lf --machine` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf repo refresh` could never authenticate.
@@ -588,7 +588,7 @@ async fn resolve_pm_token_from_store(
     unreachable!("both refresh attempts return or retry")
 }
 
-/// Env var carrying a PM access token forwarded by `lf home ssh`.
+/// Env var carrying a PM access token forwarded by `lf --machine`.
 pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
 /// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
 pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
@@ -872,15 +872,15 @@ pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResu
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let local = store
-        .local_home()
+        .local_machine()
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    if placement.home_id != local.id {
+    if placement.machine_id != local.id {
         return Err(OpsError::Message(format!(
-            "Wave {} is placed on {}; run this command with `lf home ssh {}`",
+            "Wave {} is placed on {}; run this command with `lf --machine {}`",
             wave.slug(),
-            placement.home_id,
-            placement.home_id
+            placement.machine_id,
+            placement.machine_id
         )));
     }
     Ok(())
@@ -1110,6 +1110,63 @@ pub fn pm_update(
     progress: &impl Progress,
 ) -> OpsResult<PmUpdateResult> {
     block_on_pm(pm_update_async(repo, options, progress))
+}
+
+/// Move an issue into `to_wave`'s configured Project. Placed work stays where
+/// it is: its Sessions are recorded under the Wave that ran them.
+pub fn pm_refile(repo: &Path, issue: &str, to_wave: &str) -> OpsResult<PmUpdateResult> {
+    block_on_pm(pm_refile_async(repo, issue, to_wave))
+}
+
+pub(crate) async fn pm_refile_async(
+    repo: &Path,
+    issue: &str,
+    to_wave: &str,
+) -> OpsResult<PmUpdateResult> {
+    let store = pm_store().await?;
+    let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
+    let ResolvedTask { wave, item, .. } = resolve_owned_issue(repo, issue).await?;
+    let placed = store
+        .get_task_by_issue(&item.id)
+        .await
+        .map_err(|error| message(&error))?
+        .is_some();
+    if placed && wave != to_wave {
+        return Err(OpsError::Message(format!(
+            "{} has work recorded under wave/{wave}; a placed Task keeps its Wave",
+            item.identifier
+        )));
+    }
+    let locator =
+        crate::work::wave::WaveLocator::discover(repo, to_wave).map_err(|error| message(&error))?;
+    let registered = store
+        .get_wave_at(&locator)
+        .await
+        .map_err(|error| message(&error))?
+        .ok_or_else(|| OpsError::Message(format!("Wave {to_wave} is not initialized")))?;
+    require_planning_home(&store, &registered).await?;
+    let acquisition = lock_wave_planning(&registered).await?;
+    let ctx = resolve_context(repo, to_wave).await?;
+    refresh_pm_snapshot_locked(repo, &registered, &ctx, &store, acquisition).await?;
+    let project = super::project::current_project(&store, &registered)?;
+    if item.project_id.as_deref() != Some(project.id.as_str()) {
+        ctx.client
+            .move_item_to_project(&item.id, &project.id)
+            .await
+            .map_err(|error| message(&error))?;
+        let moved =
+            crate::ops::task_pm::resolve_task_async(repo, &item.id, PmRefresh::Force).await?;
+        if moved.item.project_id.as_deref() != Some(project.id.as_str()) {
+            return Err(OpsError::Message(format!(
+                "Linear has not confirmed {} in Project {}",
+                item.identifier, project.name
+            )));
+        }
+    }
+    Ok(PmUpdateResult {
+        wave: to_wave.to_string(),
+        id: item.id,
+    })
 }
 
 /// Read a Task thread or publish a comment without allocating execution state.

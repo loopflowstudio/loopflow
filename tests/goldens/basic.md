@@ -9,7 +9,7 @@ Read-only inspection and ordinary edits/tests run directly here.
 - **Task**: one intended outcome with its brief, checkout and PR chain.
 - **Session**: one agent conversation, interactive or headless.
 - **Flow**: a Task's authored sequence of steps and reviews.
-- **Exec**: one actual `lf` process.
+- **Process**: one actual `lf` process.
 
 ## Execute Here First
 
@@ -36,8 +36,9 @@ lf pr reconcile                      # check delivery once; settle a verified me
 
 Publish makes a PR ready for review; it does not sync. Submit is
 for a reviewer to land; arm/land request auto-merge and return. Later reconciliation
-settles verified merges. Bare land keeps the Task open;
-`-c` completes it after merge, and `--next <slug>` rotates its PR chain. Use the
+settles verified merges and normally completes the Task. Record accepted remaining
+work with `lf task follow-up` (outcome, evidence and next check); `--next <slug>`
+keeps additional PR work open and rotates its chain. Use the
 selected delivery skill for preparation and recovery. `lf pr open` creates or
 updates a draft and opens its page; use it when the user asks to see the PR.
 It preserves an existing PR's readiness. Publish/submit/arm/land make drafts ready.
@@ -87,8 +88,7 @@ conversation is that scope's operator: it reads failed work's logs and keeps
 started Tasks moving. Running Flows and optional scheduled checks continue
 independently; nothing re-invokes a conversation.
 
-Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
-never launch a GUI browser executable for capture. Keep credentials out of
+Never launch a GUI browser executable for capture. Keep credentials out of
 output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge

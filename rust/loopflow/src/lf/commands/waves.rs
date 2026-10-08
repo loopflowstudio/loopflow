@@ -1,7 +1,7 @@
 //! `lf wave list`, `lf wave status`, and `lf roadmap` — read the wave registry (`store`).
 //!
 //! `lf wave list` lists durable Wave identities, authored goals, Task counts and
-//! Home placement. `lf wave status [wave]` adds current Projects, Task conditions,
+//! Machine placement. `lf wave status [wave]` adds current Projects, Task conditions,
 //! metric readings and Session history; it never reads process health or a live
 //! loop. With no argument it resolves the ambient Wave. Reads preserve missing
 //! evidence; `--json` is the dashboard contract.
@@ -19,13 +19,12 @@ use std::sync::Mutex;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{Home, TaskState, WorkRef, WorkStatus};
+use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
-use crate::ops::task_execution::TaskExecutionState;
+use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
-use crate::store::sqlite::OpenExecs;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
@@ -60,7 +59,7 @@ pub struct WaveSnapshot {
     pub superseded_by_wave_id: Option<String>,
     pub retirement_reason: Option<String>,
     /// Stable execution authority and its currently observed route.
-    pub home: Home,
+    pub machine: Machine,
 }
 
 /// `lf wave status <wave>`: current planning, Task conditions and Session history.
@@ -76,7 +75,7 @@ pub struct WaveDetailSnapshot {
     /// Durable Project Work that cannot join the current PM plan, including
     /// non-terminal Tasks stranded under a terminal historical Project.
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
-    /// This Wave's Home-local Session history, newest first.
+    /// This Wave's Machine-local Session history, newest first.
     pub history: Evidence<SessionHistory>,
 }
 
@@ -179,11 +178,11 @@ pub enum TaskConditionState {
     Unknown,
 }
 
+use crate::durable::FlowProcessDetail;
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
-use crate::ops::task_flow::TaskFlowRecord;
-pub use crate::ops::task_flow::TaskFlowSnapshot;
+use crate::ops::task_run::TaskRunControl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -233,13 +232,13 @@ pub struct TaskReferenceSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWorktreeSnapshot {
-    pub home_id: Option<crate::durable::HomeId>,
+    pub machine_id: Option<crate::durable::MachineId>,
     pub slug: String,
     /// Full branch name from the active PR, or the last recorded PR after the
     /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
     pub worktree: String,
-    /// Existence on the reading Home; unknown when the filesystem check fails.
+    /// Existence on the reading Machine; unknown when the filesystem check fails.
     pub local_exists: Option<bool>,
 }
 
@@ -252,7 +251,10 @@ pub struct TaskDetailSnapshot {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub flow: TaskFlowSnapshot,
+    pub workflow_name: Option<String>,
+    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub execution: Option<TaskExecutionSnapshot>,
+    pub run_control: TaskRunControl,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -478,7 +480,10 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub flow: TaskFlowSnapshot,
+    pub workflow_name: Option<String>,
+    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub execution: Option<TaskExecutionSnapshot>,
+    pub run_control: TaskRunControl,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -746,8 +751,7 @@ async fn roadmap_snapshot(
 #[derive(Debug)]
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
-    local_home: crate::durable::HomeId,
-    open: OpenExecs,
+    local_machine: crate::durable::MachineId,
 }
 
 impl SharedTaskReads {
@@ -756,8 +760,7 @@ impl SharedTaskReads {
         ask_checkouts_ahead(&checkouts);
         Ok(Self {
             checkouts,
-            local_home: store.local_home().await?.id,
-            open: store.sqlite.open_execs()?,
+            local_machine: store.local_machine().await?.id,
         })
     }
 }
@@ -875,7 +878,10 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         next_move: detail.next_move,
         condition: detail.condition,
         actions: detail.actions,
-        flow: detail.flow,
+        workflow_name: detail.workflow_name,
+        latest_flow_process: detail.latest_flow_process,
+        execution: detail.execution,
+        run_control: detail.run_control,
         active_pr,
         section,
     }
@@ -965,12 +971,12 @@ pub(crate) async fn snapshot_wave(
     let placement = store
         .placement(&WorkRef::Wave(wave.id().clone()))
         .await
-        .map_err(|error| anyhow!("failed to read Wave Home placement: {error}"))?;
-    let home = store
-        .home_by_id(&placement.home_id)
+        .map_err(|error| anyhow!("failed to read Wave Machine placement: {error}"))?;
+    let machine = store
+        .machine_by_id(&placement.machine_id)
         .await
-        .map_err(|error| anyhow!("failed to read Wave Home: {error}"))?
-        .ok_or_else(|| anyhow!("Home {} was not found", placement.home_id))?;
+        .map_err(|error| anyhow!("failed to read Wave Machine: {error}"))?
+        .ok_or_else(|| anyhow!("Machine {} was not found", placement.machine_id))?;
     let status = store
         .work_status(&WorkRef::Wave(wave.id().clone()))
         .await
@@ -992,7 +998,7 @@ pub(crate) async fn snapshot_wave(
         retired_at: wave.retired_at().and_then(format_time),
         superseded_by_wave_id: wave.superseded_by_wave_id().map(ToString::to_string),
         retirement_reason: wave.retirement_reason().map(str::to_string),
-        home,
+        machine,
     })
 }
 
@@ -1117,7 +1123,7 @@ async fn snapshot_tasks(
             assignee: None,
         };
         let recommended = current_plan
-            .map_or("feature", |plan| plan.workflow.as_str())
+            .map_or("", |plan| plan.workflow.as_str())
             .to_string();
         requests.push(TaskDetailRequest {
             item,
@@ -1223,7 +1229,7 @@ fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>)
     projects
         .iter()
         .find(|project| Some(project.id.as_str()) == project_id)
-        .map_or("feature", |project| project.workflow.as_str())
+        .map_or("", |project| project.workflow.as_str())
         .to_string()
 }
 
@@ -1261,18 +1267,18 @@ async fn snapshot_task_detail(
                 flow_record,
             )
         }
-        None => (None, None, TaskFlowRecord::None),
+        None => (None, None, None),
     };
-    let home_id = task
+    let machine_id = task
         .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
-        .and_then(|row| row.home_id.clone());
-    let reference = task_reference(&item, task, active, &prs, home_id, &shared.local_home);
+        .and_then(|row| row.machine_id.clone());
+    let reference = task_reference(&item, task, active, &prs, machine_id, &shared.local_machine);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
     };
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
-        (Some(task), None) => crate::ops::task::task_exec_refusal(store, task).await?,
+        (Some(task), None) => crate::ops::task::task_process_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
     };
     let next_move = task.map(|_| {
@@ -1321,7 +1327,7 @@ async fn snapshot_task_detail(
         task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !runtime.status.is_terminal() => {
-            crate::ops::task::task_completion_gate_among(store, task, &shared.open)
+            crate::ops::task::task_completion_gate(store, task)
                 .await?
                 .refusal(&task.plan.identifier)
         }
@@ -1367,7 +1373,7 @@ async fn snapshot_task_detail(
         &next_move,
         local_progress,
         action_evidence.as_ref(),
-        &flow_record,
+        execution.as_ref(),
         observed_at,
     );
     let actions = action_evidence.as_ref().map_or_else(
@@ -1382,8 +1388,8 @@ async fn snapshot_task_detail(
         None => None,
     };
     let work_status = runtime.as_ref().map(|runtime| runtime.status.work_status());
-    let flow_controls =
-        crate::ops::task_flow::task_flow_controls(&crate::ops::task_flow::TaskFlowGate {
+    let run_control =
+        crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: work_status.as_ref(),
             // Linear completing a Task that never left `start` withdraws it.
             plan_terminal_reason: item.terminal_reason().filter(|_| {
@@ -1396,11 +1402,14 @@ async fn snapshot_task_detail(
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let flow = TaskFlowSnapshot {
-        recommended,
-        record: flow_record,
-        controls: flow_controls,
-    };
+    let workflow_name = match task {
+        Some(task) => store
+            .sqlite
+            .workflow(&task.id)?
+            .map(|workflow| workflow.definition.name),
+        None => None,
+    }
+    .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
         reference,
@@ -1409,7 +1418,10 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        flow,
+        workflow_name,
+        latest_flow_process: flow_record,
+        execution,
+        run_control,
         prs: prs
             .iter()
             .map(|pr| {
@@ -1543,13 +1555,13 @@ fn derive_task_condition(
     next_move: &NextMove,
     local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
-    flow: &TaskFlowRecord,
+    execution: Option<&TaskExecutionSnapshot>,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
         !runtime.status.is_terminal()
-            || matches!(flow, TaskFlowRecord::Latest(flow) if flow.execution != TaskExecutionState::Idle)
+            || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
     });
@@ -1630,14 +1642,14 @@ fn task_reference(
     task: Option<&Task>,
     active_pr: Option<&TaskPr>,
     prs: &[TaskPr],
-    home_id: Option<crate::durable::HomeId>,
-    local_home: &crate::durable::HomeId,
+    machine_id: Option<crate::durable::MachineId>,
+    local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.map(|task| {
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
-        let local = home_id.as_ref() == Some(local_home);
+        let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
         let worktree = if local && task.worktree.is_dir() {
             crate::engine::git::worktree_root(&task.worktree)
@@ -1648,7 +1660,7 @@ fn task_reference(
             task.worktree.clone()
         };
         TaskWorktreeSnapshot {
-            home_id,
+            machine_id,
             slug: task.workspace_slug.clone(),
             branch,
             worktree: worktree.display().to_string(),
@@ -1797,23 +1809,23 @@ fn print_wave_table(snapshots: &[WaveSnapshot]) {
     }
     let colors = Colors::default();
     println!(
-        "{bold}{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}{reset}",
+        "{bold}{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {machine:<16}{reset}",
         bold = colors.bold,
         reset = colors.reset,
         name = "WAVE",
         repo = "REPOSITORY",
         status = "STATUS",
         tasks = "TASKS",
-        home = "HOME",
+        machine = "MACHINE",
     );
     for wave in snapshots {
         println!(
-            "{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {home:<16}",
+            "{name:<16}  {repo:<28}  {status:<8}  {tasks:>5}  {machine:<16}",
             name = truncate(&wave.name, 16),
             repo = truncate_start(&wave.repo, 28),
             status = wave.status.label(),
             tasks = wave.active_tasks,
-            home = truncate(&wave.home.route, 16),
+            machine = truncate(&wave.machine.route, 16),
         );
     }
 }
@@ -1844,7 +1856,10 @@ fn print_status(status: &WaveDetailSnapshot) {
         );
     }
     println!("  goal      {}", wave.goal);
-    println!("  home      {} ({})", wave.home.id, wave.home.route);
+    println!(
+        "  machine      {} ({})",
+        wave.machine.id, wave.machine.route
+    );
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {
@@ -2362,7 +2377,7 @@ mod tests {
     use super::{
         derive_task_condition, metric_portfolio_text, next_move_for_task, truncate_start,
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
-        TaskConditionState, TaskFlowRecord, TaskRuntimeSnapshot,
+        TaskConditionState, TaskRuntimeSnapshot,
     };
     use crate::durable::{TaskState, WorkStatus};
     use crate::ops::task_actions::TaskActionEvidence;
@@ -2435,7 +2450,7 @@ mod tests {
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
             );
-            assert_eq!(detail.flow.controls[0].unavailable.as_deref(), terminal);
+            assert_eq!(detail.run_control.unavailable.as_deref(), terminal);
             if let Some(reason) = terminal {
                 assert_eq!(detail.next_move.reason, reason);
                 assert_eq!(detail.actions.reason, reason);
@@ -3002,7 +3017,7 @@ mod tests {
 
     #[test]
     fn a_finished_task_stays_current_only_while_execution_is_unresolved() {
-        let unresolved = |status, flow: &TaskFlowRecord, state, unsettled| {
+        let unresolved = |status, execution: Option<&TaskExecutionSnapshot>, state, unsettled| {
             let runtime = TaskRuntimeSnapshot {
                 work_id: "task-1".to_string(),
                 status,
@@ -3027,30 +3042,26 @@ mod tests {
                     reason: None,
                 },
                 None,
-                flow,
+                execution,
                 OffsetDateTime::now_utc(),
             )
             .unresolved_execution
         };
-        let review = TaskFlowRecord::Latest(crate::ops::task_flow::LatestTaskFlow {
-            invocation_id: "inv".into(),
-            graph: crate::engine::flow_graph::FlowGraph::new("feature", &[]),
-            current: None,
-            completed: Vec::new(),
-            returns: Vec::new(),
-            iterations: Vec::new(),
-            execution: TaskExecutionState::Blocked,
+        let review = Some(TaskExecutionSnapshot {
+            state: TaskExecutionState::Blocked,
             reason: "Release target is unavailable".into(),
+            step: None,
+            captured: None,
         });
-        let none = TaskFlowRecord::None;
+        let none = None;
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
-        assert!(!unresolved(TaskState::Done, &none, missing, true));
-        assert!(unresolved(TaskState::Active, &none, missing, true));
-        assert!(unresolved(TaskState::Done, &review, missing, false));
+        assert!(!unresolved(TaskState::Done, none, missing, true));
+        assert!(unresolved(TaskState::Active, none, missing, true));
+        assert!(unresolved(TaskState::Done, review.as_ref(), missing, false));
         assert!(unresolved(
             TaskState::Done,
-            &none,
+            none,
             LocalProgressEvidenceState::Observed,
             true
         ));
@@ -3085,7 +3096,7 @@ mod tests {
             &next_move,
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(advisory.state, TaskConditionState::Clear);
@@ -3098,7 +3109,7 @@ mod tests {
             },
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(delegated.state, TaskConditionState::Waiting);
@@ -3112,7 +3123,7 @@ mod tests {
             },
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
@@ -3161,7 +3172,7 @@ mod tests {
                     reason: None,
                 },
                 Some(&actions),
-                &TaskFlowRecord::None,
+                None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, expected);
@@ -3188,7 +3199,7 @@ mod tests {
                             status: runtime.status.work_status(),
                             ..actions
                         }),
-                        &TaskFlowRecord::None,
+                        None,
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
@@ -3230,7 +3241,7 @@ mod tests {
             },
             local_progress,
             Some(&action_evidence),
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
 

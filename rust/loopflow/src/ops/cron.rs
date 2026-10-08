@@ -15,14 +15,14 @@ use std::time::{Duration, Instant};
 use chrono::{TimeZone, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{CronReceiptId, HomeId};
+use crate::durable::{CronReceiptId, MachineId};
 use crate::ops::error::{OpsError, OpsResult};
 
 const RECEIPT_STALE_AFTER: i64 = 6 * 60 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CronHost {
-    pub home_id: HomeId,
+    pub machine_id: MachineId,
     pub lf_home: PathBuf,
     pub path_env: String,
 }
@@ -133,7 +133,8 @@ pub struct CronReceipt {
     pub id: CronReceiptId,
     pub runner_pid: u32,
     pub runner_started_at: Option<i64>,
-    pub home_id: HomeId,
+    #[serde(alias = "home_id")]
+    pub machine_id: MachineId,
     pub wave: String,
     pub flow: String,
     pub target_kind: CronTargetKind,
@@ -164,7 +165,7 @@ pub(crate) struct CronObligation {
     pub(crate) wave: String,
     pub(crate) flow: String,
     pub(crate) schedule: CronSchedule,
-    pub(crate) home_id: HomeId,
+    pub(crate) machine_id: MachineId,
     pub(crate) activated_at: i64,
     pub(crate) receipts: Vec<CronReceipt>,
     pub(crate) repo: PathBuf,
@@ -189,7 +190,7 @@ pub struct InstalledCron {
     pub path: PathBuf,
     pub schedule: String,
     pub target_kind: CronTargetKind,
-    pub home_id: HomeId,
+    pub machine_id: MachineId,
     pub activated_at: i64,
     pub repo: PathBuf,
     pub lf_path: PathBuf,
@@ -256,7 +257,7 @@ pub fn add_cron(
         retain_installed_obligation(&prior_spec, prior.activated_at, now)?;
         if matches!(prior_spec.flow.as_str(), "release-run" | "telemetry-daily")
             && (prior_spec.host.lf_home != spec.host.lf_home
-                || prior_spec.host.home_id != spec.host.home_id
+                || prior_spec.host.machine_id != spec.host.machine_id
                 || prior_spec.working_directory.canonicalize()?
                     != spec.working_directory.canonicalize()?)
         {
@@ -317,7 +318,7 @@ fn retain_installed_obligation(spec: &CronSpec, activated_at: i64, now: i64) -> 
     // retained evidence needs today's zone, explicitly unknown before now.
     let retained = accounting::read(&spec.host.lf_home)?.iter().any(|s| {
         s.repo == repo
-            && s.home_id == spec.host.home_id
+            && s.machine_id == spec.host.machine_id
             && s.wave == spec.wave
             && s.flow == spec.flow
             && s.schedule == spec.schedule.expression()
@@ -502,16 +503,16 @@ pub fn run_cron(
     launch_agents_dir: &Path,
     wave: &str,
     flow: &str,
-    current_home: &HomeId,
-    placed_home: &HomeId,
+    current_machine: &MachineId,
+    placed_machine: &MachineId,
     source: CronSource,
 ) -> OpsResult<CronReceipt> {
     run_cron_recorded(
         launch_agents_dir,
         wave,
         flow,
-        current_home,
-        placed_home,
+        current_machine,
+        placed_machine,
         source,
         &mut |_| Ok(()),
     )
@@ -521,8 +522,8 @@ pub(crate) fn run_cron_recorded(
     launch_agents_dir: &Path,
     wave: &str,
     flow: &str,
-    current_home: &HomeId,
-    placed_home: &HomeId,
+    current_machine: &MachineId,
+    placed_machine: &MachineId,
     source: CronSource,
     record: &mut dyn FnMut(&CronReceipt) -> OpsResult<()>,
 ) -> OpsResult<CronReceipt> {
@@ -530,7 +531,7 @@ pub(crate) fn run_cron_recorded(
     let spec = read_cron_spec(&path)?;
     validate_installed_spec(&spec, wave, flow)?;
     let root = receipt_root(&spec.host.lf_home);
-    let mut receipt = new_receipt(&spec, current_home, source);
+    let mut receipt = new_receipt(&spec, current_machine, source);
     if source == CronSource::Scheduled && accounting::consume_trigger(&spec, &receipt)? {
         receipt.source = CronSource::Triggered;
     }
@@ -559,14 +560,14 @@ pub(crate) fn run_cron_recorded(
     };
     let release_obligation = obligation.filter(|_| flow == "release-run");
 
-    let placement_error = if spec.host.home_id != *placed_home {
+    let placement_error = if spec.host.machine_id != *placed_machine {
         Some(format!(
-            "installed for Home {}, but Wave {wave} is placed on {placed_home}; run `lf wave cron sync --wave {wave}` on the placed Home",
-            spec.host.home_id
+            "installed for Machine {}, but Wave {wave} is placed on {placed_machine}; run `lf wave cron sync --wave {wave}` on the placed Machine",
+            spec.host.machine_id
         ))
-    } else if *current_home != *placed_home {
+    } else if *current_machine != *placed_machine {
         Some(format!(
-            "current Home is {current_home}, but Wave {wave} is placed on {placed_home}"
+            "current Machine is {current_machine}, but Wave {wave} is placed on {placed_machine}"
         ))
     } else {
         None
@@ -670,7 +671,7 @@ pub(crate) fn run_cron_recorded(
     }
 }
 
-/// Persist a terminal receipt when scheduled execution cannot read its Home
+/// Persist a terminal receipt when scheduled execution cannot read its Machine
 /// placement authority. The installed plist still supplies the durable receipt
 /// location and non-secret job identity; no target is started.
 pub fn record_cron_preflight_failure(
@@ -683,11 +684,11 @@ pub fn record_cron_preflight_failure(
     let spec = read_cron_spec(&plist_path(launch_agents_dir, wave, flow))?;
     validate_installed_spec(&spec, wave, flow)?;
     let root = receipt_root(&spec.host.lf_home);
-    let mut receipt = new_receipt(&spec, &spec.host.home_id, source);
+    let mut receipt = new_receipt(&spec, &spec.host.machine_id, source);
     write_receipt(&root, &receipt)?;
     receipt.finished_at = Some(Utc::now().timestamp());
     receipt.outcome = CronOutcome::Failed;
-    receipt.error = Some(format!("Home placement preflight failed: {error}"));
+    receipt.error = Some(format!("Machine placement preflight failed: {error}"));
     if matches!(flow, "release-run" | "telemetry-daily") {
         let zone = iana_time_zone::get_timezone().map_err(|e| OpsError::Message(e.to_string()))?;
         let prior = read_cron_obligation(&plist_path(launch_agents_dir, wave, flow))?;
@@ -840,12 +841,9 @@ pub fn default_launch_agents_dir() -> OpsResult<PathBuf> {
 pub fn resolve_lf_path() -> OpsResult<PathBuf> {
     // Scheduled work follows future promotions; Sessions pin their own runtime.
     if !crate::store::custom_home_selected() {
-        let gate = crate::machine_install::root()
+        let gate = crate::installation::root()
             .and_then(|root| {
-                crate::machine_install::entry_gate_path(
-                    &root,
-                    &crate::machine_install::ArtifactRole::Cli,
-                )
+                crate::installation::entry_gate_path(&root, &crate::installation::ArtifactRole::Cli)
             })
             .map_err(|error| OpsError::Message(error.to_string()))?;
         if gate.is_file() {
@@ -866,7 +864,7 @@ fn inspect_cron(path: &Path, launchctl: &dyn Launchctl) -> OpsResult<InstalledCr
         path: path.to_path_buf(),
         schedule: spec.schedule.expression().to_string(),
         target_kind: spec.target_kind,
-        home_id: spec.host.home_id.clone(),
+        machine_id: spec.host.machine_id.clone(),
         activated_at: obligation.activated_at,
         repo: spec.working_directory.clone(),
         lf_path: spec.lf_path.clone(),
@@ -902,7 +900,7 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
         working_directory: PathBuf::from(required("LoopflowRepo")?),
         lf_path: PathBuf::from(required("LoopflowLfPath")?),
         host: CronHost {
-            home_id: HomeId::parse(&required("LoopflowHomeId")?)
+            machine_id: MachineId::parse(&required("LoopflowHomeId")?)
                 .map_err(|error| OpsError::Parse(error.to_string()))?,
             lf_home: PathBuf::from(required("LoopflowLfHome")?),
             path_env: required("LoopflowPath")?,
@@ -932,7 +930,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
                 receipt.source == CronSource::Scheduled
                     && receipt.wave == spec.wave
                     && receipt.flow == spec.flow
-                    && receipt.home_id == spec.host.home_id
+                    && receipt.machine_id == spec.host.machine_id
                     && receipt.schedule == spec.schedule.expression()
             })
             .map(|receipt| receipt.started_at)
@@ -955,7 +953,7 @@ fn read_cron_obligation(path: &Path) -> OpsResult<CronObligation> {
         wave: spec.wave,
         flow: spec.flow,
         schedule: spec.schedule,
-        home_id: spec.host.home_id,
+        machine_id: spec.host.machine_id,
         activated_at,
         receipts,
     })
@@ -965,7 +963,7 @@ fn same_obligation(prior: &CronObligation, spec: &CronSpec) -> bool {
     prior.wave == spec.wave
         && prior.flow == spec.flow
         && prior.schedule == spec.schedule
-        && prior.home_id == spec.host.home_id
+        && prior.machine_id == spec.host.machine_id
 }
 
 fn file_timestamp(path: &Path) -> Option<i64> {
@@ -1041,7 +1039,7 @@ fn spawn_cron_target(
         use std::os::unix::process::CommandExt;
         let fd = file.as_raw_fd();
         // SAFETY: the parent keeps the file alive until spawn returns. The child
-        // only changes an fd flag with an async-signal-safe syscall before exec.
+        // only changes an fd flag with an async-signal-safe syscall before process.
         unsafe {
             command.pre_exec(move || {
                 if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
@@ -1103,7 +1101,7 @@ fn validate_installed_spec(spec: &CronSpec, wave: &str, flow: &str) -> OpsResult
     )))
 }
 
-fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronReceipt {
+fn new_receipt(spec: &CronSpec, machine_id: &MachineId, source: CronSource) -> CronReceipt {
     CronReceipt {
         schema_version: 1,
         id: CronReceiptId::new(),
@@ -1111,7 +1109,7 @@ fn new_receipt(spec: &CronSpec, home_id: &HomeId, source: CronSource) -> CronRec
         runner_started_at: crate::journal::process_started_at(std::process::id())
             .ok()
             .flatten(),
-        home_id: home_id.clone(),
+        machine_id: machine_id.clone(),
         wave: spec.wave.clone(),
         flow: spec.flow.clone(),
         target_kind: spec.target_kind,
@@ -1257,7 +1255,7 @@ fn plist_path(dir: &Path, wave: &str, flow: &str) -> PathBuf {
     dir.join(format!("{}.plist", label(wave, flow).replace('/', ".")))
 }
 
-pub fn repository_cron_key(repo: &Path, home: &HomeId) -> String {
+pub fn repository_cron_key(repo: &Path, home: &MachineId) -> String {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     hash.update(repo.as_os_str().as_encoded_bytes());
@@ -1311,7 +1309,7 @@ fn render_plist(spec: &CronSpec, activated_at: i64) -> String {
         ("LoopflowFlow", spec.flow.clone()),
         ("LoopflowTargetKind", spec.target_kind.as_str().to_string()),
         ("LoopflowSchedule", spec.schedule.expression.clone()),
-        ("LoopflowHomeId", spec.host.home_id.to_string()),
+        ("LoopflowHomeId", spec.host.machine_id.to_string()),
         ("LoopflowActivatedAt", activated_at.to_string()),
         (
             "LoopflowRepo",
@@ -1506,7 +1504,7 @@ mod tests {
 
     fn host(root: &Path) -> CronHost {
         CronHost {
-            home_id: HomeId::new(),
+            machine_id: MachineId::new(),
             lf_home: root.join("home"),
             path_env: "/usr/bin:/bin".to_string(),
         }
@@ -1548,7 +1546,7 @@ mod tests {
 
         let temp = tempfile::TempDir::new().unwrap();
         let cron = spec(temp.path(), Path::new("/usr/bin/true"));
-        let receipt = new_receipt(&cron, &cron.host.home_id, CronSource::Scheduled);
+        let receipt = new_receipt(&cron, &cron.host.machine_id, CronSource::Scheduled);
         assert_eq!(receipt.runner_evidence(), ProcessIdentityEvidence::Live);
 
         let mut reused = receipt.clone();
@@ -1600,8 +1598,8 @@ mod tests {
             temp.path(),
             &spec.wave,
             &spec.flow,
-            &spec.host.home_id,
-            &spec.host.home_id,
+            &spec.host.machine_id,
+            &spec.host.machine_id,
             CronSource::Recovery,
         )
         .unwrap_err();
@@ -1612,8 +1610,8 @@ mod tests {
             temp.path(),
             &spec.wave,
             &spec.flow,
-            &spec.host.home_id,
-            &spec.host.home_id,
+            &spec.host.machine_id,
+            &spec.host.machine_id,
             CronSource::Recovery,
         )
         .unwrap();
@@ -1658,7 +1656,7 @@ mod tests {
         );
         fs::create_dir_all(&spec.working_directory).unwrap();
         add_cron(temp.path(), &spec, &FakeLaunchctl::default()).unwrap();
-        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let receipt = new_receipt(&spec, &spec.host.machine_id, CronSource::Recovery);
         let root = receipt_root(&spec.host.lf_home);
         write_receipt(&root, &receipt).unwrap();
         let owner = accounting::claim_execution(&spec).unwrap().unwrap();
@@ -1694,8 +1692,8 @@ mod tests {
                 temp.path(),
                 &spec.wave,
                 &spec.flow,
-                &spec.host.home_id,
-                &spec.host.home_id,
+                &spec.host.machine_id,
+                &spec.host.machine_id,
                 CronSource::Recovery,
             )
         };
@@ -1730,7 +1728,7 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let spec = spec(temp.path(), Path::new("/usr/bin/true"));
         fs::create_dir_all(&spec.working_directory).unwrap();
-        let receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Recovery);
+        let receipt = new_receipt(&spec, &spec.host.machine_id, CronSource::Recovery);
         let root = receipt_root(&spec.host.lf_home);
         write_receipt(&root, &receipt).unwrap();
         let mut child = spawn_cron_target(&spec, None, &receipt).unwrap();
@@ -1751,6 +1749,32 @@ mod tests {
     }
 
     #[test]
+    fn released_receipts_keep_their_machine_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let spec = spec(temp.path(), Path::new("/usr/bin/true"));
+        let receipt = new_receipt(&spec, &spec.host.machine_id, CronSource::Scheduled);
+        let mut released = serde_json::to_value(&receipt).unwrap();
+        let object = released.as_object_mut().unwrap();
+        let id = object.remove("machine_id").unwrap();
+        object.insert("home_id".into(), id);
+        let root = receipt_root(&spec.host.lf_home);
+        let dir = root.join(&spec.wave).join(&spec.flow);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("{}-{}.json", receipt.started_at, receipt.id)),
+            serde_json::to_vec(&released).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_receipts(&root, &spec.wave, Some(&spec.flow)).unwrap(),
+            vec![receipt.clone()]
+        );
+        let current = serde_json::to_value(receipt).unwrap();
+        assert!(current.get("machine_id").is_some());
+        assert!(current.get("home_id").is_none());
+    }
+
+    #[test]
     fn add_list_remove_round_trips_loaded_launchd_spec() {
         let temp = tempfile::TempDir::new().unwrap();
         let launchctl = FakeLaunchctl::default();
@@ -1761,7 +1785,7 @@ mod tests {
         assert_eq!(installed.label, "loopflow.cron.reliability.wave-report");
         assert!(installed.loaded);
         assert_eq!(installed.schedule, "0 0 3 * * *");
-        assert_eq!(installed.home_id, spec.host.home_id);
+        assert_eq!(installed.machine_id, spec.host.machine_id);
         assert!(installed.activated_at > 0);
         assert_eq!(
             fs::metadata(&installed.path).unwrap().permissions().mode() & 0o777,
@@ -1813,7 +1837,7 @@ mod tests {
             installed.activated_at
         );
         fs::write(&installed.path, content.replace(&activation, "")).unwrap();
-        let mut receipt = new_receipt(&spec, &spec.host.home_id, CronSource::Scheduled);
+        let mut receipt = new_receipt(&spec, &spec.host.machine_id, CronSource::Scheduled);
         receipt.started_at = 1_787_419_441;
         receipt.finished_at = Some(receipt.started_at + 60);
         receipt.outcome = CronOutcome::Succeeded;
@@ -1850,7 +1874,7 @@ mod tests {
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
         let mut cron = spec(temp.path(), &executable);
         cron.wave.clear();
-        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
         cron.target_kind = CronTargetKind::Repository;
         cron.schedule = parse_schedule("every-minute").unwrap();
         fs::create_dir_all(&cron.working_directory).unwrap();
@@ -1858,7 +1882,7 @@ mod tests {
         assert_eq!(plist.matches("<key>Minute</key>").count(), 60);
         assert!(!plist.contains("<key>Hour</key>"));
         assert!(!plist.contains("KeepAlive"));
-        let receipt = super::new_receipt(&cron, &cron.host.home_id, CronSource::Scheduled);
+        let receipt = super::new_receipt(&cron, &cron.host.machine_id, CronSource::Scheduled);
         assert!(super::spawn_cron_target(&cron, None, &receipt)
             .unwrap()
             .wait()
@@ -1870,7 +1894,7 @@ mod tests {
         );
         assert_ne!(
             cron.flow,
-            super::repository_cron_key(&cron.working_directory, &HomeId::new())
+            super::repository_cron_key(&cron.working_directory, &MachineId::new())
         );
     }
 
@@ -1881,7 +1905,7 @@ mod tests {
         let launchctl = FakeLaunchctl::default();
         let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
         cron.wave.clear();
-        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.home_id);
+        cron.flow = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
         cron.target_kind = CronTargetKind::Repository;
         cron.schedule = parse_schedule("every-minute").unwrap();
         fs::create_dir_all(&cron.working_directory).unwrap();
@@ -1891,8 +1915,8 @@ mod tests {
                 &agents,
                 "",
                 &cron.flow,
-                &cron.host.home_id,
-                &cron.host.home_id,
+                &cron.host.machine_id,
+                &cron.host.machine_id,
                 CronSource::Scheduled,
             )
         };
@@ -1980,7 +2004,7 @@ mod tests {
 
         let old_home = telemetry.host.lf_home.clone();
         telemetry.host.lf_home = temp.path().join("other-home");
-        telemetry.host.home_id = HomeId::new();
+        telemetry.host.machine_id = MachineId::new();
         add_cron(&agents, &telemetry, &launchctl).unwrap();
         assert!(accounting::read(&old_home)
             .unwrap()
@@ -1989,7 +2013,7 @@ mod tests {
         remove_cron(&agents, &telemetry.wave, &telemetry.flow, &launchctl).unwrap();
         let moved = accounting::read(&telemetry.host.lf_home).unwrap();
         assert_eq!(moved.len(), 1);
-        assert_eq!(moved[0].home_id, telemetry.host.home_id);
+        assert_eq!(moved[0].machine_id, telemetry.host.machine_id);
         assert!(moved[0].closed_at.is_some());
         assert!(moved[0].opportunities.is_empty());
         assert!(!path.exists());
@@ -2065,24 +2089,23 @@ mod tests {
     fn scheduled_work_follows_the_entry_gate_without_reinstalling_the_job() {
         let temp = tempfile::TempDir::new().unwrap();
         let agents = temp.path().join("agents");
-        let root = crate::machine_install::root_for_home(temp.path());
-        let role = crate::machine_install::ArtifactRole::Cli;
+        let root = crate::installation::root_for_home(temp.path());
+        let role = crate::installation::ArtifactRole::Cli;
         let gate =
-            crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/false"))
+            crate::installation::install_entry_gate(&root, &role, Path::new("/usr/bin/false"))
                 .unwrap();
         let spec = spec(temp.path(), &gate);
         fs::create_dir_all(&spec.working_directory).unwrap();
         let installed = add_cron(&agents, &spec, &FakeLaunchctl::default()).unwrap();
         let declaration = fs::read(&installed.path).unwrap();
 
-        crate::machine_install::install_entry_gate(&root, &role, Path::new("/usr/bin/true"))
-            .unwrap();
+        crate::installation::install_entry_gate(&root, &role, Path::new("/usr/bin/true")).unwrap();
         let receipt = run_cron(
             &agents,
             &spec.wave,
             &spec.flow,
-            &spec.host.home_id,
-            &spec.host.home_id,
+            &spec.host.machine_id,
+            &spec.host.machine_id,
             CronSource::Scheduled,
         )
         .unwrap();
@@ -2105,8 +2128,8 @@ mod tests {
             &agents,
             &success.wave,
             &success.flow,
-            &success.host.home_id,
-            &success.host.home_id,
+            &success.host.machine_id,
+            &success.host.machine_id,
             CronSource::Manual,
         )
         .unwrap();
@@ -2126,8 +2149,8 @@ mod tests {
             &agents,
             &failure.wave,
             &failure.flow,
-            &failure.host.home_id,
-            &failure.host.home_id,
+            &failure.host.machine_id,
+            &failure.host.machine_id,
             CronSource::Scheduled,
         )
         .is_err());
@@ -2193,8 +2216,8 @@ mod tests {
                 &agents,
                 &cron.wave,
                 &cron.flow,
-                &cron.host.home_id,
-                &cron.host.home_id,
+                &cron.host.machine_id,
+                &cron.host.machine_id,
                 CronSource::Scheduled,
             )
             .unwrap();
@@ -2233,14 +2256,14 @@ mod tests {
         let cron = spec(temp.path(), Path::new("/usr/bin/true"));
         fs::create_dir_all(&cron.working_directory).unwrap();
         add_cron(&agents, &cron, &launchctl).unwrap();
-        let placed_home = HomeId::new();
+        let placed_machine = MachineId::new();
 
         let error = run_cron(
             &agents,
             &cron.wave,
             &cron.flow,
-            &cron.host.home_id,
-            &placed_home,
+            &cron.host.machine_id,
+            &placed_machine,
             CronSource::Scheduled,
         )
         .unwrap_err();
@@ -2259,7 +2282,7 @@ mod tests {
             .error
             .as_deref()
             .unwrap()
-            .contains(placed_home.as_str()));
+            .contains(placed_machine.as_str()));
     }
 
     #[test]
@@ -2276,7 +2299,7 @@ mod tests {
             &cron.wave,
             &cron.flow,
             CronSource::Scheduled,
-            "registry schema is incompatible; run `lf home doctor`",
+            "registry schema is incompatible; run `lf doctor`",
         )
         .unwrap();
         assert_eq!(receipt.outcome, CronOutcome::Failed);
@@ -2298,7 +2321,7 @@ mod tests {
             id: CronReceiptId::new(),
             runner_pid: u32::MAX,
             runner_started_at: None,
-            home_id: HomeId::new(),
+            machine_id: MachineId::new(),
             wave: "infra".to_string(),
             flow: "telemetry".to_string(),
             target_kind: CronTargetKind::Flow,
@@ -2374,8 +2397,8 @@ mod tests {
             &agents,
             &spec.wave,
             &spec.flow,
-            &spec.host.home_id,
-            &spec.host.home_id,
+            &spec.host.machine_id,
+            &spec.host.machine_id,
             CronSource::Scheduled,
         )
         .unwrap();
@@ -2403,8 +2426,8 @@ mod tests {
                 &agents,
                 &spec.wave,
                 &spec.flow,
-                &spec.host.home_id,
-                &spec.host.home_id,
+                &spec.host.machine_id,
+                &spec.host.machine_id,
                 CronSource::Scheduled,
             )
             .unwrap_err();

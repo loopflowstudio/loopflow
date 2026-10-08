@@ -385,7 +385,7 @@ fn seed_previous_release_task_pr(home: &Path) {
     std::fs::create_dir_all(home.join("repo")).expect("fixture repo");
     let fixture = PREVIOUS_RELEASE_TASK_PR_FIXTURE.replace(
         "__LF_HOME__",
-        home.to_str().expect("fixture Home path is utf8"),
+        home.to_str().expect("fixture Machine path is utf8"),
     );
     let database = home.join("loopflow.db");
     let connection = rusqlite::Connection::open(&database).expect("open previous release store");
@@ -888,7 +888,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     conn.execute("DELETE FROM task_prs", []).unwrap();
     let before: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_processes)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -935,7 +935,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     }
     let after: (i64, i64, i64) = conn
         .query_row(
-            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_execs)",
+            "SELECT (SELECT COUNT(*) FROM task_events), (SELECT COUNT(*) FROM agent_sessions), (SELECT COUNT(*) FROM flow_processes)",
             [],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

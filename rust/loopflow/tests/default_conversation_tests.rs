@@ -3,7 +3,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 #[test]
-fn bare_lf_launches_a_conversational_prompt_with_a_model_option() {
+fn bare_lf_launches_a_conversational_prompt_with_an_agent_option() {
     let temp = tempfile::tempdir().unwrap();
     let bin = temp.path().join("bin");
     fs::create_dir(&bin).unwrap();
@@ -36,17 +36,29 @@ printf '%s\n' "$@"
         &std::env::var_os("PATH").unwrap_or_default(),
     )))
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .args(["-m", "claude"])
-        // Outside the checkout: the launch prompt carries the working directory's
-        // scratch notes, and a branch with large notes exceeds Linux's argument limit.
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+    for (key, _) in std::env::vars_os() {
+        let name = key.to_string_lossy();
+        if name.starts_with("LF_") || name.starts_with("LOOPFLOW_") {
+            command.env_remove(key);
+        }
+    }
+    let output = command
+        .args(["-a", "claude:sonnet"])
+        // Keep the conversational fixture independent of this checkout's context.
         .current_dir(&repo)
         .env("LF_HOME", temp.path().join("home"))
         .env("PATH", path)
         .output()
         .unwrap();
 
-    let prompt = String::from_utf8_lossy(&output.stdout);
+    let arguments = String::from_utf8_lossy(&output.stdout);
+    assert!(arguments.contains("--model\nsonnet\n"), "{arguments}");
+    let mut arguments = arguments.lines();
+    arguments
+        .find(|arg| *arg == "--append-system-prompt-file")
+        .expect("context file argument");
+    let prompt = fs::read_to_string(arguments.next().unwrap()).unwrap();
     assert!(prompt.contains("<lf:skill:default>"), "{prompt}");
     assert!(!prompt.contains("<lf:skill:repo/operate>"), "{prompt}");
     assert!(!prompt.contains("lf session list --json"), "{prompt}");

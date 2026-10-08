@@ -254,7 +254,7 @@ pub(crate) fn experimental_store_diagnostic(
         return error;
     };
     StoreError::IncompatibleDevelopment(format!(
-        "{reason}\nDatabase: {}\nCustom Homes are disposable. Start a new experiment with a fresh LF_HOME; this Home will not be upgraded or repaired.",
+        "{reason}\nDatabase: {}\nCustom Machines are disposable. Start a new experiment with a fresh LF_HOME; this Machine will not be upgraded or repaired.",
         conn.path().unwrap_or(":memory:")
     ))
 }
@@ -680,7 +680,7 @@ fn hash_text(digest: &mut Sha256, value: &str) {
 /// Scan every stored row for a dangling reference. This reads the whole
 /// database, so opening a store never runs it: every connection enforces
 /// foreign keys and only a migration can violate them. Migrations check before
-/// they commit; `lf home doctor` and installation preflight diagnose in full.
+/// they commit; `lf doctor` and installation preflight diagnose in full.
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
     let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
     if statement.query([])?.next()?.is_some() {
@@ -1073,7 +1073,7 @@ fn pending_migrations<'a>(
         }
         return match MigrationId::parse_version(version) {
             Some(_) => Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf home doctor with that binary",
+                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf doctor with that binary",
                 env!("CARGO_PKG_VERSION"),
                 set.last()
                     .map(Migration::version)
@@ -1339,6 +1339,97 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn process_names_preserves_released_history_and_constraints() {
+        let conn = open();
+        apply_before_current_draft(&conn, "process_names");
+        conn.execute_batch(r#"
+            PRAGMA foreign_keys = ON;
+            INSERT INTO execs(id,trace_id,command,cwd,started_at)
+                VALUES('parent','trace','lf run code','/repo/task',1);
+            INSERT INTO execs(id,trace_id,parent_exec_id,command,started_at,completed_at,outcome,exit_code,error)
+                VALUES('child','trace','parent','lf skill implement',2,3,'failed',42,'retained error');
+            INSERT INTO waves(id,name,repo,created_at,project_activation_exec_id) VALUES('w','proof','/repo',1,'parent');
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','external-p',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree)
+                VALUES('t','p','external-t','PROOF-1',1,'/repo/task');
+            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_exec_id,provider_exec_id,provider_thread,input_published)
+                VALUES('s','Keep conversation','human',1,'/repo/task','t','w','child','child','native-thread',1);
+            INSERT INTO session_events(session_id,exec_id,kind,receipt_key,observed_at,payload)
+                VALUES('s','child','captured','capture',2,'{"exec":"opaque history"}');
+            INSERT INTO flow_execs(exec_id,flow,graph) VALUES('parent','code','{}');
+            INSERT INTO flow_exec_steps(flow_exec_id,exec_id,node,iterations) VALUES('parent','child',7,'[[2,1]]');
+            INSERT INTO task_workflows(task_id,graph,node,edge,exec_id,updated_at) VALUES('t','{}','start',0,'parent',2);
+            INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,exec_id,note,at)
+                VALUES('t','code','chose','start','start',0,'parent','Retained decision',2);
+        "#).unwrap();
+        let rows = |table: &str| -> Vec<Vec<rusqlite::types::Value>> {
+            let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |row| (0..columns).map(|i| row.get(i)).collect())
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let tables = [
+            ("execs", "processes"),
+            ("flow_execs", "flow_processes"),
+            ("flow_exec_steps", "flow_process_steps"),
+            ("agent_sessions", "agent_sessions"),
+            ("session_events", "session_events"),
+            ("waves", "waves"),
+            ("tasks", "tasks"),
+            ("task_workflows", "task_workflows"),
+            ("task_workflow_moves", "task_workflow_moves"),
+        ];
+        let before: Vec<_> = tables.iter().map(|(old, _)| rows(old)).collect();
+        let revision: i64 = conn
+            .query_row(
+                "SELECT revision FROM store_revisions WHERE domain='execs'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("process_names"))
+            .unwrap();
+        for ((_, current), mut expected) in tables.iter().zip(before) {
+            if *current == "processes" {
+                for row in &mut expected {
+                    row.push(rusqlite::types::Value::Null);
+                }
+            }
+            assert_eq!(rows(current), expected, "{current}");
+        }
+        assert!(rows("pragma_foreign_key_check").is_empty());
+        assert!(conn.prepare("SELECT * FROM execs").is_err());
+        assert!(conn
+            .execute("UPDATE flow_processes SET flow='changed'", [])
+            .is_err());
+        assert!(conn
+            .execute("UPDATE flow_process_steps SET node=8", [])
+            .is_err());
+        assert!(conn.execute("INSERT INTO flow_process_steps(flow_process_lfid,process_lfid,node,iterations) VALUES('parent','parent',0,'[]')", []).is_err());
+        conn.execute("UPDATE tasks SET started_at=started_at WHERE id='t'", [])
+            .unwrap();
+        assert!(conn
+            .execute("UPDATE tasks SET started_at=started_at+1 WHERE id='t'", [])
+            .is_err());
+        conn.execute(
+            "UPDATE processes SET completed_at=4,outcome='succeeded',exit_code=0 WHERE lfid='parent'",
+            [],
+        )
+        .unwrap();
+        let after: i64 = conn
+            .query_row(
+                "SELECT revision FROM store_revisions WHERE domain='processes'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, revision + 1);
     }
 
     #[test]
@@ -2382,6 +2473,67 @@ mod tests {
         );
     }
 
+    #[test]
+    fn machine_connections_preserve_released_records() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "rename_home_to_machine");
+        conn.execute_batch("INSERT INTO homes (id, route, created_at, observed_at)
+            VALUES ('home_11111111111111111111111111111111', 'ssh://jack@mini', 9, 10);
+            INSERT INTO waves (id, name, repo, created_at) VALUES ('machine-wave', 'machine', '/repo', 7);
+            INSERT INTO work_placements (wave_id, home_id, placed_at)
+            VALUES ('machine-wave', 'home_11111111111111111111111111111111', 8);").unwrap();
+        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("machine_connections"))
+            .unwrap();
+        let row: (String, i64, i64, Option<String>, Option<String>, i64) = conn.query_row(
+            "SELECT m.route, m.created_at, m.observed_at, m.label, m.repo, p.placed_at
+             FROM machines m JOIN work_placements p ON p.machine_id=m.id WHERE p.wave_id='machine-wave'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))).unwrap();
+        assert_eq!(row, ("ssh://jack@mini".into(), 9, 10, None, None, 8));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
+    fn machine_rename_preserves_released_identity_and_placement() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "rename_home_to_machine");
+        let id: String = conn
+            .query_row("SELECT id FROM homes WHERE route='local'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO waves (id, name, repo, created_at)
+            VALUES ('rename-wave', 'rename', '/repo', 7);
+            INSERT INTO work_placements (wave_id, home_id, placed_at)
+            SELECT 'rename-wave', id, 8 FROM homes WHERE route='local';
+            INSERT INTO homes (id, route, created_at, observed_at)
+            VALUES ('home_00000000000000000000000000000001', 'ssh://jack@mini', 9, 10);",
+        )
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("rename_home_to_machine"))
+            .unwrap();
+        let retained: (String, i64) = conn
+            .query_row(
+                "SELECT machine_id, placed_at FROM work_placements WHERE wave_id='rename-wave'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(retained, (id.clone(), 8));
+        assert!(crate::durable::MachineId::parse(&id).is_ok());
+        let remote: (String, i64, i64) = conn.query_row(
+            "SELECT route, created_at, observed_at FROM machines WHERE id='home_00000000000000000000000000000001'",
+            [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(remote, ("ssh://jack@mini".into(), 9, 10));
+        assert!(conn.prepare("SELECT * FROM homes").is_err());
+        assert!(conn
+            .execute("UPDATE work_placements SET machine_id='missing'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
     #[tokio::test]
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
@@ -2513,7 +2665,7 @@ mod tests {
         assert_eq!(store.pending_pr_landings("owner/repo").unwrap().len(), 6);
         let conn = rusqlite::Connection::open(&path).unwrap();
         assert!(conn.execute(
-            "UPDATE pr_landings SET supervisor_placement='home', supervisor_home_id='retired_home',
+            "UPDATE pr_landings SET supervisor_placement='home', supervisor_machine_id='retired_home',
                 supervisor_process_id=456, supervisor_heartbeat_at=50 WHERE id='home_watching' AND generation=8", [],
         ).is_err());
         let retained_ci: (String, i64, i64) = conn.query_row(
@@ -4459,7 +4611,7 @@ mod tests {
             message.contains("latest known 0.10.001_initial"),
             "{message}"
         );
-        assert!(message.contains("run lf home doctor"), "{message}");
+        assert!(message.contains("run lf doctor"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned
@@ -4805,7 +4957,7 @@ mod tests {
 
         // A bare `Ok` is not the proof: the regression opened fine and failed
         // on the first read of a table it never created.
-        assert!(store.execs_since(0).unwrap().is_empty());
+        assert!(store.processes_since(0).unwrap().is_empty());
         let conn = rusqlite::Connection::open(&path).unwrap();
         validate_experimental_sqlite(&conn, crate::build_info::migration_draft_manifest()).unwrap();
         assert_eq!(

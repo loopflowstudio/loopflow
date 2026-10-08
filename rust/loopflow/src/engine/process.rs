@@ -159,10 +159,27 @@ pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext>
 }
 
 pub(crate) fn which_on_path(name: &Path) -> Option<PathBuf> {
+    if name.components().count() > 1 {
+        return executable_file(name).then(|| name.to_path_buf());
+    }
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| executable_file(candidate))
+}
+
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return false;
+        }
+    }
+    metadata.is_file()
 }
 
 pub(crate) fn shell_escape(value: &str) -> String {

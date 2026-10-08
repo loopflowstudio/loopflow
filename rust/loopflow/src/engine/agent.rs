@@ -171,6 +171,8 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
+    /// Native skill selection, kept separate from bounded user context.
+    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
@@ -205,6 +207,19 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    /// Declared input bytes; native expansion is measured in provider receipts.
+    pub(crate) fn task_input_for_budget(&self) -> String {
+        match &self.skill_invocation {
+            Some(invocation) => format!(
+                "{}\n\n{}\n\n{}",
+                self.task_prompt,
+                invocation.instruction_text(&parse_agent(self.agent()).0),
+                invocation.arguments
+            ),
+            None => self.task_prompt.clone(),
+        }
+    }
+
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -956,7 +971,7 @@ pub fn build_claude_command(
         worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
             && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
-        stream: process.auto && process.stream,
+        stream: process.auto && (process.stream || launch.skill_invocation.is_some()),
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
     };
@@ -1316,6 +1331,7 @@ fn _run_with_transient_retries(
                     if let Some(resume_token) = resume_token {
                         attempt_config.resume_token = Some(resume_token);
                         attempt_config.task_prompt = RETRY_PROMPT.to_string();
+                        attempt_config.skill_invocation = None;
                     }
                 }
                 (transient_delay, false)
@@ -1715,7 +1731,7 @@ fn _run_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                if matches!(code.as_str(), "codex_disconnected" | "opencode_disconnected" | "provider_rate_limited") {
+                                if matches!(code.as_str(), "codex_disconnected" | "codex_dispatch_rejected" | "opencode_disconnected" | "provider_rate_limited") {
                                     exit_code = Some(1);
                                 }
                             }
@@ -1817,7 +1833,32 @@ fn _run_agent_once(
         // Claude's text stdin carries large assembled context without
         // argv limits. An anonymous file also avoids pipe backpressure at startup.
         let mut input = tempfile::tempfile()?;
-        input.write_all(launch.task_prompt.as_bytes())?;
+        if let Some(invocation) = &launch.skill_invocation {
+            let (flags, command) = invocation
+                .claude_input(launch)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
+            cmd.args(flags);
+            if !launch.task_prompt.is_empty() {
+                writeln!(
+                    input,
+                    "{}",
+                    serde_json::json!({
+                        "type": "user", "shouldQuery": false,
+                        "message": {"role": "user", "content": launch.task_prompt}
+                    })
+                )?;
+            }
+            writeln!(
+                input,
+                "{}",
+                serde_json::json!({
+                    "type": "user", "message": {"role": "user", "content": command}
+                })
+            )?;
+        } else {
+            input.write_all(launch.task_prompt.as_bytes())?;
+        }
         input.rewind()?;
         cmd.stdin(Stdio::from(input));
     } else {
@@ -2311,36 +2352,37 @@ pub fn missing_agent_message(cli: &str) -> String {
 
 /// Check if a CLI is available.
 pub fn check_cli_available(cli: &str) -> bool {
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    if let Ok(guard) = cache.lock() {
-        if let Some(value) = guard.get(cli) {
-            return *value;
-        }
-    }
-
-    let available = Command::new(cli)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(cli.to_string(), available);
-    }
-
-    available
+    crate::engine::process::which_on_path(Path::new(cli)).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    #[cfg(unix)]
+    fn cli_discovery_needs_an_executable_not_a_version_command() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let root = tempfile::tempdir().unwrap();
+        let provider = root.path().join("provider");
+        fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!check_cli_available(provider.to_str().unwrap()));
+        fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(check_cli_available(provider.to_str().unwrap()));
+        let linked = root.path().join("linked-provider");
+        symlink(&provider, &linked).unwrap();
+        assert!(check_cli_available(linked.to_str().unwrap()));
+        fs::remove_file(provider).unwrap();
+        assert!(!check_cli_available(linked.to_str().unwrap()));
+        assert!(!check_cli_available(root.path().to_str().unwrap()));
+    }
+
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
+            skill_invocation: None,
             ..Default::default()
         }
     }

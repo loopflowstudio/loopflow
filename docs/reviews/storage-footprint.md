@@ -137,11 +137,80 @@ written by a build containing #1465 was not checked.
 | --- | --- | --- |
 | History keeps what increments add up to. A run of deltas becomes one event at the first delta's position; a Turn keeps its last cumulative diff; raw increment notifications stay in `events.jsonl` only. | Replaying all 2,046 retained capture files through the same rule keeps 27.5% of rows and 72% of bytes (`scripts/benchmarks/storage/replay_history.py`). Write transactions fall by the same 72%. | `history_keeps_what_streamed_increments_add_up_to`; the existing streamed-prose recovery test still passes with the capture directory deleted |
 | Preflight reads an exact-frontier store in place. Only a pending migration takes #1465's pinned snapshot. | No store copy on routine installs or currency probes; preflight no longer scales with store size. | `an_exact_store_is_validated_in_place` |
-| Write connections set `journal_size_limit` to 64 MiB. | The WAL is truncated when a checkpoint resets it. Expected to return about 1.4 GiB here after install. | `a_burst_does_not_leave_its_wal_on_disk` |
-| A committed migration keeps the two newest fingerprinted backups. | About 10.6 GiB returns at this machine's next migrating release. Hand-named and unfingerprinted backups are never touched. | `a_committed_migration_keeps_only_the_newest_backup_generations` |
+| Write connections set `journal_size_limit` to 64 MiB. | The WAL is truncated when a checkpoint resets it. | `a_burst_does_not_leave_its_wal_on_disk` |
+| A committed migration keeps the two newest fingerprinted backups. | Hand-named and unfingerprinted backups are never touched. | `a_committed_migration_keeps_only_the_newest_backup_generations` |
 
-Existing rows are not rewritten. The installed effect needs a release and is not
-yet observed.
+Existing rows are not rewritten.
+
+## Installed acceptance · 2026-10-07
+
+PR #1474 shipped in v0.13.9, installed on this machine October 7 at 09:43:40
+PDT (`0.13.9.002_release`). Read-only measurements at 18:14–18:25 PDT, 8.5 hours
+later, with the machine at load 27. Nothing was deleted or migrated for this pass.
+
+| Fix | Installed observation | Status |
+| --- | --- | --- |
+| History keeps what increments add up to | 128 captures begun after the install and idle for five minutes: 161,289 rows in `events.jsonl`, 45,475 in SQLite (28.2%; replay predicted 27.5%). SQLite payload is 76.5% of the file's bytes, against 105.9% for the 800 captures of the two days before, a ratio of 72% (predicted 72%). All 508 raw increment rows written after the install belong to one capture begun 34 seconds before it by the previous binary. | **Proved** |
+| Preflight reads an exact store in place | `lf home install preflight --json` three times on the 3.1 GB store: 1.01, 1.01, 1.02 s, verdict `promote`, no `candidate.db` in `$TMPDIR` before or after. October 4 measured 6–13 s at load 14. | **Proved** for an exact frontier; the pending-migration snapshot path was not exercised |
+| WAL limit | `loopflow.db-wal` was 1.4 GiB on October 6 and read exactly 67,108,864 bytes at 18:14 and 18:18 while written. | **Proved** |
+| Two migration backups | The v0.13.9 migration left two fingerprinted backups (`0.13.6.001`, `0.13.7.001`, 5.6 GiB). Backups total 5.9 GiB in 30 files, from 13.6 GiB in 48. The 28 files named any other way, including the hand-made ones, remain. | **Proved** once |
+
+What this did not fix, measured the same day:
+
+- **The store still grows without bound.** It was 2,860 MB at the install and
+  3,100 MB 8.5 hours later: 240 MB across 139 captures, 1.7 MB each including
+  indexes and Exec rows. These captures were larger than the earlier sample
+  (mean `events.jsonl` 1.67 MB against 1.28 MB), so bytes per capture fell less
+  than the 28% saving on equal input. Wall-clock rates are not comparable
+  between windows: the 8.5 hours before the install held 11 captures.
+- **`runs/` is 3.6 GiB in 2,258 captures**, up from 3.4 GiB in 2,057. The file
+  side is unchanged by design.
+- **Complete items stored twice are now the bulk of new history**: raw
+  `item/completed` 69 MB, derived `item_completed` 47 MB, raw `item/started`
+  25 MB and `user_input` 14 MB of 182 MB of post-install event payload.
+  Proposal 1 below addresses the first three.
+- **Binaries and app bundles**: 168 and 63, up from 165 and 62. No retention.
+- **Development output outgrew everything reclaimed.** Cargo `target/` is
+  135.5 GiB across 20 worktrees (100 GiB across 11 after cleanup).
+  `/private/tmp` is 57 GiB (16 GiB): LOO-304's `loo304-*` directories hold
+  about 40 GiB of 1.34 GB store copies as benchmark fixtures. These are `du`
+  sizes; whether the copies share APFS blocks was not measured. They are
+  LOO-304's evidence and were left alone. Free space read 132–149 GiB.
+
+Next acceptance condition: a retention decision. Proposals 1 and 2 are the
+only changes that bound the dominant rate, and both alter what history is kept,
+so neither was built without Jack Heart's choice. Proposal 6 (sizes in
+`lf home doctor`) is the measurement that would let any budget be observed
+without this kind of pass. The four fixes above need no further observation
+except the snapshot path at a release whose migration is pending.
+
+## Install artifact retention · 2026-10-07
+
+Every install staged a CLI under `~/.lf/bin` and an app bundle under
+`~/.lf-machine/install/artifacts` by content address, and nothing removed them.
+The cause was in the record as well as the files: published promotion appended
+each release's artifact set to `retained_published_sets` in `active.json`, so 18
+sets were named as retained here, while switch recovery already kept two. Nothing
+reads the older sets except an error message; a receipt-managed install refuses
+legacy rollback to an arbitrary retained binary.
+
+**Fixed here**, not yet installed: a settled install retains its published
+fallback and the one it replaced. After settlement, still under the promotion
+lock, `lf-<sha256>` and `lfd-<sha256>` files and `published-`/`development-<sha256>`
+bundle directories are removed unless the active install names them or a live
+process executes them. Any other name stays (`hotfix-*`, `lf.stale-*`, `lfd`),
+as do the switch receipts. An unreadable process table skips the pass; a failed
+removal waits for the next settlement. Proof:
+`a_settled_install_keeps_only_what_it_can_select_or_is_running`.
+
+Read-only projection for the next settled install on this machine: 161 of 168
+binaries (6.06 GiB) and 62 of 63 bundles (5.32 GiB) are superseded; two binaries
+are kept because processes run them. These are `du` sizes. Staging copies with
+`fs::copy`, which clones on APFS, so blocks still shared with a surviving build
+output are not returned; that share was not measured. Reclamation is unobserved
+until a release containing this change installs. Steady state afterwards is two
+releases: about 100 MB of CLI and 180 MB of bundle, where each release used to
+add 140 MB for good.
 
 ## Customer growth
 
@@ -165,9 +234,9 @@ ten captures; the ninetieth percentile was 63 MB and the largest 249 MB.
 | Heavy: several agents all day | 100 | 14 GB | 168 GB | about 148 GB |
 | This machine | 285 | 39 GB | 480 GB | about 420 GB |
 
-Fixed costs per release: 50 MB of CLI and about 90 MB of app bundle kept
-forever, roughly 7 GB a year at weekly releases, plus one store copy per
-migrating release before the backup fix. Before LOO-382, Desktop polling added
+Fixed costs per release, before the install retention fix: 50 MB of CLI and
+about 90 MB of app bundle kept forever, roughly 7 GB a year at weekly releases,
+plus one store copy per migrating release before the backup fix. Before LOO-382, Desktop polling added
 about 30 MB a day whether or not anyone worked.
 
 Development-only costs, not customer costs: 118 GiB of Cargo output, benchmark
@@ -181,8 +250,8 @@ the retention decisions below.
 ## Producer audit and proposals
 
 No Loopflow producer expires anything except per-minute cron receipts, the
-Desktop cache and launch journal (both size-capped), and dead process receipts
-through `lf monitor prune`. `lf home doctor` reports no sizes.
+Desktop cache and launch journal (both size-capped), dead process receipts
+through `lf monitor prune`, and now migration backups and install artifacts. `lf home doctor` reports no sizes.
 
 In priority order, all **proposed**:
 
@@ -197,9 +266,8 @@ In priority order, all **proposed**:
    and final answer. A 90-day window would cap a heavy user near 40 GB. Needs a
    decision on what history is worth; started-Task and captured rows are
    protected by triggers today.
-3. **Binary and artifact retention.** Keep what `active.json` and `switch.json`
-   reference plus the retained published set; delete the rest after a settled
-   switch. About 11 GiB here.
+3. **Binary and artifact retention.** **Fixed here**; see
+   [install artifact retention](#install-artifact-retention--2026-10-07).
 4. **Narrow `session_driver_exit`.** Index only rows carrying an outcome.
    About 110 MB here; needs a migration.
 5. **Store each prompt once.** `manifest.json`, `user_input` and `context.json`

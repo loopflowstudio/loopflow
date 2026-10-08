@@ -807,6 +807,137 @@ fn flow_parsing_parity() {
 }
 
 #[test]
+fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
+    use std::io::Write;
+    use std::os::fd::FromRawFd;
+    use std::process::Stdio;
+
+    for (flags, stop) in [
+        (vec!["-i", "run", "conversation"], false),
+        (vec!["run", "conversation", "-i"], false),
+        (vec!["run", "conversation"], false),
+        (vec!["-i", "run", "conversation"], true),
+    ] {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = TempDir::new().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        for name in ["first", "second"] {
+            write_skill(repo.path(), name, "Ask for input, then exit.");
+        }
+        write_flow(repo.path(), "conversation", "- first\n- second\n");
+        write_executable(
+            &bin.join("claude"),
+            r#"#!/bin/sh
+set -eu
+if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
+for arg in "$@"; do
+    case "$arg" in --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;; esac
+done
+case "$*" in
+    *'<lf:skill:first>'*) step=first;;
+    *'<lf:skill:second>'*) step=second;;
+    *) exit 2;;
+esac
+touch "$LF_HOME/$step.ready"
+IFS= read -r answer
+printf '%s' "$answer" > "$LF_HOME/$step.answer"
+[ "$answer" != stop ] || exit 130
+"#,
+        );
+
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: valid output pointers; null selects default terminal settings.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two fresh independently owned descriptors.
+        let mut master = unsafe { fs::File::from_raw_fd(master) };
+        // SAFETY: slave is the other fresh descriptor returned by openpty.
+        let slave = unsafe { fs::File::from_raw_fd(slave) };
+        let log_path = home.path().join("output");
+        let log = fs::File::create(&log_path).unwrap();
+        let path = format!("{}:/usr/bin:/bin", bin.display());
+        let mut child = lf_command(repo.path(), home.path(), &flags, Some(&path))
+            .args(["-a", "claude", "--no-loopflow"])
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("ANTHROPIC_API_KEY")
+            .stdin(Stdio::from(slave))
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut wait = |ready: &dyn Fn() -> bool| {
+            while !ready() {
+                let exited = child.try_wait().unwrap();
+                if exited.is_some() || std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!(
+                        "{flags:?}: {exited:?}\n{}",
+                        fs::read_to_string(&log_path).unwrap()
+                    );
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+        wait(&|| home.path().join("first.ready").exists());
+        assert!(!home.path().join("second.ready").exists());
+        master
+            .write_all(if stop { b"stop\n" } else { b"blue\n" })
+            .unwrap();
+        if !stop {
+            wait(&|| home.path().join("second.ready").exists());
+            assert_eq!(
+                fs::read_to_string(home.path().join("first.answer")).unwrap(),
+                "blue"
+            );
+            master.write_all(b"green\n").unwrap();
+            wait(&|| home.path().join("second.answer").exists());
+        }
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() > deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!(
+                    "Flow did not finish: {}",
+                    fs::read_to_string(&log_path).unwrap()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert_eq!(
+            status.success(),
+            !stop,
+            "{}",
+            fs::read_to_string(log_path).unwrap()
+        );
+        if stop {
+            assert!(!home.path().join("second.ready").exists());
+        } else {
+            assert_eq!(
+                fs::read_to_string(home.path().join("second.answer")).unwrap(),
+                "green"
+            );
+        }
+    }
+}
+
+#[test]
 fn authored_flow_records_each_skill_as_one_session() {
     let repo = TempDir::new().unwrap();
     run_git(repo.path(), &["init", "-b", "main"]);

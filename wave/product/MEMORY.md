@@ -13,8 +13,7 @@ failed on an unbound Initiative.
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
   replaces `lf ssh` with global `lf --machine LABEL COMMAND`, no alias or
-  cross-version negotiation. These names are already in source; an older
-  installed binary is not authority for new design vocabulary.
+  cross-version negotiation. Source owns current vocabulary, not older installed help.
 - **One repository window across machines.** Jack Heart proposed at most one
   open window per repo and explicitly chose “One repo window across machines”
   in the LOO-427 conversation. Open/focus by repository; closed repos need no
@@ -47,27 +46,27 @@ failed on an unbound Initiative.
 command dispositions. Jack corrected scope: identity, repository-window control
 and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
-review. The owned cmux probe proved arrangement, output and draft retention,
-then cleaned up; no provider, herdr-pane or Desktop parity proof.
+review. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
 Jack Heart clarified in LOO-427: the repo window is built on one shared Work
 model, “all fromone place”; its subtrees can be delegated to Machines. Machines
 execute that Work, not independent trees Desktop pairs later. The repository-group
-proposal is withdrawn. Extend Work placement/routing; physical source/protocol,
-inheritance and live reassignment remain to design. LOO-411's SSH override removal
+proposal is withdrawn. Extend Work placement/routing; inheritance and live reassignment remain to design. LOO-411's SSH override removal
 is not a general veto on Work-directed routing. Never rewrite a Machine default
 per request. Current placements copy inheritance once; delegation is unimplemented.
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
 October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
-assignment, preserving files/status and Session membership. Unknown location
-stays unavailable. Compare through the validated checkout and its PR, without
-hydrating a second Task. Shared authority remains unresolved:
-WorkRef lacks a repository root; LOO-412 keeps independent IDs; LOO-406 excludes
-sync. Jack's Git leaning and Linear plans select no write protocol (sources in
-the comparison/design). Cold-open routing still overwrites one URL; reversed
-registration and repeat opens need proof. No shared-source or native proof.
+assignment; files/status and Session membership retain actual Machine evidence.
+Unknown stays unavailable. Jack
+accepted trying a designated planning Machine and flagged mixed `lf task run`.
+LOO-412's newer callback direction (`e9ef3396`) routes planning to the host,
+superseding adoption-only scope, but leaves Workflow position on the worker.
+LOO-427 proposes host-owned Workflow writes with worker-owned driver/Flow/results,
+retained mutation identity and pending arrival after host loss; this extension is
+not implemented or separately accepted. Reuse 412 transport and 406 host writers.
+Cold opens still overwrite one URL. No shared-source or native Desktop proof.
 
 ## Live Home reconciliation (2026-10-05)
 

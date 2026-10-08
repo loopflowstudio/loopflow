@@ -27,14 +27,12 @@ code or duplicated planning. The ownership/deletion cut is independently reviewa
 from conditional-write research, which remains required. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
-Comments and completion/reopening save before provider I/O. Foreground connections
-independently acquire selected comments/inventory and deliver mapped Tasks' effects.
-Receipts replace the duplicate writeback column, preserving legacy decisions without
-inventing Workflow history. Effect locks exclude neither saves nor inbound reads.
-Acknowledgements cannot settle newer decisions; `lf task sync --resolve local|linear`
-supersedes identity while retaining conflict evidence. At `5a786d905`, inbound
-direction is derived inside the observation transaction; comment threads and Steers
-commit together. Removed intermediate writers grant no outbound concurrency guarantee.
+Foreground connections independently acquire comments/inventory and deliver mapped
+Tasks' effects. Receipts replace duplicate writeback state without inventing Workflow
+history. Effect locks exclude neither saves nor inbound reads. Acknowledgements
+cannot settle newer decisions; `lf task sync --resolve local|linear` supersedes
+identity while retaining conflicts. At `5a786d905`, inbound direction, comment threads
+and Steers commit together. These transactions grant no provider concurrency guarantee.
 
 October 8's enabled regression `task_completion_preserves_linear_reopening_during_delivery`
 fails: between ownership read and unconditional mutation, Linear reopening is
@@ -46,12 +44,11 @@ investigation authorized without further approval. Safe outbound updates remain
 unproved; weakening preservation or automatic propagation would need a product
 decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
 
-`b3cd894f3` shares transactional comment/thread/conflict storage outside personal
-planning. Resolution retains both values; local creates one retry-stable replacement
-UUID without overwriting the provider comment or repeating direction. `783305284`
-saves abandonment and cancellation identity atomically in both modes, deleting
-provider-first decision writers. Cleanup checks execution separately and cannot
-reverse the decision. Safe cancellation delivery remains unimplemented and pending.
+`b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
+local creates one retry-stable UUID without overwriting the provider comment or
+repeating direction. `783305284` saves abandonment/cancellation identity atomically,
+deleting provider-first decision writers. Cleanup checks execution separately;
+safe cancellation delivery remains pending.
 
 Placement and Flow admission consume saved Task planning without provider inventory.
 The obsolete registration writer, provider-plan rewrite and launch ownership dispatch
@@ -60,11 +57,13 @@ invalidation and Project/Team mismatch evidence; no observation moves Workflow o
 cleans checkouts. Known issue changes remain invalid even without inventory rows.
 Wave/checkout locks and winning PR/path survive cancellation. Public paired offline
 checkout/Flow fixtures preserve saved edits; existing CLI proofs retain active work
-after remote completion and prevent unstarted work. Common schema, definitions,
-creation/edit, membership reconciliation and
-rotation remain; LOO-412 still has no coherent writer boundary. Public resolution
-and composed reconnect remain unproved. The enabled reopening regression still
-fails after this admission cut; its propagation/preservation requirements remain.
+after remote completion and prevent unstarted work. October 8's uncommitted
+extraction places shared content/workflows in `sqlite/project_content.rs`. Local
+Task projection still derives planning state/completion from Workflow state, while
+mapped status uses provider observations; deleting the branch alone changes semantics.
+Common schema, definitions, creation/edit, membership, rotation and projections
+remain; LOO-412 has no coherent committed writer boundary. Public resolution and
+composed reconnect remain unproved; the enabled reopening failure is unchanged.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

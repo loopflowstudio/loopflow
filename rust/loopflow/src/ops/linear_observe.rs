@@ -6,6 +6,9 @@
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
 //! store; acquisition supplies observations without proposing a second write.
 
+use std::future::Future;
+use std::time::Duration;
+
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
@@ -90,58 +93,22 @@ impl PlanningSync {
             .name("planning-sync".into())
             .spawn(move || {
                 let drive = async {
-                    let inbound = async {
-                        loop {
-                            let result = tokio::time::timeout(
-                                std::time::Duration::from_secs(5),
-                                refresh_task_comments(&store, &task),
-                            )
-                            .await;
-                            if let Ok(Err(error)) = result {
-                                tracing::debug!(%error, "comment acquisition pending");
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                        }
-                    };
-                    let outbound = async {
-                        loop {
-                            if let Err(error) =
-                                sync_repository_deliveries(&store, &task, false).await
-                            {
-                                tracing::debug!(%error, "comment delivery pending");
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                    };
-                    let decisions = async {
-                        loop {
-                            if let Err(error) =
-                                sync_repository_deliveries(&store, &task, true).await
-                            {
-                                tracing::debug!(%error, "Task state delivery pending");
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                    };
-                    let inventory = async {
-                        loop {
-                            let result = tokio::time::timeout(
-                                std::time::Duration::from_secs(5),
-                                refresh_task_planning(&store, &task),
-                            )
-                            .await;
-                            if let Ok(Err(error)) = result {
-                                tracing::debug!(%error, "planning acquisition pending");
-                            }
-                            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-                        }
-                    };
                     tokio::select! {
                         _ = stopped => {},
-                        _ = inbound => {},
-                        _ = outbound => {},
-                        _ = decisions => {},
-                        _ = inventory => {},
+                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || async {
+                            tokio::time::timeout(Duration::from_secs(5), refresh_task_comments(&store, &task))
+                                .await.map_err(|error| OpsError::Message(error.to_string()))?
+                        }) => {},
+                        _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
+                            tokio::time::timeout(Duration::from_secs(5), refresh_task_planning(&store, &task))
+                                .await.map_err(|error| OpsError::Message(error.to_string()))?
+                        }) => {},
+                        _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
+                            sync_repository_deliveries(&store, &task, false)
+                        }) => {},
+                        _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
+                            sync_repository_deliveries(&store, &task, true)
+                        }) => {},
                     }
                 };
                 #[cfg(test)]
@@ -155,6 +122,21 @@ impl PlanningSync {
             stop: Some(stop),
             thread: Some(thread),
         })
+    }
+}
+
+// Each branch has its own delay after an attempt. A slow delivery cannot
+// postpone acquisition or cause missed ticks to burst when the request returns.
+async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
+    operation: &str,
+    delay: Duration,
+    mut attempt: impl FnMut() -> F,
+) {
+    loop {
+        if let Err(error) = attempt().await {
+            tracing::debug!(%error, operation, "planning synchronization pending");
+        }
+        tokio::time::sleep(delay).await;
     }
 }
 

@@ -80,6 +80,11 @@ LOO-406's accepted replacement is one locally owned plan with repository-wide
 optional Linear synchronization. That cutover remains unfinished. Creation, edits,
 definitions and rotation retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
+Project content and stored Wave workflows share `sqlite/project_content.rs`;
+comments use `sqlite/task_comments.rs`. Task status still branches: local planning
+derives state/completion from Workflow state, while mapped planning reads provider
+observations. The replacement must preserve planning fields and observation age
+independently of Workflow position.
 
 ## Connected Project selection
 

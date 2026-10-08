@@ -33,9 +33,7 @@ pub fn run(
     let items = compile_flow(flow, repo)?;
     require_autonomous_steps(&items)?;
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async {
-            Ok(crate::ops::task::require_task_flow_launch(&open_flow_store().await?, task).await?)
-        })?;
+        block_on(async { Ok(open_flow_store().await?.sqlite.require_task_launch(task)?) })?;
     }
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding

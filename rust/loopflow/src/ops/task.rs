@@ -1594,17 +1594,6 @@ pub(crate) fn task_event_process_refusal(
     }
 }
 
-/// Every Task launch consumes the same saved planning and execution facts.
-pub(crate) async fn require_task_flow_launch(
-    store: &SharedStore,
-    task_id: &crate::work::task::TaskId,
-) -> OpsResult<()> {
-    store
-        .sqlite
-        .require_task_launch(task_id)
-        .map_err(task_error)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskWorktreeBlocker {
     pub initializing: bool,

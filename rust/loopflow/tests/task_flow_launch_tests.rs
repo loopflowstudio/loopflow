@@ -293,12 +293,14 @@ impl WorkflowTask {
             "launch-proof",
             &repo.head_sha(),
         );
-        Self {
+        let fixture = Self {
             repo,
             home,
             registered,
             _env: env,
-        }
+        };
+        fixture.ok(&["task", "checkout", "INF-123"]);
+        fixture
     }
 
     fn status(&self) -> serde_json::Value {

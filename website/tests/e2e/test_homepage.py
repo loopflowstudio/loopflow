@@ -10,7 +10,7 @@ def test_approved_homepage_sections(homepage: Page) -> None:
     expect(homepage.locator("h1")).to_have_text("A software engineering CLI for your agents.")
     assert homepage.locator("main > section").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["", "", "flows", "tasks", "mac", "why", "start"]
+    ) == ["", "", "flows", "mac", "start"]
     expect(homepage.locator(".strip > div")).to_have_count(4)
     expect(homepage.locator("#flows .parts article")).to_have_count(3)
     assert homepage.locator(".work-row .tag").evaluate_all(
@@ -125,14 +125,15 @@ def test_llms_txt(page: Page, base_url: str):
     assert "install.sh" in body
 
 
-def test_studio_bar_reaches_the_company_and_each_effort(page: Page, base_url: str) -> None:
+def test_company_menu_reaches_the_studio_and_each_effort(page: Page, base_url: str) -> None:
     for label, path, heading in [
         ("Loopflow Studio", "/studio", "We make three things."),
-        ("Fantasia", "/fantasia", "Superhuman Magic: The Gathering bots."),
         ("Etude", "/etude", "Experiment orchestration."),
+        ("Fantasia", "/fantasia", "Superhuman Magic: The Gathering bots."),
+        ("About", "/about", "Jack Heart"),
     ]:
         page.goto(base_url)
-        page.locator(".studio-bar").get_by_role("link", name=label, exact=True).click()
+        page.locator("nav summary", has_text="Company").click()
+        page.locator("nav .menu").get_by_role("link", name=label, exact=True).click()
         assert page.url == f"{base_url}{path}"
         expect(page.locator("h1")).to_have_text(heading)
-    expect(page.locator(".studio-bar").get_by_role("link", name="Loopflow", exact=True)).to_have_attribute("href", "/")

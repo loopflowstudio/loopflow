@@ -5,15 +5,33 @@
 # 2026-10-08. His wording so far: the Loopflow sentence, and the company page's
 # argument (Etude is sold, Loopflow is the tool for building it, Fantasia is the
 # research for doing it well). Each effort says what exists today.
-studio:
-  name: Loopflow Studio
-  bar:
-  - label: Loopflow
-    href: /
+navigation:
+- label: For your agents
+  href: /#flows
+  optional: true
+- label: For you
+  href: /#mac
+  optional: true
+- label: Docs
+  href: /docs
+- label: Company
+  menu:
+  - label: Loopflow Studio
+    href: /studio
   - label: Etude
     href: /etude
   - label: Fantasia
     href: /fantasia
+  - label: About
+    href: /about
+- label: GitHub ↗
+  href: https://github.com/loopflowstudio/loopflow
+  optional: true
+install:
+  label: Install
+  href: /#start
+
+studio:
   company:
     title: Loopflow Studio
     heading: We make three things.
@@ -65,23 +83,20 @@ studio:
     label: Etude · Loopflow Studio
     heading: Experiment orchestration.
     lede: We are building this.
+  about:
+    title: About
+    label: About · Loopflow Studio
+    heading: Jack Heart
+    lede: Founder of Loopflow Studio.
 
 homepage:
-  navigation:
-  - label: Flows
-    href: '#flows'
-  - label: Tasks
-    href: '#tasks'
-  - label: Mac app
-    href: '#mac'
-  - label: Why
-    href: '#why'
-  - label: Docs ↗
-    href: /docs
   hero:
     label: Loopflow is a software instrument
     tagline: A software engineering CLI for your agents.
-    subline: A free, open-source podium for conducting your software orchestra, with native
+    subline:
+    - Ask your agents to build software and they can do it through this one command, breaking
+      the work into concrete steps you can trace and pick back up.
+    - For you, a free, open-source podium for conducting your software orchestra, with native
       macOS and terminal interfaces.
     actions:
     - label: See it ↓
@@ -110,11 +125,13 @@ homepage:
       text: lf is a command. Run it in the terminal you already use.
   flows:
     label: In the terminal
-    heading: Stay in flow while you work with agents.
-    introduction: 'A session is one conversation with an agent. Good work takes several: a plan,
-      a build, a check, another pass. A Flow is a file that runs those sessions in order: each
-      step is its own session, with a commit between them. lf runs the Flow in whatever terminal
-      you are in.'
+    heading: For your agents
+    claim: Give your agents the tools to do things the right way.
+    introduction: 'lf is a command your agents run. It covers each part of building software:
+      planning, designing, prototyping, implementing, testing, optimizing, researching, landing.
+      A Flow is a file that puts those parts in order. Each step is its own session, with a
+      commit between them, so the work arrives planned, checked and reviewable whether or not
+      you watched it happen.'
     example:
       label: 'Example loopflow:'
       steps:
@@ -151,29 +168,35 @@ homepage:
       # the Flow: three sessions, in order
       $ lf run ship-api "Rate-limit the export endpoint"
     parts:
-    - title: Skills & workflows
-      description: Instructions are Markdown and sequences are YAML, kept in your repository,
-        or use the built-ins. Choose the steps, and which of them are conversations with you.
-      link:
-        label: Skills and workflows ↗
-        href: /docs/authoring
-    - title: Scale the autonomy
-      description: Stay in one session and steer as you go, meet it at design and demo, or let
-        it run. Choose one per task or per project.
-      link:
-        label: Write your own Flow ↗
-        href: /docs/authoring#flows
-    - title: Checks & review
+    - title: Checked before it reaches you
       description: Checks run on each change. After a task’s pull request is handed off for
         landing, a failed required check can start a repair in the same task.
       link:
         label: Review workflows ↗
         href: /docs/authoring#loopflows
+    - title: Your way of working, written down
+      description: Instructions are Markdown and sequences are YAML, kept in your repository,
+        or use the built-ins. Your agents follow the same steps every time.
+      link:
+        label: Skills and workflows ↗
+        href: /docs/authoring
+    - title: As much or as little of you
+      description: Stay in one session and steer as you go, come in at design and demo, or
+        let it run. Choose per task or per project.
+      link:
+        label: Write your own Flow ↗
+        href: /docs/authoring#flows
   tasks:
-    label: Around the sessions
-    heading: An organizing system for all your work.
-    introduction: Whether you are one person or a large company. Four things, each inside the
-      one before, kept in the same records the terminal and the Mac app read.
+    label: How it is organized
+    introduction: Four plain things, each inside the one before. Have as many Waves as you
+      like.
+    kinds:
+    - title: Long-lived sessions
+      text: A session stays with a workstream and its results. Come back to it and the work
+        is where you left it.
+    - title: Isolated jobs
+      text: Routine process and autonomous development run as separate jobs, each in its own
+        working copy.
     items:
     - label: Wave
       title: A goal
@@ -221,10 +244,12 @@ homepage:
         label: Write a workflow ↗
         href: /docs/authoring#workflows
   mac:
-    label: On your Mac
-    heading: Your sessions, organized around the work.
-    introduction: Loopflow for Mac files each conversation with the task it belongs to. Go from
-      the plan to a task’s terminal to what it shipped.
+    label: On your Mac, or in cmux or herdr
+    heading: For you
+    claim: Stay in flow while you work with agents.
+    introduction: What needs your attention is on screen, and the rest is not. Loopflow for
+      Mac is laid out around your work, with each conversation filed under the task it belongs
+      to, so you follow the work and not a trail of chats.
     capture:
       image: /static/wave-surface.png
       image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their
@@ -233,17 +258,6 @@ homepage:
       height: 1800
       caption: Actual capture, unedited. The Mac app includes the command line tool; the command
         line tool does not need the Mac app.
-  why:
-    label: Why it exists
-    claim: To empower any human being to build with endless scale.
-    lead: With great agents comes a need for great software process.
-    paragraphs:
-    - Agents make it possible for one engineer to build what used to take a team. They make
-      it just as easy to bury yourself in a mess. The more you zoom out, the more you need to
-      zoom in to counterbalance.
-    - The emphasis of the Loopflow product is around the work done by you. Its purpose is to
-      make your time more effective, to help you mentally organize around the work happening
-      with your agents.
   install:
     label: Install
     heading: Start playing.

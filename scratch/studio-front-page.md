@@ -110,3 +110,39 @@ the page is a draft.
 Jack Heart set the order everywhere: Loopflow, Etude, Fantasia.
 
 Jack Heart replaced the homepage headline "A command line for great software engineering." with "A software engineering CLI for your agents" (plural). The /studio Loopflow row was aligned to the plural.
+
+## Homepage restructure from Jack Heart (2026-10-08, later in this conversation)
+
+Jack's directions, in order:
+
+- The subline "needs to be balanced against the other perspective": a sentence
+  on what a software engineering CLI means, "if you're asking your agents to
+  build software, your agent can do it basically just by using this CLI To break
+  its work down into concrete steps in traceable and reconnectable ways".
+- Two main sections. One: user agents, surface terminal, offering "craft of
+  software, api around all the parts of the process (planning, designing,
+  prototping, implementing, testing, optimizing, researching, landing, etc)".
+  Two: user human, surface "OS X native, or alternative a user of herdr/cmux",
+  offering "peace of mind, focus, flow, from having exactly what needs your
+  attention on screen by havung the UX map directly to what matters to you, and
+  not be path dependent and meandering chats".
+- Section titles "For your agents" and "For You". "Give your agents the tools to
+  do things the right way." and "Stay in flow while you work with agents." are
+  his lines and sit under them.
+- Organization copy: "long lived sessions around workstreams and results, not
+  meandering chats" and "isolated jobs for routine process and autonomous
+  development". "Our organization system is not special and shoudlnt be sold as
+  such. Its just minimally simple and flexible - you can have as many waves sas
+  you want. and it just works with everything".
+- "Kill the To empower section and combine the previous 3 into 2".
+- No double header: one top bar structured like cmux's and herdr's (brand, flat
+  links, one primary button), with a Company menu holding Loopflow Studio, Etude
+  and Fantasia, and "an about that is just my name or something basically".
+
+Built as directed. Still draft, not his wording: both section introductions, the
+three part titles under For your agents, the two "kinds" paragraphs, the "How it
+is organized" line, and the About page's one line. "It just works with
+everything" is not on the page; no claim was drafted for it. The four rows
+(Wave, Project, Task, Workflow) remain inside For you; whether they stay on the
+homepage is open. Only the structure of the cmux and herdr bars was studied; no
+code or copy was taken.

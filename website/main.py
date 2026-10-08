@@ -128,7 +128,6 @@ OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
 FLOWS_CONTENT = HOME_CONTENT["flows"]
 TASKS_CONTENT = HOME_CONTENT["tasks"]
 MAC_CONTENT = HOME_CONTENT["mac"]
-WHY_CONTENT = HOME_CONTENT["why"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
 
 # Markdown rendering
@@ -336,7 +335,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/studio", "/fantasia", "/etude", "/download", "/docs"] + [
+    pages = ["", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
@@ -811,6 +810,7 @@ def _section_heading(content: dict) -> tuple:
     return (
         P(content["label"], cls="eyebrow"),
         H2(content["heading"]),
+        P(content["claim"], cls="claim"),
         P(*_inline_command(content["introduction"]), cls="lede"),
     )
 
@@ -860,9 +860,16 @@ def _flows_section() -> FT:
     )
 
 
-def _tasks_section() -> FT:
+def _you_section() -> FT:
     return Section(
-        *_section_heading(TASKS_CONTENT),
+        *_section_heading(MAC_CONTENT),
+        *_capture(MAC_CONTENT["capture"]),
+        Div(
+            *[Article(H3(kind["title"]), P(kind["text"])) for kind in TASKS_CONTENT["kinds"]],
+            cls="parts kinds",
+        ),
+        P(TASKS_CONTENT["label"], cls="eyebrow"),
+        P(TASKS_CONTENT["introduction"], cls="lede"),
         Div(
             *[
                 Article(
@@ -880,27 +887,38 @@ def _tasks_section() -> FT:
             ],
             cls="work-rows",
         ),
-        id="tasks",
+        id="mac",
         cls="block",
     )
 
 
-def _studio_bar(current: str) -> FT:
-    return Div(
-        A(STUDIO_CONTENT["name"], href="/studio", aria_current="page" if current == "/studio" else None),
-        Div(
+def _topbar(current: str) -> FT:
+    """The one bar on the homepage and studio pages: brand, links, a company menu, install."""
+
+    def link(item: dict) -> FT:
+        return A(
+            item["label"],
+            href=item["href"],
+            cls="optional" if item.get("optional") else None,
+            aria_current="page" if item["href"] == current else None,
+        )
+
+    install = SITE_CONTENT["install"]
+    return Header(
+        A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
+        Nav(
             *[
-                A(
-                    link["label"],
-                    href=link["href"],
-                    aria_current="page" if link["href"] == current else None,
+                Details(
+                    Summary(item["label"]),
+                    Div(*[link(entry) for entry in item["menu"]], cls="menu"),
                 )
-                for link in STUDIO_CONTENT["bar"]
-            ]
+                if "menu" in item
+                else link(item)
+                for item in SITE_CONTENT["navigation"]
+            ],
+            A(install["label"], href=install["href"], cls="button solid"),
+            aria_label="Main navigation",
         ),
-        cls="studio-bar",
-        role="navigation",
-        aria_label=STUDIO_CONTENT["name"],
     )
 
 
@@ -909,7 +927,7 @@ def _studio_page(current: str, content: dict, *sections) -> tuple:
         Title(content["title"]),
         SkipLink(),
         Div(
-            _studio_bar(current),
+            _topbar(current),
             Main(
                 Section(
                     P(content["label"], cls="eyebrow kicker") if "label" in content else None,
@@ -979,27 +997,13 @@ def build_homepage() -> tuple:
         Title("Loopflow — " + HERO_CONTENT["tagline"]),
         SkipLink(),
         Div(
-            _studio_bar("/"),
-            Header(
-                A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
-                Nav(
-                    *[
-                        A(
-                            link["label"],
-                            href=link["href"],
-                            cls="optional" if link["href"].startswith("#") else None,
-                        )
-                        for link in HOME_CONTENT["navigation"]
-                    ],
-                    aria_label="Main navigation",
-                ),
-            ),
+            _topbar("/"),
             Main(
                 Section(
                     Div(
                         P(HERO_CONTENT["label"], cls="eyebrow kicker"),
                         H1(HERO_CONTENT["tagline"]),
-                        P(HERO_CONTENT["subline"], cls="intro"),
+                        *[P(line, cls="intro") for line in HERO_CONTENT["subline"]],
                         Div(
                             *[
                                 A(
@@ -1024,24 +1028,7 @@ def build_homepage() -> tuple:
                     aria_label="Ownership",
                 ),
                 _flows_section(),
-                _tasks_section(),
-                Section(
-                    *_section_heading(MAC_CONTENT),
-                    *_capture(MAC_CONTENT["capture"]),
-                    id="mac",
-                    cls="block",
-                ),
-                Section(
-                    P(WHY_CONTENT["label"], cls="eyebrow"),
-                    Div(
-                        P(WHY_CONTENT["claim"], cls="claim"),
-                        P(B(WHY_CONTENT["lead"])),
-                        *[P(paragraph) for paragraph in WHY_CONTENT["paragraphs"]],
-                        cls="essay",
-                    ),
-                    id="why",
-                    cls="block",
-                ),
+                _you_section(),
                 Section(
                     Div(P(INSTALL_CONTENT["label"], cls="eyebrow"), H2(INSTALL_CONTENT["heading"])),
                     Div(
@@ -1127,6 +1114,11 @@ def get():
 @rt("/etude")
 def get():
     return build_effort_page("etude")
+
+
+@rt("/about")
+def get():
+    return build_effort_page("about")
 
 
 @rt("/team")

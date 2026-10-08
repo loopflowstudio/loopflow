@@ -234,6 +234,16 @@ drives both; this supersedes "The site does not state this plan" below.
 Loopflow stays free. Etude's page says only that it is being built. Copy on
 those pages beyond Jack's quoted lines is draft until he approves it.
 
+Later the same day Jack reshaped the homepage into two sections named by their
+user: "For your agents" (the terminal; "Give your agents the tools to do things
+the right way.") and "For you" (the Mac app, or cmux or herdr; "Stay in flow
+while you work with agents."). The subline gained a first sentence saying what
+the CLI does for agents. He removed the "Why it exists" section and the second
+header: one top bar carries a Company menu (Loopflow Studio, Etude, Fantasia,
+About). The organizing system is described plainly and not sold: "Our
+organization system is not special and shoudlnt be sold as such." This
+supersedes the October 7 section order above.
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

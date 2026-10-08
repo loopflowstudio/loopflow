@@ -106,3 +106,5 @@ README supplied "AI-assisted Pro Tour testing house" and "serious practice,
 visible disagreement, rapid experiments, and the fun of discovering something
 together." No line in that repository is quoted as Jack's; the lever wording on
 the page is a draft.
+
+Jack Heart set the order everywhere: Loopflow, Etude, Fantasia.

@@ -10,14 +10,21 @@ studio:
   bar:
   - label: Loopflow
     href: /
-  - label: Fantasia
-    href: /fantasia
   - label: Etude
     href: /etude
+  - label: Fantasia
+    href: /fantasia
   company:
     title: Loopflow Studio
     heading: We make three things.
     efforts:
+    - name: Loopflow
+      label: The tool we build with
+      text: Loopflow is a software engineering CLI for your agent. Free and open source.
+      status: Available today
+      link:
+        label: Loopflow ↗
+        href: /
     - name: Etude
       label: What we sell
       text: 'Experiment orchestration, for doing science inside a company: state the hypothesis,
@@ -26,13 +33,6 @@ studio:
       link:
         label: Etude ↗
         href: /etude
-    - name: Loopflow
-      label: The tool we build it with
-      text: Loopflow is a software engineering CLI for your agent. Free and open source.
-      status: Available today
-      link:
-        label: Loopflow ↗
-        href: /
     - name: Fantasia
       label: The research that drives both
       text: 'Superhuman Magic: The Gathering bots. Building them is what drives the development

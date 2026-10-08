@@ -693,8 +693,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
         "--account",
         "personal@",
         "--machine=mini",
-        "--secret",
-        "SENTRY_AUTH_TOKEN",
         "--forward-agent",
         "--task",
         "LOO-123",
@@ -707,7 +705,6 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
     let (cli, command) = machine_invocation(&args).unwrap().unwrap();
     assert_eq!(cli.machine.as_deref(), Some("mini"));
     assert!(cli.account.is_empty());
-    assert_eq!(cli.secret, ["SENTRY_AUTH_TOKEN"]);
     assert!(cli.forward_agent);
     assert_eq!(
         command,

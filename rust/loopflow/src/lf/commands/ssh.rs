@@ -87,7 +87,7 @@ fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     let args = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    match Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?) {
+    match Cli::try_parse_from(args) {
         Ok(cli) => Ok(cli),
         Err(error)
             if matches!(

@@ -392,20 +392,6 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
             "remote-only-wave",
             "wave/operate",
         ],
-        vec![
-            "--machine",
-            "mini",
-            "--account",
-            "remote-only-account",
-            "implement",
-        ],
-        vec![
-            "--only-account",
-            "remote-only-account",
-            "--machine",
-            "mini",
-            "implement",
-        ],
         vec!["--machine", "mini", "--help"],
         vec!["--machine", added["id"].as_str().unwrap(), "--version"],
         vec![
@@ -454,10 +440,83 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
 }
 
 #[test]
+fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
+    use base64::Engine;
+
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
+    db.execute(
+        "INSERT INTO provider_accounts (provider, account_id, login_email, credential_state, routing_state, created_at, updated_at) VALUES ('codex', 'person', 'person@example.com', 'connected', 'automatic', 0, 0)",
+        [],
+    ).unwrap();
+    let remote = fixture.root.path().join("remote");
+    fs::write(remote.join("connected"), "true").unwrap();
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            r#"#!/bin/sh
+case "$1 $2 $3" in
+"--version  ") echo 'lf {}';;
+"machine id ") echo 'home_11111111111111111111111111111111';;
+"machine credentials inspect") cat "$HOME/connected";;
+*) printf 'selection: %s\nisolation: %s\n' "$LF_ACCOUNT_SELECTION" "$LF_ACCOUNT_ISOLATION"; printf 'argument: %s\n' "$@";;
+esac
+"#,
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    let args = [
+        "--machine",
+        "mini",
+        "--account",
+        "codex=person@",
+        "--shared",
+        "skill",
+        "implement",
+        "--",
+        "--account=other@",
+        "--shared",
+    ];
+    let output = fixture.run(&args);
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let selection = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("selection: "))
+        .unwrap();
+    let selection: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(selection)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        selection,
+        serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
+    );
+    assert!(stdout.contains("isolation: isolated\n"), "{stdout}");
+    assert!(stdout.contains("argument: --isolate\n"), "{stdout}");
+    assert!(
+        stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("argument: codex=person@"), "{stdout}");
+
+    fs::write(remote.join("connected"), "false").unwrap();
+    let output = fixture.run(&args);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("foreground terminal"), "{stderr}");
+    assert!(stderr.contains("lf machine connect"), "{stderr}");
+}
+
+#[test]
 fn transport_options_require_machine_and_retired_commands_are_gone() {
     let fixture = Machines::new();
     for args in [
         vec!["--secret", "EXAMPLE", "status"],
+        vec!["--machine", "mini", "--secret", "EXAMPLE", "status"],
         vec!["--forward-agent", "status"],
         vec!["machine", "ssh", "mini", "status"],
         vec!["ssh", "mini", "status"],

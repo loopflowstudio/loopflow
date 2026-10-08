@@ -20,8 +20,7 @@ lf machine remove builder
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
-`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+repository. Task, worktree and Wave selectors resolve there. `--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
 
 Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
 Without `--repo`, add uses the local checkout's path relative to the local home.
@@ -48,7 +47,7 @@ foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity, routes and Work placements remain in SQLite. Previously observed routes
-need an explicit add before they can receive forwarded credentials.
+need an explicit add before they can receive a login.
 
 ## Local by default
 

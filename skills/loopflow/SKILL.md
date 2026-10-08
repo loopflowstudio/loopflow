@@ -110,10 +110,10 @@ lf --machine <machine-id> --wave <wave> wave/operate       # one finite pass the
 ```
 
 `--machine <label-or-id>` runs the whole command in the saved remote repository.
-Task, worktree and Wave selectors resolve on that machine. Foreground commands can choose from origin-forwarded and
-target-local subscription accounts. Durable processes scrub forwarded provider,
-GitHub, PM, and secret authority before detaching and use credentials installed
-on their machine.
+Task, worktree and Wave selectors resolve on that machine. Connect missing
+logins in the foreground with `lf machine connect`; remote work uses credentials
+resident on its Machine. Account-selected launches connect a missing login and
+restrict provider launches to that account.
 
 ## Speak
 

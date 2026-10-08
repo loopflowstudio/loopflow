@@ -4,7 +4,8 @@ Jack Heart authorized step 4 on 2026-10-07: implement fresh laptop logins instal
 on an added machine, publish the stacked PR, then stop for review. No landing,
 real login, real credential read or real-account provider contact is authorized.
 LOO-411 / PR #1489 owns the parent machine records. Its later shared connection,
-remote-install offer and failure hints are integrated from parent `32607f1d24ad` (October 7 steer).
+remote-install offer, failure hints and global selector are integrated from parent
+`72f06221183c771ddd43eaabd8f968417a82c571` (October 7 sync).
 
 The full remote-work design and dated decisions remain at
 `8f270beaf3cf752756bb0aaf254cf9a37dbc368d:scratch/work-on-another-machine-name.md`.
@@ -26,9 +27,9 @@ and refresh grant in the target SQLite store after comparing provider user IDs.
 Neither provider account directories nor browser profiles are copied wholesale.
 
 Jack Heart selected `lf --machine mini --account codex=person@ implement` on
-October 7 (`e332b3bb-603b-4dc4-bee4-1e5b704d5721`). This checkout still dispatches
-through `MachineCommand::Ssh`; the accepted selector awaits LOO-411 integration.
-The existing launch path connects that account when missing and restricts the
+October 7 (`e332b3bb-603b-4dc4-bee4-1e5b704d5721`). The global selector now
+dispatches through the parent's transport entry; `lf ssh` is removed.
+The launch path connects that account when missing and restricts the
 remote invocation to the same login. Remote launches use isolated
 account homes so native activation cannot require an unlocked Mac Keychain.
 Unselected read commands do not mint logins. Missing logins require a foreground
@@ -64,17 +65,6 @@ provider-owned refresh, historical captures, current machine records and routes.
 
 ## Remaining work
 
-- Integrate LOO-411's global `--machine` selector before publication, per Jack
-  Heart's comment `e332b3bb-603b-4dc4-bee4-1e5b704d5721`. The current base still
-  exposes `lf ssh`; its removal belongs to the parent. October 7 realignment
-  verified GitHub's published PR #1489 is open at `32607f1d24ad`, already
-  integrated here; `lf sync --plan` reports `noop`. Remote availability is now
-  verified: no published selector exists to integrate. Once the parent publishes
-  it, integration uses `lf sync`. Adapt resident account
-  selection to the global dispatch and update surviving `lf ssh` examples and
-  diagnostics together. Prove selected-account restriction, literal prompt flags
-  after `--`, headless missing-login recovery and retired-command rejection through
-  the public selector with isolated fixtures.
 - Publish the stacked PR and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
@@ -107,4 +97,4 @@ test proves those values are absent in the child; local account reporting still
 checks cached/live evidence and successful/failed Process outcomes without a
 provider executable. No old-peer compatibility path is retained.
 
-Checks: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and shell syntax checks passed; with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout, `uv run python scripts/test_network.py cargo nextest run -p loopflow --lib --test auth_tests -E 'test(engine::process::tests::) | test(account_status_preserves_local_evidence_without_provider_executables)' --no-fail-fast` passed 9 tests and network-isolated `uv run pytest python/tests/test_materialize_rust_tests.py -q` passed 3; prior 69 focused passes remain recorded at `7a3f263cb:scratch/work-on-another-machine-name.md` (including the retained-output-handle leak); `gh pr view 1489 --json headRefName,headRefOid,state,url` and `lf sync --plan` reconfirm the unchanged parent; gate/CI owns broader checks and selector integration still needs its four public-path proofs.
+Checks: network-isolated `cargo nextest run -p loopflow --test machine_commands --test cli_discovery -E 'binary(machine_commands) | test(remote_selection_preserves_command_arguments_and_literal_boundaries)' --no-fail-fast` passed 12/13; removing origin-side shorthand resolution repaired dispatch, then `cargo nextest run -p loopflow --test machine_commands -E 'test(machine_selector_dispatches_before_local_help_and_placement) | test(selected_machine_login_stays_restricted_and_missing_login_stops_headless)' --no-fail-fast` passed 2/2 with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout; `cargo fmt --all` and `git diff --check` passed. Global-selector fixtures cover selected-account restriction, literal prompt flags, headless missing-login recovery and retired-command rejection. Earlier focused evidence is retained in pre-sync history; gate/CI owns broader proof.

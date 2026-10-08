@@ -260,9 +260,8 @@ lf --machine <machine-id> --wave <wave> wave/operate
 ```
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
-commands. The remote process can select from subscription accounts forwarded
-for that invocation and accounts installed on the remote Machine. GitHub, PM, and
-secret authority use the remote machine's installed credentials. Before
+commands. Connect required logins with `lf machine connect` in a foreground
+terminal. Remote processes use credentials installed on their Machine. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf machine add` discovers the identity
 and records its label, repository and SSH route. Placement is allowed only while

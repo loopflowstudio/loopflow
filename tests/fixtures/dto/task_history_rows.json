@@ -43,12 +43,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -97,12 +92,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -151,12 +141,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -205,12 +190,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -259,12 +239,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -313,12 +288,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -367,12 +337,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }
@@ -421,12 +386,7 @@
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": null
     }
@@ -475,12 +435,7 @@
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": null
     }
@@ -529,12 +484,7 @@
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": null
     }
@@ -583,12 +533,7 @@
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": null
     }
@@ -637,12 +582,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
     }
@@ -691,12 +631,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
     }
@@ -745,12 +680,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
     }
@@ -799,12 +729,7 @@
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": null
     }
@@ -853,12 +778,7 @@
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
-    "execution": {
-      "state": "idle",
-      "reason": "No active execution",
-      "step": null,
-      "captured": null
-    },
+    "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
     }

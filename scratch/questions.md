@@ -33,7 +33,8 @@ Implementation choices and remaining uncertainties:
 Jack Heart requested “ok. cool. move it forward.” on October 7 after settling
 restart. Implement through pursue and return at demo review. Earlier synonyms
 are research evidence, not targets; this grants no approval of the finished demo
-or permission to skip it and land.
+or permission to skip it and land. Jack Heart's subsequent review and shipping
+approval in [workflow-review.md](workflow-review.md) supersedes that hold.
 
 Implementation review, October 7: Project show/set accepts stable IDs and unique
 names/slugs; catalog commands occupy Project's Workflow group. The obsolete

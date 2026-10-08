@@ -273,8 +273,6 @@ struct WorkNavigationProofTests {
         let flowData = try Data(contentsOf: root.appendingPathComponent("tests/fixtures/dto/flow_process_progress.json"))
         let flows = try #require(JSONSerialization.jsonObject(with: flowData) as? [[String: Any]])
         let latest = flows[0]
-        let entry = try #require(latest["entry"] as? [String: Any])
-        let invocation = try #require(entry["id"] as? String)
         var plan = try #require(JSONSerialization.jsonObject(with: placingTaskWorktrees(in: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")), at: repo)) as? [String: Any])
         var waves = try #require(plan["waves"] as? [[String: Any]])

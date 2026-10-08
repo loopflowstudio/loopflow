@@ -323,7 +323,7 @@ lf roadmap --task LOO-303 --all --json
 Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
 Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
-Task destinations open details; selecting a Flow opens its folded template.
+Task destinations open details; selecting a Flow opens its folded graph.
 
 ### Inspect all work in a Task
 

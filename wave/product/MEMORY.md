@@ -51,27 +51,28 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 
 ## Workflow and Flow alignment (LOO-386, 2026-10-07)
 
-Jack Heart retained Workflow and Flow, scoped Workflow commands to Project and
-Task, and specified that restart resets position. He authorized implementation
-through pursue, returning for demo review; no landing approval follows.
+Jack Heart retained Workflow and Flow, scoped commands to Project and Task, and
+specified restart resets position. After reviewing PR #1492 and accepting
+TaskRunEvidence, he requested “lets ship it”: gate then
+Task-completing landing. Review and approval: `9669d67d5:scratch/workflow-review.md`.
 
-The local cut keeps FlowDefinition and WorkflowDefinition in independent
-namespaces. Project workflow selection affects future take-up; Task restart
-moves the captured graph to start without reloading, execution or history loss.
-Definition navigation carries kind and name. Task projections separate Workflow
-selection, latest FlowProcessDetail, execution evidence and TaskRunControl.
-Completed execution retains its graph; latest grants no primary authority.
-LOO-400's landed `e467ea995` supplies Process/LFID and the migration. Historical
-captures stay readable.
+Definitions have independent namespaces; navigation carries kind and name.
+Project selection affects future take-up; restart retains the captured graph and
+history. Workflow selection, latest FlowProcessDetail, execution evidence and
+TaskRunControl stay separate; latest grants no authority. LOO-400's landed
+`e467ea995` supplies Process/LFID and the migration; old captures remain readable.
 
-Implementation choices: definition list/customize under `project workflow`,
-Project addressing by IDs or unique name/slug, and Flow inspection `--processes`.
-Catalog read failure must not look like a builtin-only inventory; inspecting one
-definition need not enumerate the catalog. Diagrams consume FlowProcessDetail
-directly: a copied progress model duplicated identity and graph. Process success
-is `succeeded`, not `ok`; the latter drew a successful step as failed after a
-stopped driver. Headless fixtures cover the local cut; configured provider, live
-planning and Jack's finished-demo judgment remain unshown. No chapter KR is claimed.
+Choices: list/customize under `project workflow`, Project IDs or unique name/slug,
+and Flow inspection `--processes`. Failed catalogs stay errors; single-definition
+reads skip enumeration. Diagrams read FlowProcessDetail directly. Process success
+is `succeeded`, not `ok`. Restart leaves an active Flow running but prevents its
+arrival from advancing the reset Task.
+
+Gate repaired fixtures missed by focused checks: absent
+execution is null, and every Task needs run_control. A nested macOS sandbox
+failed to launch; the test passed under its own restrictions. Rust and Swift
+failures passed focused reruns. Approval establishes no native Desktop, live
+planning, configured-provider proof or chapter KR.
 
 ## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
 

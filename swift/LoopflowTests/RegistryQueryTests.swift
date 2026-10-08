@@ -247,7 +247,7 @@ struct RegistryQueryTests {
           "started": true
         },
         "directive": null,
-        "flow":{"recommended":"feature","record":{"kind":"none"},"controls":[]},
+        "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
         "next_move": {
           "owner": "task",
           "reason": "ready"

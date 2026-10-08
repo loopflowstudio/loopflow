@@ -52,3 +52,19 @@ checks. The walkthrough remains pinned to the earlier published head; this
 note records the subsequent naming change and approval.
 
 Naming check: `cargo fmt --all`, focused Task run refusal test (1/1), and `cargo clippy --all-targets -- -D warnings` passed with LF_* cleared for test/Clippy.
+
+## Gate review
+
+Gate found one shared JSON fixture inventing idle execution for planning-only
+Tasks, and four inline Swift fixtures still using the removed `flow` object.
+Corrected the shared rows to absent execution and migrated the mock Wave screen,
+RegistryQuery and Wave lens fixtures to the explicit Workflow/execution/control
+fields. Removed an unused navigation-test identity left by the rename and changed
+the guide's remaining “folded template” to “folded graph.” Existing producer and
+consumer tests prove the repairs; the design holds the single check-result line.
+
+The Python observation test cannot install its sandbox inside the runner's macOS
+sandbox. It passed directly with its own network/write/read restrictions intact.
+The initial gate run remains failed evidence; focused repairs and this bounded
+fallback resolve its findings without claiming an identical-tree cached pass.
+No production lifecycle, schema, retry policy or authority change was needed.

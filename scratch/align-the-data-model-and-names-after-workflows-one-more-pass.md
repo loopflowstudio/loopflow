@@ -23,7 +23,9 @@ and returning for demo review.
 The outcome is to distinguish a Task's Workflow from the autonomous work it
 invokes, select either definition without name collisions, and inspect execution
 without learning another lifecycle. CLI, code, wire, Swift and documentation
-change together. Demo review remains the authored boundary.
+change together. Jack Heart subsequently reviewed PR #1492, accepted the
+TaskRunEvidence naming correction and requested shipping; the
+[review record](workflow-review.md) supersedes the earlier demo hold.
 
 ## Accepted constraints and integrated baseline
 
@@ -280,14 +282,15 @@ Upstream #1487 is also integrated. Its terminal recovery repairs preserve native
 provider identity and history, but Infrastructure still records failed installed
 reconnect evidence. That does not establish this Task's provider-continuity proof.
 
-Remaining: gate's changed-aware acceptance and packaging/docs checks, followed
-by Jack Heart's demo review. No provider continuity, live Home/Linear mutation,
-rendered/native interaction or chapter KR is established by local fixtures.
+Remaining: the authorized Task-completing landing. Gate's affected checks and
+focused repairs are complete. Jack Heart's shipping approval is recorded in workflow-review.md.
+No provider continuity, live Home/Linear mutation, rendered/native interaction
+or chapter KR is established by local fixtures.
 Retry/recovery policy, graph clipping and completion/reopening remain out of scope.
 
 ## Proof and limits
 
-Remaining acceptance covers the provider-free path from definitions and public
+Automated acceptance covers the provider-free path from definitions and public
 commands through SQLite and the watch DTO into Swift:
 
 1. Same-name autonomous and Workflow definitions both list, show, customize and
@@ -345,4 +348,4 @@ work remains outstanding.
   and show share `flow_catalog_entry`; invalid local sources retain diagnostics,
   and a missing definition never falls through to a skill.
 
-Checks (October 7): prior implementation/compression recorded passing build, docs/architecture, `cargo test -p loopflow --test flow_discovery_tests`, `cargo test -p loopflow --lib engine::flow_graph::tests`, `scripts/test_desktop.sh --filter 'TaskFlowTests|DTOFixtureTests|DesktopHeadlessTests'`, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`; prose-only realign: `git diff --check` passes and `lf context --skill realign --json` fits all budgets; affected acceptance, packaging/website and native demo remain with gate/demo.
+Checks (October 7 gate, LF_* cleared and LF_BIN pinned to this checkout): `uv run python scripts/test.py --base e467ea995241569040260f801c933821e08c0a6b --reuse-passing` ran architecture, Python, materialized Rust, website and headless Desktop; architecture/fmt/Clippy and website (78 passed, 3 skipped) passed; Python 405 passed plus one nested-sandbox launch failure, direct self-sandboxed test rerun passed; Rust 2287 passed, one stale planning-only execution fixture repaired and its materialized producer test rerun passed; Swift built and ran 390 tests with eight stale-inline-fixture failures, repaired then `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'MockWaveFixtureTests|RegistryQueryTests|WaveLensTests|TaskHistoryFilterTests|WorkNavigationProofTests'` rebuilt and passed (native cases skipped); `uv run python scripts/check_swift_multiplatform_boundaries.py` and `git diff --check` passed. Original failure receipts remain at `.lf/tmp/gate/run-10213`; no full-tree passing-cache claim. CI owns its full matrix; installed packaging, native interaction and configured-provider continuity remain unproven.

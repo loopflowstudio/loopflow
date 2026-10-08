@@ -250,9 +250,17 @@ which is told its node's skill and the command for each edge leaving it. `lf --t
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
 `research` (findings, no PR). `lf project workflow list` lists Workflows;
-`lf flow list` lists autonomous Flows. `lf project workflow customize NAME`
-copies a builtin into `.lf/workflows/`; `lf flow customize NAME` uses
-`.lf/flows/`. Both reuse existing local files and print the path.
+`lf flow list` lists autonomous Flows. To edit a Workflow, read its source,
+edit the file, then save it to the Wave:
+
+```bash
+lf project workflow source PROJECT feature > /tmp/feature.yaml
+# Edit /tmp/feature.yaml.
+lf project workflow set PROJECT feature --file /tmp/feature.yaml
+```
+
+`lf flow customize NAME` copies a builtin into `.lf/flows/`, reusing an
+existing local file and printing its path.
 Overrides stay within their kind: a Flow and a Workflow can share a name.
 An invalid local source stays unavailable and never exposes a hidden builtin.
 

@@ -30,7 +30,10 @@ pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
             .await
             .map_err(error)?
             .ok_or_else(|| error(format!("no Task exists for {issue:?}")))?;
-        let _lock = store.sqlite.lock_checkout(&task.worktree).map_err(error)?;
+        let _lock = store
+            .sqlite
+            .lock_checkout(task.worktree()?)
+            .map_err(error)?;
         store
             .sqlite
             .set_task_automation(&task.id, enabled)

@@ -94,9 +94,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal
-    #[arg(long, conflicts_with = "batch")]
-    pub tui: bool,
+    /// Show context accounting and diagnostic logs
+    #[arg(short = 'v', long, global = true)]
+    pub verbose: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -186,12 +186,12 @@ impl Cli {
         for (flag, enabled) in [
             ("--batch", self.batch),
             ("--interactive", self.interactive),
-            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
+            ("--verbose", self.verbose),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -255,7 +255,7 @@ impl Cli {
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
-            tui: self.tui,
+            verbose: self.verbose,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -341,6 +341,12 @@ pub enum Commands {
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
+    /// Native provider naming callback.
+    #[command(name = "__session-title", hide = true)]
+    SessionTitle {
+        #[arg(value_parser = ["claude", "codex"])]
+        provider: String,
+    },
     /// Inspect and continue Sessions
     Session {
         #[command(subcommand)]
@@ -490,6 +496,14 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Update a Project's name or summary
+    Edit {
+        project: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+    },
     /// Select and inspect reusable Workflows
     Workflow {
         #[command(subcommand)]
@@ -499,8 +513,13 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectWorkflowCommand {
+    /// Read the authored definition without creating a repository file
+    Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
+        /// Include this Project's stored Wave definitions
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -511,9 +530,13 @@ pub enum ProjectWorkflowCommand {
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
-    Set { project: String, name: String },
-    /// Copy a builtin Workflow when needed and print its local path
-    Customize { name: String },
+    Set {
+        project: String,
+        name: String,
+        /// Store this definition in the Wave
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -703,6 +726,14 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Replace stored Wave documents without modifying repository files
+    Edit {
+        wave: String,
+        #[arg(long, required_unless_present = "memory")]
+        goal: Option<PathBuf>,
+        #[arg(long)]
+        memory: Option<PathBuf>,
+    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,
@@ -809,6 +840,8 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Synchronize a Task; observed planning conflicts adopt Linear
+    Sync { issue: String },
     /// Inspect or reset this Task's captured Workflow
     Workflow {
         #[command(subcommand)]
@@ -892,7 +925,7 @@ pub enum TaskCommand {
         #[arg(long)]
         force: bool,
     },
-    /// File a Task in the current chapter
+    /// Create a planning Task without allocating a checkout or starting work
     Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
@@ -984,6 +1017,14 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        /// Zero-based position in the Project's Task order
+        #[arg(long)]
+        rank: Option<u32>,
+        /// Assignee identity; provider user ID in connected plans
+        #[arg(long, conflicts_with = "unassign")]
+        assignee: Option<String>,
+        #[arg(long)]
+        unassign: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -1039,6 +1080,7 @@ impl TaskCommand {
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Run { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
@@ -1784,10 +1826,12 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
-        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
-        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
-        assert!(error.to_string().contains("--ide"));
+    fn retired_surface_flags_are_rejected_for_a_valid_skill_command() {
+        for flag in ["--ide", "--tui"] {
+            let error = Cli::try_parse_from(["lf", flag, "skill", "debug"]).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+            assert!(error.to_string().contains(flag));
+        }
     }
 
     #[test]

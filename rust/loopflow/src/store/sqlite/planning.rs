@@ -182,6 +182,13 @@ impl SqliteStore {
              removed=MAX(removed,excluded.removed)",
             params![issue_id, revision, removed],
         )?;
+        if removed {
+            tx.execute(
+                "UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,?2)
+                 WHERE external_issue_id=?1",
+                params![issue_id, super::super::rows::now_unix()],
+            )?;
+        }
         let mut query =
             tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
         let rows = query
@@ -307,8 +314,41 @@ impl SqliteStore {
             &snapshot.snapshot.items,
             None,
         )?;
+        for project in &snapshot.snapshot.projects {
+            super::planning_order::observe_in(
+                &tx,
+                &repo,
+                &snapshot.provider,
+                &project.id,
+                &snapshot
+                    .snapshot
+                    .items
+                    .iter()
+                    .filter(|i| i.project_id.as_deref() == Some(&project.id))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )?;
+        }
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn put_pm_project_order(
+        &self,
+        repo: &str,
+        project: &str,
+        items: &[PmItem],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let now = super::super::rows::now_unix();
+        for item in items {
+            put_item(&tx, repo, "linear", now, item)?;
+        }
+        project_accepted_planning(&tx, repo, "linear", &[], items, None)?;
+        let accepted = super::planning_order::observe_in(&tx, repo, "linear", project, items)?;
+        tx.commit()?;
+        Ok(accepted)
     }
 
     pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
@@ -410,16 +450,19 @@ pub(super) fn pm_task_observation_in(
         )));
     }
     let Some((item, project, observed_at, invalid, removed)) = rows.into_iter().next() else {
-        let removed = conn.query_row(
+        let (removed, changed) = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1 AND ?2='linear')
                  OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE))",
-                params![selector, provider, repo], |row| row.get::<_, bool>(0),
+                           WHERE w.repo=?3 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
+                 EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND ?2='linear')",
+                params![selector, provider, repo], |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
             )?;
         return Ok(PmTaskObservation {
             record: None,
             state: if removed {
                 PlanningState::Removed
+            } else if changed {
+                PlanningState::Invalid
             } else {
                 PlanningState::Unavailable
             },
@@ -496,6 +539,7 @@ fn project_accepted_planning(
     for project in projects {
         let (body, observed_at, wave_id) = project?;
         let project: PmProject = serde_json::from_str(&body)?;
+        super::planning_export::attach_in(tx, repo, true, &serde_json::to_value(&project)?)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
                 "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
@@ -515,37 +559,139 @@ fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
+        let project =
+            super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11,?12,?13,?14)
              ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
              project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status",
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary,planning_provider_revision=excluded.planning_provider_revision,
+             planning_initiatives=excluded.planning_initiatives,planning_teams=excluded.planning_teams",
             params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str()],
+                crate::pm::render_project_content(&crate::pm::ProjectContent { workflow: project.workflow.clone(), krs: project.krs.clone(), metric_targets: project.metric_targets.clone() }),
+                observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary,
+                project.revision,serde_json::to_string(&project.initiative_ids)?,serde_json::to_string(&project.team_ids)?],
+        )?;
+        tx.execute(
+            "UPDATE projects SET planning_rank=COALESCE((SELECT position FROM pm_wave_projects
+                WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
+            params![id.as_str(), wave_id, project.id],
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
-    // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
-    tx.execute(
-        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
-         UPDATE tasks AS target SET
-             issue_identifier=json_extract(i.body,'$.identifier'),
-             issue_title=json_extract(i.body,'$.name'),
-             issue_description=json_extract(i.body,'$.description'),
-             pm_snapshot_synced_at=i.observed_at,project_id=p.id
-         FROM pm_items i
+    for item in items {
+        if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
+            params![repo,provider,item.id], |row| row.get::<_,String>(0)).optional()? {
+            super::planning_export::attach_in(tx, repo, false, &serde_json::from_str(&body)?)?;
+        }
+    }
+    // Reconcile pending fields against their provider baselines in the same transaction.
+    let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id
          JOIN projects p ON p.external_project_id=i.project_id
-         JOIN projects current ON current.wave_id=p.wave_id
+         JOIN projects current ON current.id=target.project_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
-         WHERE target.external_issue_id=i.id AND target.project_id=current.id
+         WHERE target.external_issue_id=i.id
+         AND (current.wave_id=p.wave_id OR EXISTS(
+             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
+             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$')=current.id
+             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
          AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"),
-        params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
-    )?;
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"))?;
+    let updates = query
+        .query_map(
+            params![
+                repo,
+                provider,
+                item_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (id, body, observed_at, project) in updates {
+        let item: PmItem = serde_json::from_str(&body)?;
+        let task_id = crate::durable::TaskId::from_raw(&id);
+        super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
+        let item = super::planning_changes::PlanningChanges::Task(&task_id).reconcile(tx, &item)?;
+        let project: String = match item.project_id.as_deref() {
+            Some(selected) => tx.query_row(
+                "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                [selected],
+                |row| row.get(0),
+            )?,
+            None => project,
+        };
+        tx.execute(
+            "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
+                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
+             UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
+                 planning_state=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_state ELSE ?5 END,
+                 planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
+                 planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
+                 planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
+                 planning_team_id=?11,planning_assignee=?12,
+                 pm_snapshot_synced_at=?13,project_id=?14,
+                 planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
+                     OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
+             WHERE id=?1",
+            params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
+                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project],
+        )?;
+    }
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT i.body,i.observed_at,p.id FROM pm_items i
+         JOIN projects p ON p.external_project_id=i.project_id
+         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
+         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.external_issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1)"
+    ))?;
+    let imported = query
+        .query_map(
+            params![
+                repo,
+                provider,
+                item_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (body, observed_at, project) in imported {
+        let item: PmItem = serde_json::from_str(&body)?;
+        tx.execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
+             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
+             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17)",
+            params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
+        )?;
+    }
     Ok(())
 }
 
@@ -705,7 +851,7 @@ fn put_project(
     Ok(())
 }
 
-fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
+pub(super) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
     revision
         .map(|revision| {
             time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
@@ -721,7 +867,7 @@ fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
         .transpose()
 }
 
-fn put_item(
+pub(super) fn put_item(
     conn: &Connection,
     repo: &str,
     provider: &str,
@@ -799,6 +945,71 @@ mod tests {
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::store::{FrontierAdvance, PlanningState, Store};
+
+    #[test]
+    fn owned_issue_import_retains_identity_across_alias_changes_without_placement() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let initiative = snapshot.projects[0].initiative_ids[0].clone();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let mut row = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative,
+            synced_at: 42,
+            snapshot,
+        };
+        store.put_pm_snapshot(&row).unwrap();
+        let item = &row.snapshot.items[0];
+        let task = store.task_by_issue(&item.id).unwrap().unwrap();
+        assert!(task.worktree.is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        assert_eq!(task.plan.title, item.name);
+        assert_eq!(task.plan.pm_snapshot_synced_at, Some(42));
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
+        row.synced_at = 43;
+        row.snapshot.items[0].identifier = "MOVED-42".into();
+        row.snapshot.items[0].revision = Some("2099-01-01T00:00:00Z".into());
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(
+            store.task_by_issue("MOVED-42").unwrap().unwrap().id,
+            task.id
+        );
+        store
+            .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
+            .unwrap();
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(
+            store.task_by_issue("MOVED-42").unwrap().unwrap().id,
+            task.id
+        );
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM tasks WHERE started_at IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn project_name_cutover_retains_both_histories_and_rejects_later_conflicts() {
@@ -986,10 +1197,7 @@ mod tests {
             .is_ok());
 
         // A delayed list cannot resurrect a confirmed removal in either reader.
-        store
-            .confirm_task_deletion(&wave, "issue", "FIX-1")
-            .await
-            .unwrap();
+        store.sqlite.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'issue','FIX-1',1)", [&wave]).unwrap();
         store.put_pm_snapshot(list, None).await.unwrap();
         let removed = store
             .pm_task_observation("/repo", "linear", "FIX-1")

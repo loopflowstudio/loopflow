@@ -77,6 +77,12 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+Changes to interactive/headless selection also run `default_conversation_tests`
+and `context_launch_tests` alongside `flow_tests`: bare `lf`, explicit `-b`, and a
+Flow invoking the `default` skill must preserve their distinct launch modes.
+Prompt fixtures read the harness's actual inputs, including context files and
+stdin, rather than assuming everything remains in argv.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
@@ -103,6 +109,25 @@ boundary. CI and release own the full matrix. Run `scripts/test.py --all` only
 to reproduce a matrix failure or when release guidance requires it.
 
 ## External network isolation
+
+`tests/e2e/native_titles.py` exercises real Claude/Codex TUIs against a local fake
+API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
+and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
+it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
+OSC titles and native manual rename. `--headless` checks new `claude -p` and
+`codex exec` conversations, saving naming readback beside stdout/stderr. Claude
+saves the name; Codex currently records the missing embedded naming endpoint.
+Old conversations and resume repair are out of scope. No installed
+accounts, host shims, or cmux windows participate.
+The probe uses native terminal-title defaults and checks the latest OSC title,
+so an earlier correct title cannot hide a later overwrite. The TUI probe does not
+cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
+
+`uv run python scripts/test_task_installation.py --native-titles` builds a
+release-shaped candidate only inside Docker and exercises published promotion
+under a disposable OS account. It checks preview, existing settings and symlinks,
+failed hook installation, same-candidate retry and repeated installation. CI's
+installation job runs this proof; it never touches the host installation.
 
 ```bash
 uv sync
@@ -763,8 +788,8 @@ Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
-installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
-the deletion test, and the regular Rust suite skips installation proofs. Keep
+installation proofs and the paired `local_planning` deletion proof. The independent abandonment
+`task_deletion_tests` binary fixture runs only on Linux, and the regular Rust suite skips installation proofs. Keep
 simulated provider revisions and checkout Team/Initiative bindings consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
@@ -840,7 +865,7 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise Task deletion through the real CLI on Linux:
+Exercise retained execution during abandonment through the real CLI on Linux:
 
 ```bash
 cargo test -p loopflow --test task_deletion_tests
@@ -849,9 +874,9 @@ cargo test -p loopflow --test task_deletion_tests
 Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so this test is Linux-only. It verifies native removal, local retirement,
-completed history, retained PRs/files, retries, planning sync, diagnostics and
-rejection of the removed `pm`/`work` groups. No installation or live provider is
+setting, so this test is Linux-only. It verifies an immediate cancellation save, stable pending delivery and retained
+Sessions, Processes, PRs and files. `local_planning` covers deletion in both connection
+modes, rollback, retry identity and retained execution without provider access. No installation or live provider is
 used.
 
 Exercise Linear expiry and rejection through an explicit experimental CLI:
@@ -895,6 +920,21 @@ It exercises the real CLI, verified shell installer, store creation, repeat
 installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
+
+### Native Codex terminal capture
+
+```bash
+uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py \
+  --lf target/debug/lf --codex /path/to/native/codex
+```
+
+Use a native Codex binary supporting profile files. This headless PTY fixture
+uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+independently authored wrapper supplying trust plus SessionStart/Stop hooks.
+It verifies completed turns, exact native capture, both launch hooks, reconnect,
+unchanged configuration and temporary-profile cleanup. It uses no account or
+login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
+without lf. This proves launch composition, not cmux's actual tab tracking.
 
 ### Released capture-history preservation
 

@@ -542,30 +542,32 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    let mut directory = PathBuf::from("wave");
-    for segment in Path::new(wave).components() {
-        directory.push(segment);
-        let absolute = repo_root.join(&directory);
-        if !absolute.is_dir() {
-            continue;
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let repo = crate::repository::CanonicalRepo::discover(repo_root)
+        .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let mut prefix = String::new();
+    for segment in wave.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
         }
-        let mut paths = fs::read_dir(&absolute)?
-            .map(|entry| entry.map(|entry| entry.path()))
-            .collect::<Result<Vec<_>, _>>()?;
-        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
-        paths.sort_by_key(|path| {
-            (
-                path.file_name().is_none_or(|name| name != "README.md"),
-                path.clone(),
-            )
-        });
-        for path in paths {
+        prefix.push_str(segment);
+        let locator = crate::work::wave::WaveLocator::new(repo.clone(), &prefix)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+        let Some(saved) = store
+            .get_wave_at(&locator)
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        else {
+            continue;
+        };
+        for (name, content) in store
+            .wave_documents(saved.id())
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        {
             docs.push(Document {
-                path: directory
-                    .join(path.file_name().expect("directory entry has a name"))
-                    .to_string_lossy()
-                    .into_owned(),
-                content: fs::read_to_string(&path)?,
+                path: format!("wave/{prefix}/{name}"),
+                content,
                 source: DocumentSource::Wave,
             });
         }
@@ -1540,9 +1542,10 @@ pub fn loopflow_section() -> String {
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
+        let memory = format!("Curate stored Wave memory with `lf wave edit {wave} --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.");
         parts.push(format!(
             "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
-             Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.\n\
+             {memory}\n\
              Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
         ));
     }
@@ -2785,7 +2788,13 @@ mod tests {
 
     #[test]
     fn gather_context_wave_preserved() {
-        let temp = tempfile::tempdir().expect("create temp dir");
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+            .unwrap();
+        let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();
 
         let opts = GatherContextOpts {
@@ -2814,8 +2823,10 @@ mod tests {
         assert!(path.to_string_lossy().contains(".lf/prompts/"));
         assert!(path.to_string_lossy().ends_with("-implement.md"));
 
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, prompt);
+        let next = write_prompt_log(repo.path(), "Next step", "implement", None).unwrap();
+        assert_ne!(path, next);
+        assert_eq!(fs::read_to_string(&path).unwrap(), prompt);
+        assert_eq!(fs::read_to_string(&next).unwrap(), "Next step");
     }
 
     #[test]

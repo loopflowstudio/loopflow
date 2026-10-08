@@ -18,7 +18,8 @@ and truth source for each responsibility.
 
 ## Projects
 
-Projects and tasks live in Linear and sync into the local SQLite registry.
+Jack Heart selected locally owned Projects and Tasks with optional repository-wide
+Linear synchronization. LOO-406 owns the unfinished writer cutover.
 Projects do not own memory, cadence, or child projects.
 
 ## Bounds

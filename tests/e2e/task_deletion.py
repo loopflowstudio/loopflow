@@ -53,21 +53,8 @@ class Handler(BaseHTTPRequestHandler):
             }
         elif "query IssueOwnership" in query:
             data = {"issue": issue if not issue["trashed"] else None}
-        elif "query IssueDeletion" in query:
-            data = {"issue": {"trashed": issue["trashed"]}}
         elif "query IssueAttachments" in query:
             data = {"issue": {"attachments": {"nodes": [], "pageInfo": page}}}
-        elif "query CanceledWorkflowStates" in query:
-            data = {"workflowStates": {"nodes": [{"id": "canceled", "position": 0}]}}
-        elif "mutation SetIssueState" in query:
-            issue["state"]["type"] = variables["stateId"]
-            issue["updatedAt"] = _next_revision(issue["updatedAt"])
-            data = {"issueUpdate": {"success": True}}
-        elif "mutation DeleteIssue" in query:
-            assert variables["id"] == issue["id"]
-            issue["trashed"] = True
-            state["deletes"] += 1
-            data = {"issueDelete": {"success": True, "entity": None}}
         elif "query ListInitiatives" in query:
             data = {
                 "initiatives": {
@@ -134,6 +121,7 @@ def _abandon_retains_execution(
     processes = db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall()
     sessions = db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
     prs = db.execute("SELECT * FROM task_prs").fetchall()
+    delivery = None
     for _ in range(2):
         result = subprocess.run(
             [fixture["lf"], "task", "abandon", "INF-123"],
@@ -144,8 +132,16 @@ def _abandon_retains_execution(
             timeout=30,
         )
         assert result.returncode == 0, result.stderr
-        assert issue["state"]["type"] == "canceled"
+        assert issue["state"]["type"] == "unstarted"
         assert db.execute("SELECT abandoned_at IS NOT NULL FROM tasks").fetchone() == (1,)
+        pending = db.execute(
+            "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?",
+            (fixture["task"],),
+        ).fetchall()
+        assert len(pending) == 1 and pending[0][1:] == ("canceled", 0, 0)
+        if delivery is not None:
+            assert pending == delivery
+        delivery = pending
         assert (
             db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall() == processes
         )
@@ -298,114 +294,11 @@ def main() -> None:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            if fixture["abandon"]:
-                _abandon_retains_execution(fixture, repo, env, db, issue, authored)
-                return
-            # Trash preserves a completed Task's outcome and occupied checkout.
-            issue["state"]["type"] = "completed"
-            issue["updatedAt"] = _next_revision(issue["updatedAt"])
-            # Ownership refresh may advance its observation time, not Task history.
-            db.execute(
-                "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?,?,'end',123)",
-                (
-                    fixture["task"],
-                    '{"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]}',
-                ),
-            )
-            db.commit()
-            # Accept the provider's planning facts before checking that deletion
-            # preserves them and the Task's independent execution history.
-            refreshed = subprocess.run(
-                [fixture["lf"], "repo", "refresh", "task-pr-tests"],
-                cwd=repo,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            assert refreshed.returncode == 0, refreshed.stderr
-            db.execute(
-                "UPDATE tasks SET pm_snapshot_synced_at=1 WHERE id=?",
-                (fixture["task"],),
-            )
-            db.commit()
-            history_columns = ",".join(
-                row[1]
-                for row in db.execute("PRAGMA table_info(tasks)")
-                if row[1] != "pm_snapshot_synced_at"
-            )
-            history_query = f"SELECT {history_columns} FROM tasks"
-            before = db.execute(history_query).fetchall()
-            prs = db.execute("SELECT * FROM task_prs").fetchall()
-            for selector in ["INF-123", fixture["task"]]:
-                result = subprocess.run(
-                    [fixture["lf"], "task", "delete", selector],
-                    cwd=repo,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                assert result.returncode == 0, result.stderr
-                assert "INF-123: deleted" in result.stdout
-                assert (
-                    "Retained PR history: https://github.com/loopflowstudio/fixture/pull/1"
-                    in result.stderr
-                )
-            assert server.state["deletes"] == 1 and issue["trashed"]
-            assert issue["state"]["type"] == "completed"
-            assert db.execute(history_query).fetchall() == before, (
-                history_columns,
-                before,
-                db.execute(history_query).fetchall(),
-            )
-            assert db.execute("SELECT pm_snapshot_synced_at FROM tasks").fetchone()[0] > 1
-            assert db.execute("SELECT * FROM task_prs").fetchall() == prs
-            assert db.execute("SELECT issue_id FROM task_deletions").fetchall() == [
-                (fixture["issue"],)
-            ]
-            assert authored.read_text() == "preserve authored work\n"
-            for args in [["repo", "refresh", "task-pr-tests"], ["doctor", "--planning", "--json"]]:
-                result = subprocess.run(
-                    [fixture["lf"], *args],
-                    cwd=repo,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                assert result.returncode == 0, result.stderr
-            for group, verb in [("pm", "sync"), ("work", "status")]:
-                result = subprocess.run(
-                    [fixture["lf"], group, verb],
-                    cwd=repo,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                assert result.returncode != 0, f"{group} still dispatches"
-            # An unplaced issue uses the identical binary entry point.
-            issue["id"], issue["identifier"], issue["trashed"] = "unplaced-issue", "INF-124", False
-            issue["state"]["type"] = "unstarted"
-            result = subprocess.run(
-                [fixture["lf"], "task", "delete", "INF-124"],
-                cwd=repo,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            assert result.returncode == 0, result.stderr
-            assert issue["trashed"] and server.state["deletes"] == 2
-            assert db.execute("SELECT count(*) FROM tasks").fetchone() == (1,)
+            _abandon_retains_execution(fixture, repo, env, db, issue, authored)
         finally:
             server.shutdown()
             thread.join()
-    print(
-        "real CLI: provider trash confirmed; local removal, Done history "
-        "and authored files preserved"
-    )
+    print("real CLI: cancellation saved locally with execution and files preserved")
 
 
 if __name__ == "__main__":

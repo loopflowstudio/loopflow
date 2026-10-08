@@ -25,6 +25,7 @@ pub mod skills;
 pub mod stream;
 pub mod structured_reply;
 pub mod target;
+pub(crate) mod terminal_title;
 pub mod transitions;
 pub mod workflow;
 pub mod worktree;

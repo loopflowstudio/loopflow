@@ -676,7 +676,7 @@ fn print_task_snapshot(
             snapshot.status,
             snapshot.task_id,
             body,
-            snapshot.worktree,
+            snapshot.worktree.as_deref().unwrap_or("unplaced"),
             branch,
             pm_writeback,
         );
@@ -805,7 +805,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 println!(
-                    "Wave {wave}: Project {} ({}) is active",
+                    "Wave {wave}: Project {} ({}) is active locally",
                     result.name, result.id
                 );
             }
@@ -832,12 +832,26 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
         }
+        WaveCommand::Edit { wave, goal, memory } => {
+            for (document, path) in [("GOAL.md", goal), ("MEMORY.md", memory)] {
+                if let Some(path) = path {
+                    loopflow::work::wave::config::write_wave_document(
+                        repo,
+                        wave,
+                        document,
+                        &std::fs::read_to_string(path)?,
+                    )?;
+                }
+            }
+            Ok(())
+        }
         WaveCommand::UpdatePlan { wave, plan } => {
-            update_plan(
+            let saved = tokio::runtime::Runtime::new()?.block_on(update_plan(
                 repo,
                 wave.as_deref(),
                 serde_json::from_slice(&std::fs::read(plan)?)?,
-            )?;
+            ))?;
+            print_project_sync(&saved);
             Ok(())
         }
     }
@@ -966,6 +980,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Ok(())
             }
         },
+        TaskCommand::Sync { issue } => {
+            println!("{}", loopflow::ops::task::task_sync(issue)?);
+            Ok(())
+        }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
@@ -1000,7 +1018,14 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.identifier, issue.name);
+                println!("{} · {}", issue.id, issue.name);
+            }
+            if loopflow::engine::config::load_config_or_default(Some(repo))
+                .pm
+                .and_then(|pm| pm.linear_team)
+                .is_some()
+            {
+                eprintln!("Saved locally; pending Linear sync.");
             }
             Ok(())
         }
@@ -1187,23 +1212,47 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Delete { issue } => {
             let identifier = loopflow::ops::task::task_delete(repo, issue)?;
-            println!("{identifier}: deleted");
+            println!("{identifier}: removed locally; execution history retained");
+            if loopflow::engine::config::load_config_or_default(Some(repo))
+                .pm
+                .and_then(|pm| pm.linear_team)
+                .is_some()
+            {
+                println!("Pending Linear sync");
+            }
             Ok(())
         }
         TaskCommand::Edit {
             issue,
             title,
             notes,
+            rank,
+            assignee,
+            unassign,
             wave,
         } => {
             let result = loopflow::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                title.clone(),
-                notes.clone(),
+                loopflow::pm::PmItemUpdate {
+                    name: title.clone(),
+                    description: notes.clone(),
+                    rank: *rank,
+                    assignee: if *unassign {
+                        Some(None)
+                    } else {
+                        assignee.clone().map(Some)
+                    },
+                },
             )?;
             println!("{}: updated task {}", result.wave, result.id);
+            if result.sync_enabled && !result.pending_changes.is_empty() {
+                eprintln!(
+                    "Saved locally; pending Linear sync ({} fields).",
+                    result.pending_changes.len()
+                );
+            }
             Ok(())
         }
         TaskCommand::Refile { issue, wave } => {
@@ -1238,7 +1287,20 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
                     };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
-                    println!("── {author} · {date}\n{}\n", comment.body.trim_end());
+                    let sync = if result.pending_sync.contains(&comment.id) {
+                        " · pending sync"
+                    } else {
+                        ""
+                    };
+                    println!("── {author} · {date}{sync}\n{}\n", comment.body.trim_end());
+                    if let Some(body) = result.conflicts.get(&comment.id) {
+                        println!("Saved local comment; Linear’s edit is current:\n{body}\n");
+                    }
+                }
+            }
+            if !*json {
+                if let Some(error) = &result.refresh_error {
+                    eprintln!("{error}; showing saved comments");
                 }
             }
             Ok(())
@@ -1289,6 +1351,21 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
+fn init_tracing(verbose: bool) {
+    let default_filter = if verbose {
+        "lf=info,loopflow=info"
+    } else {
+        "warn"
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
+        )
+        .with_writer(std::io::stderr)
+        .without_time()
+        .init();
+}
+
 fn run() -> anyhow::Result<()> {
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
@@ -1298,16 +1375,6 @@ fn run() -> anyhow::Result<()> {
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
     // loop's codex app-server pair and left a stale .wave-endpoint).
-    // Initialize tracing with RUST_LOG env filter
-    // Usage: RUST_LOG=lf=debug lf unbreak
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("lf=info,loopflow=info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .without_time()
-        .init();
-
     let raw_args: Vec<String> = std::env::args().collect();
     if let Some((remote, command)) = loopflow::lf::navigation::machine_invocation(&raw_args)
         .map_err(|error| {
@@ -1316,6 +1383,8 @@ fn run() -> anyhow::Result<()> {
             loopflow::process::CommandExit(code)
         })?
     {
+        // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
+        init_tracing(false);
         loopflow::installation::dispatch_default_cli()?;
         ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
@@ -1348,6 +1417,7 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    init_tracing(cli.verbose);
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
@@ -1461,8 +1531,7 @@ fn run() -> anyhow::Result<()> {
         } else {
             None
         };
-
-        debug!(?cli, "parsed CLI arguments");
+        debug!(batch = cli.batch, "parsed CLI arguments");
 
         dispatch(cli, &args)
     }
@@ -1592,10 +1661,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             args,
             direct_binding.as_ref(),
         ),
-        None => match direct_binding.as_ref() {
-            Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
-            None => run_default_agent(&cli, args),
-        },
+        None => {
+            cli.interactive = !cli.batch;
+            match direct_binding.as_ref() {
+                Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
+                None => run_default_agent(&cli, args),
+            }
+        }
     });
 
     finish_command(result)
@@ -1624,6 +1696,9 @@ fn execute_command(
         }) => loopflow::lf::commands::config::print_user(*json),
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
+        }
+        Some(Commands::SessionTitle { provider }) => {
+            loopflow::lf::commands::session_history::name_native_session(provider)
         }
         Some(Commands::Session {
             cmd:
@@ -1758,13 +1833,41 @@ fn execute_command(
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd),
         Some(Commands::Project {
+            cmd:
+                loopflow::lf::ProjectCommand::Edit {
+                    project,
+                    name,
+                    summary,
+                },
+        }) => {
+            let cwd = std::env::current_dir()?;
+            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+            let saved = tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
+                &repo,
+                project,
+                name.as_deref(),
+                summary.as_deref(),
+            ))?;
+            print_project_sync(&saved);
+            Ok(())
+        }
+        Some(Commands::Project {
             cmd: loopflow::lf::ProjectCommand::Workflow { cmd },
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
             match cmd {
-                loopflow::lf::ProjectWorkflowCommand::List { json } => {
-                    let entries = loopflow::engine::workflow::workflow_catalog(&repo)?;
+                loopflow::lf::ProjectWorkflowCommand::Source { project, name } => {
+                    let source = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow_source(&repo, project, name),
+                    )?;
+                    print!("{source}");
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::List { json, project } => {
+                    let entries = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow_catalog(&repo, project.as_deref()),
+                    )?;
                     if *json {
                         println!("{}", serde_json::to_string(&entries)?);
                     } else {
@@ -1781,32 +1884,37 @@ fn execute_command(
                     }
                     Ok(())
                 }
-                loopflow::lf::ProjectWorkflowCommand::Customize { name } => {
-                    println!(
-                        "{}",
-                        loopflow::engine::workflow::customize(name, &repo)?.display()
-                    );
-                    Ok(())
-                }
                 loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
                     let selected = tokio::runtime::Runtime::new()?
-                        .block_on(loopflow::ops::project::workflow(&repo, project, None))?;
+                        .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;
                     if *json {
                         println!("{}", serde_json::to_string_pretty(&selected)?);
                     } else {
-                        println!("{} · Workflow {}", selected.name, selected.workflow);
+                        println!(
+                            "{} · Workflow {}",
+                            selected.project.name, selected.project.workflow
+                        );
+                        print_project_sync(&selected);
                     }
                     Ok(())
                 }
-                loopflow::lf::ProjectWorkflowCommand::Set { project, name } => {
-                    with_runtime(&repo, args, || {
-                        tokio::runtime::Runtime::new()?.block_on(
-                            loopflow::ops::project::workflow(&repo, project, Some(name)),
-                        )?;
-                        println!("Project {project}: Workflow {name}");
-                        Ok(())
-                    })
-                }
+                loopflow::lf::ProjectWorkflowCommand::Set {
+                    project,
+                    name,
+                    file,
+                } => with_runtime(&repo, args, || {
+                    let saved = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow(
+                            &repo,
+                            project,
+                            Some(name),
+                            file.as_deref(),
+                        ),
+                    )?;
+                    println!("Project {project}: Workflow {name}");
+                    print_project_sync(&saved);
+                    Ok(())
+                }),
             }
         }
         Some(Commands::Task { cmd }) => {
@@ -1898,6 +2006,15 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
         }
     }
     result
+}
+
+fn print_project_sync(saved: &loopflow::ops::project::ProjectPlanning) {
+    if saved.sync_enabled && !saved.pending_changes.is_empty() {
+        eprintln!(
+            "Saved locally; pending Linear sync ({} fields).",
+            saved.pending_changes.len()
+        );
+    }
 }
 
 #[cfg(test)]

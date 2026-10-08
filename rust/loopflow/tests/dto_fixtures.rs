@@ -77,7 +77,7 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         snapshot.items[0].project_id.as_deref(),
         Some("project-gmail")
     );
-    assert_eq!(snapshot.items[0].team_id, "team-loo");
+    assert_eq!(snapshot.items[0].team_id.as_deref(), Some("team-loo"));
 
     let round_trip = serde_json::to_string(&snapshot).unwrap();
     assert_eq!(
@@ -87,15 +87,16 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
 }
 
 #[test]
-fn pm_show_requires_team_identity_even_without_project_ownership() {
+fn pm_show_preserves_an_unmapped_team_as_null() {
     let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
-    fixture["items"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("team_id");
+    fixture["items"][0]["team_id"] = serde_json::Value::Null;
 
-    let error = serde_json::from_value::<PmShowResult>(fixture).unwrap_err();
-    assert!(error.to_string().contains("team_id"));
+    let snapshot: PmShowResult = serde_json::from_value(fixture.clone()).unwrap();
+    assert_eq!(snapshot.items[0].team_id, None);
+    assert_eq!(
+        serde_json::to_value(&snapshot.items[0]).unwrap(),
+        fixture["items"][0]
+    );
 }
 
 #[test]
@@ -108,6 +109,13 @@ fn wave_detail_preserves_flow_and_requires_machine() {
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
     assert!(snapshot.project_readiness.activation.is_none());
+    let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
+        panic!("missing Tasks")
+    };
+    assert_eq!(
+        tasks[0].runtime.as_ref().unwrap().pending_sync.as_deref(),
+        Some("Saved locally; pending Linear synchronization")
+    );
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
@@ -436,7 +444,10 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
-    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.worktree.as_deref(),
+        Some("/src/loopflow.workspace")
+    );
     assert_eq!(
         snapshot.execution.state,
         loopflow::ops::task_execution::TaskExecutionState::Idle

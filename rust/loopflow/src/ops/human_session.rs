@@ -311,16 +311,7 @@ pub(crate) async fn list(
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
         let task = if let Some(selector) = &filter.task {
-            store
-                .task_checkouts()
-                .await?
-                .into_iter()
-                .find(|task| {
-                    task.task_id.as_str() == selector
-                        || task.issue_id == *selector
-                        || task.issue_identifier == *selector
-                })
-                .map(|task| task.task_id)
+            store.sqlite.resolve_task_id(selector, None)?
         } else {
             None
         };
@@ -581,7 +572,7 @@ async fn serve_locked(
 
 async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "-i".to_string(),
         "--agent".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
@@ -995,7 +986,7 @@ pub(crate) async fn rename(
     let session = find_session(store, session_id, false)
         .await?
         .ok_or_else(|| session_not_found(session_id))?;
-    let title = crate::session_record::validate_session_title(title)
+    let title = crate::engine::naming::validate_session_title(title)
         .map_err(|error| anyhow!("cannot rename Session {session_id}: {error}"))?;
     let title_source = match source {
         SessionTitleSource::Human => crate::session::TitleSource::Human,

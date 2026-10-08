@@ -23,7 +23,7 @@ use tracing::{debug, info, instrument, trace};
 /// | None    | Some    | Run inline prompt                     |
 /// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
-#[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
+#[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.process_options();
@@ -312,7 +312,7 @@ fn build_prompt_at(
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
         Some((_, seed)) => {
-            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
+            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
         }
         None => false,
     };
@@ -447,7 +447,14 @@ fn build_prompt_at(
     let prompt = prepared.prompt;
 
     let mut components = prepared.components;
-    components.message_context = message_context;
+    components.message_context = message_context.or_else(|| {
+        task_message.as_ref().map(|_| {
+            (
+                crate::trace::ContextAssetKind::Goal,
+                crate::trace::ContextScope::Task,
+            )
+        })
+    });
     components.steers = steers;
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
@@ -457,6 +464,7 @@ fn build_prompt_at(
         &effective_system,
         &agent_config.task_prompt,
         &deduplication_decisions,
+        Some(arguments),
     );
     Ok(PromptBuild {
         repo_root,
@@ -493,10 +501,13 @@ fn is_interactive_run_with_tty(
     if cli.batch {
         return false;
     }
-    cli.interactive || cli.tui || attached_tty || (skill.is_none() && message.is_none())
+    cli.interactive || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
+    if !cli.verbose {
+        return;
+    }
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
     let cli_agent = if cli.agent.is_some() {
@@ -522,7 +533,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
-    if cli.tui || built.skill_name.as_deref() == Some("default") || !built.process.auto {
+    if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
         let provider_session_id = if built.harness == "claude" {
@@ -649,8 +660,6 @@ fn run_headless_prompt(
         agent_config.directive_relay = Some(path.clone());
     }
 
-    debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
-
     info!(harness = built.harness, "launching agent");
     let process_start = Instant::now();
     let result = run_agent(&agent_config, &process, &built.capabilities);
@@ -744,6 +753,7 @@ pub(crate) fn attributed_context(
     system_prompt: &str,
     task_prompt: &str,
     deduplication_decisions: &[crate::trace::ContextDecision],
+    request: Option<&str>,
 ) -> crate::trace::PreparedTurnContext {
     use crate::engine::prompt::{DiffTier, DocumentSource};
     use crate::trace::{
@@ -929,6 +939,18 @@ pub(crate) fn attributed_context(
                 "vendor_skill",
             );
         }
+    }
+    // Bound launches append the caller's request to inherited Work context.
+    // Attribute it separately before the enclosing Goal claims the same bytes.
+    if let Some(request) = request {
+        push(
+            request,
+            Kind::UserMessage,
+            Scope::User,
+            "user message".into(),
+            None,
+            "message",
+        );
     }
     if let Some(message) = &components.message {
         // Steers ride inside the launch message; claim them before it does.
@@ -1620,7 +1642,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .contains("Replacement instructions"));
         // Inline attribution uses the same retained components; native input
         // records its source on the invocation instead of the context message.
-        let context = attributed_context(&built.components, "", "Original audit instructions", &[]);
+        let context = attributed_context(
+            &built.components,
+            "",
+            "Original audit instructions",
+            &[],
+            None,
+        );
         let asset = context
             .task
             .assets
@@ -1682,10 +1710,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--tui", "gate"]);
+    fn explicit_interactive_runs_without_a_tty() {
+        let cli = Cli::parse_from(["lf", "-i", "gate"]);
 
-        assert!(is_interactive_run(&cli, Some("gate"), None));
+        assert!(is_interactive_run_with_tty(&cli, Some("gate"), None, false));
     }
 
     #[test]
@@ -1712,13 +1740,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn explicit_tui_skill_launch_uses_the_assembled_prompt() {
+    fn explicit_interactive_skill_launch_uses_the_assembled_prompt() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "-i", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1753,7 +1781,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        let cli = Cli::parse_from(["lf", "--tui", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),
@@ -1795,7 +1823,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..Default::default()
         };
         let system = crate::engine::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[]);
+        let prepared = attributed_context(&components, &system, "", &[], None);
         assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
             (ContextAssetKind::Scratch, "> &#36;kickoff"),
@@ -1843,7 +1871,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..Default::default()
         };
         let system = crate::engine::format_prompt(&components);
-        let prepared = attributed_context(&components, &system, "", &[]);
+        let prepared = attributed_context(&components, &system, "", &[], None);
 
         let block = prepared
             .system
@@ -1894,7 +1922,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             ..PromptComponents::default()
         };
 
-        let prepared = attributed_context(&components, "MEMORY", "outer MEMORY remainder", &[]);
+        let prepared =
+            attributed_context(&components, "MEMORY", "outer MEMORY remainder", &[], None);
 
         assert_eq!(
             prepared.system.unwrap().assets[0].kind,

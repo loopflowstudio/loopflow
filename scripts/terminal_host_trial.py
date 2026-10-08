@@ -707,8 +707,8 @@ class _Trial:
             connection.execute(
                 "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,"
                 "created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at,"
-                "pm_writeback_json,worktree,workspace_slug,started_at) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "worktree,workspace_slug,started_at) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     "task_00000000000040008000000000000421",
                     "proj_00000000000040008000000000000421",
@@ -719,7 +719,6 @@ class _Trial:
                     "Synthetic terminal trial",
                     "Fixture only",
                     now,
-                    '{"state":"current"}',
                     str(checkout),
                     "trial-task",
                     None,

@@ -1,3 +1,5 @@
+mod planning;
+
 use std::env;
 use std::ffi::OsString;
 use std::path::Path;
@@ -266,6 +268,7 @@ pub fn bind_task_planning(repo: &TestRepo) {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
+    database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,
@@ -312,13 +315,16 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            linear_id: Some(
+                LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            ),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),
             prompt_context: "Keep Task PR transitions durable.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -326,19 +332,22 @@ fn register_task_fixture(
         created_at: now,
         updated_at: now,
     };
-    let task = Task {
+    let mut task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            revision: 0,
+            linear_id: Some(
+                LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            ),
             identifier: "INF-123".to_string(),
             title: "Prove Task PR transitions".to_string(),
             description: "Exercise the persisted lifecycle.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: worktree.to_path_buf(),
+        worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
         agent: None,
         abandon_intent: None,
@@ -346,7 +355,7 @@ fn register_task_fixture(
         updated_at: now,
         observation: loopflow::work::task::Observation::NotRequired,
     };
-    let pr = TaskPr {
+    let mut pr = TaskPr {
         id: TaskPrId::new(),
         task_id: task.id.clone(),
         sequence: 1,
@@ -380,7 +389,7 @@ fn register_task_fixture(
             .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
-                "id": project.plan.id.as_str(),
+                "id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "slug": project.plan.slug.as_str(),
                 "name": project.plan.name.as_str(),
                 "summary": "",
@@ -392,14 +401,14 @@ fn register_task_fixture(
                 "team_ids": ["team-task-pr-tests"]
             }],
             "items": [{
-                "id": task.plan.id.as_str(),
+                "id": task.plan.linear_id.as_ref().unwrap().as_str(),
                 "identifier": task.plan.identifier.as_str(),
                 "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
                 "name": task.plan.title.as_str(),
                 "description": task.plan.description.as_str(),
                 "rank": 1,
                 "completed": false,
-                "project_id": project.plan.id.as_str(),
+                "project_id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "project": project.plan.slug.as_str(),
                 "team_id": "team-task-pr-tests",
                 "assignee": null
@@ -418,12 +427,30 @@ fn register_task_fixture(
             )
             .await
             .expect("cache Task PR context");
+        task.id = store
+            .get_task_by_issue(task.plan.linear_id.as_ref().unwrap().as_str())
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        pr.task_id = task.id.clone();
         store
-            .create_task(&task, &pr, None)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
             .await
             .expect("create test Task");
     });
-    RegisteredTask { store, task, pr }
+    RegisteredTask {
+        store,
+        task,
+        pr,
+        database: home.join("loopflow.db"),
+    }
 }
 
 /// A second Task in the fixture's Wave and Project, tracking `branch` from its
@@ -441,11 +468,12 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
+    task.plan.linear_id =
+        Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
-    task.worktree = worktree.to_path_buf();
+    task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
     let pr = TaskPr {
@@ -457,8 +485,15 @@ pub fn register_sibling_task(
         updated_at: now,
         ..registered.pr.clone()
     };
+    planning::seed_unplaced_task(&registered.database, &task);
     runtime
-        .block_on(registered.store.create_task(&task, &pr, None))
+        .block_on(registered.store.place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+            None,
+        ))
         .expect("create sibling Task");
     task
 }

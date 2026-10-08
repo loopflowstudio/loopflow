@@ -1,36 +1,31 @@
 # infrastructure wave memory
 
-## Plan ownership exploration (LOO-406, 2026-10-07)
+## Plan ownership (LOO-406, revised 2026-10-08)
 
-Jack Heart selected the complete local lifecycle, Linear-compatible fields and
-stable IDs, through publication for review, not landing. Preserve IDs/history;
-UUID, selector and provider mapping remain distinct. Callback, Git and export
-are follow-ups. Design: `scratch/explore-loopflow-s-own-store.md`.
+Jack Heart selected one locally owned plan with identical stored representations
+and read/write APIs, whether or not the repository connects to Linear. Connection
+is all-or-nothing for the repository. Delete personal/shared namespaces,
+`personal_plans`, personal-only workflows and `project_authority_on`; provider
+mappings are links, not planning authorities. During an outage, local edits succeed
+and show pending sync. Preserve uncertain effects and concurrent edits; no resident
+or automatic turn/Flow retry. This supersedes the branch's mixed-authority design.
 
-Jack leans toward Git refs outside code branches; the laptop authors and workers
-remain disposable. Cover personal machines, shared Linear and independent company
-developers. Namespaces provide no privacy. The callback draft treats host as origin,
-keeps execution on X and routes Linear through the online host; disconnect/direct
-fallback remain open. No resident or automatic retry. Callbacks provide no
-laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
+Jack also selected Git-like Task prefixes: accept four or more hex digits, bare or
+prefixed, reject ambiguity, and retain full IDs. Display abbreviations can lengthen.
+Stable identity, creation receipts, provider mapping and placement stay distinct.
+The revision remains authorized through publication for review, not landing or
+installation. Current design: `scratch/explore-loopflow-s-own-store.md`.
 
-October 8 source `817ec2634`/`2d4115339` adds native launch/resume, skill Flows,
-owned-issue import and complete local planning; `b8abd3c9a` removes duplicate
-deletion/source readers. Wave ownership selects authority; aliases do not.
-One draft preserves IDs, serialized observations and orphan deletion recovery.
-Creation receipts retain original input/Project across edits and rotation. A failing
-race exposed selection before the Wave lock; selection now follows it.
-Status and launch share deletion judgment,
-including personal tombstones and connected refusal; history survives deletion.
-Personal definitions/workflows stay in SQLite. Contained public fixtures cover
-concurrency, placement recovery, rotation, paired fields and confirmed GitHub merge;
-no-remote landing refuses. CLI fixtures and headless Swift views prove separate
-source boundaries, not installed/live-provider continuity. Mixed rotation passes ten
-interrupted provider mutations, preserving receipts and
-membership across retry. Gate exposed missing planning revisions and globally unique
-ticket aliases; private definition/workflow changes now notify readers, and separate
-repositories retain duplicate aliases with ambiguous lookup explicit. Six-suite gate
-and disposable Linux migration/adoption pass.
+PR #1503 at `dfe18ab60` passed a six-suite gate and disposable Linux adoption proof
+for the earlier split architecture. Those results establish neither the new unified
+path nor live/installed continuity. Its exact implementation, retained deletion
+recovery, selection-race repair and ten mixed-rotation failure points remain at
+`dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
+
+Git refs outside code branches and the host callback remain follow-ups. The laptop
+authors; workers remain disposable. Cover personal machines, shared Linear and
+independent company developers. Namespaces provide no privacy; callbacks provide
+no laptop-loss recovery; write-once mappings prove no concurrent-export uniqueness.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

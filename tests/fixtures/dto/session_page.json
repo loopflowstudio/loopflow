@@ -54,7 +54,22 @@
       "workspace": null,
       "primary_scope": null,
       "attention": "waiting",
-      "task_primary": false
+      "task_primary": false,
+      "program_status": {
+        "seen": true,
+        "records": [
+          {
+            "state": "blocked",
+            "id": "worker",
+            "kind": "question",
+            "progress": null,
+            "app": "example",
+            "title": null,
+            "msg": "Use **literal** text?"
+          }
+        ]
+      },
+      "provider_generation": 1
     }
   ],
   "next": null

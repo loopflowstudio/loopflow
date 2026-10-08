@@ -211,11 +211,21 @@ attempt object. History entries have stable references, not independent lifecycl
 Every agent conversation is an AgentSession: skills, inline prompts, helpers,
 reviews, interactive and headless work. Default views select interactive
 conversations. `lf session list --waiting` selects conversations Waiting on a
-person, using the same projection as Desktop: the driver that owns a provider's
-stream saves its latest reading (`session_activity`), and a conversation is
-Waiting on an unanswered question, or with no unresolved tool call once an
-interactive turn is handed back or the stream has been quiet for 120 seconds.
-No reading, or one from a driver that has let go, is unknown. Explicit filters expose headless and
+person, using the same Rust projection as Desktop. `session_activity` holds both
+the driver's latest stream reading and an optional terminal-reported snapshot.
+A current provider generation's reports take precedence: any blocked record, or
+idle for an interactive Session, means Waiting. Other reports and explicit clear
+suppress inference. Without reports, an unanswered question, interactive hand-back
+or 120 seconds of silence without an unresolved tool call means Waiting.
+No current reading is unknown; replacement providers need fresh observations.
+
+Desktop consumes the embedded Ghostty action for every retained surface. Shell
+panes keep local records; Session panes publish bounded snapshots through
+`lf session observe-status` with the current terminal receipt and provider
+generation. Stream identity and increasing sequence fence replacements in SQLite.
+An unchanged provider keeps reports across driver handoff. Report text is literal
+and display-sanitized; protocol IDs never select Sessions or grant process,
+Flow or completion authority. Detached relay observation remains unimplemented. Explicit filters expose headless and
 completed history; `--all`
 continues to mean all repositories. Interactive mode grants neither review
 completion nor Flow authority.
@@ -473,7 +483,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **PM projection** — locally readable planning facts | Linear remains authoritative. Repository/provider-scoped Project and issue facts serve both exact Task lookup and Wave views. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmTaskRecord`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `pm_project_name_cutover`, `project_binding_imports`, `project_transitions`, `project_transition_items` | Foreground PM sync and Task lookup | `lf repo`, `lf refresh`, `lf task status` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its Runs | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task Runs refresh comments into their starting context | `lf comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
-| **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds its driver's latest stream reading | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
+| **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds driver stream readings and terminal-reported status | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
 | **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf installation`, `lf ssh`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
 | **Session history projections** — captured events and exact provider evidence | AgentSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `process:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `process:chrome-headless-shell` |
@@ -510,7 +520,7 @@ kernel locks                 live local exclusion authority
 | Owner | Tables | Purpose |
 | --- | --- | --- |
 | Planning | `waves`, `projects`, `project_events`, `tasks`, `task_issue_identities`, `task_deletions`, `task_events` | Linear Project statuses, Wave plans, Work identity, corrections, historical evidence |
-| Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the stream reading Waiting is judged from |
+| Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the current observations Waiting is judged from |
 | Flow processes | `flow_processes`, `flow_process_steps` | One append-only row per Flow process and per step its driver started |
 | Workflows | `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
@@ -522,7 +532,7 @@ kernel locks                 live local exclusion authority
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Machine and provider authority | `machines`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, shared-home account switches, delivery receipts |
 | Local observation/cache | `blob_tokens` | Deterministic Git-blob token counts |
-| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `flows`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: transcript lines (the `events.jsonl` observation types no summary reader selects) move nothing and usage moves only `usage`; provider attempts under the same receipt key move `sessions`. FlowProcess rows move `flows`, a Workflow's position and moves `planning`, and a Session's stream reading `sessions` only when Waiting could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
+| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `flows`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: transcript lines (the `events.jsonl` observation types no summary reader selects) move nothing and usage moves only `usage`; provider attempts under the same receipt key move `sessions`. FlowProcess rows move `flows`, a Workflow's position and moves `planning`, and a Session's stream reading `sessions` when Waiting or reported detail could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
 Released migration files remain immutable. Three direct draft groups establish

@@ -197,6 +197,8 @@ pub(crate) struct SessionSummary {
     pub driver_outcome: Option<String>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
+    pub program_status: Option<crate::program_status::Records>,
+    pub provider_generation: i64,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,

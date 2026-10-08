@@ -250,7 +250,7 @@ collide across history. References use `process_lfid` and `parent_process_lfid`.
 AgentSession is one durable agent conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention
-state, judged in Rust from a provider stream `lf` owns. A step's result
+state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session
 history; mechanical results are step Process exits. A Session reaches its Flow

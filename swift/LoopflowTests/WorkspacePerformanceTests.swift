@@ -43,7 +43,7 @@ struct WorkspacePerformanceTests {
                     "work_path": NSNull(), "title_source": "generated", "task_primary": false,
                     "actions": sessionActionFixture(state: "active"),
                     "flow_membership": ["kind": "independent"],
-                    "task_ids": ["work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"],
+                    "task_ids": ["work-\(index)"], "provider_generation": 1, "terminal_ids": [], "open_argv": ["must-not-launch"],
                 ]))
             }
             for attempt in 0..<21 {

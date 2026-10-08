@@ -317,6 +317,10 @@ participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
 
+After upgrading GhosttyKit or its bundled shell integration, run
+`scripts/test_desktop.sh --filter GhosttyShellBlockTests` to check the actual
+shell output for prompt headers, command boundaries and exit status.
+
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
 
@@ -1048,6 +1052,12 @@ Run the installation harness for migration changes; its released-source proof
 must retain Wave placement before projecting accepted Projects.
 
 ### Shared identity fixtures
+
+When changing Session activity or Waiting, run `session_cli_tests` and
+`work_watch` together. Direct SQL fixtures must carry both driver and provider
+generations, matching the production activity writer. Rebuild both SwiftPM and
+the Xcode test targets after shared model renames; Foundation types such as
+`Foundation.Process` need explicit qualification where names overlap.
 
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.
 `wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different

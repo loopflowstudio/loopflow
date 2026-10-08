@@ -75,6 +75,10 @@ struct DTOFixtureTests {
         let data = try Data(contentsOf: url)
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
+        #expect(page.entries[0].providerGeneration == 1)
+        #expect(page.entries[0].programStatus?.summary?.state == .blocked)
+        #expect(page.entries[0].programStatus?.summary?.kind == .question)
+        #expect(page.entries[0].programStatus?.summary?.msg == "Use **literal** text?")
         #expect(page.next == nil)
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(SessionPage.self, from: Data(#"{"next":null}"#.utf8))

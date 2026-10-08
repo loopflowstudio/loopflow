@@ -1,5 +1,30 @@
 # infrastructure wave memory
 
+## Program Status direction (LOO-398, 2026-10-07)
+
+Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
+lf writing only for pipe-driven work/Flow position. Reports override inference
+in Rust's single Waiting judgment; they grant no execution authority.
+Implement from the spec. LOO-384 remains for non-reporters; provider adoption is
+unverified. LOO-402 owns broader presentation.
+Jack authorized build and publication for review, not landing, and made LOO-394's
+absent relay a named follow-up. Its #1484 covers naming only.
+
+Jack approved the embedded patch at `a60e9e2a…`; both earlier patches survive
+in immutable lf2, verified by public checksum and SwiftPM
+linking. Literal state/kind/message appears in the breadcrumb header and pane
+strip; Task-header intent remains for review. SQL/CLI/DTO/Swift proofs establish
+separate boundaries, not installed or composed native-pane acceptance. Provider
+generation and surface incarnation fence observations; viewer absence is not death.
+
+Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
+existing independent output paths cannot safely finish the escape before normal
+text. Flow children inherit terminal descriptors; a parent mutex cannot serialize
+them, and piping native children changes terminal behavior. Extending this Task
+with PTY transport or deferring emission to LOO-394 remains an unresolved choice,
+not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
+original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
+
 ## Machine terminology (LOO-394, 2026-10-07)
 
 Jack Heart authorized the rename, then two changes to PR #1484 and republication
@@ -341,7 +366,7 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` on 2026-07-08; current schedules supersede historical ones.
+Renamed from `systems` July 8; current schedules supersede history.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
@@ -506,7 +531,7 @@ Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
 changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
 at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
 reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-machine) and [Homes](../../docs/architecture/machines.md#one-main-machine).
+[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
 The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
 configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
@@ -572,9 +597,8 @@ Earlier branch details remain at
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
-Main's landed cutover supersedes the intermediate-schema bridge. Retained
-integration detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-Planning preserves Task/PR identity without inferring execution progress.
+The landed cutover supersedes the bridge; planning preserves Task/PR identity,
+not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 

@@ -285,12 +285,6 @@ pub(crate) fn validate_project_ownership(
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmItemCreate {
-    pub name: String,
-    pub description: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PmItemUpdate {
     pub rank: Option<u32>,

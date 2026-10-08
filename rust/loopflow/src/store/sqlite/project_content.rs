@@ -5,20 +5,11 @@ use serde_json::Value;
 
 use crate::durable::ProjectId;
 use crate::id::WaveId;
+use crate::planning::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
-
-/// A saved field edit and retained provider evidence, independent of connection state.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ProjectChange {
-    pub id: String,
-    pub field: String,
-    pub value: Value,
-    pub base: Option<Value>,
-    pub conflict: Option<Value>,
-}
 
 fn record_change(
     conn: &Connection,
@@ -87,7 +78,7 @@ pub(super) fn retain_edits(
     Ok(serde_json::from_value(saved)?)
 }
 
-fn pending_in(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<ProjectChange>> {
+fn pending_in(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
     let mut query = conn.prepare(
         "SELECT id,field,value_json,base_json,conflict_json FROM project_changes c
          WHERE project_id=?1 AND acknowledged=0 AND seq=(SELECT max(seq) FROM project_changes
@@ -104,7 +95,7 @@ fn pending_in(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<Project
     })?;
     rows.map(|row| {
         let (id, field, value, base, conflict) = row?;
-        Ok(ProjectChange {
+        Ok(PlanningChange {
             id,
             field,
             value: serde_json::from_str(&value)?,
@@ -119,7 +110,7 @@ impl SqliteStore {
     pub(crate) fn project_with_changes(
         &self,
         project: &ProjectId,
-    ) -> StoreResult<(crate::pm::PmProject, Vec<ProjectChange>)> {
+    ) -> StoreResult<(crate::pm::PmProject, Vec<PlanningChange>)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let result = (
@@ -130,7 +121,7 @@ impl SqliteStore {
         Ok(result)
     }
 
-    pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<ProjectChange>> {
+    pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         pending_in(&conn, project)
     }

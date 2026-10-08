@@ -400,7 +400,7 @@ mod tests {
                 .unwrap();
         }
         let task = store
-            .create_local_task(&NewTask {
+            .create_task(&NewTask {
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Local work".into(),

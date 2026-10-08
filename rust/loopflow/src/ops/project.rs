@@ -523,7 +523,7 @@ pub struct ProjectPlanning {
     #[serde(flatten)]
     pub project: PmProject,
     pub sync_enabled: bool,
-    pub pending_changes: Vec<crate::store::sqlite::ProjectChange>,
+    pub pending_changes: Vec<crate::planning::PlanningChange>,
 }
 
 fn planning(store: &Store, project: &Project, repo: &Path) -> OpsResult<ProjectPlanning> {

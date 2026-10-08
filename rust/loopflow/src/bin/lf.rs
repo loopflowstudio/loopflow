@@ -1033,6 +1033,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             } else {
                 println!("{} · {}", issue.identifier, issue.name);
             }
+            if loopflow::engine::config::load_config_or_default(Some(repo))
+                .pm
+                .and_then(|pm| pm.linear_team)
+                .is_some()
+            {
+                eprintln!("Saved locally; pending Linear sync.");
+            }
             Ok(())
         }
         TaskCommand::Status { issue, json } => {
@@ -1246,6 +1253,17 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 },
             )?;
             println!("{}: updated task {}", result.wave, result.id);
+            if result.sync_enabled && !result.pending_changes.is_empty() {
+                eprintln!(
+                    "Saved locally; pending Linear sync ({} fields, {} conflicts).",
+                    result.pending_changes.len(),
+                    result
+                        .pending_changes
+                        .iter()
+                        .filter(|change| change.conflict.is_some())
+                        .count()
+                );
+            }
             Ok(())
         }
         TaskCommand::Refile { issue, wave } => {

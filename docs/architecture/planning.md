@@ -77,9 +77,18 @@ A mixed Local/Linear rotation retains each authority's recovery records; a SQLit
 transaction cannot make the external provider effects atomic.
 
 LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished. Task creation/edits, Wave
-definitions and rotation retain separate planning authorities;
+optional Linear synchronization. That cutover remains unfinished. Wave definitions, Project creation, membership,
+rotation and deletion/refiling retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
+Task creation and edits use one SQLite writer, regardless of provider mapping.
+Creation receipts retain the original Project and input; field receipts retain
+stable mutation identity, baseline and the first conflicting provider value.
+`sqlite/task_content.rs` preserves pending edits during inbound ingestion, including
+rank changes to neighboring Tasks. No-op retries retain revision and receipt IDs;
+actual inbound field changes advance the local optimistic-write revision. The
+provider-first creation, marker lookup and edit writers are deleted. Connected
+CLI commands report pending sync; Task export, field delivery/resolution and
+Desktop pending presentation remain unfinished.
 Project names, summaries, content and stored Wave workflows use
 `sqlite/project_content.rs` in both connection modes. Edits and per-field delivery
 receipts commit together, including before a provider mapping exists. Inbound
@@ -368,7 +377,7 @@ effect, so it cannot settle a newer decision. Explicit state resolution supersed
 the delivery identity without changing the Workflow. No local/provider clock
 comparison orders edits. The provider read and mutation remain separate requests;
 they do not prevent a concurrent Linear edit between them. The complete unified
-planning-owner cutover remains in progress; creation, edits and rotation still use
+planning-owner cutover remains in progress; Project creation and rotation still use
 split paths. Abandonment of an existing Task saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation

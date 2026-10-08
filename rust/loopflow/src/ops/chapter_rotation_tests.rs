@@ -177,7 +177,7 @@ async fn mixed_rotation_retry_preserves_settled_personal_work_after_provider_fai
             context
                 .store
                 .sqlite
-                .create_local_task(&NewTask {
+                .create_task(&NewTask {
                     id: TaskId::new(),
                     project_id: project.id.clone(),
                     title: title.into(),

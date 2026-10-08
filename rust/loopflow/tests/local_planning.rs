@@ -1307,3 +1307,280 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert!(!repo.path().join(".lf/workflows").exists());
     }
 }
+
+#[test]
+fn task_creation_and_edits_save_offline_in_both_connection_modes() {
+    use loopflow::durable::TaskId;
+    use loopflow::store::{PmSnapshotRow, PmTaskRecord};
+
+    for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "pm:\n  linear_team: fixture-team\n",
+            )
+            .unwrap();
+        }
+        let path = home.path().join("loopflow.db");
+        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let wave = loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "product".into(),
+            canonical.to_string(),
+        );
+        store.create_wave(&wave).unwrap();
+        let project = loopflow::pm::PmProject {
+            id: "provider-project".into(),
+            revision: Some("2026-10-08T10:00:00Z".into()),
+            slug: "product".into(),
+            name: "Product".into(),
+            summary: "".into(),
+            workflow: "".into(),
+            status: loopflow::pm::ProjectStatus::Started,
+            krs: vec![],
+            metric_targets: vec![],
+            initiative_ids: vec!["initiative".into()],
+            team_ids: vec!["fixture-team".into()],
+        };
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
+            .unwrap();
+        let project_id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![wave.id(), project_id.as_str()],
+        )
+        .unwrap();
+        if !mapped {
+            conn.execute(
+                "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                [project_id.as_str()],
+            )
+            .unwrap();
+        }
+        let first = TaskId::new();
+        let second = TaskId::new();
+        let create = |id: &TaskId| {
+            let output = command(
+                repo.path(),
+                home.path(),
+                &[
+                    "task",
+                    "create",
+                    "--wave",
+                    "product",
+                    "--title",
+                    "Independent same title",
+                    "--notes",
+                    "Original notes",
+                    "--creation-id",
+                    id.as_str(),
+                    "--json",
+                ],
+            )
+            .output()
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+                connected
+            );
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        };
+        assert_eq!(create(&first)["id"], first.as_str());
+        assert_eq!(create(&second)["id"], second.as_str());
+        assert_eq!(create(&first)["id"], first.as_str());
+        assert_eq!(store.list_tasks(None).unwrap().len(), 2);
+        let mut snapshot = loopflow::pm::PmSnapshot {
+            projects: vec![project.clone()],
+            items: vec![],
+        };
+        if mapped {
+            for (id, alias) in [(&first, "FIX-1"), (&second, "FIX-2")] {
+                conn.execute(
+                    "UPDATE tasks SET external_issue_id=?2,issue_identifier=?2 WHERE id=?1",
+                    rusqlite::params![id.as_str(), alias],
+                )
+                .unwrap();
+                let mut item = store.planning_task(id).unwrap().record.unwrap().item;
+                item.revision = Some("2026-10-08T10:00:00Z".into());
+                item.team_id = Some("fixture-team".into());
+                snapshot.items.push(item);
+            }
+            store
+                .put_pm_snapshot(&PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 18,
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap();
+        }
+        let selector = if mapped { "FIX-2" } else { second.as_str() };
+        let edit = [
+            "task",
+            "edit",
+            selector,
+            "--title",
+            "Saved offline",
+            "--notes",
+            "",
+            "--rank",
+            "0",
+            "--assignee",
+            "person-id",
+        ];
+        let output = command(repo.path(), home.path(), &edit).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            connected
+        );
+        let pending = store.pending_task_changes(&second).unwrap();
+        assert_eq!(pending.len(), 4);
+        assert_eq!(store.pending_task_changes(&first).unwrap().len(), 1);
+        let edited = store.task(&second).unwrap().unwrap();
+        let revision = || {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='planning'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let before_failure = revision();
+        conn.execute_batch("CREATE TRIGGER fail_task_save BEFORE UPDATE ON tasks BEGIN SELECT RAISE(ABORT,'injected task save failure'); END;").unwrap();
+        let failed = command(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "edit",
+                selector,
+                "--title",
+                "Must roll back",
+                "--rank",
+                "1",
+            ],
+        )
+        .output()
+        .unwrap();
+        assert!(!failed.status.success());
+        conn.execute_batch("DROP TRIGGER fail_task_save").unwrap();
+        assert_eq!(store.task(&second).unwrap().unwrap(), edited);
+        assert_eq!(store.pending_task_changes(&second).unwrap(), pending);
+        assert_eq!(revision(), before_failure);
+        lf(repo.path(), home.path(), &edit);
+        assert_eq!(store.pending_task_changes(&second).unwrap(), pending);
+        assert_eq!(
+            store.task(&second).unwrap().unwrap().plan.revision,
+            edited.plan.revision
+        );
+        assert!(store
+            .edit_task(
+                &second,
+                0,
+                &loopflow::pm::PmItemUpdate {
+                    name: Some("Stale".into()),
+                    ..Default::default()
+                }
+            )
+            .is_err());
+        assert_eq!(create(&second)["name"], "Saved offline");
+        let status = lf(
+            repo.path(),
+            home.path(),
+            &["task", "status", selector, "--json"],
+        );
+        assert_eq!(status["planning"]["item"]["name"], "Saved offline");
+        assert_eq!(status["planning"]["item"]["description"], "");
+        assert_eq!(status["planning"]["item"]["rank"], 0);
+        assert_eq!(status["planning"]["item"]["assignee"], "person-id");
+        if mapped {
+            let mut incoming = snapshot.items[1].clone();
+            incoming.name = "Concurrent title".into();
+            incoming.assignee = Some("remote-person".into());
+            incoming.state = Some("completed".into());
+            incoming.completed = true;
+            incoming.revision = Some("2026-10-08T11:00:00Z".into());
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &PmTaskRecord {
+                        observed_at: 19,
+                        project: Some(project.clone()),
+                        item: incoming.clone(),
+                    },
+                    Some((wave.id(), "initiative")),
+                )
+                .unwrap();
+            let retained = store.planning_task(&second).unwrap().record.unwrap().item;
+            assert_eq!(retained.name, "Saved offline");
+            assert_eq!(retained.description, "");
+            assert_eq!(retained.rank, 0);
+            assert_eq!(retained.assignee.as_deref(), Some("person-id"));
+            assert!(retained.completed);
+            let changes = store.pending_task_changes(&second).unwrap();
+            assert_eq!(changes[0].id, pending[0].id);
+            assert_eq!(
+                changes[0].conflict.as_ref().unwrap()["value"],
+                "Concurrent title"
+            );
+            incoming.name = "Saved offline".into();
+            incoming.assignee = Some("person-id".into());
+            incoming.description.clear();
+            incoming.revision = Some("2026-10-08T12:00:00Z".into());
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &PmTaskRecord {
+                        observed_at: 20,
+                        project: Some(project.clone()),
+                        item: incoming,
+                    },
+                    Some((wave.id(), "initiative")),
+                )
+                .unwrap();
+            assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
+        }
+        lf(
+            repo.path(),
+            home.path(),
+            &["task", "edit", selector, "--unassign"],
+        );
+        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        assert!(reopened
+            .planning_task(&second)
+            .unwrap()
+            .record
+            .unwrap()
+            .item
+            .assignee
+            .is_none());
+        assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);
+        assert!(reopened
+            .list_tasks(None)
+            .unwrap()
+            .iter()
+            .all(|task| task.worktree.is_none()));
+        let (sessions,flows): (i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_workflows)",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!((sessions, flows), (0, 0));
+        assert!(!repo.path().join("wave").exists());
+    }
+}

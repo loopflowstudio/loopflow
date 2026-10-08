@@ -1249,90 +1249,84 @@ pub fn task_create(
 ) -> OpsResult<crate::pm::PmItem> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-    let personal = match wave {
-        Some(wave) if wave.starts_with("personal:") => {
-            wave.strip_prefix("personal:").map(str::to_string)
-        }
-        selected => {
-            match crate::work::wave::context::resolve_managed_wave_sync(Some(&main), selected) {
-                Ok(wave) => wave.slug().strip_prefix("personal:").map(str::to_string),
-                Err(crate::work::wave::context::WaveResolveError::NoContext)
-                    if selected.is_none() =>
-                {
-                    Some("inbox".into())
+    block_on_task(async {
+        let store = super::pm::pm_store().await?;
+        let selected = match wave {
+            Some(name) if name.starts_with("personal:") => None,
+            _ => match crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(&main),
+                wave,
+                None,
+            )
+            .await
+            {
+                Ok(wave) => Some(wave),
+                Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => {
+                    None
                 }
                 Err(error) => return Err(task_error(error)),
+            },
+        };
+        let wave = match selected {
+            Some(wave) => wave,
+            None => {
+                let canonical =
+                    crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
+                let name = wave
+                    .and_then(|name| name.strip_prefix("personal:"))
+                    .unwrap_or("inbox");
+                let project = store
+                    .sqlite
+                    .ensure_personal_project(&canonical.to_string(), name)
+                    .map_err(task_error)?;
+                store
+                    .get_wave(&project.wave_id)
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| task_error("Task Wave is missing"))?
             }
-        }
-    };
-    if let Some(name) = personal {
-        return block_on_task(async {
-            let store = super::pm::pm_store().await?;
-            let canonical =
-                crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
-            let project = store
-                .sqlite
-                .ensure_personal_project(&canonical.to_string(), &name)
-                .map_err(task_error)?;
-            let wave = store
-                .get_wave(&project.wave_id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("personal Wave is missing"))?;
-            let acquisition = super::pm::lock_wave_planning(&wave).await?;
-            let creation_project = match store
-                .sqlite
-                .local_task_creation_project(&identity)
-                .map_err(task_error)?
-            {
-                Some(id) => {
-                    let original = store
-                        .get_project(&id)
-                        .await
-                        .map_err(task_error)?
-                        .ok_or_else(|| task_error("creation Project is missing"))?;
-                    if original.wave_id != project.wave_id {
-                        return Err(task_error("creation identity belongs to a different Wave"));
-                    }
-                    id
+        };
+        let acquisition = super::pm::lock_wave_planning(&wave).await?;
+        let creation_project = match store
+            .sqlite
+            .local_task_creation_project(&identity)
+            .map_err(task_error)?
+        {
+            Some(id) => {
+                let original = store
+                    .get_project(&id)
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| task_error("creation Project is missing"))?;
+                if original.wave_id != *wave.id() {
+                    return Err(task_error("creation identity belongs to a different Wave"));
                 }
-                None => crate::durable::ProjectId::parse(
-                    &super::project::current_project(&store, &wave)?.id,
-                )
-                .map_err(task_error)?,
-            };
-            let task = store
-                .create_local_task(
-                    &crate::planning::NewTask {
-                        id: identity,
-                        project_id: creation_project,
-                        title: input.title,
-                        description: input.report,
-                    },
-                    acquisition,
-                )
-                .await
-                .map_err(task_error)?;
-            task_planning_item(&store, &task)
-        });
-    }
-    let project =
-        crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;
-    let marker = format!("<!-- loopflow-task-start:{identity} -->");
-    let (created, ()) = block_on_task(crate::ops::task_pm::create_and_load_task(
-        &main,
-        &project.snapshot.wave,
-        &input.title,
-        &input.report,
-        &marker,
-        |_, _| async { Ok(()) },
-    ))
-    .map_err(|error| {
-        task_error(format!(
-            "{error} Retain --creation-id {identity} when retrying."
-        ))
-    })?;
-    Ok(created.item)
+                id
+            }
+            None => {
+                store
+                    .get_project_by_project(&super::project::current_project(&store, &wave)?.id)
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| task_error("selected Project is missing"))?
+                    .id
+            }
+        };
+        let task = store
+            .create_task(
+                &crate::planning::NewTask {
+                    id: identity,
+                    project_id: creation_project,
+                    title: input.title,
+                    description: input.report,
+                },
+                acquisition,
+            )
+            .await
+            .map_err(task_error)?;
+        task_planning_item(&store, &task)
+    })
 }
 
 pub(crate) fn task_planning_item(store: &Store, task: &Task) -> OpsResult<crate::pm::PmItem> {
@@ -4884,12 +4878,20 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
     Ok(output.stdout)
 }
 
+#[derive(Debug)]
+pub struct TaskEdit {
+    pub wave: String,
+    pub id: String,
+    pub sync_enabled: bool,
+    pub pending_changes: Vec<crate::planning::PlanningChange>,
+}
+
 pub fn task_edit(
     repo: &Path,
     issue: &str,
     wave: Option<&str>,
     update: crate::pm::PmItemUpdate,
-) -> OpsResult<super::pm::PmUpdateResult> {
+) -> OpsResult<TaskEdit> {
     if update == crate::pm::PmItemUpdate::default() {
         return Err(task_error(
             "task edit requires --title, --notes, --rank, --assignee or --unassign",
@@ -4902,28 +4904,26 @@ pub fn task_edit(
     {
         return Err(task_error("Task title cannot be empty"));
     }
-    if let Some((store, task)) = block_on_task(resolve_local_task(repo, issue, wave))? {
-        return block_on_task(async {
-            let edited = store
-                .edit_local_task(&task.id, task.plan.revision, &update)
-                .await
-                .map_err(task_error)?;
-            let wave = owning_wave(&store, &edited).await?;
-            Ok(super::pm::PmUpdateResult {
-                wave: wave.slug().into(),
-                id: edited.id.to_string(),
-            })
-        });
-    }
-    super::pm::pm_update(
-        repo,
-        &super::pm::PmUpdateOptions {
-            wave: wave.map(str::to_string),
-            id: issue.to_string(),
-            update,
-        },
-        &super::NullProgress,
-    )
+    block_on_task(async {
+        let (store, task) = super::pm::resolve_saved_task(repo, wave, issue).await?;
+        let edited = store
+            .edit_task(&task.id, task.plan.revision, &update)
+            .await
+            .map_err(task_error)?;
+        let owner = owning_wave(&store, &edited).await?;
+        Ok(TaskEdit {
+            wave: owner.slug().into(),
+            id: edited.id.to_string(),
+            sync_enabled: crate::engine::config::load_config_or_default(Some(repo))
+                .pm
+                .and_then(|pm| pm.linear_team)
+                .is_some(),
+            pending_changes: store
+                .sqlite
+                .pending_task_changes(&edited.id)
+                .map_err(task_error)?,
+        })
+    })
 }
 
 pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {

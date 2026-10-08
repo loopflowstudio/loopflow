@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult};
+use crate::ops::pm::PmRefresh;
 use crate::pm::{PmItem, PmProject};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,23 +10,6 @@ pub struct ResolvedTask {
     pub observed_at: i64,
     pub project: PmProject,
     pub item: PmItem,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ResolvedProject {
-    pub snapshot: PmShowResult,
-    pub project: PmProject,
-}
-
-pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResult<PmShowResult> {
-    crate::ops::pm::pm_show(
-        repo,
-        &PmShowOptions {
-            wave: Some(wave.to_string()),
-            refresh,
-        },
-        &crate::ops::NullProgress,
-    )
 }
 
 pub(crate) async fn resolve_task_async(
@@ -61,52 +44,4 @@ pub(crate) async fn resolve_task_async(
         project,
         item,
     })
-}
-
-pub fn resolve_current_project(
-    repo: &Path,
-    wave: Option<&str>,
-    refresh: PmRefresh,
-) -> OpsResult<ResolvedProject> {
-    let wave = crate::work::wave::context::resolve_managed_wave_sync(Some(repo), wave)
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let snapshot = load_wave(repo, wave.slug(), refresh)?;
-    let project = tokio::runtime::Runtime::new()
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .block_on(async {
-            let store = crate::ops::pm::pm_store().await?;
-            crate::ops::project::current_project(&store, &wave)
-        })?;
-    Ok(ResolvedProject { snapshot, project })
-}
-
-pub(crate) async fn create_and_load_task<T, F, Fut>(
-    repo: &Path,
-    wave: &str,
-    title: &str,
-    report: &str,
-    marker: &str,
-    prepare: F,
-) -> OpsResult<(ResolvedTask, T)>
-where
-    F: FnOnce(Option<PmItem>, PmProject) -> Fut,
-    Fut: std::future::Future<Output = OpsResult<T>>,
-{
-    let (issue, prepared) =
-        crate::ops::pm::pm_create_task_idempotent(repo, wave, title, report, marker, prepare)
-            .await?;
-    // The mutation already committed. Confirm only its issue; a Wave-wide
-    // sweep makes unrelated Project latency a prerequisite for using the Task.
-    let resolved = resolve_task_async(repo, &issue, PmRefresh::Force)
-        .await
-        .map_err(|error| OpsError::Message(format!(
-            "Linear task {issue} is committed, but its planning record could not refresh: {error}. No worktree was created. Retry the same `lf task create` command, retaining its original options and --creation-id, to confirm the issue and reuse its creation marker."
-        )))?;
-    if resolved.wave != wave {
-        return Err(OpsError::Message(format!(
-            "Linear task {issue} is committed in wave/{} rather than wave/{wave}; inspect the existing issue before starting it",
-            resolved.wave
-        )));
-    }
-    Ok((resolved, prepared))
 }

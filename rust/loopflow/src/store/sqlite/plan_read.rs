@@ -96,7 +96,7 @@ pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<PmPro
     Ok(project)
 }
 
-fn task_in(conn: &Connection, id: &TaskId) -> StoreResult<PmTaskObservation> {
+pub(super) fn task_in(conn: &Connection, id: &TaskId) -> StoreResult<PmTaskObservation> {
     let (mut item, observed_at, repo, project_id, issue, deleted):
         (PmItem, i64, String, String, Option<String>, bool) = conn.query_row(
         "SELECT t.planning_provider_revision,COALESCE(t.external_issue_id,t.id),issue_identifier,

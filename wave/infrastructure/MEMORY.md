@@ -39,10 +39,9 @@ fails: between ownership read and unconditional mutation, Linear reopening is
 overwritten; matching readback falsely settles delivery. The published Linear schema
 at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
 Extra reads and matching readback cannot prove preserved concurrent changes.
-The October 8 iteration direction keeps the ownership cut and provider-guarantee
-investigation authorized without further approval. Safe outbound updates remain
-unproved; weakening preservation or automatic propagation would need a product
-decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
+October 8's iteration direction authorizes the ownership cut and provider-guarantee
+investigation. Weakening preservation or automatic propagation remains unselected.
+The schema accepts UUIDs for issue/Project creation.
 
 `b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
 local creates one retry-stable UUID without overwriting the provider comment or
@@ -50,25 +49,27 @@ repeating direction. `783305284` saves abandonment/cancellation identity atomica
 deleting provider-first decision writers. Cleanup checks execution separately;
 safe cancellation delivery remains pending.
 
-Placement and Flow admission consume saved Task planning without provider inventory.
-The obsolete registration writer, provider-plan rewrite and launch ownership dispatch
-are deleted. One SQLite admission reader preserves state/completion, removal,
-invalidation and Project/Team mismatch evidence; no observation moves Workflow or
-cleans checkouts. Known issue changes remain invalid even without inventory rows.
-Cancellation preserves Wave/checkout locks and winning PR/path. `7fb5a5f1b`
-commits shared Project/workflow storage. `459331192` commits the CLI/Desktop reader using saved
-planning independently of Workflow and inventory. Pending decisions survive inbound
-completion and late acknowledgements; unrelated fields advance. Generated Project
-prompt text lost KRs/targets under the editable parser; ingestion and the draft now
-retain editable content. Wave definitions, creation/edit, membership
-and rotation still prevent the LOO-412 writer boundary. Composed reconnect/public
-resolution remain unproved; outbound reopening still fails.
-`c3e527a93` commits saved Project selection. Project edits/Workflow selection now
-save atomically with field receipts before mapping; inbound conflicts and pending
-values survive refresh/readback. Delivery,
-resolution and Desktop pending display remain. Task creation/edit, membership,
-rotation, deletion/refiling and Wave definitions still block LOO-412's writer boundary.
-Project updates also lack an exposed revision precondition. One draft targets v0.13.10; installation is unproved.
+`7fb5a5f1b` shares Project/workflow storage; `459331192` supplies saved-plan
+CLI/Desktop reads. Placement/admission preserve invalidation, removal, Project/Team
+conflicts and winning PR/path under Wave/checkout locks. Provider-plan rewrite and
+launch ownership dispatch are deleted. Observations grant no execution authority.
+Pending decisions survive inbound completion and late acknowledgements. Ingestion
+and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project selection;
+`22477da8e` owns Project edits/Workflow selection and per-field receipts.
+`921fc68ba` moves complete-plan edits onto that writer and removes inspection locking.
+
+October 8 Task creation/edit now use common SQLite transactions. Creation
+input/Project survive edits and rotation; names, notes, assignment and ordering save
+field receipts before mapping. Changed neighbors retain rank receipts. Inbound reads
+preserve pending values/conflicts; actual field changes advance local revisions.
+Unchanged retries preserve receipt identity. Provider-first create/marker lookup and
+edit/readback writers are deleted. Paired offline CLI proofs cover connection/mapping
+combinations, rollback and conflicts; they establish no export or field delivery.
+Wave provisioning still uses personal routing. Project creation, membership, rotation,
+deletion/refiling and Wave definitions block LOO-412's coherent boundary. Task/Project
+export, field delivery/resolution, Desktop pending display and composed reconnect
+remain unfinished. Project updates also lack an exposed revision precondition.
+The one draft starts at integrated v0.13.10 (`fc0bb97f7`); installation is unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -77,8 +78,7 @@ for review only; no landing or installation. Design: `scratch/explore-loopflow-s
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-The laptop authors; workers are disposable. Namespaces prove no privacy, callbacks
-no laptop-loss recovery, and mappings no concurrent-export uniqueness.
+Laptop authorship and disposable workers prove neither backup nor private, unique export.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

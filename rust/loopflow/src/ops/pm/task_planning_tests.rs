@@ -70,13 +70,11 @@ impl PlanningEnvironment {
     }
 }
 
-// Stateful provider evidence for the creation/preparation boundary. The same
-// fixture retains an issue after a lost response, just as Linear would.
+// Stateful provider evidence for completion, membership, and deletion.
 #[derive(Default)]
 struct PlanningState {
     issues: Vec<serde_json::Value>,
     extra_projects: Vec<serde_json::Value>,
-    fail_confirmation: bool,
     fail_snapshot: bool,
     // Discovery and confirmation under the Wave lock consume two reads before mutation.
     fail_issue_read_after: Option<usize>,
@@ -164,10 +162,6 @@ async fn planning_graphql(
             return axum::Json(
                 json!({"errors":[{"message":"foreign Project issues are unavailable"}]}),
             );
-        }
-        if !state.issues.is_empty() && state.fail_confirmation {
-            state.fail_confirmation = false;
-            return axum::Json(json!({"errors":[{"message":"confirmation unavailable"}]}));
         }
         let issues = if state.trashed && state.omit_trashed_issues {
             vec![]
@@ -285,39 +279,8 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
         json!({"commentCreate":{"comment":{"id":id}}})
-    } else if query.contains("mutation UpdateIssue") {
-        let issue = state
-            .issues
-            .iter_mut()
-            .find(|issue| issue["id"] == vars["id"])
-            .unwrap();
-        for key in ["title", "description", "sortOrder", "prioritySortOrder"] {
-            if let Some(value) = vars["input"].get(key) {
-                issue[key] = value.clone();
-            }
-        }
-        if let Some(id) = vars["input"].get("assigneeId") {
-            issue["assignee"] = if id.is_null() {
-                serde_json::Value::Null
-            } else {
-                json!({"id":id})
-            };
-        }
-        mark_issue_updated(issue);
-        json!({"issueUpdate":{"success":true}})
-    } else if query.contains("query UnstartedWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
-    } else if query.contains("mutation CreateIssue") {
-        let number = state.issues.len() + 1;
-        state
-            .issues
-            .push(json!({"id":format!("issue-{number}"), "identifier":format!("FIX-{number}"), "url":null,
-            "title":vars["title"], "description":vars["description"], "completedAt": null, "prioritySortOrder":0.0,
-            "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
-            "team":{"id":"team-1"}, "project":{"id":project_id,"name":"Chapter"}}));
-        return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
     } else {
-        panic!("unexpected creation fixture query: {query}");
+        panic!("unexpected planning fixture query: {query}");
     };
     axum::Json(json!({"data":data}))
 }
@@ -369,436 +332,6 @@ async fn project_workflow_uses_stored_definition_offline() {
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
-}
-
-#[tokio::test]
-async fn connected_fields_match_personal_order_assignment_and_summary() {
-    let fixture = Fixture::new().await;
-    fixture.seed(now() + 86_400).await;
-    let (repo, wave) = planning_repo(&fixture).await;
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
-    let (url, server) = serve(state).await;
-    let fields: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../tests/fixtures/dto/planning_fields.json"
-    ))
-    .unwrap();
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            for (name, marker) in [("First", "first"), ("Second", "second")] {
-                super::pm_create_task_idempotent(
-                    &repo,
-                    "product",
-                    name,
-                    "",
-                    marker,
-                    |_, _| async { Ok(()) },
-                )
-                .await
-                .unwrap();
-            }
-            let update = crate::pm::PmItemUpdate {
-                name: Some(fields["name"].as_str().unwrap().into()),
-                description: Some(fields["description"].as_str().unwrap().into()),
-                rank: Some(0),
-                assignee: Some(Some(fields["assignee"].as_str().unwrap().into())),
-            };
-            super::pm_update_async(
-                &repo,
-                &super::PmUpdateOptions {
-                    wave: None,
-                    id: "issue-2".into(),
-                    update,
-                },
-                &NullProgress,
-            )
-            .await
-            .unwrap();
-            let read = crate::ops::task_pm::resolve_task_async(&repo, "issue-2", PmRefresh::Never)
-                .await
-                .unwrap();
-            let item = serde_json::to_value(read.item).unwrap();
-            for field in ["name", "rank", "assignee"] {
-                assert_eq!(item[field], fields[field]);
-            }
-            assert!(item["description"]
-                .as_str()
-                .unwrap()
-                .starts_with(fields["description"].as_str().unwrap()));
-            crate::ops::project::edit(
-                &repo,
-                "project-1",
-                Some("Current"),
-                fields["summary"].as_str(),
-            )
-            .await
-            .unwrap();
-            let project = fixture
-                .store
-                .sqlite
-                .selected_planning_project(wave.id())
-                .unwrap()
-                .unwrap();
-            assert_eq!(project.summary, fields["summary"]);
-            assert_eq!(project.name, "Current");
-            super::pm_update_async(
-                &repo,
-                &super::PmUpdateOptions {
-                    wave: None,
-                    id: "issue-2".into(),
-                    update: crate::pm::PmItemUpdate {
-                        assignee: Some(None),
-                        ..Default::default()
-                    },
-                },
-                &NullProgress,
-            )
-            .await
-            .unwrap();
-            assert!(
-                crate::ops::task_pm::resolve_task_async(&repo, "issue-2", PmRefresh::Never)
-                    .await
-                    .unwrap()
-                    .item
-                    .assignee
-                    .is_none()
-            );
-        })
-        .await;
-    server.abort();
-}
-
-#[tokio::test]
-async fn refile_leaves_a_task_already_in_the_wave_and_refuses_an_unknown_wave() {
-    let fixture = Fixture::new().await;
-    fixture.seed(now() + 86_400).await;
-    let (repo, _wave) = planning_repo(&fixture).await;
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
-    let (url, server) = serve(state.clone()).await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Misfiled",
-                "Report",
-                "<!-- loopflow-task-start:refile -->",
-                |_, _| async { Ok(()) },
-            )
-            .await
-            .unwrap();
-
-            // The fixture rejects any mutation it does not know, so an Ok here
-            // also proves no move was sent.
-            let kept = super::pm_refile_async(&repo, "FIX-1", "product")
-                .await
-                .unwrap();
-            assert_eq!(kept.wave, "product");
-            assert_eq!(state.lock().await.issues[0]["project"]["id"], "project-1");
-
-            assert!(super::pm_refile_async(&repo, "FIX-1", "nowhere")
-                .await
-                .is_err());
-            assert_eq!(state.lock().await.issues[0]["project"]["id"], "project-1");
-        })
-        .await;
-    server.abort();
-}
-
-#[tokio::test]
-async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provider_title() {
-    let fixture = Fixture::new().await;
-    fixture.seed(now() + 86_400).await;
-    let (repo, _wave) = planning_repo(&fixture).await;
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
-    let (url, server) = serve(state.clone()).await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            let marker = "<!-- loopflow-task-start:fixture -->";
-            let refused = super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Original title",
-                "Report",
-                marker,
-                |_, _| async {
-                    Err::<(), _>(crate::ops::error::OpsError::Message(
-                        "placement refused".into(),
-                    ))
-                },
-            )
-            .await;
-            assert!(refused
-                .unwrap_err()
-                .to_string()
-                .contains("placement refused"));
-            assert!(
-                state.lock().await.issues.is_empty(),
-                "refusal must leave provider inventory unchanged"
-            );
-
-            let (created, ()) = super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Original title",
-                "Report",
-                marker,
-                |_, _| async { Ok(()) },
-            )
-            .await
-            .unwrap();
-            assert_eq!(
-                created, "issue-1",
-                "lost response resolves the committed issue"
-            );
-            assert_eq!(state.lock().await.issues.len(), 1);
-            super::pm_update_async(
-                &repo,
-                &super::PmUpdateOptions {
-                    wave: None,
-                    id: "FIX-1".into(),
-                    update: crate::pm::PmItemUpdate {
-                        name: Some("Persisted edited title".into()),
-                        description: Some("Edited notes".into()),
-                        ..Default::default()
-                    },
-                },
-                &NullProgress,
-            )
-            .await
-            .unwrap();
-            let description = state.lock().await.issues[0]["description"]
-                .as_str()
-                .unwrap()
-                .to_string();
-            assert_eq!(description, format!("Edited notes\n\n{marker}"));
-            let (retried, title) = super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Original title",
-                "Report",
-                marker,
-                |existing, _| async move { Ok(existing.unwrap().name) },
-            )
-            .await
-            .unwrap();
-            assert_eq!(retried, created);
-            assert_eq!(title, "Persisted edited title");
-            assert_eq!(state.lock().await.issues[0]["description"], description);
-            assert!(fixture
-                .store
-                .list_tasks(None)
-                .await
-                .unwrap()
-                .iter()
-                .all(|task| task.worktree.is_none()));
-            // Lookup is valid for terminal planning items; launch owns eligibility.
-            state.lock().await.issues[0]["state"]["type"] = json!("completed");
-            mark_issue_updated(&mut state.lock().await.issues[0]);
-            let resolved =
-                crate::ops::task_pm::resolve_task_async(&repo, "FIX-1", PmRefresh::Force)
-                    .await
-                    .unwrap();
-            assert!(resolved.item.completed);
-            assert_eq!(resolved.item.description, description);
-            assert_eq!(
-                state.lock().await.issues.len(),
-                1,
-                "retry cannot file a second issue"
-            );
-
-            // A second independent creation loses both the mutation response
-            // and its confirmation read. Keep uncertainty and the retry path.
-            state.lock().await.fail_confirmation = true;
-            state.lock().await.issues.clear();
-            let uncertain = super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Unconfirmed task",
-                "Another report",
-                "<!-- loopflow-task-start:unconfirmed -->",
-                |_, _| async { Ok(()) },
-            )
-            .await;
-            let error = uncertain.unwrap_err().to_string();
-            assert!(error.contains("lost response after commit"), "{error}");
-            assert!(error.contains("confirmation unavailable"), "{error}");
-            assert!(error.contains("issue may already exist"), "{error}");
-            assert!(error.contains("Retry the same `lf task create`"), "{error}");
-            assert_eq!(state.lock().await.issues.len(), 1);
-            let (recovered, ()) = super::pm_create_task_idempotent(
-                &repo,
-                "product",
-                "Unconfirmed task",
-                "Another report",
-                "<!-- loopflow-task-start:unconfirmed -->",
-                |_, _| async { Ok(()) },
-            )
-            .await
-            .unwrap();
-            assert_eq!(recovered, "issue-1");
-            assert_eq!(state.lock().await.issues.len(), 1);
-        })
-        .await;
-    server.abort();
-}
-
-#[test]
-fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let fixture = runtime.block_on(Fixture::new());
-    std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _wave) = runtime.block_on(planning_repo(&fixture));
-    runtime.block_on(fixture.seed(now() + 86_400));
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
-        // The initial Project read works, but after creation a Wave snapshot
-        // is unavailable. Exact issue reads still work.
-        fail_snapshot: true,
-        ..Default::default()
-    }));
-    let (url, server) = runtime.block_on(serve(state.clone()));
-    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let created = crate::ops::task::task_create(
-            &repo,
-            Some("product"),
-            Some("Continue training".into()),
-            Some("Retain the issue".into()),
-            crate::durable::TaskId::new(),
-        )
-        .unwrap();
-        crate::ops::task::task_edit(
-            &repo,
-            &created.identifier,
-            None,
-            crate::pm::PmItemUpdate {
-                name: Some("Continue the existing training Task".into()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let record = runtime
-            .block_on(crate::ops::task_pm::resolve_task_async(
-                &repo,
-                &created.id,
-                PmRefresh::Never,
-            ))
-            .unwrap();
-        assert_eq!(record.item.name, "Continue the existing training Task");
-        assert_eq!(record.item.id, created.id);
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.issues.len() }),
-            1
-        );
-        assert!(runtime
-            .block_on(fixture.store.list_tasks(None))
-            .unwrap()
-            .iter()
-            .all(|task| task.worktree.is_none()));
-    });
-    server.abort();
-}
-
-#[test]
-fn task_creation_confirmation_failure_retries_without_starting_backlog() {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let fixture = runtime.block_on(Fixture::new());
-    std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, _wave) = runtime.block_on(planning_repo(&fixture));
-    // Deliberately no commit, Project Work, agent route or execution credential.
-    std::fs::write(repo.join("authored.txt"), "keep this unfinished work").unwrap();
-    runtime.block_on(fixture.seed(now() + 86_400));
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
-        fail_issue_read_after: Some(0),
-        ..Default::default()
-    }));
-    let (url, server) = runtime.block_on(serve(state.clone()));
-    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let identity = crate::durable::TaskId::new();
-        let create = || {
-            crate::ops::task::task_create(
-                &repo,
-                Some("product"),
-                Some("Future work".into()),
-                Some("Full directive".into()),
-                identity.clone(),
-            )
-        };
-        {
-            let error = create().unwrap_err().to_string();
-            assert!(
-                error.contains("Linear task issue-1 is committed"),
-                "{error}"
-            );
-            assert!(error.contains("issue confirmation unavailable"), "{error}");
-            assert!(error.contains("Retry the same `lf task create`"), "{error}");
-            assert!(!error.contains("lf task run"), "{error}");
-            assert_eq!(
-                runtime.block_on(async { state.lock().await.issues.len() }),
-                1
-            );
-        }
-        let first = create().unwrap();
-        let edit = || {
-            crate::ops::task::task_edit(
-                &repo,
-                "FIX-1",
-                None,
-                crate::pm::PmItemUpdate {
-                    name: Some("Edited future work".into()),
-                    description: Some("Edited full directive".into()),
-                    ..Default::default()
-                },
-            )
-        };
-        {
-            runtime.block_on(async {
-                state.lock().await.fail_issue_read_after = Some(2);
-            });
-            let error = edit().unwrap_err().to_string();
-            assert!(
-                error.contains("was updated, but local refresh failed"),
-                "{error}"
-            );
-            assert!(error.contains("Retry the same Task command"), "{error}");
-        }
-        edit().unwrap();
-        let retry = create().unwrap();
-        assert_eq!(first.id, retry.id);
-        assert_eq!(first.name, "Future work");
-        assert_eq!(retry.name, "Edited future work");
-        assert!(retry.description.starts_with("Edited full directive"));
-        let marker = first
-            .description
-            .split("<!-- loopflow-task-start:")
-            .nth(1)
-            .unwrap();
-        assert!(retry.description.ends_with(marker));
-        let snapshot = crate::ops::task_pm::load_wave(&repo, "product", PmRefresh::Never).unwrap();
-        assert_eq!(snapshot.items, vec![retry]);
-    });
-    assert_eq!(
-        runtime.block_on(async { state.lock().await.issues.len() }),
-        1
-    );
-    assert!(runtime
-        .block_on(fixture.store.list_tasks(None))
-        .unwrap()
-        .iter()
-        .all(|task| task.worktree.is_none()));
-    assert_eq!(
-        crate::engine::worktrees::list_worktrees(&repo)
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(
-        std::fs::read_to_string(repo.join("authored.txt")).unwrap(),
-        "keep this unfinished work"
-    );
-    server.abort();
 }
 
 #[test]
@@ -871,12 +404,12 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        crate::ops::task::task_create(
+        seed_provider_task(
+            &runtime,
+            &state,
             &repo,
-            Some("product"),
-            Some("Future work".into()),
-            Some("Preserve this issue's outcome".into()),
-            crate::durable::TaskId::new(),
+            "Future work",
+            "Preserve this issue's outcome",
         )
         .unwrap();
     });
@@ -1087,6 +620,37 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
 
 struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>);
 
+fn seed_provider_task(
+    runtime: &tokio::runtime::Runtime,
+    state: &Arc<tokio::sync::Mutex<PlanningState>>,
+    repo: &Path,
+    title: &str,
+    description: &str,
+) -> crate::ops::OpsResult<crate::pm::PmItem> {
+    runtime.block_on(async {
+        let mut state = state.lock().await;
+        let project = state
+            .initial_project_id
+            .as_deref()
+            .unwrap_or("project-1")
+            .to_string();
+        let index = state.issues.len() + 1;
+        let id = format!("issue-{index}");
+        state.issues.push(json!({
+            "id":id,"identifier":format!("FIX-{index}"),"url":null,
+            "title":title,"description":description,"completedAt":null,
+            "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,
+            "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
+            "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
+        }));
+        drop(state);
+        super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress).await?;
+        Ok(super::read_task_planning_async(repo, &id, PmRefresh::Force)
+            .await?
+            .item)
+    })
+}
+
 fn with_completion_task(
     test: impl FnOnce(
         &tokio::runtime::Runtime,
@@ -1106,12 +670,12 @@ fn with_completion_task(
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let item = crate::ops::task::task_create(
+        let item = seed_provider_task(
+            &runtime,
+            &state,
             &repo,
-            Some("product"),
-            Some("Deliver locally".into()),
-            Some("Retain decisions".into()),
-            crate::durable::TaskId::new(),
+            "Deliver locally",
+            "Retain decisions",
         )
         .unwrap();
         let task = runtime
@@ -1161,7 +725,9 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
                 let retained = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
                 assert_eq!(retained.id, original.id);
                 assert_eq!(retained.project_id, original.project_id);
-                assert_eq!(retained.plan, original.plan);
+                let mut expected = original.plan.clone();
+                expected.revision += 1;
+                assert_eq!(retained.plan, expected);
                 assert!(retained.worktree.is_none());
                 assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
                 assert_eq!(runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap(), history);
@@ -1623,13 +1189,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
             assert!(runtime.block_on(fixture.store.list_tasks(None)).unwrap().is_empty());
             "FIX-1".to_string()
         } else {
-            crate::ops::task::task_create(
-                &repo,
-                Some("product"),
-                Some("Finish without checkout".into()),
-                Some("Retain the completion".into()),
-                crate::durable::TaskId::new(),
-            )
+            seed_provider_task(&runtime, &state, &repo, "Finish without checkout", "Retain the completion")
             .unwrap()
             .identifier
         };
@@ -1723,14 +1283,8 @@ fi
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let item = crate::ops::task::task_create(
-            &repo,
-            Some("product"),
-            Some("Future work".into()),
-            Some("A directive".into()),
-            crate::durable::TaskId::new(),
-        )
-        .unwrap();
+        let item =
+            seed_provider_task(&runtime, &state, &repo, "Future work", "A directive").unwrap();
         let task = {
             for args in [
                 vec!["add", "."],
@@ -2009,14 +1563,8 @@ esac
         let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
         let (url, server) = runtime.block_on(serve(state.clone()));
         PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-            let item = crate::ops::task::task_create(
-                &repo,
-                Some("product"),
-                Some("Cancel me".into()),
-                Some("Keep history".into()),
-                crate::durable::TaskId::new(),
-            )
-            .unwrap();
+            let item =
+                seed_provider_task(&runtime, &state, &repo, "Cancel me", "Keep history").unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
             let project = runtime
                 .block_on(fixture.store.list_projects(Some(wave.id())))
@@ -2254,13 +1802,13 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        // Creation refreshes planning and must still find the repository chapter.
-        crate::ops::task::task_create(
+        // Import owned planning while foreign Projects remain independently unavailable.
+        seed_provider_task(
+            &runtime,
+            &state,
             &repo,
-            Some("product"),
-            Some("Eligible work".into()),
-            Some("Cancel only repository work".into()),
-            crate::durable::TaskId::new(),
+            "Eligible work",
+            "Cancel only repository work",
         )
         .unwrap();
         for plan in [true, false] {
@@ -2394,14 +1942,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
                 &repo, "product", selected,
             ))
             .unwrap();
-        crate::ops::task::task_create(
-            &repo,
-            Some("product"),
-            Some("Planning work".into()),
-            Some("Retain evidence".into()),
-            crate::durable::TaskId::new(),
-        )
-        .unwrap();
+        seed_provider_task(&runtime, &state, &repo, "Planning work", "Retain evidence").unwrap();
         assert!(crate::ops::task::task_sweep(&repo, true)
             .unwrap()
             .is_empty());

@@ -12,8 +12,7 @@ mod deletion_tests;
 use crate::pm::PmKr;
 use crate::pm::{
     parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmResult, PmWave, ProjectContent,
-    TeamBinding, RATE_LIMIT_RETRIES,
+    PmError, PmItem, PmProject, PmResult, PmWave, ProjectContent, TeamBinding, RATE_LIMIT_RETRIES,
 };
 
 const LINEAR_BASE_URL: &str = "https://api.linear.app/graphql";
@@ -243,22 +242,6 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
     status { type }
     initiatives(first: 50) { nodes { id } }
     teams(first: 50) { nodes { id } }
-  }
-}"#;
-
-const CREATE_ITEM_MUTATION: &str = r#"mutation CreateIssue($teamId: String!, $projectId: String!, $title: String!, $description: String!, $stateId: String) {
-  issueCreate(input: { teamId: $teamId, projectId: $projectId, title: $title, description: $description, stateId: $stateId }) {
-    issue {
-      id
-    }
-  }
-}"#;
-
-const UPDATE_ITEM_MUTATION: &str = r#"mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
-  issueUpdate(id: $id, input: $input) {
-    issue {
-      id
-    }
   }
 }"#;
 
@@ -1127,83 +1110,6 @@ impl LinearClient {
         }
     }
 
-    pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
-        let team_id = self.require_team_id()?;
-        let state_id = self.unstarted_state_id(&team_id).await?;
-        let response: IssueCreateData = self
-            .graphql(
-                CREATE_ITEM_MUTATION,
-                json!({
-                    "teamId": team_id,
-                    "projectId": project_id,
-                    "title": item.name,
-                    "description": item.description,
-                    "stateId": state_id,
-                }),
-            )
-            .await?;
-
-        Ok(response.issue_create.issue.id)
-    }
-
-    pub async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let mut input = serde_json::Map::new();
-        if let Some(name) = &update.name {
-            input.insert("title".to_string(), json!(name));
-        }
-        if let Some(description) = &update.description {
-            input.insert("description".to_string(), json!(description));
-        }
-        if let Some(assignee) = &update.assignee {
-            input.insert("assigneeId".into(), json!(assignee));
-        }
-        if let Some(rank) = update.rank {
-            let (_, project) = self
-                .issue_ownership(item_id)
-                .await?
-                .ok_or_else(|| PmError::Message("issue is unavailable".into()))?;
-            let project =
-                project.ok_or_else(|| PmError::Message("ordering requires a Project".into()))?;
-            let mut ordered = self.list_issue_nodes(&project.id, false).await?;
-            ordered.retain(|issue| issue.fields.id != item_id);
-            let index = (rank as usize).min(ordered.len());
-            let key =
-                |issue: &IssueNode| (issue.fields.priority_sort_order, issue.fields.sort_order);
-            let before = index.checked_sub(1).map(|i| key(&ordered[i]));
-            let after = ordered.get(index).map(key);
-            let (priority, order) = match (before, after) {
-                (Some((left, order)), None) => (left + 1.0, order),
-                (None, Some((right, order))) => (right - 1.0, order),
-                (Some((left, lo)), Some((right, hi))) if left == right => {
-                    (left, lo + (hi - lo) / 2.0)
-                }
-                (Some((left, order)), Some((right, _))) => (left + (right - left) / 2.0, order),
-                (None, None) => (0.0, 0.0),
-            };
-            if before.is_some_and(|before| before >= (priority, order))
-                || after.is_some_and(|after| after <= (priority, order))
-            {
-                return Err(PmError::Message("Linear's neighboring ranks have no distinct position; reorder them in Linear before retrying".into()));
-            }
-            input.insert("prioritySortOrder".into(), json!(priority));
-            input.insert("sortOrder".into(), json!(order));
-        }
-        if input.is_empty() {
-            return Ok(());
-        }
-
-        let _: Value = self
-            .graphql(
-                UPDATE_ITEM_MUTATION,
-                json!({
-                    "id": item_id,
-                    "input": input,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
     pub async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
@@ -1737,12 +1643,6 @@ struct InitiativeCreateData {
 }
 
 #[derive(Deserialize)]
-struct IssueCreateData {
-    #[serde(rename = "issueCreate")]
-    issue_create: IssuePayload,
-}
-
-#[derive(Deserialize)]
 struct IssueUpdateIdentifierData {
     #[serde(rename = "issueUpdate")]
     issue_update: IssueIdentifierPayload,
@@ -1766,11 +1666,6 @@ struct ProjectPayload {
 #[derive(Deserialize)]
 struct InitiativePayload {
     initiative: IdNode,
-}
-
-#[derive(Deserialize)]
-struct IssuePayload {
-    issue: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -2473,7 +2368,6 @@ mod tests {
     #[test]
     fn issue_mutations_use_linear_string_ids() {
         for query in [
-            UPDATE_ITEM_MUTATION,
             MOVE_ITEM_MUTATION,
             SET_ITEM_STATE_MUTATION,
             CREATE_COMMENT_MUTATION,
@@ -2503,7 +2397,6 @@ mod tests {
 
     #[test]
     fn workflow_state_filters_use_linear_team_id() {
-        assert!(CREATE_ITEM_MUTATION.contains("$teamId: String!"));
         assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
@@ -3059,96 +2952,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_update_and_comment_map_to_linear_mutations() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({
-                    "data": {
-                        "workflowStates": {
-                            "nodes": [
-                                { "id": "state-in-progress", "position": 2.0 },
-                                { "id": "state-todo", "position": 1.0 }
-                            ]
-                        }
-                    }
-                }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-123" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        let item_id = client
-            .create_item(
-                "project-123",
-                &PmItemCreate {
-                    name: "Implement client".to_string(),
-                    description: "Build the GraphQL adapter".to_string(),
-                },
-            )
-            .await
-            .expect("create item succeeds");
-        client
-            .update_item(
-                &item_id,
-                &PmItemUpdate {
-                    name: Some("Implement Linear client".to_string()),
-                    description: Some("Build the GraphQL adapter and tests".to_string()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("update item succeeds");
-        client
-            .comment(&item_id, "Shipped in v0.9.9")
-            .await
-            .expect("comment succeeds");
-
-        assert_eq!(item_id, "issue-123");
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 4);
-
-        // create_item first resolves the team's active (unstarted) state, then
-        // sends that lowest-position state id as stateId on issueCreate so new
-        // issues land in Todo rather than the hidden Backlog.
-        let states_body: Value =
-            serde_json::from_str(&requests[0].body).expect("states body is json");
-        assert!(states_body["query"]
-            .as_str()
-            .expect("query present")
-            .contains("UnstartedWorkflowStates"));
-
-        let create_body: Value =
-            serde_json::from_str(&requests[1].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["stateId"], json!("state-todo"));
-        let update_body: Value =
-            serde_json::from_str(&requests[2].body).expect("update body is json");
-        assert_eq!(
-            update_body["variables"]["input"],
-            json!({
-                "title": "Implement Linear client",
-                "description": "Build the GraphQL adapter and tests",
-            })
-        );
-    }
-
-    #[tokio::test]
     async fn pr_linkage_maps_to_attachment_and_comment_mutations() {
         let (base_url, requests) = test_server::spawn(vec![
             json_response(
@@ -3214,73 +3017,6 @@ mod tests {
             .expect("query present")
             .contains("commentUpdate"));
         assert_eq!(comment["variables"]["id"], json!("comment-1"));
-    }
-
-    #[tokio::test]
-    async fn update_item_omits_absent_text_fields() {
-        let (base_url, requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "issueUpdate": { "issue": { "id": "issue-123" } } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
-
-        client
-            .update_item(
-                "issue-123",
-                &PmItemUpdate {
-                    name: None,
-                    description: Some("Only the description changes".to_string()),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("description-only update succeeds");
-
-        let requests = requests.lock().await;
-        let update_body: Value =
-            serde_json::from_str(&requests[0].body).expect("update body is json");
-        assert_eq!(
-            update_body["variables"]["input"],
-            json!({ "description": "Only the description changes" })
-        );
-        assert!(update_body["variables"]["input"].get("title").is_none());
-    }
-
-    #[tokio::test]
-    async fn create_item_omits_state_when_team_has_no_unstarted_state() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueCreate": { "issue": { "id": "issue-123" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-9".to_string()),
-            base_url,
-        );
-
-        client
-            .create_item(
-                "project-123",
-                &PmItemCreate {
-                    name: "Implement client".to_string(),
-                    description: "Build the GraphQL adapter".to_string(),
-                },
-            )
-            .await
-            .expect("create item succeeds");
-
-        let requests = requests.lock().await;
-        let create_body: Value =
-            serde_json::from_str(&requests[1].body).expect("create body is json");
-        assert_eq!(create_body["variables"]["stateId"], Value::Null);
     }
 
     #[tokio::test]

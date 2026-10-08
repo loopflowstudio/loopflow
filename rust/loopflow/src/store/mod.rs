@@ -2056,7 +2056,7 @@ mod tests {
                     .unwrap();
                 store
                     .sqlite
-                    .create_local_task(&crate::planning::NewTask {
+                    .create_task(&crate::planning::NewTask {
                         id: TaskId::new(),
                         project_id: project.id,
                         title: "Retain this plan".into(),

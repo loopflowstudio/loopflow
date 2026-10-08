@@ -204,8 +204,8 @@ lf list wave                       # authored goals, including unconnected Waves
 lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
-lf checkout EXP-12                  # prepare its checkout without execution
-lf task run EXP-12
+lf checkout <task-id>               # use the ID printed at creation
+lf task run <task-id>
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
@@ -214,11 +214,12 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
-After Linear accepts a Task creation or text update, Loopflow confirms that issue
-directly. Rank edits also reread Project ordering. If Linear commits but issue
-confirmation fails, the error names the retained issue. Retry the same command
-with the original creation options and printed `--creation-id` to reuse it without
-filing a duplicate.
+Task creation and edits save locally, including during a Linear outage. Retry with
+the original creation options and printed `--creation-id` to reuse the same Task;
+later edits and Project rotation preserve that receipt. Connected repositories
+report pending sync. Field receipts preserve pending titles, notes, assignment and
+ordering through inbound refreshes. Task export and field delivery remain unfinished;
+the saved Task's local ID works before it receives a Linear alias.
 
 ## Inspect and continue
 

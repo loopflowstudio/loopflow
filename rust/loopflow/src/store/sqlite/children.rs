@@ -86,7 +86,7 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub fn create_local_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {
+    pub fn create_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let intent: Option<(String, String, String)> = tx
@@ -115,13 +115,7 @@ impl SqliteStore {
             [input.project_id.as_str()],
             |row| row.get(0),
         )?;
-        if super::local_planning::project_authority_on(&tx, &input.project_id)?
-            != crate::planning::PlanningAuthority::Local
-        {
-            return Err(StoreError::InvalidAuthority(
-                "this Project's planning is owned by Linear".into(),
-            ));
-        }
+
         super::durable::require_selected_project(&tx, &input.project_id)?;
         let now = OffsetDateTime::now_utc();
         let task = Task {
@@ -159,72 +153,6 @@ impl SqliteStore {
             ],
         )?;
         let task = task_on(&tx, &input.id)?.ok_or(StoreError::NotFound)?;
-        tx.commit()?;
-        Ok(task)
-    }
-
-    pub fn edit_local_task(
-        &self,
-        id: &TaskId,
-        expected_revision: u64,
-        patch: &crate::pm::PmItemUpdate,
-    ) -> StoreResult<Task> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        require_task_not_deleted(&tx, &task)?;
-        if super::local_planning::project_authority_on(&tx, &task.project_id)?
-            != crate::planning::PlanningAuthority::Local
-        {
-            return Err(StoreError::InvalidAuthority(
-                "this Task's planning is owned by Linear".into(),
-            ));
-        }
-        if task.plan.revision != expected_revision {
-            return Err(StoreError::InvalidAuthority(
-                "Task changed; read its current revision before editing".into(),
-            ));
-        }
-        if patch
-            .name
-            .as_ref()
-            .is_some_and(|title| title.trim().is_empty())
-        {
-            return Err(StoreError::InvalidData("Task title cannot be empty".into()));
-        }
-        tx.execute(
-            "UPDATE tasks SET issue_title=COALESCE(?2, issue_title),
-                issue_description=COALESCE(?3, issue_description),
-                planning_revision=planning_revision+1, updated_at=?4,
-                planning_assignee=CASE WHEN ?5 THEN ?6 ELSE planning_assignee END
-             WHERE id=?1",
-            params![
-                id.as_str(),
-                patch.name,
-                patch.description,
-                now_unix(),
-                patch.assignee.is_some(),
-                patch.assignee.as_ref().and_then(|id| id.as_deref())
-            ],
-        )?;
-        if let Some(rank) = patch.rank {
-            let mut query = tx.prepare("SELECT id FROM tasks WHERE project_id=?1 AND id!=?2 AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id")?;
-            let mut ordered = query
-                .query_map(params![task.project_id.as_str(), id.as_str()], |row| {
-                    row.get::<_, String>(0)
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            ordered.insert((rank as usize).min(ordered.len()), id.to_string());
-            for (rank, task_id) in ordered.iter().enumerate() {
-                tx.execute(
-                    "UPDATE tasks SET planning_rank=?2,
-                    planning_revision=planning_revision+CASE WHEN id=?3 THEN 0 ELSE 1 END
-                    WHERE id=?1 AND planning_rank!=?2",
-                    params![task_id, rank as u32, id.as_str()],
-                )?;
-            }
-        }
-        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
     }
@@ -2054,13 +1982,13 @@ mod local_planning_tests {
             title: "Fix parser".into(),
             description: "Keep the original input".into(),
         };
-        let task = store.create_local_task(&input).unwrap();
+        let task = store.create_task(&input).unwrap();
         assert!(task.worktree.is_none());
         assert!(task.plan.linear_id.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert!(store.task_checkouts().unwrap().is_empty());
         let edited = store
-            .edit_local_task(
+            .edit_task(
                 &task.id,
                 task.plan.revision,
                 &PmItemUpdate {
@@ -2073,7 +2001,7 @@ mod local_planning_tests {
         assert_eq!(edited.plan.revision, 1);
         assert_eq!(edited.plan.description, input.description);
         assert!(store
-            .edit_local_task(
+            .edit_task(
                 &task.id,
                 0,
                 &PmItemUpdate {
@@ -2085,10 +2013,10 @@ mod local_planning_tests {
             .is_err());
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let retried = store.create_local_task(&input).unwrap();
+        let retried = store.create_task(&input).unwrap();
         assert_eq!(retried, edited);
         let second = store
-            .create_local_task(&NewTask {
+            .create_task(&NewTask {
                 id: TaskId::new(),
                 ..input.clone()
             })
@@ -2098,7 +2026,7 @@ mod local_planning_tests {
         assert_eq!(store.list_tasks(Some(&task.wave_id)).unwrap().len(), 2);
         assert!(store.list_tasks(Some(&WaveId::new())).unwrap().is_empty());
         assert!(store
-            .create_local_task(&NewTask {
+            .create_task(&NewTask {
                 title: "Different request".into(),
                 ..input
             })
@@ -2125,7 +2053,7 @@ mod local_planning_tests {
             title: "Keep identity".into(),
             description: String::new(),
         };
-        let local = store.create_local_task(&input).unwrap();
+        let local = store.create_task(&input).unwrap();
         assert_eq!(local.plan.pm_snapshot_synced_at, None);
         // Export is a separate slice; this proves the schema accepts a different
         // provider UUID without changing local identity or creation history.
@@ -2143,9 +2071,9 @@ mod local_planning_tests {
                 .id,
             local.id
         );
-        assert_eq!(store.create_local_task(&input).unwrap(), mapped);
+        assert_eq!(store.create_task(&input).unwrap(), mapped);
         let edited = store
-            .edit_local_task(
+            .edit_task(
                 &local.id,
                 0,
                 &PmItemUpdate {
@@ -2163,7 +2091,7 @@ mod local_planning_tests {
         assert!(store.list_tasks(None).unwrap().is_empty());
         let retained = store.task(&mapped.id).unwrap().unwrap();
         assert_eq!(retained.plan, edited.plan);
-        assert_eq!(store.create_local_task(&input).unwrap(), retained);
+        assert_eq!(store.create_task(&input).unwrap(), retained);
     }
 
     #[test]
@@ -2176,7 +2104,7 @@ mod local_planning_tests {
             title: "One".into(),
             description: String::new(),
         };
-        let first = store.create_local_task(&input).unwrap();
+        let first = store.create_task(&input).unwrap();
         assert_eq!(first.plan.identifier, "lf-0123456");
         for selector in ["0123", "0123456789A", "lf-0123", "task_0123"] {
             assert_eq!(store.task_by_issue(selector).unwrap().unwrap().id, first.id);
@@ -2196,7 +2124,7 @@ mod local_planning_tests {
             first.id
         );
         let second = store
-            .create_local_task(&NewTask {
+            .create_task(&NewTask {
                 id: TaskId::parse("task_0123456789ab40008000000000000002").unwrap(),
                 ..input
             })

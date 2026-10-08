@@ -546,29 +546,8 @@ fn project_accepted_planning(
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
-    // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
-    tx.execute(
-        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}),
-         pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
-             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
-         UPDATE tasks AS target SET
-             issue_identifier=json_extract(i.body,'$.identifier'),
-             issue_title=json_extract(i.body,'$.name'),
-             issue_description=json_extract(i.body,'$.description'),
-             planning_state=CASE WHEN target.id IN (SELECT task_id FROM pending)
-                 THEN target.planning_state ELSE json_extract(i.body,'$.state') END,
-             planning_completed=CASE WHEN target.id IN (SELECT task_id FROM pending)
-                 THEN target.planning_completed ELSE json_extract(i.body,'$.completed') END,
-             planning_completed_at=CASE WHEN target.id IN (SELECT task_id FROM pending)
-                 THEN target.planning_completed_at ELSE json_extract(i.body,'$.completed_at') END,
-             planning_provider_revision=json_extract(i.body,'$.revision'),
-             planning_url=json_extract(i.body,'$.url'),
-             planning_branch_name=json_extract(i.body,'$.branch_name'),
-             planning_team_id=json_extract(i.body,'$.team_id'),
-             planning_assignee=json_extract(i.body,'$.assignee'),
-             planning_rank=json_extract(i.body,'$.rank'),
-             pm_snapshot_synced_at=i.observed_at,project_id=p.id
-         FROM pm_items i
+    // Pending fields keep their saved value; unrelated accepted facts advance.
+    let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id
          JOIN projects p ON p.external_project_id=i.project_id
          JOIN projects current ON current.wave_id=p.wave_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
@@ -576,9 +555,48 @@ fn project_accepted_planning(
          AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"),
-        params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
-    )?;
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"))?;
+    let updates = query
+        .query_map(
+            params![
+                repo,
+                provider,
+                item_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (id, body, observed_at, project) in updates {
+        let item: PmItem = serde_json::from_str(&body)?;
+        let item =
+            super::task_content::retain_edits(tx, &crate::durable::TaskId::from_raw(&id), &item)?;
+        tx.execute(
+            "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
+                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
+             UPDATE tasks SET issue_identifier=?2,issue_title=?3,issue_description=?4,
+                 planning_state=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_state ELSE ?5 END,
+                 planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
+                 planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
+                 planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
+                 planning_team_id=?11,planning_assignee=?12,planning_rank=?13,
+                 pm_snapshot_synced_at=?14,project_id=?15,
+                 planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
+                     OR planning_assignee IS NOT ?12 OR planning_rank IS NOT ?13 OR project_id IS NOT ?15 THEN 1 ELSE 0 END
+             WHERE id=?1",
+            params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
+                item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.rank,observed_at,project],
+        )?;
+    }
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
          SELECT i.body,i.observed_at,p.id FROM pm_items i

@@ -30,6 +30,8 @@ def main() -> None:
         "",
         "## Selection and output",
         "",
+        "`--machine <label-or-id>` runs the command in the saved remote repository.",
+        "`--secret` and `--forward-agent` require `--machine`.",
         "`--task` selects a Task checkout; `--wt` selects an existing worktree.",
         "`--wave` adds context without moving directories and must match a Task's",
         "owning Wave. `task run` places a Task's worktree and then runs like",

@@ -35,3 +35,8 @@ Jack Heart's October 7 PR review now permits a first-install offer during
 interactive add, default yes; existing lf is never replaced. Batch, JSON and
 nonterminal use report the install command. A 60-second idle lifetime is the
 reversible choice for private OpenSSH sharing.
+
+2026-10-07 selector decision: Jack Heart's whole-command rule puts explicit
+`--account`/`--only-account` selection on the target, independent of argument
+order. The existing origin grant respects inherited account restrictions;
+remote-only account selectors must not fail during local credential resolution.

@@ -12,10 +12,16 @@ their stored spelling. Live commands and DTOs use `machine` and `machine_id`.
 lf machine add mini --repo '~/src/project'
 lf machine list
 lf machine status mini
-lf ssh mini session list
+lf --machine mini session list
+lf --machine mini --task LOO-123 implement
+lf --machine mini machine add builder
 lf machine rename mini builder
 lf machine remove builder
 ```
+
+`--machine <label-or-id>` runs the entire command on that machine in its saved
+repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
+`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
 
 Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
 Without `--repo`, add uses the local checkout's path relative to the local home.
@@ -50,11 +56,11 @@ lf mon list                                # Processes recorded on this Machine
 lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf ssh build-home mon list   # run the same reader on build-home
-lf ssh build-home --wave product wave/operate
+lf --machine build-home mon list   # run the same reader on build-home
+lf --machine build-home --wave product wave/operate
 ```
 
-`lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
+`lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
 its Machine identity, resolves its own files and store, and returns the result.
 There is no implicit fan-out and no central execution database.
 
@@ -173,7 +179,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 
 - Machine identity is stable; network route is replaceable.
 - Commands and read surfaces act locally unless explicitly routed with
-  `lf ssh`.
+  `lf --machine`.
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Machine.
 - Direct child handles are local capability; inferred process ownership is not.

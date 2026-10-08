@@ -191,7 +191,7 @@ and `lf roadmap` joins the current Linear plan to that runtime truth.
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
-All of these reads are local to the executing Machine. Use `lf ssh <machine-id> ...`
+All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
 to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.

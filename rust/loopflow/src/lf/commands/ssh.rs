@@ -1,4 +1,4 @@
-//! `lf ssh <label> <lf-args...>` — run `lf` on a remote machine.
+//! `lf --machine <label> <lf-args...>` — run `lf` on a remote machine.
 //!
 //! Foreground commands bring narrowly resolved local credentials. Managed
 //! Claude/Codex accounts stay behind a foreground Unix-socket broker; the
@@ -14,7 +14,7 @@
 //! store rather than the environment. The remote `resolve_pm_token` reads
 //! `LF_FORWARDED_PM_TOKEN` before its (empty) store, so remote `lf repo refresh` works.
 //!
-//! Secrets policy: `lf machine ssh` forwards specific resolved secrets, never the
+//! Secrets policy: `lf --machine` forwards specific resolved secrets, never the
 //! Doppler token that could fetch them all. The Doppler login/CLI token is a
 //! master key to the whole secret estate and never leaves this machine. When a
 //! remote command needs a Doppler-backed secret, name it with `--secret NAME`:
@@ -22,7 +22,6 @@
 //! Agent forwarding (`ssh -A`) is off by default — git pushes ride the
 //! forwarded `GH_TOKEN` over HTTPS, so the caller's SSH identity stays home.
 
-use clap::Parser;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -126,13 +125,10 @@ impl std::fmt::Debug for Credentials {
 /// would hand the caller's whole SSH identity to the remote.
 pub fn run(
     target: &str,
-    repo: Option<&str>,
     secret_names: &[String],
     forward_agent: bool,
-    selection: &AccountSelection,
     lf_args: &[String],
 ) -> anyhow::Result<()> {
-    reject_nested_ssh(lf_args)?;
     let runtime = tokio::runtime::Runtime::new().context("failed to create async runtime")?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let cmd = std::iter::once("lf".to_string())
@@ -140,10 +136,13 @@ pub fn run(
         .collect::<Vec<_>>();
     if lease::account_lease_active() {
         return Err(anyhow!(
-            "an inherited account lease cannot be re-forwarded over SSH; put `lf machine ssh` on the outer account-selected invocation"
+            "an inherited account lease cannot be re-forwarded over SSH; put `lf --machine` on the outer account-selected invocation"
         ));
     }
-    let mut credentials = runtime.block_on(resolve_credentials(secret_names, selection))?;
+    let mut credentials = runtime.block_on(resolve_credentials(
+        secret_names,
+        &AccountSelection::from_env()?,
+    ))?;
     if let ProviderAuthority::Lease(prepared) = &credentials.provider_authority {
         println!("Account lease: {}", format_account_plan(&prepared.lease));
     }
@@ -152,24 +151,18 @@ pub fn run(
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
-    let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
-    let mut extra_env = vec![
+    let extra_env = vec![
         (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
         (crate::engine::config::USER_NAME_ENV, user_name.as_str()),
     ];
-    if let Some(value) = declaration.as_deref() {
-        extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));
-    }
     let preamble = build_preamble(
         &credentials,
         remote_handle.as_ref(),
         &target.route,
-        repo.unwrap_or(
-            target
-                .repo
-                .as_deref()
-                .expect("added machines have a repository"),
-        ),
+        target
+            .repo
+            .as_deref()
+            .expect("added machines have a repository"),
         &cmd,
         &extra_env,
     );
@@ -177,31 +170,6 @@ pub fn run(
     // Release the broker before reporting the remote command's result.
     drop(broker);
     result
-}
-
-fn reject_nested_ssh(lf_args: &[String]) -> anyhow::Result<()> {
-    if lf_args.first().is_some_and(|arg| arg == "lf") {
-        return Err(anyhow!(
-            "the remote `lf` is implicit; use `lf machine ssh <target> <args...>` without `-- lf`"
-        ));
-    }
-    let args = std::iter::once("lf".to_string())
-        .chain(lf_args.iter().cloned())
-        .collect::<Vec<_>>();
-    if matches!(
-        crate::lf::Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?),
-        Ok(crate::lf::Cli {
-            command: Some(crate::lf::Commands::Machine {
-                cmd: crate::lf::MachineCommand::Ssh { .. }
-            }),
-            ..
-        })
-    ) {
-        return Err(anyhow!(
-            "nested `lf machine ssh` is not supported; connect directly from the origin machine"
-        ));
-    }
-    Ok(())
 }
 
 async fn resolve_target(
@@ -654,10 +622,10 @@ fn run_ssh(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_preamble, command_result, is_valid_env_name, reject_detached_account_forwarding, run,
+        build_preamble, command_result, is_valid_env_name, reject_detached_account_forwarding,
         sh_quote, Credentials, ProviderAuthority, EXPECTED_MACHINE_ID_ENV,
     };
-    use crate::provider_account::lease::{self, AccountLeaseHandle, AccountSelection};
+    use crate::provider_account::lease::{self, AccountLeaseHandle};
     use std::path::PathBuf;
 
     fn full_credentials() -> Credentials {
@@ -696,36 +664,6 @@ mod tests {
             &["lf".to_string(), "wave".to_string(), "--detach".to_string()]
         )
         .is_err());
-    }
-
-    #[test]
-    fn nested_ssh_is_rejected_before_transport() {
-        let _lock = crate::journal::test_env_lock();
-        let previous = std::env::var_os(lease::ACCOUNT_LEASE_ENV);
-        std::env::set_var(lease::ACCOUNT_LEASE_ENV, "forwarded");
-        let result = run(
-            "must-not-be-reached.invalid",
-            None,
-            &[],
-            false,
-            &AccountSelection::default(),
-            &[
-                "--account".to_string(),
-                "forwarded@example.com".to_string(),
-                "ssh".to_string(),
-                "second-hop".to_string(),
-                "task".to_string(),
-                "pursue".to_string(),
-            ],
-        );
-        match previous {
-            Some(value) => std::env::set_var(lease::ACCOUNT_LEASE_ENV, value),
-            None => std::env::remove_var(lease::ACCOUNT_LEASE_ENV),
-        }
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("nested `lf machine ssh` is not supported"));
     }
 
     #[test]

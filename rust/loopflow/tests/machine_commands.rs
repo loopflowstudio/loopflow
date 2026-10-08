@@ -53,7 +53,7 @@ exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
                 r#"#!/bin/sh
 case "$1" in
 --version) echo 'lf {version}';;
-machine) echo '{id}';;
+machine) if [ "$2" = id ]; then echo '{id}'; else printf 'argument: %s\n' "$@"; fi;;
 fail) exit 42;;
 *) printf 'remote cwd: %s\n' "$PWD"; printf 'argument: %s\n' "$@";;
 esac
@@ -185,13 +185,13 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     assert_eq!(statuses[0]["local_version"], env!("CARGO_PKG_VERSION"));
     assert!(statuses[0]["error"].is_null());
     assert_success(&fixture.run(&["machine", "rename", "mini", "builder"]));
-    let connected = fixture.run(&["ssh", "builder", "session", "list"]);
+    let connected = fixture.run(&["--machine", "builder", "session", "list"]);
     assert_success(&connected);
     let text = String::from_utf8_lossy(&connected.stdout);
     assert!(text.contains("project's checkout"), "{text}");
     assert!(text.contains("argument: session"), "{text}");
     assert_eq!(
-        fixture.run(&["ssh", "builder", "fail"]).status.code(),
+        fixture.run(&["--machine", "builder", "fail"]).status.code(),
         Some(42)
     );
     assert_success(&fixture.run(&["machine", "remove", "builder"]));
@@ -200,7 +200,7 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
         serde_json::json!([])
     );
     assert!(!fixture
-        .run(&["ssh", "builder", "session", "list"])
+        .run(&["--machine", "builder", "session", "list"])
         .status
         .success());
     let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
@@ -238,7 +238,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
         .as_str()
         .unwrap()
         .contains("identity probe failed"));
-    let connect = fixture.run(&["ssh", "mini", "session", "list"]);
+    let connect = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!connect.status.success());
     assert!(String::from_utf8_lossy(&connect.stderr).contains("versions differ"));
     executable(
@@ -256,7 +256,7 @@ fn status_reports_version_mismatch_and_unreachable_without_prompting() {
 #[test]
 fn unregistered_and_changed_machines_cannot_receive_a_command() {
     let fixture = Machines::new();
-    let unregistered = fixture.run(&["ssh", "mini", "session", "list"]);
+    let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
     assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));
     assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
@@ -264,7 +264,7 @@ fn unregistered_and_changed_machines_cannot_receive_a_command() {
         env!("CARGO_PKG_VERSION"),
         "home_22222222222222222222222222222222",
     );
-    let output = fixture.run(&["ssh", "mini", "session", "list"]);
+    let output = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("identity changed"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("remote cwd"));
@@ -363,4 +363,163 @@ fn broken_existing_lf_and_failed_installer_do_not_register_a_machine() {
         fixture.json(&["machine", "list", "--json"]),
         serde_json::json!([])
     );
+}
+
+#[test]
+fn machine_selector_dispatches_before_local_help_and_placement() {
+    let fixture = Machines::new();
+    let added = fixture.json(&[
+        "machine",
+        "add",
+        "mini",
+        "--repo",
+        "project's checkout",
+        "--json",
+    ]);
+    for args in [
+        vec![
+            "--machine",
+            "mini",
+            "--task",
+            "remote-only-task",
+            "implement",
+        ],
+        vec!["--wt", "remote-only-worktree", "--machine=mini", "status"],
+        vec![
+            "--machine",
+            "mini",
+            "--wave",
+            "remote-only-wave",
+            "wave/operate",
+        ],
+        vec![
+            "--machine",
+            "mini",
+            "--account",
+            "remote-only-account",
+            "implement",
+        ],
+        vec![
+            "--only-account",
+            "remote-only-account",
+            "--machine",
+            "mini",
+            "implement",
+        ],
+        vec!["--machine", "mini", "--help"],
+        vec!["--machine", added["id"].as_str().unwrap(), "--version"],
+        vec![
+            "machine",
+            "add",
+            "another",
+            "--machine",
+            "mini",
+            "--repo",
+            "~/code",
+        ],
+        vec!["--machine", "mini", "install", "--help"],
+        vec![
+            "--machine",
+            "mini",
+            "commit",
+            "-m",
+            "literal --machine is text",
+        ],
+    ] {
+        let output = fixture.run(&args);
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if args.last() == Some(&"--version") {
+            assert!(stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+        } else {
+            for arg in args.iter().filter(|arg| {
+                !matches!(**arg, "--machine" | "--machine=mini" | "mini")
+                    && **arg != added["id"].as_str().unwrap()
+            }) {
+                assert!(
+                    stdout.contains(&format!("argument: {arg}\n")),
+                    "{args:?}: {stdout}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        fixture
+            .json(&["machine", "list", "--json"])
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn transport_options_require_machine_and_retired_commands_are_gone() {
+    let fixture = Machines::new();
+    for args in [
+        vec!["--secret", "EXAMPLE", "status"],
+        vec!["--forward-agent", "status"],
+        vec!["machine", "ssh", "mini", "status"],
+        vec!["ssh", "mini", "status"],
+    ] {
+        assert!(!fixture.run(&args).status.success(), "{args:?}");
+    }
+    let help = fixture.run(&["--help"]);
+    assert_success(&help);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--machine"));
+}
+
+#[test]
+fn remote_command_exit_is_retained_in_local_process_history() {
+    let fixture = Machines::new();
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    let output = fixture.run(&["--machine", "mini", "fail"]);
+    assert_eq!(output.status.code(), Some(42));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("Error:"));
+    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
+    let outcome: (String, i32, bool) = db.query_row(
+        "SELECT outcome, exit_code, completed_at IS NOT NULL FROM processes WHERE command LIKE '%--machine%fail%' ORDER BY started_at DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).unwrap();
+    assert_eq!(outcome, ("failed".to_string(), 42, true));
+}
+
+#[test]
+fn machine_add_on_the_remote_updates_only_its_registry() {
+    let fixture = Machines::new();
+    let remote = fixture.root.path().join("remote");
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            remote.join("store").display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
+    );
+    executable(
+        &remote.join(".local/bin/ssh"),
+        &format!(
+            "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
+            env!("CARGO_PKG_VERSION")
+        ),
+    );
+    assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
+    let added = fixture.json(&[
+        "--machine",
+        "mini",
+        "machine",
+        "add",
+        "third",
+        "--repo",
+        "~/code",
+        "--json",
+    ]);
+    assert_eq!(added["label"], "third");
+    assert_eq!(added["repo"], "~/code");
+    let remote_machines = fixture.json(&["--machine", "mini", "machine", "list", "--json"]);
+    assert_eq!(remote_machines.as_array().unwrap().len(), 1);
+    assert_eq!(remote_machines[0]["id"], added["id"]);
+    let local = fixture.json(&["machine", "list", "--json"]);
+    assert_eq!(local.as_array().unwrap().len(), 1);
+    assert_eq!(local[0]["label"], "mini");
 }

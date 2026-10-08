@@ -18,7 +18,7 @@ user:
 
 Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
-preference. Direct interactive and batch launches use the resolved name, and `lf ssh`
+preference. Direct interactive and batch launches use the resolved name, and `lf --machine`
 carries the caller's name rather than reading the destination owner's name.
 A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
 empty or whitespace-only value falls through to personal configuration and Git.

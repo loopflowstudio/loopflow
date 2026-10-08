@@ -35,6 +35,16 @@ gets its own socket scope. Cancel account routes on return: shared masters outli
 commands. Fixtures and loopback SSH prove behavior and reuse, not real broker
 cleanup, installation, account continuity or migration. Republication and review remain.
 
+Jack Heart's latest LOO-411 decision (`c597174a-6330-4be3-9509-3e7667caf7d3`)
+replaces `lf ssh` with global `--machine <label-or-id>`, alongside Task, worktree
+and Wave selectors. The target parses the whole command in its saved repository;
+`--machine Y machine add X` edits Y's registry. No command allowlist, SSH alias or
+per-call repository override. Secret and agent-forwarding options require a
+machine. Account flags resolve on the target, not against origin-only accounts;
+inherited origin restrictions still constrain its grant. Republish #1489 and
+stop; no landing or later-slice authority. Local fixtures prove dispatch and
+separate registries, not configured remote continuity or installation.
+
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
 Jack Heart authorized autonomous repair, verification and landing, with verified
@@ -640,28 +650,21 @@ names and store-selection policies are historical evidence, not instructions.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
 
-Jack Heart selected the identity core for [LOO-339](https://linear.app/loopflow/issue/LOO-339)
-delivery and authorized landing and a patch release without review. The earlier
-expanded scope is superseded: [LOO-340](https://linear.app/loopflow/issue/LOO-340)
-owns shared account state across Homes, current status by default, browser
-suppression, Claude cached identity/routing, Flow account bundles and reset credits.
-[LOO-338](https://linear.app/loopflow/issue/LOO-338) owns the command rename;
-this branch retains `lf auth`. Authorization is not evidence of shipment.
+Jack Heart selected LOO-339's identity core and authorized landing plus a patch
+release without review; shipment remains unproved. LOO-340 owns shared account
+state, default current status, browser suppression, Claude identity/routing, Flow
+account bundles and reset credits; LOO-338 owns renaming. Historical branch
+proofs and four findings: `32607f1d2:wave/infrastructure/MEMORY.md` under this
+heading, including its design and gate references. Current mechanics:
+[subscriptions](../../docs/subscriptions.md).
 
-Design, review and gate evidence remain at `8973f689a9e1:scratch/`; current
-behavior belongs in [subscriptions](../../docs/subscriptions.md).
-
-Usage acceptance cannot establish the intended login: validation compares
-expected email and per-user subject, never shared workspace identity. Reconnect
-stages and installs only after identity and duplicate checks, without proving
-native refresh coordination or sole browser ownership. An unavailable identity
-service is not credential rejection; a plan is separate from quota. Fixture
-isolation includes executable selection: clear inherited `LF_*` authority and pin
-the compiled source CLI. The four detailed findings remain at
-`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
-
-Synthetic passes prove no live OAuth or installed acceptance. State remains
-Home-local; LOO-340 owns shared authority. No installed repair is authorized.
+Usage does not establish the intended login: compare email and per-user subject,
+not workspace identity. Reconnect stages before identity/duplicate checks; native
+refresh coordination and sole browser ownership remain unproved. Unavailable
+identity service is not rejection; plan is not quota. Clear inherited LF_*
+authority and pin the compiled CLI in fixtures. Synthetic passes prove no live
+OAuth or installed outcome. State remains Home-local; no installed repair is
+authorized.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-04)
 
@@ -956,20 +959,14 @@ commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart requested closing LOO-292 on actual machine evidence. Install updates
-published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
-#1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
-09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
-
-Published 0.13.0's October 4 installation and checkout acceptance, exact hashes,
-cadence receipts and retained limitations remain at
-`6448e3c9e:wave/infrastructure/MEMORY.md`
-under this heading. Installation preserved the Home, repaired a missing entry in
-an isolated Ubuntu container and preserved caller bytes during checkout sync.
-No Monday firing, sleep-coalesced wake or interactive app acceptance was proved.
-Unresolved: a currency probe triggered a redundant download under load; timeout
-is only a hypothesis. Reload killed that download without damaging installation.
-A hand-truncated entry gate is not healed by reinstall.
+Jack Heart closed LOO-292 on actual machine evidence: published 0.13.0 preserved
+its Home; isolated Ubuntu repaired a missing entry; checkout sync preserved caller
+bytes. Details: `32607f1d2:wave/infrastructure/MEMORY.md` under this heading and
+`6448e3c9e` there. Install owns artifacts, sync owns checkouts. Cadence is opt-in
+login plus Monday 09:00 local, with daily/hourly/5min options. No Monday firing,
+sleep-coalesced wake or interactive app acceptance was proved. Redundant download
+under load remains unexplained; reload stopped it without damaging installation.
+Reinstall does not heal a hand-truncated entry gate.
 
 ## Shipped history
 

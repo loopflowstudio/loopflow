@@ -372,44 +372,6 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
 }
 
 #[test]
-fn remote_command_status_is_the_local_process_status() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let bin = home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    // No real credential CLI, Keychain reader or remote transport participates.
-    for (name, script) in [
-        ("ssh", "#!/bin/sh\ncat >/dev/null\nexit 42\n"),
-        ("gh", "#!/bin/sh\nexit 1\n"),
-        ("security", "#!/bin/sh\nexit 1\n"),
-    ] {
-        let path = bin.join(name);
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let output = command(
-        home.path(),
-        repo.path(),
-        &["machine", "ssh", "proof@example.invalid", "catalog"],
-    )
-    .env_clear()
-    .env("HOME", home.path())
-    .env("LF_HOME", home.path())
-    .env(
-        "PATH",
-        format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
-    )
-    .output()
-    .unwrap();
-    assert_eq!(output.status.code(), Some(42), "{output:?}");
-    assert!(
-        !String::from_utf8_lossy(&output.stderr).contains("Error:"),
-        "{output:?}"
-    );
-    assert_recorded_exit(home.path(), 42);
-}
-
-#[test]
 fn empty_release_check_returns_through_process_completion() {
     let repo = TestRepo::new();
     let tagged = Command::new("git")

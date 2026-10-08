@@ -6,25 +6,23 @@ first republication attempt rejected the stale stacked base.
 Jack Heart authorized implementation and publication on 2026-10-07, then stopping
 for review. The rename is inherited; later remote-work slices remain intent.
 
-## Remaining for LOO-411 (review additions, 2026-10-07)
+## Remaining for LOO-411 (global selector, 2026-10-07)
 
-Jack Heart reviewed PR #1489 and requested three additions in comment
-`1d47fbe6-24aa-4ba1-90f6-2a5f02c93476`: share an OpenSSH connection using a
-private Loopflow control socket; offer the published installer (default yes)
-only when interactive add finds no lf; distinguish sign-in, unknown/changed host
-keys, unreachable hosts and missing lf with recovery commands. Existing lf is
-never replaced, status and background use never install. Republication of #1489
-and Jack's review remain; landing and later slices are outside this authorization.
+Jack Heart's latest decision (`c597174a-6330-4be3-9509-3e7667caf7d3`)
+replaces the SSH command with `lf --machine <label-or-id> <command…>`.
+The whole command, minus transport options, runs in the saved remote repository.
+There is no per-call repository override or command allowlist. Task, worktree,
+Wave, help and account options belong to that invocation. Account preferences
+resolve against the target's combined catalog, regardless of argument order;
+inherited origin restrictions still constrain its foreground grant.
+`--secret` and `--forward-agent` require `--machine` and are consumed by transport.
+`lf --machine Y machine add X` adds X to Y's registry.
 
-- The three review additions are implemented. Focused command/PTY tests and a
-  disposable real-SSH sharing proof pass. Affected gate and actual installer
-  proof remain with gate/CI; installer verification requires disposable OS-account
-  isolation, not host HOME overrides. The loopback proof used a stub remote lf
-  and no account broker; it does not establish forwarding cleanup or account
-  continuity on a shared connection.
-- Jack Heart's review of the same PR is the delivery boundary; no landing is authorized.
-- No product decision is needed. Later slices retain the unresolved Codex holder
-  and shell-pane choices below.
+The private shared OpenSSH connections, interactive first-install offer and
+specific recovery diagnostics remain. The selector and focused verification are complete; republication of PR #1489
+and review remain. Jack's latest comment
+explicitly requires stopping after republication, without landing. Later slices
+remain intent; their unresolved Codex holder and shell-pane choices are unchanged.
 
 Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
 2026-10-07). Their behaviour is described here from docs and reading; write
@@ -48,10 +46,10 @@ LOO-395's intent is retained in the later slices.
 ```sh
 lf machine add mini          # name the connection; offer installation if lf is missing
 lf machine status            # reachable / needs sign-in / error; never prompts
-lf ssh mini --task LOO-123 implement   # mini has never seen LOO-123; prints Session and reconnect command
+lf --machine mini --task LOO-123 implement   # mini has never seen LOO-123; prints Session and reconnect command
 # close the laptop, wait, open it
-lf ssh mini session list --waiting
-lf ssh mini session attach <id>        # same conversation, output so far, no repeated prompt
+lf --machine mini session list --waiting
+lf --machine mini session attach <id>        # same conversation, output so far, no repeated prompt
 ```
 
 Then quit the Mac app mid-turn and reopen it: the same conversations are in the
@@ -160,8 +158,7 @@ paths and historical payloads retain their bytes. Parent verification remains at
 `rename`, `remove`. Stored: label (default: the ssh host), target (anything
 OpenSSH accepts, aliases included), the remote identity fetched during add, the
 repository path. No credentials. Every command accepts the label. `remove`
-never touches remote work. `status` never prompts. `lf ssh <label>` stays the
-one way to run a command there and requires an added machine before any
+never touches remote work. `status` never prompts. `lf --machine <label>` runs the whole command there and requires an added machine before any
 credential crosses.
 
 First connect probes the installed `lf` and reads its machine identity. Missing
@@ -188,7 +185,7 @@ Proposal: Linear, GitHub and Git are already the official live copy. Derive.
 - Fetch whenever a decision depends on what the remote has, starting with
   branch placement.
 - Mint Task ids deterministically from the Linear issue id for new Tasks.
-- `lf ssh` sends the issue identifier and the Task's portable fields with the
+- `lf --machine` sends the issue identifier and the Task's portable fields with the
   request, so the first run on a cold machine needs no Linear round trip.
 
 The second machine works on the same remote branch (decided above). Placing a
@@ -259,7 +256,7 @@ The existing lease stays for foreground commands on added machines until residen
 
 ### 4. Work that outlives its launcher
 
-Headless work needs no holder. `lf ssh <machine>` is the caller that
+Headless work needs no holder. `lf --machine <machine>` is the caller that
 backgrounds: it starts the remote `lf -b …` in its own session with output to
 its capture, prints the Session id and returns or follows. This is consistent
 with "`-b` prints and blocks; the caller backgrounds". Requires part 3.
@@ -310,7 +307,7 @@ each pane attaches to its Session's relay. Shell panes can use the same relay
 ### 6. Seeing across machines
 
 `lf machine status` shows a waiting count per reachable machine with the age of
-the reading. Detail stays one call: `lf ssh mini monitor`. Reads are never
+the reading. Detail stays one call: `lf --machine mini monitor`. Reads are never
 silently merged. Phone use is LOO-396.
 
 ## Open choices
@@ -338,7 +335,7 @@ its own plan when started.
    connect a missing account at launch; file-backed storage on a Mac target.
    Deletes the raw-token fallback and, once resident credentials exist, the
    detached-form string check.
-5. Headless work that outlives the connection: detached launch from `lf ssh`,
+5. Headless work that outlives the connection: detached launch from `lf --machine`,
    the launch request id, an explicit stop, and watching recorded output.
    First end-to-end test on Jack's mini: start, close the laptop, come back.
 6. The transparent relay and `session attach` over ssh. Deletes the tmux
@@ -348,6 +345,14 @@ its own plan when started.
 8. Waiting counts per machine in `lf machine status`.
 
 ## Delete — do not maintain
+
+The selector removes `MachineCommand::Ssh`, its origin-account/target boundary,
+`normalize_ssh_args`, SSH-specific navigation/reordering and `reject_nested_ssh`.
+Remote dispatch happens before local command parsing, inspection and placement.
+The transport keeps credential and identity checks; no command-specific refusal
+is added. The saved Machine repository replaces the old invocation override.
+Process history retains the remote exit code. Local Work IDs are not forwarded.
+
 
 Review additions replace the unshared bounded SSH arguments and undifferentiated
 connection error on the existing probe/command path. No second transport or
@@ -490,4 +495,13 @@ two open-output-handle observations, remain at
 Prior loopback SSH command/evidence and the exit-classifier output-handle warning
 remain at `5840a8126:scratch/work-on-another-machine-name.md`.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run -p loopflow --lib --test machine_commands -E 'test(lf::commands::ssh::tests::) | test(lf::commands::machine::tests::) | binary(machine_commands)' --no-fail-fast` pass after compression (21 tests, one nextest output-handle leak warning in the unchanged credential-redaction test; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); realign: `git diff --check` and `lf context --skill realign` pass, with prior code checks reused; affected gate and isolated published-installer proof remain with gate/CI.
+Review findings fixed: the custom root help initially hid the selector; it now
+shows placement and forwarding options within its existing 25-line limit. A
+builtin remote example used ambiguous `status`; it now names `wave status`.
+Origin-side account resolution would reject a target-only account; explicit
+account flags now reach the target unchanged. The public CLI fixture runs the
+compiled remote CLI against a separate registry and proves `machine add` changes
+that registry only. Simulated transports do not establish configured SSH/account
+continuity; the earlier real SSH sharing proof still covers unchanged transport.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and focused `cargo nextest run` over SSH transport, Session open argv, `machine_commands`, `cli_discovery`, and `documented_commands` pass (46 tests; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); generated Clap reference, `git diff --check`, and `lf context --skill realign` pass. Affected gate and disposable-account published-installer proof remain with gate/CI.

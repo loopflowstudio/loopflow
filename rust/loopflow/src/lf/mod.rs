@@ -120,6 +120,18 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
+    /// Run the command on this saved machine in its repository
+    #[arg(long, value_name = "LABEL_OR_ID")]
+    pub machine: Option<String>,
+
+    /// Resolve a named Doppler secret locally and forward its value (repeatable)
+    #[arg(long = "secret", requires = "machine")]
+    pub secret: Vec<String>,
+
+    /// Forward the SSH agent to the selected machine
+    #[arg(long, requires = "machine")]
+    pub forward_agent: bool,
+
     /// Add Wave context and identity without changing the working directory
     #[arg(long, value_name = "WAVE")]
     pub wave: Option<String>,
@@ -245,6 +257,9 @@ impl Cli {
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
+            machine: self.machine.clone(),
+            secret: self.secret.clone(),
+            forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
             steers_after: self.steers_after,
@@ -1427,47 +1442,6 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run lf on an added machine carrying your local credentials.
-    ///
-    /// Resolves local credentials and forwards a foreground account lease over
-    /// SSH; Loopflow writes no managed provider credential on the remote. The
-    /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf ssh mini pr open`.
-    Ssh {
-        /// Prefer this origin account when the remote lf chooses a provider.
-        #[arg(
-            id = "ssh_preferred_provider_account",
-            long = "account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_restricted_provider_account"
-        )]
-        origin_account: Vec<String>,
-        /// Restrict remote provider launches to these origin accounts.
-        #[arg(
-            id = "ssh_restricted_provider_account",
-            long = "only-account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_preferred_provider_account"
-        )]
-        origin_only_account: Vec<String>,
-        /// Saved machine label (or its stable MachineId)
-        target: String,
-        /// Override the saved repository path on the remote
-        #[arg(long = "repo")]
-        repo: Option<String>,
-        /// Doppler secret to resolve locally and forward as an env var
-        /// (repeatable). The Doppler token itself is never forwarded.
-        #[arg(long = "secret")]
-        secret: Vec<String>,
-        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
-        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
-        #[arg(long = "forward-agent")]
-        forward_agent: bool,
-        /// Arguments for the remote lf. The target is the boundary: every
-        /// argument after it belongs to the remote invocation.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        lf_args: Vec<String>,
-    },
     /// Print the configured participant display name.
     User {
         #[arg(long)]
@@ -2054,49 +2028,6 @@ mod tests {
             .render_long_help()
             .to_string()
             .contains("__telemetry-scorecard"));
-    }
-
-    #[test]
-    fn ssh_parser_respects_the_internal_target_boundary() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "ssh",
-            "--account",
-            "reserve",
-            "mini",
-            "--",
-            "task",
-            "pursue",
-        ])
-        .expect("parse origin SSH account preference");
-
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { origin_account, lf_args, .. } })
-                if origin_account == vec!["reserve"]
-                    && lf_args == vec!["task", "pursue"]
-        ));
-
-        let after_host = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "ssh",
-            "mini",
-            "--",
-            "--account",
-            "reserve",
-            "task",
-            "pursue",
-        ])
-        .expect("parse remote account preference");
-        assert!(after_host.account.is_empty());
-        assert!(matches!(
-            after_host.command,
-            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { lf_args, .. } })
-                if lf_args == vec!["--account", "reserve", "task", "pursue"]
-        ));
     }
 
     #[test]

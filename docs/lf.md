@@ -393,8 +393,14 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ```bash
 lf machine add mini --repo '~/src/project'
 lf machine status mini
-lf ssh mini session list
+lf --machine mini session list
+lf --machine mini --task LOO-123 implement
+lf --machine mini machine add builder
 ```
+
+`--machine <label-or-id>` runs the entire command on that machine in its saved
+repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
+`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
 
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and

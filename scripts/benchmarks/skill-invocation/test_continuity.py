@@ -1,6 +1,37 @@
+import json
 from pathlib import Path
 
+import pytest
 from continuity import _claude_receipts, _codex_receipts, _input_receipt
+from probe import _output_events, _read_output
+
+
+@pytest.mark.parametrize("arguments", [None, "alpha", "alpha\n\ncontext"])
+def test_claude_replay_keeps_arguments_separate_from_answer(arguments):
+    answer = "<command-args>alpha</command-args>"
+    events = [{"type": "result", "result": answer}]
+    if arguments is not None:
+        events.insert(
+            0,
+            {
+                "type": "user",
+                "isReplay": True,
+                "message": {"content": f"<command-args>{arguments}</command-args>"},
+            },
+        )
+    output = "provider banner\n" + "\n".join(map(json.dumps, events))
+    assert _read_output(events) == (answer, arguments)
+    assert _read_output(_output_events(output)) == (answer, arguments)
+
+
+def test_codex_exec_answer_is_not_a_native_argument_receipt():
+    events = [
+        {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "marker|alpha|none"},
+        }
+    ]
+    assert _read_output(events) == ("marker|alpha|none", None)
 
 
 def test_codex_receipt_tolerates_provider_metadata_but_not_changed_arguments():

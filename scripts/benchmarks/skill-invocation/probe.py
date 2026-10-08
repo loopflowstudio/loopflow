@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 
@@ -21,17 +22,57 @@ def _environment() -> dict[str, str]:
     }
 
 
-def _read_output(output: str, provider: str) -> tuple[str, str | None]:
-    texts = []
-    native_arguments = None
+def _claude_command(executable: str) -> list[str]:
+    return [
+        executable,
+        "-p",
+        "--setting-sources",
+        "project",
+        "--strict-mcp-config",
+        "--mcp-config",
+        '{"mcpServers":{}}',
+        "--tools",
+        "",
+        "--output-format",
+        "stream-json",
+        "--input-format",
+        "stream-json",
+        "--verbose",
+        "--replay-user-messages",
+    ]
+
+
+def _user_message(blocks: list[str]) -> dict:
+    return {
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": block} for block in blocks],
+        },
+    }
+
+
+def _hook_settings(command: str) -> str:
+    return json.dumps(
+        {"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": command}]}]}}
+    )
+
+
+def _output_events(output: str) -> Iterator[dict]:
     for line in output.splitlines():
         try:
-            event = json.loads(line)
+            yield json.loads(line)
         except json.JSONDecodeError:
             continue
-        if provider == "claude" and event.get("type") == "result":
+
+
+def _read_output(events: Iterable[dict]) -> tuple[str, str | None]:
+    texts = []
+    native_arguments = None
+    for event in events:
+        if event.get("type") == "result":
             texts.append(event.get("result", ""))
-        elif provider == "claude" and event.get("type") == "user" and event.get("isReplay"):
+        elif event.get("type") == "user" and event.get("isReplay"):
             content = event.get("message", {}).get("content")
             if isinstance(content, str):
                 match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
@@ -68,7 +109,7 @@ def _observation(
     except subprocess.TimeoutExpired:
         result = None
     seconds = round(time.monotonic() - started, 3)
-    text, native_arguments = _read_output(result.stdout if result else "", provider)
+    text, native_arguments = _read_output(_output_events(result.stdout if result else ""))
     return {
         "case": case,
         "exit": result.returncode if result else None,
@@ -114,24 +155,7 @@ def _probe(claude: str, codex: str) -> list[dict[str, object]]:
 
         context = f"<lf:context>The context marker is {context_marker}.</lf:context>"
         invocation = f"/{name} alpha"
-        base = [
-            claude,
-            "-p",
-            "--no-session-persistence",
-            "--setting-sources",
-            "project",
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--tools",
-            "",
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--replay-user-messages",
-        ]
+        base = _claude_command(claude) + ["--no-session-persistence"]
         hook_file = root / "context.json"
         hook_file.write_text(
             json.dumps(
@@ -143,22 +167,7 @@ def _probe(claude: str, codex: str) -> list[dict[str, object]]:
                 }
             )
         )
-        settings = json.dumps(
-            {
-                "hooks": {
-                    "UserPromptSubmit": [
-                        {
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": f"cat {shlex.quote(str(hook_file))}",
-                                }
-                            ]
-                        }
-                    ]
-                }
-            }
-        )
+        settings = _hook_settings(f"cat {shlex.quote(str(hook_file))}")
         for case, blocks, flags in [
             ("claude_plain", [invocation], []),
             ("claude_context_prefix", [f"{context}\n\n{invocation}"], []),
@@ -166,13 +175,6 @@ def _probe(claude: str, codex: str) -> list[dict[str, object]]:
             ("claude_separate_blocks", [invocation, context], []),
             ("claude_context_hook", [invocation], ["--settings", settings]),
         ]:
-            message = {
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [{"type": "text", "text": block} for block in blocks],
-                },
-            }
             observation = _observation(
                 case,
                 "claude",
@@ -180,7 +182,7 @@ def _probe(claude: str, codex: str) -> list[dict[str, object]]:
                 root,
                 marker,
                 context_marker,
-                json.dumps(message) + "\n",
+                json.dumps(_user_message(blocks)) + "\n",
             )
             observations.append(observation)
             print(json.dumps(observation), flush=True)

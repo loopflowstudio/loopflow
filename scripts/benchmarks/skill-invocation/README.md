@@ -60,6 +60,9 @@ context attachment must survive. The first answer and reasoning cannot echo the
 context marker, preventing answer recall from masquerading as context retention.
 The third process explicitly reinstalls the hook. Receipt parsing has offline
 tests for wrong sources, altered arguments, assistant echoes and stale turns.
+Both scripts share Claude launch settings and receipt parsing; continuity consumes
+decoded events directly. Run the offline checks with
+`uv run pytest scripts/benchmarks/skill-invocation/test_continuity.py -q`.
 
 On 2026-10-07, Codex 0.160.1 and Claude 2.1.293 passed these transport checks.
 **This is not a fidelity pass:** Claude records `hook_additional_context` with

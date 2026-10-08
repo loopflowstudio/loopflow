@@ -13,7 +13,7 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from probe import _environment, _read_output
+from probe import _claude_command, _environment, _hook_settings, _read_output, _user_message
 
 
 @asynccontextmanager
@@ -44,11 +44,12 @@ async def _send(process, message: dict) -> None:
     await process.stdin.drain()
 
 
-async def _until(process, matches, events: list[dict]) -> dict:
+async def _until(process, matches, events: list[dict] | None = None) -> dict:
     async with asyncio.timeout(55):
         while line := await process.stdout.readline():
             event = json.loads(line)
-            events.append(event)
+            if events is not None:
+                events.append(event)
             if matches(event):
                 return event
             if "method" in event and "id" in event:
@@ -56,10 +57,10 @@ async def _until(process, matches, events: list[dict]) -> dict:
     raise RuntimeError("provider closed before the expected receipt")
 
 
-async def _request(process, method: str, params: dict, events: list[dict]) -> dict:
+async def _request(process, method: str, params: dict) -> dict:
     request_id = uuid.uuid4().hex
     await _send(process, {"id": request_id, "method": method, "params": params})
-    reply = await _until(process, lambda event: event.get("id") == request_id, events)
+    reply = await _until(process, lambda event: event.get("id") == request_id)
     if "error" in reply:
         raise RuntimeError(f"{method}: {reply['error'].get('message')}")
     return reply["result"]
@@ -84,10 +85,9 @@ def _codex_receipts(history: list[dict], turn_id: str, skill: Path, inputs: list
         == turn_id
     ]
     texts = [block.get("text", "") for message in messages for block in message["content"]]
+    source = skill.read_text()
     return {
-        "expanded_skill": any(
-            f"<path>{skill}</path>" in text and skill.read_text() in text for text in texts
-        ),
+        "expanded_skill": any(f"<path>{skill}</path>" in text and source in text for text in texts),
         "native_invocation": inputs[0]["text"] in texts,
         "native_context": inputs[2]["text"] in texts,
     }
@@ -146,7 +146,6 @@ async def _codex(codex: str, root: Path) -> bool:
     first_turn = None
     passed = True
     for argument in ["alpha", "beta"]:
-        events = []
         async with _provider(command, root) as process:
             await _request(
                 process,
@@ -155,14 +154,13 @@ async def _codex(codex: str, root: Path) -> bool:
                     "clientInfo": {"name": "lf_skill_probe", "version": "1"},
                     "capabilities": {"experimentalApi": True},
                 },
-                events,
             )
             await _send(process, {"method": "initialized"})
             params = {"cwd": str(root), "approvalPolicy": "never", "sandbox": "read-only"}
             if thread_id:
                 params["threadId"] = thread_id
             response = await _request(
-                process, "thread/resume" if thread_id else "thread/start", params, events
+                process, "thread/resume" if thread_id else "thread/start", params
             )
             resumed_id = response["thread"]["id"]
             same_thread = thread_id is None or resumed_id == thread_id
@@ -180,7 +178,6 @@ async def _codex(codex: str, root: Path) -> bool:
                     "threadId": thread_id,
                     "input": inputs,
                 },
-                events,
             )
             turn_id = turn["turn"]["id"]
             completed = await _until(
@@ -189,7 +186,6 @@ async def _codex(codex: str, root: Path) -> bool:
                     event.get("method") == "turn/completed"
                     and event["params"]["turn"]["id"] == turn_id
                 ),
-                events,
             )
             history = await _request(
                 process,
@@ -198,7 +194,6 @@ async def _codex(codex: str, root: Path) -> bool:
                     "threadId": thread_id,
                     "includeTurns": True,
                 },
-                events,
             )
             turns = history["thread"]["turns"]
             native_path = Path(history["thread"]["path"])
@@ -264,39 +259,8 @@ async def _claude(claude: str, root: Path) -> bool:
         f"'additionalContext': '<lf:context>Context marker: {context}</lf:context>'}}}}))\n"
     )
     hook.write_text(hook_source)
-    settings = json.dumps(
-        {
-            "hooks": {
-                "UserPromptSubmit": [
-                    {
-                        "hooks": [
-                            {
-                                "type": "command",
-                                "command": shlex.join([sys.executable, str(hook)]),
-                            }
-                        ]
-                    }
-                ]
-            }
-        }
-    )
-    base = [
-        claude,
-        "-p",
-        "--setting-sources",
-        "project",
-        "--strict-mcp-config",
-        "--mcp-config",
-        '{"mcpServers":{}}',
-        "--tools",
-        "",
-        "--output-format",
-        "stream-json",
-        "--input-format",
-        "stream-json",
-        "--verbose",
-        "--replay-user-messages",
-    ]
+    settings = _hook_settings(shlex.join([sys.executable, str(hook)]))
+    base = _claude_command(claude)
     passed = True
     for argument, flags in [
         ("alpha", ["--session-id", session_id, "--settings", settings]),
@@ -310,18 +274,9 @@ async def _claude(claude: str, root: Path) -> bool:
         events = []
         invocation = f"/{name} {argument}"
         async with _provider(base + flags, root) as process:
-            await _send(
-                process,
-                {
-                    "type": "user",
-                    "message": {
-                        "role": "user",
-                        "content": [{"type": "text", "text": invocation}],
-                    },
-                },
-            )
+            await _send(process, _user_message([invocation]))
             result = await _until(process, lambda event: event.get("type") == "result", events)
-        text, native_argument = _read_output("\n".join(map(json.dumps, events)), "claude")
+        text, native_argument = _read_output(events)
         receipts = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()]
         native_path = Path(receipts[0]["transcript_path"])
         history = [json.loads(line) for line in native_path.read_text().splitlines()]

@@ -16,9 +16,34 @@ Implemented defaults below remain unreviewed by Jack:
 - LOO-385 overlaps. Recheck before any parallel implementation or external
   disposition; no closure or transfer is authorized by this work.
 
-All four slices are implemented locally; focused checks pass. Gate and the
-complete demo remain. No landing or installed-Home migration is authorized.
+All four slices and the landing corrections below are present locally; focused
+checks pass. Gate and the complete demo remain. No landing or installed-Home
+migration is authorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. The receipt pins the initial Team/state as well as Project and content.
 
 Wait interruption uses the existing global exit 130 handler (a stopped Flow, without retry); timeout remains held exit 3. The public CLI test exposed a conflict with a second Tokio Ctrl-C handler, so that duplicate handler was removed.
+
+Review corrections (2026-10-08, findings from `cdde9f6a2`):
+
+- Jack Heart asked how automatic CI repair interacts with waited landing, then
+  confirmed it should repair its own PR with Desktop closed.
+  The initial wait disabled repairs and the existing guard rejected the live
+  ship driver. Waited landing now shares repair admission, exempting only its
+  recorded waiting Flow/Task controllers while retaining other-work exclusions.
+  A watcher reports busy work without marking delivery failed. The combined
+  headless Task/Flow/wait/repair/merge/follow-through fixture passes.
+- Jack asked whether already-merged `land` should succeed with a clear message.
+  Previously only `--wait` checked before preparation. Jack approved the
+  correction: bare land shares that success path, confirms
+  the same PR, preserves pending follow-through, and performs no publication,
+  sync, scratch cleanup or new merge request. Keep failed/unknown observation
+  distinct from verified merge. Pending/completed Tasks, retained scratch and
+  explicit checkout selection have passing public CLI coverage.
+
+Jack requested retry from the failed Flow step; filed Infrastructure LOO-435 on
+October 8, linked to LOO-418/PR #1499. This branch only corrects propagation of
+held exit 3, which the Flow previously turned into failure and retried. Bare land
+waiting by default remains an unaccepted suggestion. Historical finite landing
+was for continuation after caller exit (#1382), then watcher-owned repair
+(#1384); the inspected record does not establish a particular crash as the cause.

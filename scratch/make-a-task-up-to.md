@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · implementation complete locally; gate and full demo remain · reconciled 2026-10-08
+LOO-418 · four slices and landing corrections implemented; gate and full demo remain · reconciled 2026-10-08
 
 ## Decision and intended experience
 
@@ -44,8 +44,10 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The full lifecycle is implemented locally. The complete demo remains after
-gate; focused evidence below does not substitute for Jack's review.
+The four lifecycle slices and October 8 landing corrections are implemented
+locally. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
+repeated landing preserves finishing notes for pending and completed Tasks.
+The complete lifecycle proof and Jack's demo review remain.
 
 ## Inventory and findings
 
@@ -123,14 +125,29 @@ interface below are implemented defaults, not separately approved decisions.
 
 `lf land` and `lf arm` remain prepare/request/return operations. Land supports
 `--wait` for callers that own a blocking Flow. It uses the existing finite
-landing observation operation, releases its lock between checks, and never runs
-an agent inside reconciliation. Poll every 15 seconds for at most 30 minutes;
+landing observation operation and shared CI repair admission, releasing its
+lock between checks. Poll every 15 seconds for at most 30 minutes;
 timeout returns held (exit 3), leaving merge intent and evidence intact.
 Interruption uses the existing global handler (exit 130), which stops a Flow
 without retry and retains merge intent. A second Tokio signal handler conflicted
 with that owner in the public CLI test and was removed.
 These are initial operational defaults, not measured performance claims.
-CI repair remains the existing CI watcher's responsibility.
+Jack Heart confirmed on October 8: waited landing must repair its own PR with
+Desktop closed. It uses the existing incident reservation and repair worker;
+the optional repository watcher shares that path. Bare land still returns:
+changing that default was suggested, not accepted. Repeated land on a merged
+Task PR succeeds before preparation, reports completion or remaining
+follow-through, and preserves edits. Ordinary reconciliation starts no repair.
+
+The historical switch to finite landing (#1382) provided continuation after
+caller exit; #1384 moved automatic repairs to the optional watcher. #1287 fixed
+repair sandbox permissions and retained locks while canceled waits still had
+effects running. No inspected evidence identifies a particular land crash as
+the reason for the switch. Task run currently retries an entire failed Flow up
+to three times while its carrier survives. Jack requested retry from the failed
+step on October 8; Infrastructure [LOO-435](https://linear.app/loopflow/issue/LOO-435)
+owns that separate design. The current correction preserves held exit 3 through
+the Flow instead of converting it to failure and replaying gate.
 
 Change `ship` to `gate → cmd: land --wait → follow-through`. The `follow-through`
 skill files or links the remaining Tasks, records the disposition, then calls
@@ -560,4 +577,17 @@ Review also corrected the CI repair prompt's completion promise and the Desktop
 mock's malformed optional-PR JSON; its existing decode test proves the repair.
 Earlier post-sync checks are retained at `6d18dad0a:scratch/make-a-task-up-to.md`.
 
-Check (2026-10-08): prose reconciliation `git diff --check` passed; `lf context --wave product --skill realign --json` fits memory/scratch limits; reused implementation evidence (inherited `LF_*`/`LOOPFLOW_*` cleared): `cargo test -p loopflow --test task_pr_range_tests --test task_follow_through_tests` passed (16); `cargo test -p loopflow --lib` with filters `ops::task::tests::watched_landing_completes_task_only_from_merged_pr_evidence`, `ops::task::follow_through::tests`, and `store::sqlite::pr_landings::tests` passed (5); `swift test --package-path swift --filter 'MockWaveFixtureTests|DTOFixtureTests|TaskFlowTests/deliveryEvidence'` passed (31); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.
+October 8 review corrections: waited landing shares CI repair admission with the
+watcher and release. Recorded Flow drivers and the Task carrier waiting for the
+calling command do not block its repair; other live work and pending provider
+turns still do. A busy checkout is reported without persisting a false delivery
+failure that could stop another waiter. The combined CLI fixture proves repair
+without a watcher, refusal over unrelated work, a watcher's harmless busy pass,
+one repair and arrival at follow-through. The mock changes CI evidence; it is not
+a live provider repair. Initial fixture failures were missing canonical planning
+scope and an invalid mock GitHub branch response, both corrected in the fixture.
+Held exit 3 now survives the Flow driver and prevents automatic whole-Flow retries.
+Bare and waited land return success for a merged Task PR, including a completed
+Task and explicit worktree selection, without clearing newly written scratch.
+
+Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): focused `land_tests` (`waited_`, `lf_pr_land_returns_before_later_checks_repair_and_observe_merge`), `task_flow_launch_tests::a_held_command_stops_the_task_run_without_repeating_the_flow`, and lib `completed_session_with_exited_provider_does_not_block_task_work` passed (5 tests, including 7 watcher scenarios); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; prior lifecycle/Swift proof remains at `cdde9f6a2:scratch/make-a-task-up-to.md`; gate owns affected acceptance, capable CI owns Docker installation, demo owns Jack's judgment.

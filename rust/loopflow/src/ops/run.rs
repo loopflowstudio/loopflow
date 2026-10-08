@@ -415,7 +415,7 @@ mod tests {
                 prepared.prompt.matches("Keep rollback available.").count(),
                 1
             );
-            assert!(prepared.config.task_prompt.contains(goal));
+            assert!(prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -424,7 +424,9 @@ mod tests {
             );
             assert_eq!(
                 context
-                    .task
+                    .system
+                    .as_ref()
+                    .unwrap()
                     .assets
                     .iter()
                     .filter(|asset| {
@@ -519,8 +521,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt =
-                crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+            let prompt = crate::engine::format_prompt(&components);
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {

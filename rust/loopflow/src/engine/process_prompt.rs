@@ -5,9 +5,8 @@ use crate::engine::config::{default_agent, parse_agent, Config};
 use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
-    drop_duplicate_docs, format_claude_system_prompt, format_claude_task_prompt, format_prompt,
-    gather_context, Document, DocumentSource, GatherContextOpts, PromptComponents,
-    PromptFormatMode, RelatedRepoContext, Surface,
+    drop_duplicate_docs, format_prompt, gather_context, Document, DocumentSource,
+    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface, INITIAL_TURN_PROMPT,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -133,26 +132,20 @@ pub(crate) fn preview_process_prompt(
         });
     }
 
-    let original_system = format_claude_system_prompt(&components);
-    let original_task = format_claude_task_prompt(&components);
+    let original_system = format_prompt(&components);
     let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
     budget_report.measure_input(
         &original_system,
-        &original_task,
-        &format_claude_system_prompt(&components),
-        &format_claude_task_prompt(&components),
+        INITIAL_TURN_PROMPT,
+        &format_prompt(&components),
+        INITIAL_TURN_PROMPT,
     );
     components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
 
-    // Keep only system-safe sections (operate/surface) in
-    // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
-    // task prompt to avoid triggering third-party app classifiers.
-    let system_prompt = format_claude_system_prompt(&components);
-    let task_prompt = format_claude_task_prompt(&components);
     let action_style = components
         .skill
         .as_ref()
@@ -160,8 +153,8 @@ pub(crate) fn preview_process_prompt(
     let launch = AgentConfig {
         chrome: false,
         session_driver: None,
-        system_prompt,
-        task_prompt,
+        system_prompt: prompt.clone(),
+        task_prompt: INITIAL_TURN_PROMPT.to_string(),
         agent: Some(agent),
         max_turns,
         resume_token: None,
@@ -182,7 +175,7 @@ pub(crate) fn preview_process_prompt(
     let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
     budget_report.measure_input(
         &original_system,
-        &original_task,
+        INITIAL_TURN_PROMPT,
         &effective_system,
         &launch.task_prompt,
     );
@@ -354,12 +347,9 @@ Test skill body.
             );
             assert!(prepared
                 .config
-                .task_prompt
+                .system_prompt
                 .contains("Local operating guidance."));
-            assert_eq!(
-                prepared.config.task_prompt.contains(operating.trim()),
-                no_loopflow
-            );
+            assert!(prepared.config.system_prompt.contains(operating.trim()));
             assert_eq!(
                 prepared.deduplication_decisions.iter().any(|decision| {
                     decision.kind == crate::trace::ContextAssetKind::OperatingInstructions
@@ -414,6 +404,7 @@ Test skill body.
         )
         .unwrap();
         let config = &prepared.config;
+        assert_eq!(config.task_prompt, INITIAL_TURN_PROMPT);
         let bytes = config.system_prompt.len() + config.task_prompt.len();
         let tokens = count_tokens(&config.system_prompt) + count_tokens(&config.task_prompt);
         assert!(bytes <= input_bytes, "{bytes}");
@@ -441,11 +432,11 @@ Test skill body.
                 .sum::<usize>()
                 <= scratch_tokens
         );
-        assert!(config.task_prompt.contains("Task definition"));
+        assert!(config.system_prompt.contains("Task definition"));
         assert!(config
-            .task_prompt
+            .system_prompt
             .contains("Latest direction: preserve the public API"));
-        assert!(config.task_prompt.contains("scratch/13.md"));
+        assert!(config.system_prompt.contains("scratch/13.md"));
         let sources: Vec<_> = fs::read_dir(tmp.path().join(".lf/tmp/context"))
             .unwrap()
             .collect();
@@ -453,11 +444,11 @@ Test skill body.
         assert_eq!(prepared.components.budget_decisions.len(), 4);
         assert!(
             config
-                .task_prompt
+                .system_prompt
                 .find("<lf:file path=\"wave/infrastructure/MEMORY.md\">")
                 .unwrap()
                 < config
-                    .task_prompt
+                    .system_prompt
                     .find("<lf:file path=\"wave/infrastructure/release/MEMORY.md\">")
                     .unwrap()
         );
@@ -467,7 +458,7 @@ Test skill body.
             .find(|path| fs::read_to_string(path).unwrap() == message)
             .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), message);
-        assert!(config.task_prompt.contains(path.to_str().unwrap()));
+        assert!(config.system_prompt.contains(path.to_str().unwrap()));
         assert_eq!(
             fs::read_to_string(tmp.path().join("scratch/00.md")).unwrap(),
             evidence
@@ -655,7 +646,7 @@ Test skill body.
             },
         )
         .unwrap();
-        let submitted = &prepared.config.task_prompt;
+        let submitted = &prepared.config.system_prompt;
         assert!(submitted.contains("<lf:skill:implement>"));
         assert!(submitted.contains("Turn the design doc into working code."));
         assert!(submitted.contains(plan));
@@ -703,9 +694,9 @@ Test skill body.
                 assert!(prepared.prompt.contains("display name is \"Jack\""));
                 assert!(prepared
                     .config
-                    .task_prompt
+                    .system_prompt
                     .contains("display name is \"Jack\""));
-                assert!(!prepared.config.system_prompt.contains("<lf:user>"));
+                assert!(!prepared.config.task_prompt.contains("<lf:user>"));
                 assert_eq!(
                     prepared.config.env[crate::engine::config::USER_NAME_ENV],
                     "Jack"
@@ -1108,7 +1099,7 @@ mod budget_tests {
                 },
             )
             .unwrap();
-            let prompt = &prepared.config.task_prompt;
+            let prompt = &prepared.config.system_prompt;
             assert!(prompt.contains("<lf:context-budget>"), "{skill}");
             assert!(prompt.contains("scratch_tokens: 400 (provided config)"));
             assert!(prompt.contains("Read the relevant omitted sections"));
@@ -1116,7 +1107,7 @@ mod budget_tests {
             let total = prepared.budget_report.usage.last().unwrap();
             assert_eq!(
                 total.submitted_tokens,
-                count_tokens(&prepared.config.system_prompt) + count_tokens(prompt)
+                count_tokens(&prepared.config.task_prompt) + count_tokens(prompt)
             );
         }
     }

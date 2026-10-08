@@ -70,6 +70,10 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+Provider fixtures must read the launch's actual context channel. When a final
+sync adds fixtures that inspect a changed transport, run those focused tests
+before arming; the earlier gate did not cover the newly combined behavior.
+
 ## Quick Reference
 
 ```bash

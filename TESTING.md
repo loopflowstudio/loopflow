@@ -1056,6 +1056,11 @@ Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
 
+Changes to terminal provider probes or spawning must run both `session_cli_tests`
+and `agent_startup_tests`. An executable that exits with an error still started
+and must record its opening; use an absent or non-executable fixture for spawn
+failure, with PATH restricted so no installed provider can take its place.
+
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Process receipt
 does not prove that its process or descendants released their descriptors.

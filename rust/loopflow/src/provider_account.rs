@@ -182,7 +182,6 @@ struct AccountCandidate {
     account: ProviderAccount,
     credential_available: bool,
     strained: bool,
-    store: SharedStore,
     home: PathBuf,
 }
 
@@ -426,8 +425,7 @@ impl ProviderAccountRoute {
         match &self.login {
             AccountLogin::Stored { store, .. } => {
                 let account_id = self.used_account().await?;
-                record_rate_limit_signal(store, self.provider, &account_id, signal, "stream")
-                    .await?;
+                record_rate_limit_signal(store, self.provider, &account_id, signal).await?;
             }
             AccountLogin::Replayed { .. } => {}
         }
@@ -493,14 +491,12 @@ fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsString> {
 }
 
 /// Record a provider rate-limit signal against a store: health row plus any
-/// observed limit windows. The account route uses this owner so
-/// cooldown policy stays in one place.
-pub(crate) async fn record_rate_limit_signal(
+/// observed limit windows.
+async fn record_rate_limit_signal(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
     signal: &RateLimitSignal,
-    source: &str,
 ) -> Result<(), ProviderAccountError> {
     let cooldown_until = signal.limited.then(|| {
         let now = now_unix();
@@ -521,7 +517,12 @@ pub(crate) async fn record_rate_limit_signal(
         .await?;
     if !signal.windows.is_empty() {
         store
-            .upsert_provider_account_limits(provider.as_str(), account_id, &signal.windows, source)
+            .upsert_provider_account_limits(
+                provider.as_str(),
+                account_id,
+                &signal.windows,
+                "stream",
+            )
             .await?;
     }
     Ok(())
@@ -907,26 +908,25 @@ async fn resolve_selected_provider_account(
         provider_session_id,
         exact_account_id,
         repo_id.as_ref(),
-        local_store.clone(),
+        local_store.as_ref(),
         true,
     )
     .await?
     else {
         return Ok(None);
     };
+    let store = local_store
+        .as_ref()
+        .expect("candidates belong to the machine store");
     if !isolated {
         let native = activation::native_home(provider, None);
-        let active = match &local_store {
-            Some(store) => activation::observe_active_account(store, provider, &native).await?,
-            None => None,
-        };
+        let active = activation::observe_active_account(store, provider, &native).await?;
         if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
             let active = candidates.remove(index);
             candidates.insert(0, active);
         }
     }
     for (candidate, explicit) in candidates {
-        let store = &candidate.store;
         let home = &candidate.home;
         if !explicit
             && store
@@ -996,7 +996,7 @@ async fn ordered_selected_candidates(
     provider_session_id: Option<&str>,
     exact_account_id: Option<&ProviderAccountId>,
     repo_id: Option<&RepoId>,
-    local_store: Option<SharedStore>,
+    local_store: Option<&SharedStore>,
     verify_identity: bool,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
     let mut catalog = match &local_store {
@@ -1045,7 +1045,6 @@ async fn ordered_selected_candidates(
                     now,
                 )
                 .is_some(),
-                store: Arc::clone(store),
                 home,
             });
         }
@@ -1230,21 +1229,16 @@ pub(crate) async fn inspect_provider_route(
     provider: Provider,
 ) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
     if !selection::AccountSelection::from_env()?.is_default() {
-        return Ok(ordered_selected_candidates(
-            provider,
-            None,
-            None,
-            repo_id,
-            store.cloned(),
-            false,
-        )
-        .await?
-        .map(|candidates| {
-            candidates
-                .into_iter()
-                .map(|(candidate, _)| candidate.account)
-                .collect()
-        }));
+        return Ok(
+            ordered_selected_candidates(provider, None, None, repo_id, store, false)
+                .await?
+                .map(|candidates| {
+                    candidates
+                        .into_iter()
+                        .map(|(candidate, _)| candidate.account)
+                        .collect()
+                }),
+        );
     }
     let Some(store) = store else {
         return Ok(None);

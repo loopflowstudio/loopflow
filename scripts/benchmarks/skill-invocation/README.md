@@ -148,6 +148,19 @@ catalog and structured dispatch implementation. Loopflow admission and third-par
 fidelity still require proofs through Loopflow's own entry points.
 
 
+### Explicit Claude plugin selection
+
+Run `request_mapping.py --channel plugin` under the same network wrapper.
+It loads the fixture through a private plugin whose skill directory is a symlink
+to the unchanged source. On Claude 2.1.294, initial and resumed requests each
+expanded exact arguments with user-only context in one model request. The strict
+`selected_source` assertion fails: Claude reports the plugin symlink, not the
+original directory, as its base directory. Exit 1 preserves that distinction.
+This is a candidate for unambiguous startup selection; bundled assets, source
+identity through symlinks, retained source contents, and live admission remain
+unproved. The probe neither replaces native editing nor establishes lf dispatch.
+
+
 ## Decisions and remaining work
 
 Jack Heart selected native invocation on the skill's own harness, translated

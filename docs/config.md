@@ -492,16 +492,31 @@ See [Subscription Management](/docs/subscriptions) for identity storage,
 access profiles, routing, health, selectors, and remote development. See
 [Security](/docs/security) for credential forwarding and trust boundaries.
 
-### External Skills
-
-Loopflow has one external skill channel plus one compatibility shim. No config needed.
-
-- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
-- **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
+### Skill sources
 
 ```bash
-lf npx/vercel-labs/deep-research       # live fetch, cached on first run
-lf rams/rams                           # legacy compatibility alias, if installed
+lf help audit                       # inspect the selected file
+lf list skill                       # list names and sources
 ```
 
-The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/skills/<namespace>/<skill>.md` (repo-local) or `~/.lf/skills/<namespace>/<skill>.md` (user-global) and invoke them as `lf <namespace>/<skill>`. Namespaced skills use `/`, not `:`.
+Put `audit/SKILL.md` in `.claude/skills`, `.agents/skills`, or `.codex/skills`.
+A bundle wins over a same-named Markdown file in the same folder.
+Single Markdown files also work in `.lf/skills`, `.claude/commands`, and
+`.codex/prompts`. Supporting files inside a skill bundle are not separate skills.
+Namespaces use `/`, such as `lf help team/audit`.
+
+Repository sources win over personal sources, then embedded builtins. Within each
+scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
+`.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
+folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports
+never override the current embedded builtin. Help, listing, execution lookup,
+and retained Flow definitions use the same selection.
+
+Install third-party skills with their own installer, then use their installed
+names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
+`rams.md` is named `rams`.
+
+`lf sync-skills` exports personal sources and builtins, preserves third-party
+files at destination paths, and leaves repository skills local. Cross-harness
+exports retain declarations and report that native controls and argument syntax
+are not yet translated.

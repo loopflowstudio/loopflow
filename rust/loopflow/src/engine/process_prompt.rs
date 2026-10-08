@@ -587,6 +587,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 resolved_skill: Some(Skill {
+                    source: None,
                     content: Some("Follow this instruction. ".repeat(100_000)),
                     ..Skill::named("large")
                 }),
@@ -604,6 +605,7 @@ Test skill body.
         let input = |content: String, has_ui| ProcessPromptInput {
             repo_root: tmp.path().to_path_buf(),
             resolved_skill: Some(Skill {
+                source: None,
                 content: Some(content),
                 ..Skill::named("budget")
             }),
@@ -970,9 +972,10 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                skill: Some("npx/skill-creator".to_string()),
+                skill: Some("team/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
-                    name: "npx/skill-creator".to_string(),
+                    source: None,
+                    name: "team/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
                     action_style: Some("procedural".to_string()),
@@ -990,7 +993,7 @@ Test skill body.
                 .skill
                 .as_ref()
                 .map(|skill| skill.name.as_str()),
-            Some("npx/skill-creator")
+            Some("team/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
     }

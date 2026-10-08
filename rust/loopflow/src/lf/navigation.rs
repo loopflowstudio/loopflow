@@ -426,24 +426,7 @@ fn definition_help(
     name: &str,
     kind: Option<DefinitionKind>,
 ) -> Result<String> {
-    let target = match resolve_local_definition(repo, name, kind) {
-        Ok(target) => target,
-        Err(error)
-            if name.starts_with("npx/")
-                && matches!(
-                    error.downcast_ref::<crate::engine::LoadError>(),
-                    Some(
-                        crate::engine::LoadError::SkillNotFound(_)
-                            | crate::engine::LoadError::TargetNotFound(_)
-                    )
-                ) =>
-        {
-            return Ok(format!(
-                "{name} — not cached locally\nRun `lf skill {name}` to fetch and execute it.\n"
-            ));
-        }
-        Err(error) => return Err(error),
-    };
+    let target = resolve_local_definition(repo, name, kind)?;
     let (name, kind, description) = match &target {
         Target::Command(_) | Target::Xor(_) => anyhow::bail!("{name} is not a named skill or flow"),
         Target::Skill(skill) => (

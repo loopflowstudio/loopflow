@@ -128,12 +128,6 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
     assert!(collision.contains("flow wins untyped lookup"));
     let skill = success(run(repo.path(), home.path(), &["help", "skill", "paired"]));
     assert!(String::from_utf8_lossy(&skill).contains("Skill paired body."));
-    let uncached = success(run(
-        repo.path(),
-        home.path(),
-        &["run", "npx/no-such-cached-skill", "--help"],
-    ));
-    assert!(String::from_utf8_lossy(&uncached).contains("not cached locally"));
     let overview = success(run(repo.path(), home.path(), &["--help"]));
     let overview = String::from_utf8(overview).unwrap();
     assert!(overview.starts_with("Usage: lf "));
@@ -799,4 +793,59 @@ fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
         );
     }
     assert!(machine_invocation(&["lf", "--machine"].map(String::from)).is_err());
+}
+
+#[test]
+fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations() {
+    let repo = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let native = repo.path().join(".claude/skills/audit/SKILL.md");
+    fs::create_dir_all(native.parent().unwrap()).unwrap();
+    fs::write(&native, "---\ndescription: Audit a project\nagent: Explore\ncontext: fork\nallowed-tools: Read\n---\nAudit $ARGUMENTS using [rules](rules.md).\n").unwrap();
+    fs::write(
+        native.parent().unwrap().join("rules.md"),
+        "Preserve these rules.",
+    )
+    .unwrap();
+    let other = repo.path().join(".agents/skills/audit/SKILL.md");
+    fs::create_dir_all(other.parent().unwrap()).unwrap();
+    fs::write(&other, "Other source").unwrap();
+
+    let help =
+        String::from_utf8(success(run(repo.path(), home.path(), &["help", "audit"]))).unwrap();
+    assert!(help.contains(".claude/skills/audit/SKILL.md"), "{help}");
+    assert!(help.contains("Audit $ARGUMENTS"), "{help}");
+    let entries = json_entries(repo.path(), home.path(), &["list", "skill", "--json"]);
+    let audit = entries
+        .iter()
+        .find(|entry| entry["name"] == "audit")
+        .unwrap();
+    assert_eq!(audit["source"], ".claude/skills/audit/SKILL.md");
+    assert!(!entries.iter().any(|entry| entry["name"] == "audit/rules"));
+
+    fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+    fs::write(repo.path().join(".lf/flows/check.yaml"), "- audit\n").unwrap();
+    let flow = load_flow("check", repo.path()).unwrap();
+    let captured = serde_json::to_string(&flow).unwrap();
+    fs::remove_file(&native).unwrap();
+    let retained = serde_json::from_str(&captured).unwrap();
+    let compiled = compile_flow(&retained, repo.path()).unwrap();
+    let ConcreteStep::Skill(step) = &compiled[0] else {
+        panic!("expected skill")
+    };
+    assert!(
+        step.skill.agent.is_none(),
+        "Claude subagent must not select an lf harness"
+    );
+    let source = step.skill.source.as_ref().unwrap();
+    assert_eq!(source.path, native);
+    assert!(source
+        .frontmatter
+        .as_deref()
+        .unwrap()
+        .contains("context: fork"));
+    assert_eq!(
+        step.skill.content.as_deref(),
+        Some("Audit $ARGUMENTS using [rules](rules.md).\n")
+    );
 }

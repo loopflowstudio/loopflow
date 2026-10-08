@@ -1,14 +1,14 @@
 use std::env;
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
-use loopflow::engine::load_flow;
+use loopflow::engine::{
+    load_flow,
+    skill_catalog::{SkillCatalog, SkillScope},
+};
 use loopflow::lf::discovery::{
-    builtin_skill_description, builtin_skills, discover_skill, list_all_skills, resolve_definition,
+    builtin_skill_description, builtin_skills, discover_skill, resolve_definition,
     resolve_local_definition, Target, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
@@ -48,47 +48,27 @@ impl Drop for HomeGuard {
     }
 }
 
-struct EnvVarGuard {
-    key: String,
-    previous: Option<String>,
-}
-
-impl EnvVarGuard {
-    fn set(key: &str, value: impl Into<String>) -> Self {
-        let previous = env::var(key).ok();
-        env::set_var(key, value.into());
-        Self {
-            key: key.to_string(),
-            previous,
-        }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(previous) = &self.previous {
-            env::set_var(&self.key, previous);
-        } else {
-            env::remove_var(&self.key);
-        }
-    }
-}
-
-fn write_executable(path: &Path, content: &str) {
-    fs::write(path, content).expect("write script");
-    #[cfg(unix)]
-    {
-        let mut permissions = fs::metadata(path).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions).expect("chmod");
-    }
+fn list_all_skills(repo: Option<&std::path::Path>) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let catalog = SkillCatalog::discover(repo).unwrap();
+    let names = |scope| {
+        catalog
+            .entries()
+            .filter(|s| s.scope == scope)
+            .map(|s| s.name.clone())
+            .collect()
+    };
+    (
+        names(SkillScope::Repository),
+        names(SkillScope::Personal),
+        names(SkillScope::Embedded),
+    )
 }
 
 #[test]
 fn discover_builtin_skills() {
     let _home = HomeGuard::new();
     let builtins = builtin_skills();
-    let (_user, _global, builtin_only, _skills) = list_all_skills(None);
+    let (_user, _global, builtin_only) = list_all_skills(None);
     for skill in builtins {
         assert!(builtin_only.contains(&skill));
     }
@@ -119,7 +99,7 @@ fn discover_repo_skills() {
     std::fs::create_dir_all(skills_dir.join("team")).expect("create skill namespace");
     std::fs::write(skills_dir.join("team/review.md"), "# review").expect("write namespaced skill");
 
-    let (user_skills, _global, _builtin_only, _skills) = list_all_skills(Some(repo.path()));
+    let (user_skills, _global, _builtin_only) = list_all_skills(Some(repo.path()));
     assert!(user_skills.contains(&"custom".to_string()));
     assert!(user_skills.contains(&"team/review".to_string()));
 }
@@ -197,7 +177,7 @@ fn repo_skill_shadows_builtin() {
     std::fs::create_dir_all(&skills_dir).expect("create skills dir");
     std::fs::write(skills_dir.join("qa.md"), "# qa").expect("write skill");
 
-    let (user_skills, _global, builtin_only, _skills) = list_all_skills(Some(repo.path()));
+    let (user_skills, _global, builtin_only) = list_all_skills(Some(repo.path()));
     assert!(user_skills.contains(&"qa".to_string()));
     assert!(!builtin_only.contains(&"qa".to_string()));
 }
@@ -326,195 +306,31 @@ fn every_builtin_flow_is_categorized_and_loadable() {
 }
 
 #[test]
-fn npx_skills_are_listed_from_cache_and_loopflow_skipped() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().expect("repo");
-    let skills_dir = repo.path().join(".agents/skills");
-    fs::create_dir_all(skills_dir.join("explain-code")).expect("create explain-code dir");
-    fs::create_dir_all(skills_dir.join("design")).expect("create design dir");
-
-    fs::write(
-        skills_dir.join("explain-code/SKILL.md"),
-        "---\nname: explain-code\ndescription: Explain code.\n---\nExplain code.",
-    )
-    .expect("write cached skill");
-    fs::write(
-        skills_dir.join("design/SKILL.md"),
-        "---\nname: design\ndescription: built-in\nloopflow: true\n---\nInjected",
-    )
-    .expect("write loopflow marker skill");
-
-    let (_user, _global, _builtin, external) = list_all_skills(Some(repo.path()));
-    assert!(external.contains(&("npx/explain-code".to_string(), "npx skills".to_string())));
-    assert!(
-        !external.iter().any(|(name, _)| name == "npx/design"),
-        "loopflow marker skills should be excluded from npx listing"
-    );
-}
-
-#[test]
-fn npx_cache_miss_runs_add_and_loads_skill() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().expect("repo");
-    let npx_script = repo.path().join("fake-npx-add.sh");
-
-    let script = r#"#!/bin/sh
-set -e
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "explain-code" ]; then
-  mkdir -p ".agents/skills/explain-code"
-  cat > ".agents/skills/explain-code/SKILL.md" <<'EOF'
----
-name: explain-code
-description: Explain code
-agent: codex
-action_style: autonomous
----
-Loaded from add
-EOF
-  exit 0
-fi
-exit 1
-"#;
-    write_executable(&npx_script, script);
-
-    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
-
-    let skill = discover_skill(repo.path(), "npx/explain-code").expect("load npx skill");
-    assert_eq!(skill.content.as_deref(), Some("Loaded from add\n"));
-    assert_eq!(skill.agent.as_deref(), Some("codex"));
-    assert_eq!(skill.action_style.as_deref(), Some("autonomous"));
-
-    fs::remove_file(npx_script).unwrap();
-    assert_eq!(
-        discover_skill(repo.path(), "npx/explain-code").unwrap(),
-        skill
-    );
-    let Target::Skill(inspected) =
-        resolve_local_definition(repo.path(), "npx/explain-code", None).unwrap()
-    else {
-        panic!("cached external definition must remain a skill");
-    };
-    assert_eq!(inspected, skill);
-}
-
-#[test]
-fn missing_nested_definition_cannot_fall_back_to_a_cached_skill() {
+fn installed_skills_share_listing_execution_and_flow_resolution() {
     let _home = HomeGuard::new();
     let repo = TempDir::new().unwrap();
-    let flows = repo.path().join(".lf/flows/npx");
-    let cache = repo.path().join(".agents/skills/paired");
-    fs::create_dir_all(&flows).unwrap();
-    fs::create_dir_all(&cache).unwrap();
-    fs::write(flows.join("paired.yaml"), "- missing-child-23952\n").unwrap();
-    fs::write(cache.join("SKILL.md"), "Cached skill body").unwrap();
-
-    let error = resolve_local_definition(repo.path(), "npx/paired", None).unwrap_err();
-    assert!(error.to_string().contains("invalid flow"), "{error}");
-    assert!(error.to_string().contains("missing-child-23952"), "{error}");
+    let skills = repo.path().join(".agents/skills");
+    for (name, body) in [
+        ("explain-code", "Explain code."),
+        ("design", "---\nloopflow: true\n---\nStale export"),
+    ] {
+        fs::create_dir_all(skills.join(name)).unwrap();
+        fs::write(skills.join(name).join("SKILL.md"), body).unwrap();
+    }
+    let (local, _, builtin) = list_all_skills(Some(repo.path()));
+    assert!(local.contains(&"explain-code".into()));
+    assert!(builtin.contains(&"design".into()));
     assert_eq!(
-        discover_skill(repo.path(), "npx/paired")
+        discover_skill(repo.path(), "explain-code")
             .unwrap()
             .content
             .as_deref(),
-        Some("Cached skill body")
+        Some("Explain code.")
     );
-}
-
-#[test]
-fn malformed_cached_skill_reports_its_parse_error() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().unwrap();
-    let cache = repo.path().join(".agents/skills/broken");
-    fs::create_dir_all(&cache).unwrap();
-    fs::write(cache.join("SKILL.md"), "---\nagent: [\n---\nBody").unwrap();
-    let _npx_bin = EnvVarGuard::set(
-        "LF_NPX_BIN",
-        repo.path().join("no-npx").display().to_string(),
-    );
-
-    for error in [
-        discover_skill(repo.path(), "npx/broken").unwrap_err(),
-        resolve_local_definition(repo.path(), "npx/broken", None).unwrap_err(),
-    ] {
-        assert!(error.to_string().contains("invalid skill"), "{error}");
-    }
-}
-
-#[test]
-fn npx_find_fallback_runs_when_add_fails() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().expect("repo");
-    let npx_script = repo.path().join("fake-npx-find.sh");
-
-    let script = r#"#!/bin/sh
-set -e
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "deep-research" ]; then
-  exit 1
-fi
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "find" ] && [ "$4" = "deep-research" ]; then
-  echo "vercel-labs/deep-research"
-  exit 0
-fi
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "vercel-labs/deep-research" ]; then
-  mkdir -p ".agents/skills/deep-research"
-  cat > ".agents/skills/deep-research/SKILL.md" <<'EOF'
----
-name: deep-research
-description: Deep research
----
-Loaded from find fallback
-EOF
-  exit 0
-fi
-exit 1
-"#;
-    write_executable(&npx_script, script);
-
-    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
-
-    let skill = discover_skill(repo.path(), "npx/deep-research").expect("load npx skill");
-    assert!(skill
-        .content
-        .as_deref()
-        .is_some_and(|content| content.contains("Loaded from find fallback")));
-}
-
-#[test]
-fn npx_find_handles_qualified_skill_format() {
-    let _home = HomeGuard::new();
-    let repo = TempDir::new().expect("repo");
-    let npx_script = repo.path().join("fake-npx-qualified.sh");
-
-    // Simulate npx skills find returning owner/repo@skill with ANSI codes
-    let script = r#"#!/bin/sh
-set -e
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "skill-creator" ]; then
-  exit 1
-fi
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "find" ] && [ "$4" = "skill-creator" ]; then
-  printf '\033[38;5;145manthropics/skills@skill-creator\033[0m \033[36m50.4K installs\033[0m\n'
-  exit 0
-fi
-if [ "$1" = "--yes" ] && [ "$2" = "skills" ] && [ "$3" = "add" ] && [ "$4" = "anthropics/skills@skill-creator" ]; then
-  mkdir -p ".agents/skills/skill-creator"
-  cat > ".agents/skills/skill-creator/SKILL.md" <<'EOF'
----
-name: skill-creator
-description: Create skills
----
-Loaded via qualified format
-EOF
-  exit 0
-fi
-exit 1
-"#;
-    write_executable(&npx_script, script);
-
-    let _npx_bin = EnvVarGuard::set("LF_NPX_BIN", npx_script.display().to_string());
-
-    let skill = discover_skill(repo.path(), "npx/skill-creator").expect("load qualified npx skill");
-    assert!(skill
-        .content
-        .as_deref()
-        .is_some_and(|content| content.contains("Loaded via qualified format")));
+    let flows = repo.path().join(".lf/flows");
+    fs::create_dir_all(&flows).unwrap();
+    fs::write(flows.join("explain-code.yaml"), "- missing-child-23952\n").unwrap();
+    let error = resolve_local_definition(repo.path(), "explain-code", None).unwrap_err();
+    assert!(error.to_string().contains("invalid flow"), "{error}");
+    assert!(error.to_string().contains("missing-child-23952"), "{error}");
 }

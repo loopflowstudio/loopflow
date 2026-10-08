@@ -1065,23 +1065,25 @@ checkpointing, common invocation loading and Claude's file-backed stdin. Rejecte
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
-translated ports, inlined builtins and `--agent`/`-a`. His recovery steer retains
-same-conversation use through review, without landing. String-only APIs and
-missing admission are implementation work, not authority to narrow scope.
+translated ports, inlined builtins and `--agent`/`-a`, with same-conversation use
+through review, without landing. Missing transport/admission cannot narrow scope.
+The local unified catalog replaces external/npx/rams and Flow resolvers, retaining
+source/declarations through Flow capture. Selection/export tests prove no native
+dispatch, translation or current-owner admission. Export must preserve third-party
+files; a native `agent: Explore` must never select an lf harness.
+
 Codex receipts prove source, separate context and same-thread resume, not recall
-without resupply. Claude 2.1.294 fake-API capture places hook context in `system`
-for Sonnet/Opus; rendering metadata alone had proved no role. Queued
-`shouldQuery: false` user context preserves exact native arguments in one request
-and after restart without resupply; separate seeding makes no model call.
-These prove client mapping, not live-model or LF behavior. Exclude answer leakage.
-Three requests in one native Session show startup expansion, PTY submission of
-an unfinished draft and inbox slash text without expansion, then clean exit.
-They reject those paths, not every native transport. A stream-owned terminal
-remains an unapproved UI replacement; catalog and structured dispatch need not
-wait for it. Resume replaces capture before driver claim; owner-mediated admission
-remains required. Release's entry-point lesson applies: provider probes cannot
-prove LF dispatch or admission. Native dispatch, ports and fidelity remain unproved.
-Installed 0.13.9 app launches lacked native identity; both reconnects failed.
-Jack removed `--ide`. Retain terminal/headless execution and historical records;
-launcher success proves no engine exit.
+without resupply. Claude 2.1.294 fake-API captures put hook context in `system`
+for Sonnet/Opus; queued user context preserves exact native arguments across resume
+without resupply. Separate seeding makes no model call. These prove client mapping,
+not LF or live-model behavior; exclude answer leakage. Native terminal probes
+reproduce draft submission by PTY injection and unexpanded inbox slash text in one
+Session. Private-plugin invocation expands arguments but reports its symlink base;
+assets/source identity and live admission remain unproved. These reject tested
+paths, not every native transport. A replacement terminal remains unapproved.
+Resume still replaces capture before driver claim. Native admission must preserve
+the current owner. Release's entry-point lesson applies: provider probes cannot
+prove LF dispatch or admission. Installed 0.13.9 app launches lacked native identity;
+both reconnects failed. Jack removed `--ide`; retain terminal/headless execution
+and history. Launcher success proves no engine exit.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

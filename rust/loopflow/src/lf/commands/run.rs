@@ -1778,9 +1778,9 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn split_skill_args_preserves_namespaced_skill() {
-        let args = vec!["npx/explain-code".to_string()];
+        let args = vec!["team/explain-code".to_string()];
         let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "npx/explain-code");
+        assert_eq!(skill, "team/explain-code");
         assert!(rest.is_empty());
     }
 

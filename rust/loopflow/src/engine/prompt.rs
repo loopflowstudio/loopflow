@@ -2248,6 +2248,7 @@ mod tests {
     fn format_prompt_with_skill() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
@@ -2268,6 +2269,7 @@ mod tests {
     fn format_prompt_with_skill_no_content() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "review".to_string(),
                 content: None,
                 agent: None,
@@ -2360,6 +2362,7 @@ mod tests {
                 source: DocumentSource::Docs,
             }],
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
@@ -2936,6 +2939,7 @@ mod tests {
         let components = PromptComponents {
             surface: Surface::Headless,
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
@@ -2964,6 +2968,7 @@ mod tests {
             }],
             clipboard: Some("Error message".to_string()),
             skill: Some(Skill {
+                source: None,
                 name: "debug".to_string(),
                 content: Some("Fix the error.".to_string()),
                 agent: None,
@@ -3003,6 +3008,7 @@ mod tests {
     fn format_task_prompt_returns_skill_content() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement the feature.".to_string()),
                 agent: None,
@@ -3039,6 +3045,7 @@ mod tests {
     fn format_task_prompt_message_with_skill() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "debug".to_string(),
                 content: Some("Debug the error.".to_string()),
                 agent: None,
@@ -3057,6 +3064,7 @@ mod tests {
     fn format_task_prompt_skill_without_content() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "review".to_string(),
                 content: None,
                 agent: None,

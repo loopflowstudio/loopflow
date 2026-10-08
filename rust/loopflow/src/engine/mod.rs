@@ -19,6 +19,7 @@ pub mod platform;
 pub(crate) mod process;
 pub mod process_prompt;
 pub mod prompt;
+pub mod skill_catalog;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;

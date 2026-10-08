@@ -73,8 +73,9 @@ Omit owners or abbreviate commands when the result is unique. Commands take prec
 and list stay local.
 A same-named flow takes precedence in untyped execution; invalid flows report
 an error. Use `lf skill NAME` to select the skill explicitly.
-External skills honor the same frontmatter as local skills, on first fetch and
-when read from cache. Malformed definitions report their parse error.
+Skills resolve from repository and personal Claude, Codex, and Loopflow folders.
+Help names the selected source; bundled reference files stay inside their skill.
+See [skill sources](docs/config.md#skill-sources) for precedence and export behavior.
 
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.

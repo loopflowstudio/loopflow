@@ -16,6 +16,8 @@ static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 pub struct Skill {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::engine::skill_catalog::SkillOrigin>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_agent: Option<String>,
@@ -29,6 +31,7 @@ impl Skill {
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            source: None,
             agent: None,
             default_agent: None,
             action_style: None,
@@ -509,35 +512,41 @@ pub fn human_occurrence_ids(flow: &FlowDefinition, repo: &Path) -> Result<Vec<St
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
-    // Try file-based lookup first (repo-local, then global)
-    if let Ok(skill_path) = find_skill_path(name, repo) {
-        return load_skill_from_path(name, &skill_path);
-    }
-
-    // Fall back to built-in skills — exact match, then unique bare-name match
-    // across namespaces.
-    if let Some(key) = crate::engine::builtins::resolve_builtin_skill(name) {
-        if let Ok(path) = find_skill_path(key, repo) {
-            return load_skill_from_path(key, &path);
-        }
-        let content = crate::engine::builtins::get_builtin_skill(key)
-            .expect("resolve_builtin_skill returned a known key");
-        return skill_from_content(key, content);
-    }
-
-    // Fall back to .agents/skills/<name>/SKILL.md (user-installed, not loopflow-injected)
-    if let Some(content) = load_agent_skill(name, repo) {
-        warn_retired_interactive(name, &content);
-        return skill_from_content(name, &content);
-    }
-
-    Err(LoadError::SkillNotFound(name.to_string()))
+    let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
+    let source = catalog
+        .resolve(name)
+        .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
+    skill_from_source(source)
 }
 
-pub(crate) fn load_skill_from_path(name: &str, skill_path: &Path) -> Result<Skill, LoadError> {
-    let content = fs::read_to_string(skill_path)?;
-    warn_retired_interactive(name, &content);
-    skill_from_content(name, &content)
+pub(crate) fn skill_from_source(
+    source: &crate::engine::skill_catalog::SkillSource,
+) -> Result<Skill, LoadError> {
+    let content = source.read()?;
+    warn_retired_interactive(&source.name, &content);
+    let mut skill = match skill_from_content(&source.name, &content) {
+        Ok(skill) => skill,
+        Err(_) if source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow => {
+            let mut skill = Skill::named(&source.name);
+            skill.content = Some(content.clone());
+            skill
+        }
+        Err(error) => return Err(error),
+    };
+    skill.source = source
+        .path
+        .as_ref()
+        .map(|path| crate::engine::skill_catalog::SkillOrigin {
+            path: path.clone(),
+            dialect: source.dialect,
+            frontmatter: split_frontmatter(&content).map(|(frontmatter, _)| frontmatter),
+        });
+    if source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow {
+        // Claude's `agent: Explore` describes its subagent, not an lf harness.
+        skill.agent = None;
+        skill.default_agent = None;
+    }
+    Ok(skill)
 }
 
 fn warn_retired_interactive(name: &str, content: &str) {
@@ -575,6 +584,7 @@ fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
     let (frontmatter, body) = parse_skill_frontmatter(content)?;
     Ok(Skill {
         name: name.to_string(),
+        source: None,
         agent: frontmatter.agent,
         default_agent: frontmatter.default_agent,
         action_style: frontmatter.action_style,
@@ -619,10 +629,6 @@ fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<Pat
         .iter()
         .map(|extension| dir.join(format!("{name}.{extension}")))
         .collect()
-}
-
-fn markdown_path(dir: &Path, name: &str) -> PathBuf {
-    dir.join(format!("{name}.md"))
 }
 
 fn collect_flow_names(
@@ -691,63 +697,13 @@ fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     Err(LoadError::FlowNotFound(name.to_string()))
 }
 
-fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced skills: "team/review" → <dir>/.lf/skills/team/review.md
-    // Check repo first, then home (so users can override namespaced builtins).
-    if let Some((prefix, skill_name)) = name.split_once('/') {
-        let repo_ns = markdown_path(&repo.join(".lf/skills").join(prefix), skill_name);
-        if repo_ns.exists() {
-            return Ok(repo_ns);
-        }
-        if let Some(home) = home_dir() {
-            let home_ns = markdown_path(&home.join(".lf/skills").join(prefix), skill_name);
-            if home_ns.exists() {
-                return Ok(home_ns);
-            }
-        }
-    }
-
-    // 1. Check repo-local paths
-    if let Some(path) = first_existing_path([
-        markdown_path(&repo.join(".lf/skills"), name),
-        markdown_path(&repo.join(".claude/commands"), name),
-    ]) {
-        return Ok(path);
-    }
-
-    // 2. Check global paths
-    if let Some(home) = home_dir() {
-        if let Some(path) = first_existing_path([
-            markdown_path(&home.join(".lf/skills"), name),
-            markdown_path(&home.join(".claude/commands"), name),
-        ]) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::SkillNotFound(name.to_string()))
-}
-
-/// The editable file that supplied a file-backed skill. Built-in skills return
-/// `None`: their embedded content has no source file in an installed binary.
+/// The catalog's selected editable source; embedded skills have no disk path.
 pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
-    if let Ok(path) = find_skill_path(name, repo) {
-        return Some(path);
-    }
-    if crate::engine::builtins::resolve_builtin_skill(name).is_some() {
-        return None;
-    }
-    let path = agent_skill_path(name, repo);
-    path.is_file().then_some(path)
-}
-
-/// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
-fn load_agent_skill(name: &str, repo: &Path) -> Option<String> {
-    fs::read_to_string(agent_skill_path(name, repo)).ok()
-}
-
-fn agent_skill_path(name: &str, repo: &Path) -> PathBuf {
-    repo.join(".agents/skills").join(name).join("SKILL.md")
+    crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))
+        .ok()?
+        .resolve(name)?
+        .path
+        .clone()
 }
 
 // -----------------------------------------------------------------------------
@@ -1155,11 +1111,6 @@ fn compile_steps(
         }
     }
     Ok(items)
-}
-
-/// Machine directory for global lookups. Can be overridden for testing.
-fn home_dir() -> Option<PathBuf> {
-    dirs::home_dir()
 }
 
 #[cfg(test)]

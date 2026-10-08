@@ -6,9 +6,7 @@ use anyhow::Result;
 use clap::Command;
 use serde::Serialize;
 
-use crate::lf::discovery::{
-    definition_source, list_all_skills, resolve_local_definition, DefinitionKind, Target,
-};
+use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
 use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
 
 #[derive(Debug, Serialize)]
@@ -71,16 +69,11 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         }
     }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
-        let (local, global, builtin, external) = list_all_skills(Some(repo));
-        let names: BTreeSet<_> = local
-            .into_iter()
-            .chain(global)
-            .chain(builtin)
-            .chain(external.into_iter().map(|(name, _)| name))
-            .collect();
+        let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
         let namespace = path.get(1).map(|name| format!("{name}/"));
         let mut namespaces = BTreeSet::new();
-        for name in names {
+        for source in catalog.entries() {
+            let name = &source.name;
             if namespace
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))
@@ -101,7 +94,21 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                     continue;
                 }
             }
-            entries.push(definition_entry(tree, repo, name, DefinitionKind::Skill));
+            let description = match source.load() {
+                Ok(skill) => skill
+                    .content
+                    .as_deref()
+                    .and_then(crate::engine::skills::first_prose_line)
+                    .unwrap_or_default(),
+                Err(error) => format!("unavailable: {error}"),
+            };
+            entries.push(Entry {
+                name: name.clone(),
+                kind: "skill".into(),
+                source: source.display_source(repo),
+                description,
+                invocation: definition_invocation(tree, name, DefinitionKind::Skill),
+            });
         }
         if !path.is_empty() {
             return Ok(entries);

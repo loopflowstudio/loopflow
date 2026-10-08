@@ -347,6 +347,12 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             "disable-model-invocation: true\n---\n"
             f"{skill_marker}|$ARGUMENTS|\n"
         )
+        plugin = root / "selected-plugin"
+        if channel == "plugin":
+            (plugin / ".claude-plugin").mkdir(parents=True)
+            (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "lf-selected"}))
+            (plugin / "skills").mkdir()
+            (plugin / "skills/lf-mapping").symlink_to(skill.parent, target_is_directory=True)
         hook = root / "context.json"
         hook.write_text(
             json.dumps(
@@ -388,6 +394,9 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                 digest = hashlib.file_digest(executable, "sha256").hexdigest()
             print(json.dumps({"version": version, "executable_sha256": digest}), flush=True)
             base = _claude_command(claude) + ["--model", model]
+            if channel == "plugin":
+                base += ["--plugin-dir", str(plugin)]
+            command_name = "lf-selected:lf-mapping" if channel == "plugin" else "lf-mapping"
             initial = base + ["--session-id", session]
             resume = base + ["--resume", session]
             context_messages = []
@@ -424,7 +433,10 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             ]:
                 start = len(requests)
                 result = _run(
-                    command, workspace, env, [*messages, _user_message([f"/lf-mapping {argument}"])]
+                    command,
+                    workspace,
+                    env,
+                    [*messages, _user_message([f"/{command_name} {argument}"])],
                 )
                 hook.unlink(missing_ok=True)
                 _, native_arguments = _read_output(_output_events(result.stdout))
@@ -459,7 +471,7 @@ def main() -> int:
     parser.add_argument("--claude", default=shutil.which("claude"))
     parser.add_argument("--model", default="sonnet")
     parser.add_argument(
-        "--channel", choices=("hook", "queued", "staged", "terminal"), default="queued"
+        "--channel", choices=("hook", "queued", "staged", "terminal", "plugin"), default="queued"
     )
     parser.add_argument("--inbox-message", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()

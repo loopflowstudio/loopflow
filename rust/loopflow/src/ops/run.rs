@@ -594,11 +594,10 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .apply_linear_comment(
-                &task.id,
-                "comment-1".into(),
-                "ADVANCER ONLY".into(),
-                time::OffsetDateTime::now_utc(),
+            .append_steer(
+                &WorkRef::Task(task.id.clone()),
+                crate::durable::Author::User,
+                "ADVANCER ONLY",
             )
             .await
             .unwrap();

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
-    LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId,
+    LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
+    TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
@@ -294,24 +294,13 @@ impl Store {
 
     pub async fn apply_linear_observation(
         &self,
-        apply: LinearObservationApply,
-    ) -> StoreResult<LinearObservationOutcome> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&apply)
-        })
-        .await
-    }
-
-    pub async fn apply_linear_comment(
-        &self,
         task_id: &TaskId,
-        comment_id: String,
-        text: String,
+        observation: crate::pm::IssueObservation,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<i64>> {
+    ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_comment(&task_id, &comment_id, &text, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at)
         })
         .await
     }

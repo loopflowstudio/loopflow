@@ -793,37 +793,11 @@ pub struct TaskLinearObservation {
     pub updated_at: OffsetDateTime,
 }
 
-/// One Linear observation, ready to persist atomically as Task direction. The
-/// directive is applied only if the stored title/description still differ
-/// (compare-and-set), and each follow-up becomes a command only on its first
-/// entry into the ledger — so overlapping polls, restarts, and out-of-order
-/// responses never duplicate direction.
-#[derive(Debug, Clone)]
-pub struct LinearObservationApply {
-    pub task_id: TaskId,
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist as one authored Steer.
-    pub content_steer: Option<String>,
-    /// Participant comments observed this pass, oldest first.
-    pub follow_ups: Vec<LinearFollowUp>,
-    pub comments: Vec<crate::pm::IssueComment>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LinearFollowUp {
-    pub comment_id: String,
-    pub text: String,
-}
-
-/// What one [`LinearObservationApply`] actually wrote — enough for the caller to
-/// report receipts without re-reading the store.
+/// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
-    /// emitted no direction (existing comments are marked seen, not replayed).
+    /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,
     pub content_steer_applied: bool,
     /// Event ids of the steer comments this observation appended.

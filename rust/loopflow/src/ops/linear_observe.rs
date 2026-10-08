@@ -4,19 +4,13 @@
 //! appends an ordered Steer. This module maps one observation onto that input
 //! spine, and [`Store::apply_linear_observation`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
-//! store, so calling [`reconcile_linear_observation`] twice with the same read
-//! is safe.
+//! store; acquisition supplies observations without proposing a second write.
 
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
-use crate::store::SharedStore;
-
-use crate::pm::IssueObservation;
-use crate::store::{Store, StoreResult};
-use crate::work::task::{
-    LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
-};
+use crate::store::{SharedStore, Store};
+use crate::work::task::Task;
 
 fn connected(repo: &str) -> bool {
     crate::engine::config::load_config_or_default(Some(std::path::Path::new(repo)))
@@ -69,7 +63,8 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .observe_issue(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    reconcile_linear_observation(store, &task, observation, OffsetDateTime::now_utc())
+    store
+        .apply_linear_observation(&task.id, observation, OffsetDateTime::now_utc())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())
@@ -457,149 +452,36 @@ pub(crate) fn render_comment(
     format!("Linear comment {id}{attribution}{source}:\n\n{body}")
 }
 
-fn content_steer_text(title: &str, description: &str) -> String {
-    format!(
-        "The linked Linear task was edited; use this current definition.\n\n\
-         Title: {title}\n\n{description}"
-    )
-}
-
-/// Read one Linear observation into durable, exactly-once Task direction.
-pub async fn reconcile_linear_observation(
-    store: &Store,
-    task: &Task,
-    observation: IssueObservation,
-    observed_at: OffsetDateTime,
-) -> StoreResult<LinearObservationOutcome> {
-    let cursor = store.task_linear_observation(&task.id).await?;
-    let apply = plan_apply(task, observation, observed_at, cursor.as_ref());
-    store.apply_linear_observation(apply).await
-}
-
-/// Build the durable apply from a read and the current cursor. A
-/// title/description edit becomes a Steer only when a baseline exists and the
-/// content changed; every user comment rides as a candidate Steer, and the
-/// store drops the ones already seen.
-pub(crate) fn plan_apply(
-    task: &Task,
-    observation: IssueObservation,
-    observed_at: OffsetDateTime,
-    cursor: Option<&TaskLinearObservation>,
-) -> LinearObservationApply {
-    let content_steer = match cursor {
-        Some(cursor)
-            if cursor.last_title != observation.title
-                || cursor.last_description != observation.description =>
-        {
-            Some(content_steer_text(
-                &observation.title,
-                &observation.description,
-            ))
-        }
-        _ => None,
-    };
-    let follow_ups = observation
-        .comments
-        .iter()
-        .filter(|comment| is_direction_comment(&comment.body, comment.author_id.as_deref()))
-        .map(|comment| LinearFollowUp {
-            comment_id: comment_revision_id(&comment.id, comment.revision.as_deref()),
-            text: render_comment(
-                &comment.id,
-                &comment.body,
-                comment.author_id.as_deref(),
-                comment.author_name.as_deref(),
-            ),
-        })
-        .collect();
-    LinearObservationApply {
-        task_id: task.id.clone(),
-        revision: observation.revision,
-        title: observation.title,
-        description: observation.description,
-        observed_at,
-        content_steer,
-        follow_ups,
-        comments: observation.comments,
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::{is_direction_comment, plan_apply};
-    use crate::planning::{LinearIssueId, TaskPlan};
-    use crate::pm::{IssueComment, IssueObservation};
-    use crate::work::task::{Task, TaskId, TaskLinearObservation};
-
-    const VIEWER: &str = "user-loopflow";
+mod tests {
+    use super::{is_direction_comment, render_comment};
 
     #[test]
     fn agent_progress_never_reenters_direction_even_with_a_quoted_steer() {
-        let obs = observation(
-            "title",
-            "body",
-            vec![
-                comment(
-                    "progress",
-                    "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
-                    Some(VIEWER),
-                ),
-                comment("person", "keep the API", Some(VIEWER)),
-                comment(
-                    "explicit",
-                    "new instruction <!-- loopflow-steer:explicit -->",
-                    None,
-                ),
-            ],
-        );
-        let apply = plan_apply(&task(), obs, time::OffsetDateTime::now_utc(), None);
-        assert_eq!(
-            apply
-                .follow_ups
-                .iter()
-                .map(|follow| follow.comment_id.as_str())
-                .collect::<Vec<_>>(),
-            ["person", "explicit"]
-        );
+        assert!(!is_direction_comment(
+            "done <!-- loopflow-progress:run_fixture --> <!-- loopflow-steer:quoted -->",
+            Some("publisher"),
+        ));
+        assert!(is_direction_comment("keep the API", Some("publisher")));
+        assert!(is_direction_comment(
+            "new instruction <!-- loopflow-steer:explicit -->",
+            None
+        ));
     }
 
     #[test]
     fn request_authors_survive_linear_direction_rendering() {
-        let comments = [
-            ("one", Some("Jack")),
-            ("two", Some("Maya")),
-            ("three", None),
-        ]
-        .into_iter()
-        .map(|(id, name)| IssueComment {
-            id: id.into(),
-            created_at: None,
-            revision: None,
-            body: "prototype".into(),
-            author_id: Some(format!("person-{id}")),
-            author_name: name.map(str::to_string),
-        })
-        .collect();
-        let apply = plan_apply(
-            &task(),
-            observation("title", "body", comments),
-            time::OffsetDateTime::now_utc(),
-            None,
-        );
-        assert!(apply.follow_ups[0]
-            .text
-            .contains("by \"Jack\" (provider user person-one)"));
-        assert!(apply.follow_ups[1]
-            .text
-            .contains("by \"Maya\" (provider user person-two)"));
-        assert!(!apply.follow_ups[2].text.contains(" by "));
+        for name in ["Jack", "Maya"] {
+            let rendered = render_comment("one", "prototype", Some("person"), Some(name));
+            assert!(rendered.contains(&format!("by \"{name}\" (provider user person)")));
+        }
+        assert!(!render_comment("one", "prototype", Some("person"), None).contains(" by "));
         let explicit =
             "prototype\n<!-- loopflow-requester:\"Jack\" -->\n<!-- loopflow-steer:one -->";
-        let rendered =
-            super::render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
+        let rendered = render_comment("one", explicit, Some("publisher"), Some("Account Owner"));
         assert!(rendered.contains("by \"Jack\""));
         assert!(!rendered.contains("Account Owner"));
-        let legacy = super::render_comment(
+        let legacy = render_comment(
             "old",
             "prototype\n<!-- loopflow-steer:old -->",
             Some("publisher"),
@@ -608,118 +490,12 @@ pub(crate) mod tests {
         assert!(legacy.contains("by \"Account Owner\""));
     }
 
-    fn comment(id: &str, body: &str, author: Option<&str>) -> IssueComment {
-        IssueComment {
-            author_name: None,
-            id: id.to_string(),
-            created_at: None,
-            revision: None,
-            body: body.to_string(),
-            author_id: author.map(str::to_string),
-        }
-    }
-
-    fn observation(
-        title: &str,
-        description: &str,
-        comments: Vec<IssueComment>,
-    ) -> IssueObservation {
-        IssueObservation {
-            revision: "2026-07-15T18:00:00.000Z".to_string(),
-            title: title.to_string(),
-            description: description.to_string(),
-            comments,
-        }
-    }
-
-    fn task() -> Task {
-        let now = time::OffsetDateTime::now_utc();
-        Task {
-            id: TaskId::from_raw("ts_plan"),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
-                identifier: "INF-123".to_string(),
-                title: "Old title".to_string(),
-                description: "Old body".to_string(),
-                pm_snapshot_synced_at: Some(1),
-            },
-            pm_writeback: crate::work::task::PmWritebackState::Current,
-            wave_id: crate::id::WaveId::new(),
-            project_id: crate::work::project::ProjectId::new(),
-            worktree: Some("/tmp/task".into()),
-            workspace_slug: "ship-it".to_string(),
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
-        }
-    }
-
-    fn cursor(title: &str, description: &str) -> TaskLinearObservation {
-        let now = time::OffsetDateTime::now_utc();
-        TaskLinearObservation {
-            task_id: TaskId::from_raw("task_plan"),
-            last_revision: "2026-07-15T00:00:00.000Z".to_string(),
-            last_title: title.to_string(),
-            last_description: description.to_string(),
-            last_success_at: now,
-            degraded_reason: None,
-            updated_at: now,
-        }
-    }
-
     #[test]
     fn account_identity_does_not_filter_direction() {
-        for author in ["user-human", VIEWER] {
+        for author in ["person", "publisher"] {
             assert!(is_direction_comment("please fix this", Some(author)));
             assert!(!is_direction_comment("PR: x", Some(author)));
         }
         assert!(!is_direction_comment("bot", None));
-    }
-
-    #[test]
-    fn baseline_emits_no_content_steer_and_keeps_user_comments_as_candidates() {
-        // No cursor yet: a title change must not become a Steer, but user
-        // comments still ride so the store can deliver them.
-        let obs = observation(
-            "New title",
-            "New body",
-            vec![
-                comment("c-1", "please prioritize", Some("user-human")),
-                comment("c-2", "PR: x", Some(VIEWER)),
-            ],
-        );
-        let apply = plan_apply(&task(), obs, time::OffsetDateTime::now_utc(), None);
-        assert!(apply.content_steer.is_none());
-        assert_eq!(apply.follow_ups.len(), 1);
-        assert_eq!(apply.follow_ups[0].comment_id, "c-1");
-    }
-
-    #[test]
-    fn a_content_edit_becomes_one_steer() {
-        let obs = observation("New title", "New body", vec![]);
-        let apply = plan_apply(
-            &task(),
-            obs,
-            time::OffsetDateTime::now_utc(),
-            Some(&cursor("Old title", "Old body")),
-        );
-        let steer = apply.content_steer.expect("Steer for a content edit");
-        assert!(steer.contains("New title"));
-        assert!(steer.contains("New body"));
-    }
-
-    #[test]
-    fn an_unchanged_issue_emits_no_steer() {
-        let obs = observation("Old title", "Old body", vec![]);
-        let apply = plan_apply(
-            &task(),
-            obs,
-            time::OffsetDateTime::now_utc(),
-            Some(&cursor("Old title", "Old body")),
-        );
-        assert!(apply.content_steer.is_none());
     }
 }

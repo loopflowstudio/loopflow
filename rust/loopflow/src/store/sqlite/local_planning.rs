@@ -443,12 +443,23 @@ impl SqliteStore {
         &self,
         task: &crate::durable::TaskId,
     ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
+        self.read_task_comments(task, false)
+    }
+
+    fn read_task_comments(
+        &self,
+        task: &crate::durable::TaskId,
+        pending_only: bool,
+    ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id,body,author,created_at FROM task_comments
-             WHERE task_id=?1 ORDER BY created_at,id",
+            "SELECT c.id,c.body,c.author,c.created_at FROM task_comments c
+             WHERE c.task_id=?1 AND (NOT ?2 OR EXISTS (
+                 SELECT 1 FROM task_comment_deliveries d WHERE d.comment_id=c.id
+                 AND d.acknowledged=0 AND d.conflicting_body IS NULL))
+             ORDER BY c.created_at,c.id",
         )?;
-        let rows = query.query_map([task.as_str()], |row| {
+        let rows = query.query_map(params![task.as_str(), pending_only], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -542,20 +553,7 @@ impl SqliteStore {
         &self,
         task: &crate::durable::TaskId,
     ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
-        let pending = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let mut query = conn.prepare(
-                "SELECT c.id FROM task_comments c JOIN task_comment_deliveries d
-                 ON d.comment_id=c.id WHERE c.task_id=?1 AND d.acknowledged=0 AND d.conflicting_body IS NULL",
-            )?;
-            let rows = query.query_map([task.as_str()], |row| row.get::<_, String>(0))?;
-            rows.collect::<Result<std::collections::HashSet<_>, _>>()?
-        };
-        Ok(self
-            .task_comments(task)?
-            .into_iter()
-            .filter(|comment| pending.contains(&comment.id))
-            .collect())
+        self.read_task_comments(task, true)
     }
 
     pub fn task_comment_conflicts(

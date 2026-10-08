@@ -1,13 +1,11 @@
 mod support;
 
-use loopflow::ops::linear_observe::reconcile_linear_observation;
-use loopflow::pm::IssueObservation;
+use loopflow::pm::{IssueComment, IssueObservation};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 use time::OffsetDateTime;
 
 fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
-    // This fixture applies issue edits and individual comments separately.
     IssueObservation {
         revision: revision.to_string(),
         title: title.to_string(),
@@ -43,11 +41,18 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert_eq!(seeded.last_title, task.task.plan.title);
     assert_eq!(seeded.last_revision, "");
 
+    // Prepare a later explicit return to the original definition before either
+    // write. Ingestion compares with its committed cursor, not a saved proposal.
+    let restored = edit(
+        "2026-07-15T02:00:00.000Z",
+        &task.task.plan.title,
+        &task.task.plan.description,
+    );
+
     // 1. A user edits title + description → one Steer.
     let outcome = rt
-        .block_on(reconcile_linear_observation(
-            &task.store,
-            &task.task,
+        .block_on(task.store.apply_linear_observation(
+            &task.task.id,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
             now,
         ))
@@ -55,10 +60,6 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     assert!(!outcome.baselined);
     assert!(outcome.content_steer_applied);
 
-    let persisted_task = rt
-        .block_on(task.store.get_task(&task.task.id))
-        .expect("read Task")
-        .expect("Task");
     let steers = rt
         .block_on(task.store.task_steers(&task.task.id))
         .expect("Work steers");
@@ -67,34 +68,40 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
 
     // 2. Re-deliver the same edit → no duplicate directive.
     let outcome = rt
-        .block_on(reconcile_linear_observation(
-            &task.store,
-            &persisted_task,
+        .block_on(task.store.apply_linear_observation(
+            &task.task.id,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
             now,
         ))
         .expect("re-deliver");
     assert!(!outcome.content_steer_applied);
 
-    // 3. A user comment → one FIFO Steer; redelivery adds nothing.
-    let created = rt
-        .block_on(task.store.apply_linear_comment(
-            &task.task.id,
-            "c-1".to_string(),
-            "please prioritize".to_string(),
-            now,
-        ))
-        .expect("comment");
-    assert!(created.is_some(), "first delivery creates a follow-up");
-    let duplicate = rt
-        .block_on(task.store.apply_linear_comment(
-            &task.task.id,
-            "c-1".to_string(),
-            "please prioritize".to_string(),
-            now,
-        ))
-        .expect("duplicate comment");
-    assert!(duplicate.is_none(), "redelivery is a no-op");
+    // 3. One observation writes both the visible comment and its FIFO Steer.
+    let mut observation = edit("2026-07-15T01:00:00.000Z", "New title", "New body");
+    observation.comments.push(IssueComment {
+        id: "c-1".into(),
+        revision: Some("2026-07-15T01:00:00.000Z".into()),
+        created_at: None,
+        body: "please prioritize".into(),
+        author_id: Some("person".into()),
+        author_name: Some("Maya".into()),
+    });
+    for expected in [1, 0] {
+        let outcome = rt
+            .block_on(
+                task.store
+                    .apply_linear_observation(&task.task.id, observation.clone(), now),
+            )
+            .expect("comment observation");
+        assert_eq!(outcome.follow_ups_created.len(), expected);
+    }
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let body: String = conn
+        .query_row("SELECT body FROM task_comments WHERE id='c-1'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(body, "please prioritize");
 
     let steers = rt
         .block_on(task.store.task_steers(&task.task.id))
@@ -104,9 +111,8 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
 
     // 4. A stale, out-of-order edit (older revision, older content) is dropped.
     let outcome = rt
-        .block_on(reconcile_linear_observation(
-            &task.store,
-            &persisted_task,
+        .block_on(task.store.apply_linear_observation(
+            &task.task.id,
             edit(
                 "2026-07-15T00:30:00.000Z",
                 &task.task.plan.title,
@@ -125,4 +131,14 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
         .expect("cursor exists");
     assert_eq!(cursor.last_title, "New title");
     assert_eq!(cursor.last_revision, "2026-07-15T01:00:00.000Z");
+    let outcome = rt
+        .block_on(
+            task.store
+                .apply_linear_observation(&task.task.id, restored, now),
+        )
+        .expect("explicit return to the original definition");
+    assert!(outcome.content_steer_applied);
+    let steers = rt.block_on(task.store.task_steers(&task.task.id)).unwrap();
+    assert_eq!(steers.len(), 3);
+    assert!(steers[2].text.contains(&task.task.plan.title));
 }

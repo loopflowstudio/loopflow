@@ -20,9 +20,9 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
-    CiObservation, GithubObservation, GithubPr, LinearObservationApply, LinearObservationOutcome,
-    PmWritebackState, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
+    CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, PmWritebackState,
+    PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
+    TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
 use super::durable::{inherit_project_placement, inherit_task_placement};
@@ -652,7 +652,9 @@ impl SqliteStore {
     /// Issue revisions guard definition changes independently of comments.
     pub fn apply_linear_observation(
         &self,
-        apply: &LinearObservationApply,
+        task_id: &TaskId,
+        observation: &crate::pm::IssueObservation,
+        observed_at: OffsetDateTime,
     ) -> StoreResult<LinearObservationOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -661,7 +663,7 @@ impl SqliteStore {
             .query_row(
                 "SELECT last_revision, last_title, last_description
                  FROM task_linear_observations WHERE task_id=?1",
-                params![apply.task_id.as_str()],
+                params![task_id.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -672,18 +674,31 @@ impl SqliteStore {
             )
             .optional()?;
 
-        for comment in &apply.comments {
-            super::local_planning::ingest_task_comment(&transaction, &apply.task_id, comment)?;
-        }
-
-        let observed_at = apply.observed_at.unix_timestamp();
+        let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
-        for follow_up in &apply.follow_ups {
+        for comment in &observation.comments {
+            super::local_planning::ingest_task_comment(&transaction, task_id, comment)?;
+            if !crate::ops::linear_observe::is_direction_comment(
+                &comment.body,
+                comment.author_id.as_deref(),
+            ) {
+                continue;
+            }
+            let comment_id = crate::ops::linear_observe::comment_revision_id(
+                &comment.id,
+                comment.revision.as_deref(),
+            );
+            let text = crate::ops::linear_observe::render_comment(
+                &comment.id,
+                &comment.body,
+                comment.author_id.as_deref(),
+                comment.author_name.as_deref(),
+            );
             if let Some(id) = ingest_linear_comment(
                 &transaction,
-                apply.task_id.as_str(),
-                &follow_up.comment_id,
-                &follow_up.text,
+                task_id.as_str(),
+                &comment_id,
+                &text,
                 observed_at,
             )? {
                 follow_ups_created.push(id);
@@ -698,10 +713,10 @@ impl SqliteStore {
                     last_success_at, degraded_reason, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?5)",
                 params![
-                    apply.task_id.as_str(),
-                    apply.revision,
-                    apply.title,
-                    apply.description,
+                    task_id.as_str(),
+                    observation.revision,
+                    observation.title,
+                    observation.description,
                     observed_at,
                 ],
             )?;
@@ -715,7 +730,7 @@ impl SqliteStore {
 
         // Monotonic guard: an out-of-order response older than what we have
         // carries stale content, so drop it rather than let it revert direction.
-        if apply.revision.as_str() < last_revision.as_str() {
+        if observation.revision.as_str() < last_revision.as_str() {
             transaction.commit()?;
             return Ok(LinearObservationOutcome {
                 baselined: false,
@@ -724,12 +739,15 @@ impl SqliteStore {
             });
         }
 
-        let mut content_steer_applied = false;
-        if let Some(text) = &apply.content_steer {
-            if last_title != apply.title || last_description != apply.description {
-                Self::append_task_steer_in(&transaction, &apply.task_id, &Author::User, text)?;
-                content_steer_applied = true;
-            }
+        let content_steer_applied =
+            last_title != observation.title || last_description != observation.description;
+        if content_steer_applied {
+            let text = format!(
+                "The linked Linear task was edited; use this current definition.\n\n\
+                 Title: {}\n\n{}",
+                observation.title, observation.description,
+            );
+            Self::append_task_steer_in(&transaction, task_id, &Author::User, &text)?;
         }
 
         transaction.execute(
@@ -738,10 +756,10 @@ impl SqliteStore {
                  last_success_at=?5, degraded_reason=NULL, updated_at=?5
              WHERE task_id=?1",
             params![
-                apply.task_id.as_str(),
-                apply.revision,
-                apply.title,
-                apply.description,
+                task_id.as_str(),
+                observation.revision,
+                observation.title,
+                observation.description,
                 observed_at,
             ],
         )?;
@@ -751,43 +769,6 @@ impl SqliteStore {
             content_steer_applied,
             follow_ups_created,
         })
-    }
-
-    /// Persist one participant-authored Linear comment as a FIFO Task Steer, exactly once.
-    /// Webhook comments arrive one at a time (unlike the snapshot edit path), and
-    /// Linear delivers at-least-once — so the `task_linear_ingested_comments`
-    /// ledger is the guard: the Steer is created only on the comment id's first
-    /// insertion. Returns the created Steer id, or `None` for a
-    /// duplicate delivery.
-    pub fn apply_linear_comment(
-        &self,
-        task_id: &TaskId,
-        comment_id: &str,
-        text: &str,
-        observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<i64>> {
-        let observed_at = observed_at.unix_timestamp();
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let created = ingest_linear_comment(
-            &transaction,
-            task_id.as_str(),
-            comment_id,
-            text,
-            observed_at,
-        )?;
-        if created.is_some() {
-            // Best-effort freshness for status; a Task missing its seed row
-            // (legacy) simply has nothing to update.
-            transaction.execute(
-                "UPDATE task_linear_observations
-                 SET last_success_at=?2, degraded_reason=NULL, updated_at=?2
-                 WHERE task_id=?1",
-                params![task_id.as_str(), observed_at],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(created)
     }
 
     /// Record that the latest observation failed, without moving the cursor. A
@@ -1286,11 +1267,8 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
 }
 
 /// Seed the Linear observation cursor from the planning directive, in the Task's
-/// creation transaction. Webhooks only fire for changes *after* subscription, so
-/// there is no cursor to build lazily on a first poll — seeding here means the
-/// first issue-edit webhook diffs against the directive title/description instead of
-/// baselining (and swallowing) it. The revision seeds empty so any real Linear
-/// `updatedAt` wins the monotonic guard.
+/// creation transaction, so the first observed edit becomes direction rather than
+/// a baseline. The empty revision lets any Linear `updatedAt` advance the cursor.
 fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO task_linear_observations (
@@ -1381,9 +1359,8 @@ const TASK_PR_SELECT: &str = "SELECT
     FROM task_prs WHERE id=?1";
 /// Persist one Linear comment as a Steer exactly once. The insert
 /// into `task_linear_ingested_comments` is the guard — the command is written
-/// only when the comment id is new to the ledger, so a redelivered webhook or an
-/// overlapping catch-up read cannot double-deliver. Shared by the snapshot apply
-/// loop and the single-comment webhook path.
+/// only when the comment revision is new to the ledger. Overlapping observations
+/// cannot deliver it twice, and a local comment echo adds no direction.
 fn ingest_linear_comment(
     conn: &rusqlite::Transaction<'_>,
     task_id: &str,

@@ -376,3 +376,22 @@ CREATE TRIGGER store_revision_task_state_deliveries_update AFTER UPDATE ON task_
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_task_state_deliveries_delete AFTER DELETE ON task_state_deliveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- Project edits and their delivery evidence commit together, including before mapping.
+CREATE TABLE project_changes (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    field TEXT NOT NULL CHECK(field IN ('name','summary','workflow','krs','metric_targets')),
+    value_json TEXT NOT NULL CHECK(json_valid(value_json)),
+    base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
+    conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
+    acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1))
+);
+CREATE INDEX idx_project_changes_pending ON project_changes(project_id,field,seq);
+CREATE TRIGGER store_revision_project_changes_insert AFTER INSERT ON project_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_project_changes_update AFTER UPDATE ON project_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_project_changes_delete AFTER DELETE ON project_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

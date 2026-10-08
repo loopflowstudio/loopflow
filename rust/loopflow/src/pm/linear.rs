@@ -1204,29 +1204,6 @@ impl LinearClient {
         Ok(())
     }
 
-    pub async fn edit_project(
-        &self,
-        id: &str,
-        name: Option<&str>,
-        summary: Option<&str>,
-    ) -> PmResult<()> {
-        let mut input = serde_json::Map::new();
-        if let Some(name) = name {
-            input.insert("name".into(), json!(name));
-        }
-        if let Some(summary) = summary {
-            input.insert("description".into(), json!(summary));
-        }
-        let result: Value = self.graphql("mutation EditProject($id:String!,$input:ProjectUpdateInput!){projectUpdate(id:$id,input:$input){success}}",
-            json!({"id":id,"input":input})).await?;
-        if result["projectUpdate"]["success"] != true {
-            return Err(PmError::Message(
-                "Linear did not confirm Project edit".into(),
-            ));
-        }
-        Ok(())
-    }
-
     pub async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(

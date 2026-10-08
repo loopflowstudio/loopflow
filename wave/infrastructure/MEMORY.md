@@ -56,14 +56,19 @@ are deleted. One SQLite admission reader preserves state/completion, removal,
 invalidation and Project/Team mismatch evidence; no observation moves Workflow or
 cleans checkouts. Known issue changes remain invalid even without inventory rows.
 Cancellation preserves Wave/checkout locks and winning PR/path. `7fb5a5f1b`
-commits shared Project/workflow storage. October 8's CLI/Desktop reader uses saved
+commits shared Project/workflow storage. `459331192` commits the CLI/Desktop reader using saved
 planning independently of Workflow and inventory. Pending decisions survive inbound
 completion and late acknowledgements; unrelated fields advance. Generated Project
 prompt text lost KRs/targets under the editable parser; ingestion and the draft now
-retain editable content. Conversion, saved-field, public Flow and offline Desktop
-proofs establish local preservation only. Wave definitions, creation/edit, membership
+retain editable content. Wave definitions, creation/edit, membership
 and rotation still prevent the LOO-412 writer boundary. Composed reconnect/public
 resolution remain unproved; outbound reopening still fails.
+`c3e527a93` commits saved Project selection. Project edits/Workflow selection now
+save atomically with field receipts before mapping; inbound conflicts and pending
+values survive refresh/readback. Delivery,
+resolution and Desktop pending display remain. Task creation/edit, membership,
+rotation, deletion/refiling and Wave definitions still block LOO-412's writer boundary.
+Project updates also lack an exposed revision precondition. One draft targets v0.13.10; installation is unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -519,53 +524,24 @@ unproved. Desktop activation
 must preserve #1447's cached plans and independent Session reads, outside polling.
 #1446's ongoing procedures retain started-Task follow-through; reads never provision.
 
-Input replacement exposed two admission gaps on October 5: generic `cwd` updates
-removed unbound Task membership, and a Session elsewhere could replace input while
-its bound Task checkout was excluded. Source retains the stored workspace and locks
-its Flow workspace and bound Task root too. Exclusion/retry regressions pass. CI
-repair acquires its explicit Task root at its outer boundary, without reacquiring
-inside reservation; its operation-entry proof remains open. Task-bound Flow cwd
-already derives from the Task, so claims and review reservation need no second
-path owner. The later rotation proof below establishes exclusion and failed-reset
-retry; configured readiness remains unproved.
+October 5 admission, registration and rotation evidence is preserved at
+`fc0bb97f7e8e0ad3f9520daf12e7e76b2e4f2ee1:wave/infrastructure/MEMORY.md`
+under this heading. LOO-406 deleted the obsolete registration writers; their
+historical proofs are not the common-writer acceptance. Retain stored workspace
+membership, Task/PR identity, unset Started and issue-reported ownership. Ordered
+Wave and checkout locks survive queued writes and caller cancellation; Git leases
+remain separate. Unreviewed backlog is never automatically canceled.
+CI-repair entry, public crash/retry and configured readiness remain unproved.
 
-Collection preserves issue-reported ownership; listing Project IDs cannot override
-it. October 5’s failing loopback regression prompted removal; installed acceptance
-remains unproved.
+Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` authorizes
+Intelligence repair of Project `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`, preserving
+KRs, Tasks and identity without competing creation or repository rotation. That
+exact ID supplies selection; active-Project adoption proves no Backlog activation
+or installed repair.
 
-Jack Heart's October 5 comment `e4dafef5-2a87-4359-818a-3770356ba850` requests
-autonomous Intelligence repair without another review Session. The reported
-Backlog/empty-Flow Project is `999bdbdd-c045-41a6-8ffc-a97c4a40b0b3`; preserve its
-KRs, Tasks and identity, with no competing creation or repository rotation.
-This explicit ID supplies bootstrap selection, not a candidate heuristic.
-The active-Project adoption test proves no Backlog activation or installed repair.
-
-Registration now takes the Wave guard before Project resolution and retains it
-through either SQLite registration commit, including caller cancellation, then
-releases it before checkout setup and execution. Admission uses exclusive canonical
-workspace/Task roots and shared ancestors, covering future missing roots without
-a population scan while siblings progress independently. Both APIs preserve unbound
-conversations, Task/PR atomicity and unset Started. The rejected Home-wide guard
-remains at `2d96630b3:wave/infrastructure/MEMORY.md`; both missing-root failures
-remain at `be36cde18:wave/infrastructure/MEMORY.md`. Git leases remain separate.
-
-Both registration APIs share one insertion transaction and return its committed
-Task for publication, checkout setup and execution. Accepted issue facts retain
-age and reserved placement; uncached initial facts remain usable. One store and
-resolved Wave serve selection and insertion.
-
-Rotation now gathers exact Task roots under ordered Wave locks and acquires one
-checkout lock set. Queued planning writers retain both scopes after cancellation;
-a caller-owned lock alone would release exclusion before a queued commit. Automatic
-backlog cancellation and its standalone retirement writer are deleted. Unreviewed
-backlog stays with its Project; unresolved abandonment keeps its separate settlement.
-
-The October 5 file-binding implementation is superseded by the October 6
-SQLite decision below. Its exact preservation evidence and unresolved output-handle
-leak remain at `42e6c2706b1b35b2852e438ff94a49d060faccda:scratch/keep-every-wave-ready-for.md`.
-
-Ensure’s initial operation fixtures seed post-binding recovery, not a crash. Evidence:
-`57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:scratch/keep-every-wave-ready-for.md`.
+The archived file-binding design is superseded by SQLite selection below.
+Its output-handle leak remains unresolved; seeded ensure recovery proves no crash
+recovery. Exact evidence remains in the preserved October 5 notes above.
 
 October 5 rotation retains exact-ID input, selected issue membership and settled
 history. Whole-input preflight includes accepted facts and legacy conversion;

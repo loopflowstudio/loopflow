@@ -523,7 +523,7 @@ pub async fn edit(
     selector: &str,
     name: Option<&str>,
     summary: Option<&str>,
-) -> OpsResult<()> {
+) -> OpsResult<ProjectPlanning> {
     if name.is_none() && summary.is_none() {
         return Err(project_error("project edit requires --name or --summary"));
     }
@@ -537,50 +537,12 @@ pub async fn edit(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project Wave is unavailable"))?;
-    let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    if store
+    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    store
         .sqlite
-        .project_planning_authority(&project.id)
-        .map_err(project_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        return store
-            .sqlite
-            .edit_local_project(&project.id, name, summary)
-            .map_err(project_error);
-    }
-    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-    let id = project.plan.linear_id()?.as_str();
-    let current = require_project(&ctx, id).await?;
-    accept_project(
-        &store,
-        &wave,
-        &ctx,
-        current,
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-        &acquisition,
-    )
-    .await?;
-    ctx.client
-        .edit_project(id, name, summary)
-        .await
+        .edit_project(&project.id, name, summary)
         .map_err(project_error)?;
-    let edited = require_project(&ctx, id).await?;
-    if name.is_some_and(|name| name != edited.name)
-        || summary.is_some_and(|summary| summary != edited.summary)
-    {
-        return Err(project_error("Project edit was sent but readback differs; inspect its current values before retrying"));
-    }
-    accept_project(
-        &store,
-        &wave,
-        &ctx,
-        edited,
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-        &acquisition,
-    )
-    .await?;
-    Ok(())
+    planning(&store, &project, repo)
 }
 
 pub async fn workflow(
@@ -588,7 +550,7 @@ pub async fn workflow(
     selector: &str,
     selection: Option<&str>,
     file: Option<&Path>,
-) -> OpsResult<PmProject> {
+) -> OpsResult<ProjectPlanning> {
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
     let wave = store
@@ -612,59 +574,41 @@ pub async fn workflow(
         }
         None => None,
     };
-    let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let mut current = store
-        .sqlite
-        .planning_project(&project.id)
-        .map_err(project_error)?;
+    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     if let Some(name) = selection {
-        if let Some(id) = &project.plan.linear_id {
-            super::pm::require_planning_home(&store, &wave).await?;
-            let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-            let provider = require_project(&ctx, id.as_str()).await?;
-            let content = ProjectContent {
-                workflow: name.into(),
-                krs: provider.krs,
-                metric_targets: provider.metric_targets,
-            };
-            ctx.client
-                .update_project(id.as_str(), &provider.name, &content)
-                .await
-                .map_err(project_error)?;
-            super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition.clone())
-                .await?;
-            current = store
-                .sqlite
-                .planning_project(&project.id)
-                .map_err(project_error)?;
-            if current.workflow != name {
-                return Err(project_error("Workflow selection was sent but readback differs; inspect the Project before retrying"));
-            }
-        }
         store
             .sqlite
-            .update_project_content(
+            .select_project_workflow(
                 &project.id,
-                &ProjectContent {
-                    workflow: name.into(),
-                    krs: current.krs.clone(),
-                    metric_targets: current.metric_targets.clone(),
-                },
-                definition.as_deref(),
+                name,
+                definition.as_deref().expect("selected Workflow is parsed"),
             )
             .map_err(project_error)?;
-        current.workflow = name.into();
     }
-    if let Some(id) = &project.plan.linear_id {
-        return store
-            .sqlite
-            .accepted_projects(wave.id())
-            .map_err(project_error)?
-            .into_iter()
-            .find(|project| project.id == id.as_str())
-            .ok_or_else(|| project_error("Project planning is unavailable; sync its Wave"));
-    }
-    Ok(current)
+    planning(&store, &project, repo)
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ProjectPlanning {
+    #[serde(flatten)]
+    pub project: PmProject,
+    pub sync_enabled: bool,
+    pub pending_changes: Vec<crate::store::sqlite::ProjectChange>,
+}
+
+fn planning(store: &Store, project: &Project, repo: &Path) -> OpsResult<ProjectPlanning> {
+    let (project, pending_changes) = store
+        .sqlite
+        .project_with_changes(&project.id)
+        .map_err(project_error)?;
+    Ok(ProjectPlanning {
+        project,
+        sync_enabled: crate::engine::config::load_config_or_default(Some(repo))
+            .pm
+            .and_then(|pm| pm.linear_team)
+            .is_some(),
+        pending_changes,
+    })
 }
 
 pub(crate) fn load_workflow(

@@ -926,32 +926,3 @@ async fn wave_rotation_uses_its_entry_when_an_unselected_plan_is_invalid() {
         .await;
     server.abort();
 }
-
-#[tokio::test]
-async fn changing_the_workflow_keeps_the_projects_krs() {
-    let directory = tempfile::tempdir().unwrap();
-    let repo = fixture_repo(directory.path());
-    let provider = Arc::new(Mutex::new(provider_fixture()));
-    let (url, server) = serve_fixture(provider.clone()).await;
-    let context = context(&directory.path().join("registry.db"), &repo, &url).await;
-    PM_TEST_CONTEXT
-        .scope(copy_context(&context), async {
-            let selected = plan(&context, &repo, &["a"]).await;
-            let result = crate::ops::project::workflow(&repo, old_id("a"), Some("research"), None)
-                .await
-                .unwrap();
-            assert_eq!(result.workflow, "research");
-            assert_eq!(selected.waves.len(), 1);
-        })
-        .await;
-    let state = provider.lock().await;
-    let content = state.projects[old_id("a")]["content"].as_str().unwrap();
-    let plan = crate::pm::parse_project_content(content).unwrap();
-    assert_eq!(plan.workflow, "research");
-    assert_eq!(plan.krs[0].text, "Retain proof");
-    assert!(state.projects[old_id("b")]["content"]
-        .as_str()
-        .unwrap()
-        .contains("workflow: feature"));
-    server.abort();
-}

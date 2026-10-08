@@ -1061,3 +1061,173 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         std::fs::remove_dir_all(worktree).unwrap();
     }
 }
+
+#[test]
+fn project_edits_save_offline_in_both_connection_modes() {
+    for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "pm:\n  linear_team: fixture-team\n",
+            )
+            .unwrap();
+        }
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let wave = loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "product".into(),
+            canonical.to_string(),
+        );
+        store.create_wave(&wave).unwrap();
+        let project = loopflow::pm::PmProject {
+            id: "provider-project".into(),
+            revision: Some("2026-10-08T10:00:00Z".into()),
+            slug: "original".into(),
+            name: "Original".into(),
+            summary: "Original summary".into(),
+            workflow: "feature".into(),
+            status: loopflow::pm::ProjectStatus::Started,
+            krs: vec![loopflow::pm::PmKr {
+                text: "Retain the proof".into(),
+                holds: false,
+            }],
+            metric_targets: Vec::new(),
+            initiative_ids: vec!["initiative".into()],
+            team_ids: vec!["fixture-team".into()],
+        };
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &project, 17)
+            .unwrap();
+        let id = store.list_projects(Some(wave.id())).unwrap()[0].id.clone();
+        if !mapped {
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute(
+                    "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                    [id.as_str()],
+                )
+                .unwrap();
+        }
+        // Both repositories use an ordinary Wave, with optional mapping and no credentials.
+        let source = home.path().join("workflow.yaml");
+        std::fs::write(&source, "nodes: {}\nedges: [{from: start, to: end}]\n").unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "project",
+                "edit",
+                id.as_str(),
+                "--name",
+                "Saved",
+                "--summary",
+                "",
+            ],
+        );
+        let output = command(
+            repo.path(),
+            home.path(),
+            &[
+                "project",
+                "workflow",
+                "set",
+                id.as_str(),
+                "review",
+                "--file",
+                source.to_str().unwrap(),
+            ],
+        )
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            connected
+        );
+        let saved = lf(
+            repo.path(),
+            home.path(),
+            &["project", "workflow", "show", id.as_str(), "--json"],
+        );
+        assert_eq!(saved["name"], "Saved");
+        assert_eq!(saved["summary"], "");
+        assert_eq!(saved["workflow"], "review");
+        assert_eq!(saved["krs"][0]["text"], "Retain the proof");
+        assert_eq!(saved["sync_enabled"], connected);
+        assert_eq!(saved["pending_changes"].as_array().unwrap().len(), 3);
+        let changes = saved["pending_changes"].clone();
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "project",
+                "edit",
+                id.as_str(),
+                "--name",
+                "Saved",
+                "--summary",
+                "",
+            ],
+        );
+        // Repeated commands and reopened stores retain the original delivery identities.
+        drop(store);
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert_eq!(
+            serde_json::to_value(store.pending_project_changes(&id).unwrap()).unwrap(),
+            changes
+        );
+        if !mapped {
+            assert!(store.list_tasks(None).unwrap().is_empty());
+            assert!(!repo.path().join("wave").exists());
+            assert!(!repo.path().join(".lf/workflows").exists());
+            continue;
+        }
+        let mut incoming = project.clone();
+        incoming.name = "Remote name".into();
+        incoming.workflow = "research".into();
+        incoming.revision = Some("2026-10-08T11:00:00Z".into());
+        incoming.krs[0].holds = true;
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &incoming, 18)
+            .unwrap();
+        let read = lf(
+            repo.path(),
+            home.path(),
+            &["project", "workflow", "show", id.as_str(), "--json"],
+        );
+        assert_eq!(read["name"], "Saved");
+        assert_eq!(read["workflow"], "review");
+        assert_eq!(read["krs"][0]["holds"], true);
+        assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
+        let pending = read["pending_changes"].as_array().unwrap();
+        assert_eq!(pending[0]["id"], changes[0]["id"]);
+        assert_eq!(pending[0]["conflict"]["value"], "Remote name");
+        assert_eq!(pending[2]["conflict"]["value"], "research");
+        // Matching readback cannot erase an earlier conflict or acknowledge our unsent edit.
+        incoming.name = "Saved".into();
+        incoming.workflow = "review".into();
+        incoming.revision = Some("2026-10-08T12:00:00Z".into());
+        store
+            .put_pm_project(wave.id(), "linear", "initiative", &incoming, 19)
+            .unwrap();
+        let read = lf(
+            repo.path(),
+            home.path(),
+            &["project", "workflow", "show", id.as_str(), "--json"],
+        );
+        assert_eq!(read["pending_changes"], Value::Array(pending.clone()));
+        assert!(store.list_tasks(None).unwrap().is_empty());
+        assert!(!repo.path().join("wave").exists());
+        assert!(!repo.path().join(".lf/workflows").exists());
+    }
+}

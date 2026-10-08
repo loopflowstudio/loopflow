@@ -1821,12 +1821,13 @@ fn execute_command(
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-            tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
+            let saved = tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
                 &repo,
                 project,
                 name.as_deref(),
                 summary.as_deref(),
             ))?;
+            print_project_sync(&saved);
             Ok(())
         }
         Some(Commands::Project {
@@ -1868,7 +1869,11 @@ fn execute_command(
                     if *json {
                         println!("{}", serde_json::to_string_pretty(&selected)?);
                     } else {
-                        println!("{} · Workflow {}", selected.name, selected.workflow);
+                        println!(
+                            "{} · Workflow {}",
+                            selected.project.name, selected.project.workflow
+                        );
+                        print_project_sync(&selected);
                     }
                     Ok(())
                 }
@@ -1877,13 +1882,16 @@ fn execute_command(
                     name,
                     file,
                 } => with_runtime(&repo, args, || {
-                    tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::workflow(
-                        &repo,
-                        project,
-                        Some(name),
-                        file.as_deref(),
-                    ))?;
+                    let saved = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow(
+                            &repo,
+                            project,
+                            Some(name),
+                            file.as_deref(),
+                        ),
+                    )?;
                     println!("Project {project}: Workflow {name}");
+                    print_project_sync(&saved);
                     Ok(())
                 }),
             }
@@ -1977,6 +1985,20 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
         }
     }
     result
+}
+
+fn print_project_sync(saved: &loopflow::ops::project::ProjectPlanning) {
+    if saved.sync_enabled && !saved.pending_changes.is_empty() {
+        let conflicts = saved
+            .pending_changes
+            .iter()
+            .filter(|change| change.conflict.is_some())
+            .count();
+        eprintln!(
+            "Saved locally; pending Linear sync ({} fields, {conflicts} conflicts).",
+            saved.pending_changes.len()
+        );
+    }
 }
 
 #[cfg(test)]

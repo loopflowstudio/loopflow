@@ -75,7 +75,6 @@ impl PlanningEnvironment {
 #[derive(Default)]
 struct PlanningState {
     issues: Vec<serde_json::Value>,
-    project_edit: Option<serde_json::Value>,
     extra_projects: Vec<serde_json::Value>,
     fail_confirmation: bool,
     fail_snapshot: bool,
@@ -138,10 +137,7 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| initial_project_id.clone());
-    let project = state
-        .project_edit
-        .clone()
-        .unwrap_or_else(|| planning_project(&project_id, &project_id));
+    let project = planning_project(&project_id, &project_id);
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
@@ -184,18 +180,10 @@ async fn planning_graphql(
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query FindProject") {
-        let owned = state
-            .project_edit
-            .clone()
-            .filter(|p| p["id"] == vars["id"])
-            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap(), &project_id));
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"projects":page(vec![owned])})
     } else if query.contains("query ProjectOwnership") {
-        let owned = state
-            .project_edit
-            .clone()
-            .filter(|p| p["id"] == vars["id"])
-            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap(), &project_id));
+        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
         if let Some(remaining) = state.fail_issue_read_after.as_mut() {
@@ -297,29 +285,6 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
         json!({"commentCreate":{"comment":{"id":id}}})
-    } else if query.contains("mutation UpdateProject") {
-        let mut project = project;
-        project["name"] = vars["name"].clone();
-        project["description"] = vars["description"].clone();
-        project["content"] = vars["content"].clone();
-        project["updatedAt"] = json!(time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap());
-        state.project_edit = Some(project);
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation EditProject") {
-        let mut project = project;
-        if let Some(name) = vars["input"].get("name") {
-            project["name"] = name.clone();
-        }
-        if let Some(summary) = vars["input"].get("description") {
-            project["description"] = summary.clone();
-        }
-        project["updatedAt"] = json!(time::OffsetDateTime::now_utc()
-            .format(&time::format_description::well_known::Rfc3339)
-            .unwrap());
-        state.project_edit = Some(project);
-        json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation UpdateIssue") {
         let issue = state
             .issues
@@ -358,24 +323,22 @@ async fn planning_graphql(
 }
 
 #[tokio::test]
-async fn connected_project_workflow_uses_stored_definition_and_keeps_provider_fields() {
+async fn project_workflow_uses_stored_definition_offline() {
     let fixture = Fixture::new().await;
-    fixture.seed(now() + 86_400).await;
     let (repo, wave) = planning_repo(&fixture).await;
-    let (url, server) = serve(Arc::new(tokio::sync::Mutex::new(PlanningState::default()))).await;
     let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
     let source = repo.join("workflow.yaml");
     std::fs::write(&source, definition).unwrap();
     PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
+        .scope(fixture.context("http://127.0.0.1:1"), async {
             let selected =
                 crate::ops::project::workflow(&repo, "project-1", Some("code"), Some(&source))
                     .await
                     .unwrap();
-            assert_eq!(selected.workflow, "code");
-            assert_eq!(selected.id, "project-1");
-            assert_eq!(selected.initiative_ids, ["initiative-1"]);
-            assert_eq!(selected.team_ids, ["team-1"]);
+            assert_eq!(selected.project.workflow, "code");
+            assert_eq!(selected.project.id, "project-1");
+            assert_eq!(selected.project.initiative_ids, ["initiative-1"]);
+            assert_eq!(selected.project.team_ids, ["team-1"]);
             std::fs::remove_file(&source).unwrap();
             assert_eq!(
                 crate::ops::project::workflow_source(&repo, "project-1", "code")
@@ -406,7 +369,6 @@ async fn connected_project_workflow_uses_stored_definition_and_keeps_provider_fi
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
-    server.abort();
 }
 
 #[tokio::test]

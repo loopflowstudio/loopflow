@@ -173,24 +173,6 @@ pub struct ProjectActivation {
 }
 
 impl SqliteStore {
-    /// Partial ingestion can confirm one Project before a full inventory exists.
-    pub(crate) fn accepted_projects(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Vec<crate::pm::PmProject>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT f.body FROM projects p JOIN waves w ON w.id=p.wave_id
-            JOIN pm_projects f ON f.repo=w.repo AND f.provider='linear' AND f.id=p.external_project_id
-            JOIN pm_wave_projects m ON m.wave_id=w.id AND m.project_id=f.id
-            LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
-            WHERE w.id=?1 AND f.archived=0 AND f.membership_unresolved=0
-              AND p.pm_snapshot_synced_at=f.observed_at
-              AND (s.wave_id IS NULL OR EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative))
-            ORDER BY m.position,f.id")?;
-        let rows = query.query_map([wave], |row| row.get::<_, String>(0))?;
-        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
-    }
-
     pub(crate) fn selected_planning_project(
         &self,
         wave: &WaveId,

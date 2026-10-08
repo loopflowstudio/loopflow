@@ -4338,6 +4338,13 @@ mod tests {
         conn.execute_batch(&current_draft_sql("local_planning"))
             .unwrap();
         validate_foreign_keys(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM project_changes", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+
         let fields: serde_json::Value = conn.query_row("SELECT json_object('state',planning_state,'completed',planning_completed,
             'completed_at',planning_completed_at,'revision',planning_provider_revision,'url',planning_url,
             'branch_name',planning_branch_name,'team_id',planning_team_id,'assignee',planning_assignee,'rank',planning_rank)

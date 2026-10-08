@@ -525,6 +525,7 @@ fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
+        let project = super::project_content::retain_edits(tx, &id, &project)?;
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
              project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)

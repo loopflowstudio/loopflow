@@ -77,11 +77,17 @@ A mixed Local/Linear rotation retains each authority's recovery records; a SQLit
 transaction cannot make the external provider effects atomic.
 
 LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished. Creation, edits,
+optional Linear synchronization. That cutover remains unfinished. Task creation/edits, Wave
 definitions and rotation retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
-Project content and stored Wave workflows share `sqlite/project_content.rs`;
-comments use `sqlite/task_comments.rs`. `sqlite/plan_read.rs` supplies registered Task status
+Project names, summaries, content and stored Wave workflows use
+`sqlite/project_content.rs` in both connection modes. Edits and per-field delivery
+receipts commit together, including before a provider mapping exists. Inbound
+acquisition preserves pending fields and their first conflicting provider value;
+unrelated fields advance. Neither matching readback nor a provider timestamp
+acknowledges an unsent change. Workflow selection reads KRs and targets inside the
+write transaction. The CLI exposes pending fields/conflicts; Project delivery and
+Desktop pending presentation remain unfinished. Comments use `sqlite/task_comments.rs`. `sqlite/plan_read.rs` supplies registered Task status
 and Wave/Desktop planning from saved Task and Project rows. Reads preserve state,
 completion time, ordering, assignee, provider metadata and observation age separately
 from Workflow position. Missing provider inventory cannot erase saved planning;

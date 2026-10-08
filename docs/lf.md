@@ -178,6 +178,12 @@ lf project workflow list --project <project-id> --json
 lf project workflow source <project-id> review
 ```
 
+Project names, summaries and Workflow selections save locally, including during a
+Linear outage. Connected repositories report pending sync; `lf project workflow
+show <project-id> --json` includes saved field changes and retained conflicts.
+Inbound refreshes preserve pending fields and accept unrelated changes. Project
+edit delivery remains unfinished while provider concurrency protection is unresolved.
+
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
 definitions override repository and builtin sources with the same name. Nested

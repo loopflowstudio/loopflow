@@ -46,28 +46,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn edit_local_project(
-        &self,
-        id: &ProjectId,
-        name: Option<&str>,
-        summary: Option<&str>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if project_authority_on(&tx, id)? != PlanningAuthority::Local {
-            return Err(StoreError::InvalidAuthority(
-                "Project belongs to Linear".into(),
-            ));
-        }
-        tx.execute(
-            "UPDATE projects SET project_name=COALESCE(?2,project_name),
-            project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
-            params![id.as_str(), name, summary, now_unix()],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn refile_unplaced_task(
         &self,
         task: &crate::durable::TaskId,

@@ -33,6 +33,7 @@ mod pr_landings;
 mod processes;
 mod program_status;
 mod project_content;
+pub use project_content::ProjectChange;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;

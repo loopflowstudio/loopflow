@@ -71,15 +71,16 @@ and landing. Transfer over stdin only to added machines. Preserve received login
 across registration failure; remote preferences cannot relax selected identity.
 Retain the encryption key atomically in a private file. An unreadable Keychain
 permits a new key only without existing encrypted tokens.
-Jack requested sync to main and republication of #1493 for review. Reuse argument reordering
-before remote account selection: flags after a skill otherwise bypass the
-restriction. Preserve `--` prompt literals and target-owned command resolution.
-Broker, lent routes, secret forwarding and route-source metadata are deleted.
-The parent's website assertions still required the retired catalog/provenance;
-the resident-login guide owns their replacement. Check inherited tests when
-deleting a mechanism. Focused passes retain an unresolved output-handle leak.
-Independent refresh chains, one-approval login, rebooted Mac
-access and installed acceptance remain unproved; fixtures cannot establish them.
+Jack requested republication of #1493 after main sync. Sync is integrated.
+Reorder arguments before account selection: after-skill
+flags otherwise bypass restriction. Preserve `--` literals and target-owned
+resolution. Broker, lent routes, secret forwarding, route-source metadata and the
+optional token resolver are deleted. Linear uses one required-token path, preserving
+refresh races, deletion and rollback. Check inherited consumers; website assertions
+now cover resident logins. Focused assertions pass; gate/CI owns an output-handle
+leak. Release's bounded-cleanup lesson applies, not its Swift diagnosis.
+Independent refresh chains, one-approval login, rebooted Mac access and installed
+acceptance remain unproved.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 

@@ -73,7 +73,7 @@ pub(super) fn process_lfids(selector: &str) -> String {
 pub(super) fn flows_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::ops::flow_run::FlowProcess>> {
+) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
     super::flow_inventory::flows_in(
         conn,
         &format!("e.lfid IN ({})", process_lfids("?1")),
@@ -375,7 +375,10 @@ pub(crate) struct OpenProcesses {
 fn members(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-) -> StoreResult<(Vec<TaskSession>, Vec<crate::durable::FlowInventoryEntry>)> {
+) -> StoreResult<(
+    Vec<TaskSession>,
+    Vec<crate::durable::FlowProcessInventoryEntry>,
+)> {
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
@@ -388,7 +391,7 @@ fn members(
                 id: row.get(0)?,
                 title: row.get(1)?,
                 interactive: row.get(2)?,
-                flow_id: row.get(3)?,
+                flow_process_lfid: row.get(3)?,
                 completed_at: row.get(4)?,
             })
         })?
@@ -435,7 +438,7 @@ impl SqliteStore {
         let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
             sessions,
-            flows,
+            flow_processes: flows,
             processes,
             workflow,
         })
@@ -489,7 +492,7 @@ impl SqliteStore {
         Ok(TaskWork {
             workflow,
             sessions,
-            flows,
+            flow_processes: flows,
             processes: open.by_task.get(task.as_str()).cloned().unwrap_or_default(),
         })
     }
@@ -625,7 +628,7 @@ impl SqliteStore {
     pub(crate) fn task_flows(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::ops::flow_run::FlowProcess>> {
+    ) -> StoreResult<Vec<crate::ops::flow_process::FlowProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         flows_of_task(&conn, task)
     }
@@ -648,7 +651,7 @@ mod tests {
 
     use rusqlite::params;
 
-    use crate::durable::{FlowFilter, ProjectId, TaskId};
+    use crate::durable::{FlowProcessFilter, ProjectId, TaskId};
     use crate::id::{ProcessLfid, TraceId, WaveId};
     use crate::process::{ProcessFilter, ProcessWorkFilter};
     use crate::session::SessionFilter;
@@ -1024,13 +1027,13 @@ mod tests {
             ["conversation", "history", "manual"]
         );
         assert_eq!(
-            work.flows
+            work.flow_processes
                 .iter()
                 .map(|f| f.summary.id.as_str())
                 .collect::<Vec<_>>(),
             [independent.as_str()]
         );
-        assert_eq!(work.flows[0].summary.task_id.as_ref(), Some(&task));
+        assert_eq!(work.flow_processes[0].summary.task_id.as_ref(), Some(&task));
         assert_eq!(work.processes.len(), 4);
         // The open reading agrees with the full one about unfinished Processes.
         let initial_open = store
@@ -1127,7 +1130,7 @@ mod tests {
             .all(|session| session.task_ids == std::slice::from_ref(&task)));
         let flows = store
             .flow_inventory(
-                &FlowFilter {
+                &FlowProcessFilter {
                     task_id: Some(task.clone()),
                     ..Default::default()
                 },
@@ -1135,7 +1138,7 @@ mod tests {
                 NonZeroU32::new(100).unwrap(),
             )
             .unwrap();
-        assert_eq!(flows.entries, work.flows);
+        assert_eq!(flows.entries, work.flow_processes);
         // The Flow's step is the only work performed in the checkout.
         let performed = store
             .processes(
@@ -1172,7 +1175,7 @@ mod tests {
         );
         let work = store.task_work(&task).unwrap();
         assert!(work
-            .flows
+            .flow_processes
             .iter()
             .any(|flow| flow.summary.id == child_flow.as_str()));
         assert!(work
@@ -1194,6 +1197,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["history"]
         );
-        assert!(work.flows.is_empty());
+        assert!(work.flow_processes.is_empty());
     }
 }

@@ -33,7 +33,7 @@ failure, and 130 interruption. A successful auto-merge request is not a merge.
 
 ```bash
 lf task run EXP-12 pursue
-lf flow show FLOW_ID --sessions --json
+lf flow show FLOW_ID --processes --json
 lf task interrupt EXP-12
 ```
 
@@ -1263,7 +1263,60 @@ Replace the current chapter's KRs, targets and workflow
 |---|---|
 | `--wave / -w` | wave |
 | `--plan` | The complete plan as JSON |
-| `--workflow` | Change only the workflow, keeping KRs and targets |
+| `--help / -h` | Print help |
+
+## lf project
+
+Project-owned planning configuration
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf project workflow
+
+Select and inspect reusable Workflows
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf project workflow list
+
+List Workflow definitions, including unavailable local files
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf project workflow show
+
+Show the Project's selected Workflow
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf project workflow set
+
+Select the Workflow future Tasks take up; captured Tasks stay unchanged
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf project workflow customize
+
+Copy a builtin Workflow when needed and print its local path
+
+| Argument | What it does |
+|---|---|
+| `<name>` | name |
 | `--help / -h` | Print help |
 
 ## lf task
@@ -1272,6 +1325,33 @@ Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf task workflow
+
+Inspect or reset this Task's captured Workflow
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf task workflow show
+
+Show the Task's captured graph, position and history
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf task workflow restart
+
+Move the captured Workflow to start without executing or reloading it
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--help / -h` | Print help |
 
 ## lf task automation
@@ -1616,7 +1696,7 @@ List authored flows, or Flows that ran
 | Argument | What it does |
 |---|---|
 | `--json` | json Default: false. |
-| `--sessions` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
+| `--processes` | List or show Flows that ran, from their Processes, instead of reusable templates Default: false. |
 | `--all` | Include every repository and flows with unknown repository evidence Default: false. |
 | `--limit` | Page size (default 100) |
 | `--after` | Previous page's next identity; retain the same filters |
@@ -1635,12 +1715,12 @@ Inspect an authored flow, or one that ran
 |---|---|
 | `<name>` | name |
 | `--json` | json Default: false. |
-| `--sessions` | sessions Default: false. |
+| `--processes` | processes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf flow customize
 
-Print the repository file that defines a Flow or workflow, creating it from the builtin when the repository has none
+Print the repository file that defines a Flow, creating it from the builtin when the repository has none
 
 | Argument | What it does |
 |---|---|

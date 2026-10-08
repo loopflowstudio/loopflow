@@ -1,42 +1,40 @@
 diff --git a/include/ghostty.h b/include/ghostty.h
-index 19b6e0f..105aea6 100644
 --- a/include/ghostty.h
 +++ b/include/ghostty.h
-@@ -461,6 +461,13 @@ typedef struct {
+@@ -528,6 +528,13 @@
+   uint32_t cell_width_px;
    uint32_t cell_height_px;
  } ghostty_surface_size_s;
- 
++
 +typedef struct {
 +  uint16_t start_row;
 +  uint16_t end_row;
 +  int16_t exit_code; // -1 when the shell reported none
 +  bool selected;
 +} ghostty_command_block_s;
-+
+
  // Config types
- 
- // config.Color
-@@ -1118,6 +1125,12 @@ void ghostty_surface_complete_clipboard_request(ghostty_surface_t,
-                                                 void*,
-                                                 bool);
- bool ghostty_surface_has_selection(ghostty_surface_t);
-+size_t ghostty_surface_command_blocks(ghostty_surface_t,
-+                                      ghostty_command_block_s*,
-+                                      size_t);
-+bool ghostty_surface_select_command_block(ghostty_surface_t, uint16_t);
-+bool ghostty_surface_read_selected_command_block(ghostty_surface_t,
-+                                                 ghostty_text_s*);
- bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
- bool ghostty_surface_read_text(ghostty_surface_t,
-                                ghostty_selection_s,
+
+@@ -1234,6 +1241,12 @@
+ GHOSTTY_API void ghostty_surface_deny_clipboard_request(ghostty_surface_t,
+                                                            void*);
+ GHOSTTY_API bool ghostty_surface_has_selection(ghostty_surface_t);
++GHOSTTY_API size_t ghostty_surface_command_blocks(ghostty_surface_t,
++                                                 ghostty_command_block_s*,
++                                                 size_t);
++GHOSTTY_API bool ghostty_surface_select_command_block(ghostty_surface_t, uint16_t);
++GHOSTTY_API bool ghostty_surface_read_selected_command_block(ghostty_surface_t,
++                                                            ghostty_text_s*);
+ GHOSTTY_API bool ghostty_surface_read_selection(ghostty_surface_t, ghostty_text_s*);
+ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
+                                               ghostty_selection_s,
 diff --git a/src/apprt/embedded.zig b/src/apprt/embedded.zig
-index 54d5472..856618e 100644
 --- a/src/apprt/embedded.zig
 +++ b/src/apprt/embedded.zig
-@@ -1374,6 +1374,15 @@ pub const CAPI = struct {
+@@ -1652,6 +1652,15 @@
          }
      };
- 
+
 +    // ghostty_command_block_s
 +    const CommandBlock = extern struct {
 +        start_row: u16,
@@ -49,10 +47,12 @@ index 54d5472..856618e 100644
      // Reference the conditional exports based on target platform
      // so they're included in the C API.
      comptime {
-@@ -1592,6 +1601,110 @@ pub const CAPI = struct {
+@@ -1862,6 +1871,110 @@
+     /// Returns true if the surface has a selection.
+     export fn ghostty_surface_has_selection(surface: *Surface) bool {
          return surface.core_surface.hasSelection();
-     }
- 
++    }
++
 +    /// Return the completed semantic command blocks intersecting the visible
 +    /// viewport. Rows are inclusive and relative to the viewport.
 +    export fn ghostty_surface_command_blocks(
@@ -61,8 +61,8 @@ index 54d5472..856618e 100644
 +        capacity: usize,
 +    ) usize {
 +        const core_surface = &surface.core_surface;
-+        core_surface.renderer_state.mutex.lock();
-+        defer core_surface.renderer_state.mutex.unlock();
++        core_surface.renderer_state.mutex.lockUncancelable(global.io());
++        defer core_surface.renderer_state.mutex.unlock(global.io());
 +
 +        const screen = core_surface.renderer_state.terminal.screens.active;
 +        if (!screen.semantic_prompt.seen) return 0;
@@ -124,8 +124,8 @@ index 54d5472..856618e 100644
 +    ) bool {
 +        const core_surface = &surface.core_surface;
 +        const selected = selected: {
-+            core_surface.renderer_state.mutex.lock();
-+            defer core_surface.renderer_state.mutex.unlock();
++            core_surface.renderer_state.mutex.lockUncancelable(global.io());
++            defer core_surface.renderer_state.mutex.unlock(global.io());
 +
 +            const screen = core_surface.renderer_state.terminal.screens.active;
 +            const pin = screen.pages.pin(.{ .viewport = .{
@@ -149,35 +149,32 @@ index 54d5472..856618e 100644
 +        result: *Text,
 +    ) bool {
 +        const core_surface = &surface.core_surface;
-+        core_surface.renderer_state.mutex.lock();
-+        defer core_surface.renderer_state.mutex.unlock();
++        core_surface.renderer_state.mutex.lockUncancelable(global.io());
++        defer core_surface.renderer_state.mutex.unlock(global.io());
 +
 +        const screen = core_surface.renderer_state.terminal.screens.active;
 +        const block = screen.selectedCommandBlock() orelse return false;
 +        return readTextLocked(surface, block.text, result);
-+    }
-+
+     }
+
      /// Same as ghostty_surface_read_text but reads from the user selection,
-     /// if any.
-     export fn ghostty_surface_read_selection(
 diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
-index b6d53be..4a83597 100644
 --- a/src/terminal/PageList.zig
 +++ b/src/terminal/PageList.zig
-@@ -1285,7 +1285,11 @@ const ReflowCursor = struct {
+@@ -1749,7 +1749,11 @@
              self.new_rows -= 1;
          }
- 
+
 -        self.copyRowMetadata(src_row);
 +        // Loopflow: a soft-wrapped prompt is one prompt. A source row that
 +        // continues a wrapped line must not overwrite the metadata of the
 +        // row it unwraps into, and a row created by wrapping continues its
 +        // prompt instead of starting another.
 +        if (!src_row.wrap_continuation or self.x == 0) self.copyRowMetadata(src_row);
- 
+
          var x: usize = 0;
          while (x < cols_len) {
-@@ -1294,6 +1298,10 @@ const ReflowCursor = struct {
+@@ -1758,6 +1762,10 @@
                  try self.cursorScrollOrNewPage(list, cap);
                  self.copyRowMetadata(src_row);
                  self.page_row.wrap_continuation = true;
@@ -186,18 +183,18 @@ index b6d53be..4a83597 100644
 +                }
 +                self.page_row.command_exit_known = false;
              }
- 
-             // Move any tracked pins from the source.
-@@ -1980,6 +1988,8 @@ const ReflowCursor = struct {
- 
+
+             // Fast path: bulk-copy a run of simple cells directly
+@@ -2786,6 +2794,8 @@
+
      fn copyRowMetadata(self: *ReflowCursor, other: *const Row) void {
          self.page_row.semantic_prompt = other.semantic_prompt;
 +        self.page_row.command_exit_known = other.command_exit_known;
 +        self.page_row.command_exit_code = other.command_exit_code;
      }
  };
- 
-@@ -12236,7 +12246,7 @@ test "PageList resize reflow less cols no reflow preserves semantic prompt" {
+
+@@ -17616,7 +17626,7 @@
          {
              const p = s.pin(.{ .active = .{ .y = 2 } }).?;
              const rac = p.rowAndCell();
@@ -207,24 +204,23 @@ index b6d53be..4a83597 100644
      }
  }
 diff --git a/src/terminal/Screen.zig b/src/terminal/Screen.zig
-index ea8ca14..c4010d0 100644
 --- a/src/terminal/Screen.zig
 +++ b/src/terminal/Screen.zig
-@@ -55,6 +55,13 @@ saved_cursor: ?SavedCursor = null,
+@@ -60,6 +60,13 @@
+ /// directly to set it, use the `select` function which will assert and
  /// automatically setup tracking.
  selection: ?Selection = null,
- 
++
 +/// The selected command block (if any), as a tracked pin on its prompt row.
 +/// A screen has a text selection or a selected command block, never both:
 +/// `select` clears this and `selectCommandBlock` clears `selection`. Read it
 +/// through `selectedCommandBlock`, which drops a pin that no longer names a
 +/// completed block.
 +selected_command: ?*Pin = null,
-+
+
  /// The charset state
  charset: CharsetState = .{},
- 
-@@ -2380,6 +2387,9 @@ pub fn cursorSetSemanticContent(self: *Screen, t: union(enum) {
+@@ -2888,12 +2895,28 @@
              self.semantic_prompt.seen = true;
              cursor.semantic_content = .prompt;
              cursor.semantic_content_clear_eol = false;
@@ -234,10 +230,11 @@ index ea8ca14..c4010d0 100644
              cursor.page_row.semantic_prompt = switch (kind) {
                  .initial, .right => .prompt,
                  .continuation, .secondary => .prompt_continuation,
-@@ -2388,6 +2398,19 @@ pub fn cursorSetSemanticContent(self: *Screen, t: union(enum) {
+             };
+         },
      }
- }
- 
++}
++
 +/// Record the exit status the shell reported for the command the cursor is
 +/// in, on that command's prompt row. The first report wins: after `clear`
 +/// the nearest prompt above the cursor belongs to an older command.
@@ -249,23 +246,23 @@ index ea8ca14..c4010d0 100644
 +    if (row.command_exit_known) return;
 +    row.command_exit_known = true;
 +    row.command_exit_code = code;
-+}
-+
+ }
+
  /// Set the selection to the given selection. If this is a tracked selection
- /// then the screen will take ownership of the selection. If this is untracked
- /// then the screen will convert it to tracked internally. This will automatically
-@@ -2412,6 +2435,7 @@ pub fn select(self: *Screen, sel_: ?Selection) Allocator.Error!void {
-     if (self.selection) |*old| old.deinit(self);
+@@ -2940,6 +2963,7 @@
+     }
      self.selection = tracked_sel;
      self.dirty.selection = true;
 +    self.clearCommandBlockSelection();
  }
- 
+
  /// Same as select(null) but can't fail.
-@@ -2913,6 +2937,87 @@ pub fn selectOutput(self: *Screen, pin: Pin) ?Selection {
+@@ -3451,6 +3475,87 @@
+     }
+
      return .init(hl.start, hl.end, false);
- }
- 
++}
++
 +/// A completed shell command: its prompt row and the text of its input and
 +/// output. The prompt itself is excluded from the text, but the
 +/// prompt-to-prompt row extent is the block an embedder draws.
@@ -345,15 +342,13 @@ index ea8ca14..c4010d0 100644
 +    }
 +    self.clearCommandBlockSelection();
 +    return null;
-+}
-+
+ }
+
  pub const LineIterator = struct {
-     screen: *const Screen,
-     current: ?Pin = null,
-@@ -8706,6 +8811,176 @@ test "Screen: selectOutput" {
+@@ -10758,6 +10863,176 @@
      }
  }
- 
+
 +fn testWriteCommand(s: *Screen, command: []const u8, output: []const u8) !void {
 +    s.cursorSetSemanticContent(.{ .prompt = .initial });
 +    try s.testWriteString("$ ");
@@ -372,7 +367,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback_bytes = 0 });
 +    defer s.deinit();
 +
 +    try testWriteCommand(&s, "printf alpha", "alpha\nbeta\n");
@@ -393,7 +388,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 5, .max_scrollback = 0 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 5, .max_scrollback_bytes = 0 });
 +    defer s.deinit();
 +
 +    s.cursorSetSemanticContent(.{ .prompt = .initial });
@@ -411,7 +406,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 100 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback_bytes = 100 });
 +    defer s.deinit();
 +
 +    try testWriteCommand(&s, "true", "fine\n");
@@ -447,7 +442,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback_bytes = 0 });
 +    defer s.deinit();
 +
 +    try testWriteCommand(&s, "ls", "alpha\n");
@@ -483,7 +478,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 100 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback_bytes = 100 });
 +    defer s.deinit();
 +
 +    try testWriteCommand(&s, "first", "one\n");
@@ -511,7 +506,7 @@ index ea8ca14..c4010d0 100644
 +    const testing = std.testing;
 +    const alloc = testing.allocator;
 +
-+    var s = try init(alloc, .{ .cols = 20, .rows = 10, .max_scrollback = 0 });
++    var s = try init(testing.io, alloc, .{ .cols = 20, .rows = 10, .max_scrollback_bytes = 0 });
 +    defer s.deinit();
 +
 +    try testWriteCommand(&s, "ls", "alpha\n");
@@ -528,10 +523,9 @@ index ea8ca14..c4010d0 100644
      const testing = std.testing;
      const alloc = testing.allocator;
 diff --git a/src/terminal/Terminal.zig b/src/terminal/Terminal.zig
-index 323e4e9..bd7f81a 100644
 --- a/src/terminal/Terminal.zig
 +++ b/src/terminal/Terminal.zig
-@@ -1279,6 +1279,15 @@ pub fn semanticPrompt(
+@@ -2268,6 +2268,15 @@
              // its reasonable at this point to reset our semantic content
              // state but the spec doesn't really say what to do.
              self.screens.active.cursorSetSemanticContent(.output);
@@ -547,13 +541,13 @@ index 323e4e9..bd7f81a 100644
          },
      }
  }
-@@ -11932,6 +11941,34 @@ test "Terminal: semantic prompt" {
+@@ -15383,6 +15392,34 @@
      }
  }
- 
+
 +test "Terminal: end command records its exit status on the prompt row" {
 +    const alloc = testing.allocator;
-+    var t = try init(alloc, .{ .cols = 20, .rows = 10 });
++    var t = try init(testing.io, alloc, .{ .cols = 20, .rows = 10 });
 +    defer t.deinit(alloc);
 +
 +    // A failed command, then a prompt whose command reports no status.
@@ -581,15 +575,14 @@ index 323e4e9..bd7f81a 100644
 +
  test "Terminal: semantic prompt continuations" {
      const alloc = testing.allocator;
-     var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+     const io_impl = testing.io;
 diff --git a/src/terminal/page.zig b/src/terminal/page.zig
-index 3e7ca9a..1a5aab4 100644
 --- a/src/terminal/page.zig
 +++ b/src/terminal/page.zig
-@@ -1929,7 +1929,13 @@ pub const Row = packed struct(u64) {
+@@ -2071,7 +2071,13 @@
      /// screen.
      dirty: bool = false,
- 
+
 -    _padding: u23 = 0,
 +    /// The exit status of the command whose prompt starts on this row, once
 +    /// the shell reports it (OSC 133;D with a code). Only meaningful on a
@@ -598,6 +591,6 @@ index 3e7ca9a..1a5aab4 100644
 +    command_exit_code: u8 = 0,
 +
 +    _padding: u14 = 0,
- 
+
      /// The semantic prompt state of the row. See `semantic_prompt`.
      pub const SemanticPrompt = enum(u2) {

@@ -1411,6 +1411,7 @@ def _run(
                     "tests/fixtures/dto/task_comments.json",
                     "tests/fixtures/dto/context_report.json",
                     "tests/fixtures/dto/flow_catalog.json",
+                    "tests/fixtures/dto/workflow_catalog.json",
                     "scripts/desktop_performance.py",
                     "scripts/desktop-performance.sb",
                     "rust/loopflow/src/performance.rs",

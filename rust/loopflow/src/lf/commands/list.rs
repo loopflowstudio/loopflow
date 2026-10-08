@@ -108,7 +108,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         }
     }
     if path.is_empty() || path == ["flow"] {
-        for name in crate::engine::available_flow_names(repo) {
+        for name in crate::engine::available_flow_names(repo)? {
             entries.push(definition_entry(tree, repo, name, DefinitionKind::Flow));
         }
         if !path.is_empty() {

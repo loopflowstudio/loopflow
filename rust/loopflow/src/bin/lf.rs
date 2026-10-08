@@ -452,6 +452,14 @@ fn resolve_cli_target(
         None => return Ok(None),
     };
     let repo = loopflow::repo::working_directory()?;
+    if let Some(path) = &cli.skill_input {
+        let invocation = loopflow::engine::skill_invocation::SkillInvocation::read(path)?;
+        anyhow::ensure!(
+            invocation.skill.name == name,
+            "captured skill does not match {name}"
+        );
+        return Ok(Some((Target::Skill(invocation.skill), message)));
+    }
     let target = loopflow::lf::discovery::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
@@ -470,6 +478,9 @@ fn execute_target(
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
+            let mut selected = cli.process_options();
+            selected.resolved_skill = Some(skill.clone());
+            let cli = &selected;
             with_runtime(&repo_root, args, || {
                 with_skill_runtime(&repo_root, name, || {
                     let shared = binding.is_some()
@@ -484,7 +495,10 @@ fn execute_target(
                         None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if !shared && !loopflow::journal::has_caller() {
+                    if !shared
+                        && !loopflow::journal::has_caller()
+                        && loopflow::repo::discover_repo_root(&repo_root)?.is_some()
+                    {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf commit: {name}")),

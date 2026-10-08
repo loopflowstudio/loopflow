@@ -29,6 +29,8 @@ pub struct ProcessPromptInput {
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
+    /// Exact invocation arguments; Work direction stays in `message`.
+    pub skill_arguments: String,
     pub no_loopflow: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
@@ -59,7 +61,7 @@ pub fn prepare_process_prompt(
     let prepared = preview_process_prompt(config, input)?;
     crate::engine::context_budget::check_input(
         &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
-        &prepared.config.task_prompt,
+        &prepared.config.task_input_for_budget(),
         &prepared.budget_report.budgets,
     )?;
     Ok(prepared)
@@ -83,6 +85,7 @@ pub(crate) fn preview_process_prompt(
         docs: requested_docs,
         wave,
         message,
+        skill_arguments,
         no_loopflow,
         agent,
         cwd,
@@ -152,7 +155,28 @@ pub(crate) fn preview_process_prompt(
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
     let system_prompt = format_claude_system_prompt(&components);
-    let task_prompt = format_claude_task_prompt(&components);
+    let skill_invocation = components.skill.as_ref().and_then(|skill| {
+        let invocation = crate::engine::skill_invocation::SkillInvocation {
+            skill: skill.clone(),
+            arguments: skill_arguments.clone(),
+        };
+        (surface == Surface::Headless
+            && skill.source.as_ref().is_some_and(|source| {
+                source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+            })
+            && parse_agent(&agent).0 == "claude")
+            .then_some(invocation)
+    });
+    let task_prompt = if skill_invocation.is_some() {
+        let mut context = components.clone();
+        context.skill = None;
+        if context.message.as_deref() == Some(skill_arguments.as_str()) {
+            context.message = None;
+        }
+        format_claude_task_prompt(&context)
+    } else {
+        format_claude_task_prompt(&components)
+    };
     let action_style = components
         .skill
         .as_ref()
@@ -162,6 +186,7 @@ pub(crate) fn preview_process_prompt(
         session_driver: None,
         system_prompt,
         task_prompt,
+        skill_invocation,
         agent: Some(agent),
         max_turns,
         resume_token: None,
@@ -184,7 +209,7 @@ pub(crate) fn preview_process_prompt(
         &original_system,
         &original_task,
         &effective_system,
-        &launch.task_prompt,
+        &launch.task_input_for_budget(),
     );
     // The source snapshot is stable; the total includes this notice and provider guidance.
     // The notice labels its pre-feedback total; the report measures submitted bytes.
@@ -996,6 +1021,48 @@ Test skill body.
             Some("team/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+    }
+
+    #[test]
+    fn native_skill_arguments_stay_separate_from_work_direction() {
+        let tmp = create_repo_fixture();
+        let source = Skill {
+            content: Some("Audit $ARGUMENTS using reference.md".into()),
+            source: Some(crate::engine::skill_catalog::SkillOrigin {
+                path: tmp.path().join(".claude/skills/audit/SKILL.md"),
+                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                frontmatter: Some("\nallowed-tools: Read\n".into()),
+            }),
+            ..Skill::named("audit")
+        };
+        for agent in ["claude:sonnet", "claude:opus"] {
+            let prepared = prepare_process_prompt(
+                &default_test_config(),
+                ProcessPromptInput {
+                    repo_root: tmp.path().into(),
+                    resolved_skill: Some(source.clone()),
+                    message: Some("Preserve the Task checkout and return the decision".into()),
+                    skill_arguments: "  \"exact arguments\"  ".into(),
+                    agent: Some(agent.into()),
+                    surface: Surface::Headless,
+                    ..ProcessPromptInput::default()
+                },
+            )
+            .unwrap();
+            let invocation = prepared.config.skill_invocation.as_ref().unwrap();
+            assert_eq!(invocation.skill, source);
+            assert_eq!(invocation.arguments, "  \"exact arguments\"  ");
+            assert!(prepared
+                .config
+                .task_prompt
+                .contains("Preserve the Task checkout"));
+            assert!(!prepared.config.task_prompt.contains("Audit $ARGUMENTS"));
+            assert!(!prepared
+                .config
+                .system_prompt
+                .contains("Preserve the Task checkout"));
+            assert!(prepared.config.task_input_for_budget().contains("Audit"));
+        }
     }
 
     #[test]

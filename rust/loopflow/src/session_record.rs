@@ -88,6 +88,7 @@ pub enum SessionFlowMembership {
 pub struct AgentProcessRequest {
     pub system_prompt: String,
     pub task_prompt: String,
+    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
     pub agent: String,
     pub account_id: Option<crate::store::ProviderAccountId>,
     pub max_turns: Option<u32>,
@@ -105,6 +106,7 @@ impl AgentProcessRequest {
         Self {
             system_prompt: crate::engine::agent::system_prompt_with_structured_replies(config),
             task_prompt: config.task_prompt.clone(),
+            skill_invocation: config.skill_invocation.clone(),
             agent: config.agent().to_string(),
             account_id: config.provider_account_id.clone(),
             max_turns: config.max_turns,

@@ -528,7 +528,8 @@ pub(crate) fn skill_from_source(
         Ok(skill) => skill,
         Err(_) if source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow => {
             let mut skill = Skill::named(&source.name);
-            skill.content = Some(content.clone());
+            skill.content =
+                Some(split_frontmatter(&content).map_or_else(|| content.clone(), |(_, body)| body));
             skill
         }
         Err(error) => return Err(error),

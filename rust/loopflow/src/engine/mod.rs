@@ -20,6 +20,7 @@ pub(crate) mod process;
 pub mod process_prompt;
 pub mod prompt;
 pub mod skill_catalog;
+pub mod skill_invocation;
 pub mod skills;
 pub mod stream;
 pub mod structured_reply;

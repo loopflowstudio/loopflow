@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pty
+import re
 import select
 import shlex
 import shutil
@@ -312,7 +313,9 @@ def _terminal_mapping(
     }
 
 
-def _probe(claude: str, model: str, channel: str) -> bool:
+def _probe(
+    claude: str, model: str, channel: str, lf: str | None = None, flow: bool = False
+) -> bool:
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -345,14 +348,33 @@ def _probe(claude: str, model: str, channel: str) -> bool:
         skill.write_text(
             "---\nname: lf-mapping\ndescription: Local request mapping fixture.\n"
             "disable-model-invocation: true\n---\n"
-            f"{skill_marker}|$ARGUMENTS|\n"
+            f"{skill_marker}|$ARGUMENTS|\nasset-path: ${{CLAUDE_SKILL_DIR}}/reference.txt\n"
         )
+        (skill.parent / "reference.txt").write_text("fixture bundled reference")
+        original_source = skill.read_text()
         plugin = root / "selected-plugin"
-        if channel == "plugin":
+        if channel in ("plugin", "command-plugin", "snapshot-plugin"):
             (plugin / ".claude-plugin").mkdir(parents=True)
             (plugin / ".claude-plugin/plugin.json").write_text(json.dumps({"name": "lf-selected"}))
             (plugin / "skills").mkdir()
-            (plugin / "skills/lf-mapping").symlink_to(skill.parent, target_is_directory=True)
+            if channel == "snapshot-plugin":
+                selected = plugin / "skills/invoke"
+                selected.mkdir()
+                (selected / "SKILL.md").write_text(skill.read_text())
+                (selected / "reference.txt").symlink_to(skill.parent / "reference.txt")
+            else:
+                (plugin / "skills/lf-mapping").symlink_to(skill.parent, target_is_directory=True)
+            if channel == "command-plugin":
+                (plugin / "SKILL.md").write_text(skill.read_text())
+                (plugin / "reference.txt").symlink_to(skill.parent / "reference.txt")
+                (plugin / ".claude-plugin/plugin.json").write_text(
+                    json.dumps(
+                        {
+                            "name": "lf-selected",
+                            "commands": {"invoke": {"source": "./SKILL.md"}},
+                        }
+                    )
+                )
         hook = root / "context.json"
         hook.write_text(
             json.dumps(
@@ -393,10 +415,110 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             with Path(claude).open("rb") as executable:
                 digest = hashlib.file_digest(executable, "sha256").hexdigest()
             print(json.dumps({"version": version, "executable_sha256": digest}), flush=True)
+            if lf:
+                context_file = workspace / "context.md"
+                context_file.write_text(context_marker)
+                fixture_bin = root / "bin"
+                fixture_bin.mkdir()
+                wrapper = fixture_bin / "claude"
+                wrapper.write_text(
+                    "#!/bin/sh\nANTHROPIC_API_KEY=local-fixture-not-a-credential exec "
+                    + shlex.quote(claude)
+                    + ' "$@"\n'
+                )
+                wrapper.chmod(0o755)
+                env.update({"LF_HOME": str(root / "lf"), "LF_BIN": lf})
+                env["PATH"] = str(fixture_bin) + os.pathsep + env["PATH"]
+                target = ["lf-mapping", "alpha"]
+                if flow:
+                    flows = workspace / ".lf/flows"
+                    flows.mkdir(parents=True)
+                    (flows / "mapping.yaml").write_text("- lf-mapping\n")
+                    child = fixture_bin / "lf"
+                    child.write_text(
+                        "#!/bin/sh\nrm -f "
+                        + shlex.quote(str(skill))
+                        + "\nexec "
+                        + shlex.quote(lf)
+                        + ' "$@"\n'
+                    )
+                    child.chmod(0o755)
+                    env["LF_BIN"] = str(child)
+                    # A newly visible collision must not replace the captured source.
+                    collision = home / ".claude/skills/lf-mapping/SKILL.md"
+                    collision.parent.mkdir(parents=True)
+                    collision.write_text("---\ndescription: Wrong source\n---\nWRONG_SOURCE\n")
+                    target = ["flow", "mapping", "alpha"]
+                result = _run(
+                    [
+                        lf,
+                        "-b",
+                        "--no-loopflow",
+                        "--agent",
+                        f"claude:{model}",
+                        "--docs",
+                        str(context_file),
+                        *target,
+                    ],
+                    workspace,
+                    env,
+                    [],
+                )
+                snapshots = list((root / "lf/runs").glob("*/*/skill-*/skills/invoke/SKILL.md"))
+                selected = snapshots[0] if len(snapshots) == 1 else skill
+                observation = _assess(requests, selected, skill_marker, context_marker, "alpha")
+                manifests = [
+                    json.loads(path.read_text())
+                    for path in (root / "lf/runs").glob("*/*/manifest.json")
+                ]
+                origins = [
+                    manifest.get("exec", {}).get("skill_invocation") for manifest in manifests
+                ]
+                events = [
+                    json.loads(line)
+                    for path in (root / "lf/runs").glob("*/*/events.jsonl")
+                    for line in path.read_text().splitlines()
+                ]
+                raw = "\n".join(
+                    event["line"]
+                    for event in events
+                    if event.get("type") == "provider_output" and event.get("stream") == "stdout"
+                )
+                _, native_arguments = _read_output(_output_events(raw))
+                observation["checks"].update(
+                    exit_zero=result.returncode == 0,
+                    native_arguments_exact=native_arguments == "alpha",
+                    selected_bytes_retained=len(snapshots) == 1
+                    and selected.read_text() == original_source,
+                    bundled_reference_reachable=len(snapshots) == 1
+                    and (selected.parent / "reference.txt").read_text()
+                    == "fixture bundled reference",
+                    origin_retained=any(
+                        origin
+                        and origin["skill"]["source"]["path"] == str(skill)
+                        and origin["arguments"] == "alpha"
+                        for origin in origins
+                    ),
+                )
+                if flow:
+                    observation["checks"]["removed_source_not_reselected"] = (
+                        not skill.exists() and "WRONG_SOURCE" not in json.dumps(requests)
+                    )
+                print(
+                    json.dumps({"channel": "lf-flow" if flow else "lf", **observation}), flush=True
+                )
+                if result.returncode:
+                    print(result.stderr, file=sys.stderr)
+                    for event in _output_events(raw):
+                        if event.get("is_error"):
+                            print(event.get("result"), file=sys.stderr)
+                return all(observation["checks"].values())
             base = _claude_command(claude) + ["--model", model]
-            if channel == "plugin":
+            if channel in ("plugin", "command-plugin", "snapshot-plugin"):
                 base += ["--plugin-dir", str(plugin)]
             command_name = "lf-selected:lf-mapping" if channel == "plugin" else "lf-mapping"
+            if channel in ("command-plugin", "snapshot-plugin"):
+                command_name = "lf-selected:invoke"
             initial = base + ["--session-id", session]
             resume = base + ["--resume", session]
             context_messages = []
@@ -447,6 +569,14 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                     exit_zero=result.returncode == 0,
                     native_arguments_exact=native_arguments == argument,
                 )
+                observation["native_paths"] = [
+                    match
+                    for body in requests[start:]
+                    for text in _user_texts(body)
+                    for match in re.findall(
+                        r"(?:Base directory for this skill: |asset-path: )([^\n]+)", text
+                    )
+                ]
                 print(
                     json.dumps(
                         {
@@ -471,7 +601,25 @@ def main() -> int:
     parser.add_argument("--claude", default=shutil.which("claude"))
     parser.add_argument("--model", default="sonnet")
     parser.add_argument(
-        "--channel", choices=("hook", "queued", "staged", "terminal", "plugin"), default="queued"
+        "--lf", type=Path, help="Exercise headless native dispatch through this lf binary"
+    )
+    parser.add_argument(
+        "--flow",
+        action="store_true",
+        help="Remove the selected source after Flow capture, with a same-name collision",
+    )
+    parser.add_argument(
+        "--channel",
+        choices=(
+            "hook",
+            "queued",
+            "staged",
+            "terminal",
+            "plugin",
+            "command-plugin",
+            "snapshot-plugin",
+        ),
+        default="queued",
     )
     parser.add_argument("--inbox-message", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -480,7 +628,17 @@ def main() -> int:
         return 0
     if not args.claude:
         parser.error("a Claude executable is required")
-    return 0 if _probe(str(Path(args.claude).resolve()), args.model, args.channel) else 1
+    return (
+        0
+        if _probe(
+            str(Path(args.claude).resolve()),
+            args.model,
+            args.channel,
+            str(args.lf.resolve()) if args.lf else None,
+            args.flow,
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

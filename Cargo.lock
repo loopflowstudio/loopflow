@@ -1399,6 +1399,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_yaml_ng",
  "sha2",
+ "shlex",
  "subtle",
  "tempfile",
  "thiserror 2.0.21",

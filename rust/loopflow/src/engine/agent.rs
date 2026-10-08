@@ -171,6 +171,8 @@ pub struct AgentConfig {
     pub system_prompt: String,
     /// Task prompt content sent as the turn input.
     pub task_prompt: String,
+    /// Native skill selection, kept separate from bounded user context.
+    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
     /// Agent string (for example: "claude:opus" or "codex").
     pub agent: Option<String>,
     /// Max turn budget when supported by the harness.
@@ -205,6 +207,19 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
+    /// Declared input bytes; native expansion is measured in provider receipts.
+    pub(crate) fn task_input_for_budget(&self) -> String {
+        match &self.skill_invocation {
+            Some(invocation) => format!(
+                "{}\n\n{}\n\n{}",
+                self.task_prompt,
+                invocation.instruction_text(&parse_agent(self.agent()).0),
+                invocation.arguments
+            ),
+            None => self.task_prompt.clone(),
+        }
+    }
+
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -959,7 +974,7 @@ pub fn build_claude_command(
         worktree_isolation: launch.write_scope == AgentWriteScope::Worktree
             && launch.execution_boundary.is_none(),
         max_turns: launch.max_turns,
-        stream: process.auto && process.stream,
+        stream: process.auto && (process.stream || launch.skill_invocation.is_some()),
         chrome: capabilities.chrome,
         resume_id: launch.resume_token.clone(),
     };
@@ -1319,6 +1334,7 @@ fn _run_with_transient_retries(
                     if let Some(resume_token) = resume_token {
                         attempt_config.resume_token = Some(resume_token);
                         attempt_config.task_prompt = RETRY_PROMPT.to_string();
+                        attempt_config.skill_invocation = None;
                     }
                 }
                 (transient_delay, false)
@@ -1820,7 +1836,34 @@ fn _run_agent_once(
         // Claude's text stdin carries large assembled context without
         // argv limits. An anonymous file also avoids pipe backpressure at startup.
         let mut input = tempfile::tempfile()?;
-        input.write_all(launch.task_prompt.as_bytes())?;
+        if let Some(invocation) = &launch.skill_invocation {
+            let (plugin, command) = invocation
+                .claude_plugin(launch)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+            cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
+            cmd.arg("--plugin-dir").arg(plugin);
+            if !launch.task_prompt.is_empty() {
+                input.write_all(
+                    serde_json::json!({
+                        "type": "user", "shouldQuery": false,
+                        "message": {"role": "user", "content": launch.task_prompt}
+                    })
+                    .to_string()
+                    .as_bytes(),
+                )?;
+                input.write_all(b"\n")?;
+            }
+            input.write_all(
+                serde_json::json!({
+                    "type": "user", "message": {"role": "user", "content": command}
+                })
+                .to_string()
+                .as_bytes(),
+            )?;
+            input.write_all(b"\n")?;
+        } else {
+            input.write_all(launch.task_prompt.as_bytes())?;
+        }
         input.rewind()?;
         cmd.stdin(Stdio::from(input));
     } else {
@@ -2344,6 +2387,7 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
+            skill_invocation: None,
             ..Default::default()
         }
     }
@@ -3037,6 +3081,7 @@ trust_level = "trusted"
             session_driver: None,
             system_prompt: String::new(),
             task_prompt: "task".to_string(),
+            skill_invocation: None,
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,
@@ -3069,6 +3114,7 @@ trust_level = "trusted"
             session_driver: None,
             system_prompt: "Be concise".to_string(),
             task_prompt: "task".to_string(),
+            skill_invocation: None,
             agent: Some("claude-sonnet-4-5-20250514".to_string()),
             cwd: Some("/tmp".into()),
             max_turns: Some(5),
@@ -3101,6 +3147,7 @@ trust_level = "trusted"
             session_driver: None,
             system_prompt: "Base prompt".to_string(),
             task_prompt: "task".to_string(),
+            skill_invocation: None,
             agent: None,
             cwd: Some("/tmp".into()),
             max_turns: None,

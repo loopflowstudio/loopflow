@@ -167,25 +167,14 @@ under Capture cutover below. Delegation and PR #1450 evidence remain at
 
 ## Project configuration and review direction (2026-10-05)
 
-Jack Heart resolved LOO-366's shared local Project binding and one-time cached-name
-cutover on October 5; the accepted constraints and evidence remain under
-[Optional chapters and Task workflows](#optional-chapters-and-task-workflows-2026-10-02).
-Both decisions were delivered to LOO-366, and its saved Flow resumed. Source
-implementation and configured acceptance remain unfinished; neither approval
-establishes readiness. Earlier detail remains at
-`c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
-
-The Infrastructure Project recommends `code`; KRs/targets and reviews remain.
-Accepted review and v0.13.3 installation: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-
-LOO-326 completed on October 6 through installed v0.13.5's exact historical-Exec
-acceptance; its unknown outcome and checkout remain intact. Exact evidence is
-retained under Transient recovery. LOO-370 also completed under the opaque-root
-decision, without a physical capture migration.
-LOO-367's installed retry recorded a recovery boot witness (Session event 819671)
-but stopped again on the same boot. A later authorized restart can establish
-old-provider death; no restart or successful Flow continuation is claimed.
-Preserve its conversation and saved Flow rather than replaying unchanged evidence.
+LOO-366's October 5 decisions are under Optional chapters and Task workflows;
+source and configured acceptance remain unfinished. Infrastructure recommends
+`code`; KRs and reviews remain. Earlier evidence, including v0.13.3 review:
+`470382987:wave/infrastructure/MEMORY.md` under this heading.
+LOO-326 and LOO-370 completed October 6 under the decisions below. LOO-367's
+retry recorded boot witness 819671 but stopped on that same boot; preserve its
+conversation and saved Flow. A later authorized restart, not unchanged evidence,
+can establish old-provider death. No successful continuation is claimed.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -1058,33 +1047,40 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
-`44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
-checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
-Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
+`470382987:wave/infrastructure/MEMORY.md` retains prior probes; `44fe36620` retains
+large-input evidence. Preserve caller-owned checkpointing, common invocation loading
+and Claude's file-backed stdin. Rejected Codex `turn/start` remaining waiting is
+unresolved; Claude success proves no repair.
 
-LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
-translated ports, inlined builtins and `--agent`/`-a`, with same-conversation use
-through review, without landing. Missing transport/admission cannot narrow scope.
-The local unified catalog replaces external/npx/rams and Flow resolvers, retaining
-source/declarations through Flow capture. Prompt attribution uses the retained
-source, never a fresh lookup. Selection/export tests prove no native
-dispatch, translation or current-owner admission. Export must preserve third-party
-files; a native `agent: Explore` must never select an lf harness.
-Retained source identity must also govern native selection under collisions or
-file changes; serialized instructions alone prove no native asset access.
+LOO-420: Jack Heart selected native same-harness invocation, translated ports,
+inlined builtins, `--agent`/`-a`, terminal/headless and same-conversation use through
+review, without landing. Missing transport/admission cannot narrow scope. The unified
+catalog replaces external/npx/rams and Flow resolvers; captured source/declarations
+own selection and attribution. Export preserves third-party files; Claude's
+`agent: Explore` never selects an lf harness. Jack removed `--ide` after installed
+0.13.9 launches lacked native identity and both reconnects failed. Preserve history;
+launcher success proves no engine exit.
 
-Codex receipts prove source, separate context and same-thread resume, not recall
-without resupply. Claude 2.1.294 fake-API captures put hook context in `system`
-for Sonnet/Opus; queued user context preserves exact native arguments across resume
-without resupply. Separate seeding makes no model call. These prove client mapping,
-not LF or live-model behavior; exclude answer leakage. Native terminal probes
-reproduce draft submission by PTY injection and unexpanded inbox slash text in one
-Session. Private-plugin invocation expands arguments but reports its symlink base;
-assets/source identity and live admission remain unproved. These reject tested
-paths, not every native transport. A replacement terminal remains unapproved.
-Resume still replaces capture before driver claim. Native admission must preserve
-the current owner. Release's entry-point lesson applies: provider probes cannot
-prove LF dispatch or admission. Installed 0.13.9 app launches lacked native identity;
-both reconnects failed. Jack removed `--ide`; retain terminal/headless execution
-and history. Launcher success proves no engine exit.
+Local Claude headless LF/Flow fake-API receipts now prove native expansion, exact
+arguments and user-only context after source removal with a same-name collision.
+Capture-local plugins retain original provenance and link sibling assets. Native
+snapshot paths differ; parent-relative resources, deleted bundles and full controls
+remain unproved. Context-only messages acknowledge separately from the skill result;
+that acknowledgement must not settle execution. Builtins stay inline; ports report
+unenforced declarations. This establishes no live-model fidelity or cost improvement.
+
+Codex 0.160.1 ignores unregistered explicit skill paths while returning success.
+Its documented per-cwd extra roots are ignored; `skills/extraRoots/set` works but
+replaces engine-global roots. A retained fake-API probe proves both expansion and
+replacement. The unsafe LF prototype was removed. Session input authority cannot
+rewrite sibling catalogs; captured-source native dispatch needs a revised approach.
+Earlier native receipts prove same-thread resume with context resupply, not recall.
+
+Claude's hook maps context to system on tested Sonnet/Opus; queued user context
+survives resume without resupply or answer leakage. PTY injection submits unfinished
+drafts, while inbox slash text stays unexpanded. These reject tested transports,
+not every native path; a replacement terminal remains unapproved. Resume still
+replaces capture before driver claim. Current-owner admission, uncertain delivery,
+cancellation and handoff remain unfinished. Release's entry-point lesson applies:
+provider success and LF dispatch are separate proofs, neither implies admission.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -50,7 +50,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
 }
 
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
-/// run as its skill with `message` and the provider's own history.
+/// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -64,7 +64,9 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         };
     }
     turn.resume = Some(session.id);
-    run(session.skill.as_deref(), Some(message), &turn)
+    turn.skill_input = None;
+    turn.resolved_skill = None;
+    run(None, Some(message), &turn)
 }
 
 #[doc(hidden)]
@@ -116,6 +118,7 @@ fn run_bound_prompt(
         binding
     };
     let mut launch = cli.process_options();
+    let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
         launch.agent = binding.agent.clone().or(launch.agent);
@@ -124,7 +127,7 @@ fn run_bound_prompt(
         bound_message(binding, message)
     };
     let cli = &launch;
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
+    let mut built = build_bound_prompt_at(skill, &message, arguments, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
@@ -212,18 +215,27 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, None)
+    build_prompt_at(
+        skill,
+        message,
+        message.unwrap_or_default(),
+        cli,
+        repo_root,
+        None,
+    )
 }
 
 fn build_bound_prompt_at(
     skill: Option<&str>,
     message: &str,
+    arguments: &str,
     cli: &Cli,
     repo_root: &Path,
 ) -> Result<PromptBuild> {
     build_prompt_at(
         skill,
         Some(message),
+        arguments,
         cli,
         repo_root.to_path_buf(),
         Some((
@@ -274,6 +286,7 @@ fn prepare_task_input(
 fn build_prompt_at(
     skill: Option<&str>,
     message: Option<&str>,
+    arguments: &str,
     cli: &Cli,
     repo_root: PathBuf,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
@@ -308,9 +321,23 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = skill
-        .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+    let invocation = cli
+        .skill_input
+        .as_deref()
+        .map(crate::engine::skill_invocation::SkillInvocation::read)
         .transpose()?;
+    let discovered_skill = match &invocation {
+        Some(invocation) => Some(invocation.skill.clone()),
+        None => match &cli.resolved_skill {
+            Some(skill) => Some(skill.clone()),
+            None => skill
+                .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+                .transpose()?,
+        },
+    };
+    let arguments = invocation
+        .as_ref()
+        .map_or(arguments, |invocation| invocation.arguments.as_str());
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -338,6 +365,7 @@ fn build_prompt_at(
             docs: cli.docs.clone(),
             wave,
             message: message.map(|value| value.to_string()),
+            skill_arguments: arguments.to_string(),
             no_loopflow: cli.no_loopflow,
             agent: task_input
                 .as_ref()
@@ -406,7 +434,7 @@ fn build_prompt_at(
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     crate::engine::context_budget::check_input(
         &effective_system,
-        &agent_config.task_prompt,
+        &agent_config.task_input_for_budget(),
         &budgets,
     )?;
     let context = attributed_context(
@@ -1052,7 +1080,8 @@ mod tests {
                     }
                     let cli = Cli::parse_from(args);
                     let built =
-                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path()).unwrap();
+                        build_bound_prompt_at(None, "inspect changes", "", &cli, repo.path())
+                            .unwrap();
                     assert_eq!(
                         built
                             .components
@@ -1109,7 +1138,7 @@ mod tests {
             // Each assembly reloads personal config, including the correction.
             for _ in 0..2 {
                 let built =
-                    build_bound_prompt_at(None, "choose the prototype path", &cli, repo.path())
+                    build_bound_prompt_at(None, "choose the prototype path", "", &cli, repo.path())
                         .unwrap();
                 assert_eq!(
                     built.components.user_name.as_deref(),
@@ -1133,7 +1162,7 @@ mod tests {
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
-        let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
         assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
@@ -1156,7 +1185,7 @@ mod tests {
         let cli = Cli::parse_from(["lf", "--batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
-            let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
+            let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
             assert!(built.agent_config.task_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
@@ -1443,7 +1472,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .unwrap()
             .success());
 
-        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "reconcile", "", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
             .task_prompt
@@ -1468,7 +1498,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "continue", "", &cli, repo.path()).unwrap();
 
         let committed = built
             .agent_config
@@ -1534,6 +1565,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_bound_prompt_at(
             Some("proof"),
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
+            "",
             &cli,
             repo.path(),
         )
@@ -1604,6 +1636,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_prompt_at(
             Some("proof"),
             Some("verify the result"),
+            "",
             &cli,
             repo.path().to_path_buf(),
             None,
@@ -1637,6 +1670,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),
+            "",
             &cli,
             repo.path().to_path_buf(),
             None,

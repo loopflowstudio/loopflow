@@ -111,9 +111,9 @@ cross-harness translation or startup-cost improvement.
 The production resume path replaces the captured input before claiming a new
 driver. It cannot deliver through a surviving native terminal's current driver.
 A saved native Session and a live input queue require different admission;
-admission through the current owner remains implementation work. The current
-string-only harness API also needs separate context and native invocation input;
-the provider probes do not implement either boundary.
+admission through the current owner remains implementation work. The harness API
+still needs structured subsequent-turn input. Claude headless first-turn delivery
+now separates context and invocation as described below.
 
 ## Native terminal admission
 
@@ -161,6 +161,58 @@ identity through symlinks, retained source contents, and live admission remain
 unproved. The probe neither replaces native editing nor establishes lf dispatch.
 
 
+## Headless LF dispatch and retained Flow sources
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --flow
+```
+
+October 8's local implementation with Claude 2.1.294 passes both. The direct
+command runs in an ordinary folder without `.lf`; the taskless Flow deletes the
+selected file after capture, exposing a personal same-name collision before the
+child executes. Both send one model request, exact native arguments and user-only
+context. The native base directory is a capture-local snapshot whose unchanged
+SKILL.md and linked sibling file are checked; manifests retain the original path
+and arguments. These prove LF entry dispatch and sibling reachability, not
+parent-relative paths, missing bundles, every declaration, live models or admission.
+
+A context-only `shouldQuery: false` message produces its own result. The stream
+driver must not declare completion on that acknowledgement. Its focused regression
+requires the skill's response before TurnCompleted. Follow-up turns use native
+history instead of re-executing the original slash command.
+
+`--channel command-plugin` reproduced a rejected alias-manifest transport:
+arguments expand but native skill-directory context does not. `snapshot-plugin`
+expands the snapshot directory and arguments across resume; its original-path
+assertion intentionally fails. Neither is a claim that paths are interchangeable.
+
+## Codex captured-path counterexample
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py
+```
+
+Uses Codex 0.160.1, private HOME/CODEX_HOME, no credentials and a local fake
+Responses API. Exit zero means the counterexample reproduced. Two requests prove
+that an explicit captured `skill` path is ignored until registered, then expands
+when registered. `skills/list.perCwdExtraUserRoots` is silently ignored. Its
+replacement `skills/extraRoots/set` replaces engine-global roots; clearing those
+roots removes the registration. This contradicts the documented per-cwd approach.
+The [versioned skill-input selector](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/skills/src/selection.rs)
+requires membership in the loaded catalog; the
+[versioned root tests](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server/tests/suite/v2/skills_list.rs)
+cover replacement. A successful turn alone proves no skill expansion.
+
+The LF prototype reproduced exit zero without expansion and was removed.
+`--lf target/debug/lf` retains the outstanding LF acceptance check; it is expected
+to fail until native dispatch is implemented. Registering one Session's snapshot
+must not overwrite roots used by other conversations in the same engine.
+No global-root replacement or shared-engine rejection was added to production.
+
 ## Decisions and remaining work
 
 Jack Heart selected native invocation on the skill's own harness, translated
@@ -168,8 +220,9 @@ ports on the other harness, and inlined Loopflow builtins on October 7, 2026.
 Jack then selected `--agent` / `-a` for the harness and optional model, and
 removed `--ide` after the installed reconnect probe below. The selector rename
 and app-launch removal are implemented. The unified catalog now selects skill
-sources; native dispatch and ports remain unfinished. These probes establish
-provider behavior separately from Loopflow execution.
+sources; Claude headless native delivery is implemented locally, while other
+transports, complete ports and admission remain unfinished. Provider-only and LF
+entry probes establish the separate boundaries described above.
 
 [LOO-420](https://linear.app/loopflow/issue/LOO-420) owns implementation and
 acceptance: one catalog, faithful native dispatch, translated ports, existing

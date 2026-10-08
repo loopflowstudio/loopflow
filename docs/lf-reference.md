@@ -435,6 +435,17 @@ Inspect and continue Sessions
 |---|---|
 | `--help / -h` | Print help |
 
+## lf session observe-status
+
+Observe validated Program Status snapshots from an active local terminal
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--terminal` | The terminal marker in the current provider client receipt |
+| `--generation` | Provider generation from the Session reading |
+| `--help / -h` | Print help |
+
 ## lf session resume
 
 Resume a conversation by ID, or the last interactive Session in this worktree

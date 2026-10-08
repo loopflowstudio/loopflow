@@ -612,7 +612,10 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
         .map(|command| command.get_name())
         .collect();
     machine_commands.sort();
-    assert_eq!(machine_commands, ["id", "observe", "ssh"]);
+    assert_eq!(
+        machine_commands,
+        ["add", "id", "list", "remove", "rename", "status"]
+    );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();
     for path in ["self install", "self doctor", "config user", "open"] {

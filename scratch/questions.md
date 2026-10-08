@@ -22,6 +22,14 @@ Session authority over sibling catalogs or replace native controls.
 and a repository symlink, preserving sibling roots and fresh plain skill selection.
 An original-name mount breaks plain selection. This candidate is not in production;
 placement, lifetime, native-name semantics and complete resource/control fidelity
-remain implementation choices requiring evidence. The headless admission repair
-preserves stored workspace attribution, while resume still assembles its context
-from the caller's cwd; target-workspace assembly remains to reconcile.
+remain implementation choices requiring evidence. The resume repair now uses saved Session placement for context and provider cwd,
+while retaining the LF Process caller cwd. Its CLI fixture proves this boundary.
+
+2026-10-08: the real Codex client's single structured steer omits native skill
+expansion; duplicate RPC ids repeat model input. The same source expands on a
+fresh turn. Extending `send_current` cannot satisfy native skill invocation or
+exactly-once application. The revised native-boundary queue/recovery approach
+remains unproved, including admission during an unfinished native terminal draft.
+No replacement terminal, weaker fidelity, automatic ambiguous retry or new
+provider protocol is selected. This is observed implementation evidence, not a
+new product decision attributed to Jack Heart.

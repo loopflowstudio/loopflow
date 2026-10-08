@@ -7,12 +7,12 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against admission checkpoint `8d11fcb8b` and the pending
-compression diff. The locally available main ref remains `812d8cc55`; no newer
+Reconciled October 8 against compression checkpoint `423ff2ec2` and the
+resume-workspace repair and structured-steering counterexample. The locally available main ref remains `812d8cc55`; no newer
 upstream state was fetched.
 Catalog consolidation and Claude headless native dispatch through canonical commands
-and taskless Flows are implemented locally. Headless continuation now atomically
-admits its driver and next capture. Codex native delivery, terminal transport and
+and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
+assembles context in the saved Session workspace. Codex native delivery, terminal transport and
 current-owner structured delivery remain unfinished.
 Jack Heart's October 7 recovery steer retains full implementation through review, without landing or
 Task completion. Missing transport/admission remains implementation work.
@@ -117,19 +117,27 @@ remains deleted; a unique alias is a draft approach, not accepted fidelity loss.
 
 ## Remaining implementation, in dependency order
 
-1. Structured subsequent-turn input through the current owner. Both
-   `Harness::send_input` and `send_current` still take text. The Task steer reader
-   is not a general Session input channel. Same-Session invocation syntax remains
-   unselected; an inactive-only route or second writer cannot satisfy the outcome.
-   Admission, acknowledgement and application need separate evidence: held-owner
-   delivery, lost acknowledgement without duplicate application, cancellation and
-   driver handoff while retaining identity, history and drafts. Stopped-owner
-   continuation retains existing custody checks. No migration is selected.
-2. Context from the retained Session workspace. `resume` clears the old invocation
-   and calls ordinary `run`; unbound `build_prompt` still uses the caller's cwd.
-   Preserved Session attribution and truthful process-manifest cwd do not establish
-   correct context selection. A cross-directory resume proof must distinguish all
-   three without rewriting history or rerunning the original skill.
+1. Structured subsequent-turn input through the current owner. October 8's
+   Codex 0.160.1 fake-API counterexample invalidates extending `send_current`
+   into the skill-delivery path: single and duplicate structured steers succeed
+   without native expansion; identical RPC ids do not deduplicate model input.
+   The fresh-turn control expands the same skill. Task steers remain best-effort
+   text and cannot own Session skill admission. The probe preserves both replies;
+   it demonstrates unsafe redelivery, not actual lost-acknowledgement recovery.
+2. **Revised approach, still unproved:** admit retained `SkillInvocation` plus
+   context into the Session's own history without replacing its active capture.
+   Its existing driver must consume pending input at a native turn boundary.
+   The caller must not start another driver or steal an in-progress draft.
+   Capture identity must correlate dispatch with native history before retry;
+   RPC ids and turn-id acknowledgements alone cannot do that. A lost reply stays
+   uncertain until native evidence resolves it. Prove native receipt recovery,
+   cancellation, handoff and exactly-once application before implementing automatic
+   resubmission. No migration, new queue owner, extra Session or provider protocol
+   extension is selected. Same-Session invocation syntax remains unselected.
+   Claude's plain headless path uses file-backed stdin through `_run_agent_once`;
+   only Codex/OpenCode enter `_run_harness_once`. Changing the Harness trait alone
+   would miss Claude's canonical launch too. Native terminal consumption remains
+   unresolved; a replacement terminal and fidelity losses remain unapproved.
 3. Native Codex selection and terminal transport. The additive alias remains a
    provider-only candidate with unresolved placement, lifetime and name semantics.
    Terminal delivery must preserve native controls and unfinished drafts. Neither
@@ -146,15 +154,15 @@ dispatch is not Task acceptance.
 
 ## Implemented admission and compression
 
-The pending compression diff removes prompt assembly’s second read of `--skill-input` and the
+Compression checkpoint `423ff2ec2` removes prompt assembly’s second read of `--skill-input` and the
 skill-only CLI cache. `resolved_invocation` retains the selected definition and
 exact arguments together through Work binding; the transport file can disappear
 after selection without changing either. Native context rendering uses borrowed
 content sections instead of cloning the full context. Prepared and continued
 captures share `capture_subjects`; listings and help share `definition_source`,
 removing `SkillSource::display_source`. Driver custody and publication fences
-remain unchanged. The remaining string-only subsequent input is still a deletion
-target when structured current-owner delivery replaces it.
+remain unchanged. String-only next-turn input remains a deletion target; text steering retains
+its separate meaning and cannot acquire skill invocation by changing its type.
 
 Removed `human_session::continue_conversation` and headless resume's prepared-file
 round trip. `claim_session_input` reserves the next capture and claims its driver
@@ -171,6 +179,31 @@ entry point. These are source/fixture results, not installed continuity or nativ
 terminal draft-preservation proofs. Review also fenced publication against driver
 handoff, retained its original failure if release fails, and kept manifest cwd
 truthful to the actual process rather than substituting the Session's saved cwd.
+
+## Resume workspace repair
+
+Headless `session resume ID MESSAGE` builds directly from the saved Session cwd,
+Task and Wave, bypassing caller-checkout binding and ambient Wave fallback.
+The provider and replayable capture use that workspace; the LF Process retains
+its actual caller cwd. Old captures, Session attribution and the original skill
+remain unchanged. The cross-directory CLI fixture proves saved scratch context,
+exclusion of caller scratch and a registered ambient Wave, native resume identity,
+no original-skill rerun and preserved historical bytes. It uses a stub provider,
+not live-model or installed acceptance. Held-owner and taskless correction proofs
+still pass. Review retained the provider cwd in the manifest because replay uses
+it, and corrected nested Wave selection to use the full slug.
+
+## Delete — do not maintain
+
+- Delete `Harness::send_input(&str)` with its next-turn consumers when structured
+  native-boundary delivery has a proven recovery contract. Preserve plain text
+  input and builtins, account routing, native history and custody fences.
+- Do not convert `send_current`/`inject_live_steers` into skill execution. Their
+  text-steering behavior remains required; the native counterexample disproves
+  them as the predecessor for a general Session skill queue.
+- Removed caller-context continuation: `resume -> run -> implicit_binding`.
+  `build_prompt_at` now receives saved Session placement directly. Process cwd
+  and replay cwd remain distinct facts; no second workspace owner is introduced.
 
 ## Removed mechanisms
 
@@ -193,7 +226,7 @@ Review retained the separate context-result count: an acknowledgement still
 cannot finish the skill. Native selection now avoids cloning skills that stay inline.
 
 Flow child source rediscovery and implicit skill re-execution on follow-up are
-also removed. String-only subsequent input remains unfinished; pre-claim capture replacement is
+also removed. Structured subsequent input remains unfinished; pre-claim capture replacement is
 removed by the admission repair above.
 
 ## Acceptance still outstanding
@@ -222,4 +255,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08, realign): `git diff --check` and `lf context --skill realign` pass; documentation-only reconciliation reuses recorded compression build, seven focused Rust behaviors, fmt, Clippy and direct/Flow fake-API passes without rerunning them; full fidelity/cost/third-party acceptance remains for gate/review after implementation.
+Check (2026-10-08): `cargo test -p loopflow --test session_cli_tests --no-run` builds; network-isolated `session_cli_tests headless_resume` and `session_lifecycle_tests taskless_structured_output_correction_is_bounded_and_preserves_the_conversation` pass; `codex_request_mapping.py --redelivery` reproduces both counterexamples; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and `lf context --skill implement --json` pass. Gate/review retain full fidelity, cost and third-party acceptance.

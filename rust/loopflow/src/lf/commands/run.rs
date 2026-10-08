@@ -781,8 +781,6 @@ fn run_headless_prompt(
         agent_config.directive_relay = Some(path.clone());
     }
 
-    debug!(harness = built.harness, "launching agent");
-
     info!(harness = built.harness, "launching agent");
     let process_start = Instant::now();
     let result = run_agent(&agent_config, &process, &built.capabilities);

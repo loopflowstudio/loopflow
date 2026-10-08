@@ -578,11 +578,7 @@ impl SkillExecutor for &Driver<'_> {
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let name = &skill.skill.name;
-        if let Some(progress) = ctx.progress {
-            print_skill_progress(progress, name);
-        } else {
-            print_nested_skill_progress(name);
-        }
+        print_step_progress(ctx.progress, name);
         let current = self.current();
         let output = current.as_ref().and_then(FlowOutput::for_step);
         let mut message = self.message.unwrap_or_default().to_owned();
@@ -681,11 +677,7 @@ impl SkillExecutor for &Driver<'_> {
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
-        if let Some(progress) = ctx.progress {
-            print_skill_progress(progress, &label);
-        } else {
-            print_nested_skill_progress(&label);
-        }
+        print_step_progress(ctx.progress, &label);
         let started = crate::store::rows::now_unix();
         // Authored spellings outlive the CLI's; the step runs today's.
         let args: Vec<String> = ops
@@ -709,27 +701,17 @@ impl SkillExecutor for &Driver<'_> {
     }
 }
 
-fn print_skill_progress(progress: StepProgress, skill_name: &str) {
+fn print_step_progress(progress: Option<StepProgress>, name: &str) {
+    let position = match progress {
+        Some(progress) => format!("{}/{}", progress.index + 1, progress.total),
+        None => "*".to_owned(),
+    };
     let colors = Colors::new();
     eprintln!(
-        "{dim}[{current}/{total}]{reset} {bold}{name}{reset}",
+        "{dim}[{position}]{reset} {bold}{name}{reset}",
         dim = colors.dim,
         reset = colors.reset,
         bold = colors.bold,
-        current = progress.index + 1,
-        total = progress.total,
-        name = skill_name,
-    );
-}
-
-fn print_nested_skill_progress(skill_name: &str) {
-    let colors = Colors::new();
-    eprintln!(
-        "{dim}[*]{reset} {bold}{name}{reset}",
-        dim = colors.dim,
-        reset = colors.reset,
-        bold = colors.bold,
-        name = skill_name,
     );
 }
 

@@ -11,8 +11,8 @@ or settings are edited. Claude has no model tools or MCP servers; its context
 hook reads one fixture file. Codex runs read-only with user config disabled.
 These calls consume normal provider usage.
 
-The output records versions, elapsed seconds, marker observations and Claude's
-replayed native command arguments. A plausible model answer does not prove native
+The output records versions, elapsed seconds, marker observations and whether
+Claude's replayed native arguments match. A plausible model answer does not prove native
 dispatch or argument substitution. Exit zero requires both standalone invocations
 and Claude's separate context hook to return their fixture markers; Claude must
 also replay the exact original argument. Prefix, suffix and multi-block cases

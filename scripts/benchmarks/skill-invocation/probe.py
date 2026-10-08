@@ -21,9 +21,38 @@ def _environment() -> dict[str, str]:
     }
 
 
-def _run(
-    command: list[str], root: Path, input_text: str | None = None
-) -> tuple[subprocess.CompletedProcess[str] | None, float]:
+def _read_output(output: str, provider: str) -> tuple[str, str | None]:
+    texts = []
+    native_arguments = None
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if provider == "claude" and event.get("type") == "result":
+            texts.append(event.get("result", ""))
+        elif provider == "claude" and event.get("type") == "user" and event.get("isReplay"):
+            content = event.get("message", {}).get("content")
+            if isinstance(content, str):
+                match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
+                if match:
+                    native_arguments = match.group(1)
+        elif event.get("type") == "item.completed":
+            item = event.get("item", {})
+            if item.get("type") == "agent_message":
+                texts.append(item.get("text", ""))
+    return "\n".join(texts), native_arguments
+
+
+def _observation(
+    case: str,
+    provider: str,
+    command: list[str],
+    root: Path,
+    marker: str,
+    context_marker: str,
+    input_text: str | None = None,
+) -> dict[str, object]:
     started = time.monotonic()
     try:
         result = subprocess.run(
@@ -37,51 +66,9 @@ def _run(
             timeout=55,
         )
     except subprocess.TimeoutExpired:
-        return None, round(time.monotonic() - started, 3)
-    return result, round(time.monotonic() - started, 3)
-
-
-def _result_text(output: str, provider: str) -> str:
-    texts = []
-    for line in output.splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if provider == "claude" and event.get("type") == "result":
-            texts.append(event.get("result", ""))
-        elif event.get("type") == "item.completed":
-            item = event.get("item", {})
-            if item.get("type") == "agent_message":
-                texts.append(item.get("text", ""))
-    return "\n".join(texts)
-
-
-def _observation(
-    case: str,
-    provider: str,
-    command: list[str],
-    root: Path,
-    marker: str,
-    context_marker: str,
-    input_text: str | None = None,
-) -> dict[str, object]:
-    result, seconds = _run(command, root, input_text)
-    text = _result_text(result.stdout, provider) if result else ""
-    native_arguments = None
-    if result and provider == "claude":
-        for line in result.stdout.splitlines():
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            if event.get("type") != "user" or not event.get("isReplay"):
-                continue
-            content = event.get("message", {}).get("content")
-            if isinstance(content, str):
-                match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
-                if match:
-                    native_arguments = match.group(1)
+        result = None
+    seconds = round(time.monotonic() - started, 3)
+    text, native_arguments = _read_output(result.stdout if result else "", provider)
     return {
         "case": case,
         "exit": result.returncode if result else None,
@@ -241,19 +228,15 @@ def main() -> int:
         print(json.dumps({"executable": provider, "version": result.stdout.strip()}))
     observations = _probe(args.claude, args.codex)
     by_case = {observation["case"]: observation for observation in observations}
-    required = ["claude_plain", "claude_context_hook"]
-    passed = all(
-        by_case[case]["exit"] == 0
-        and by_case[case]["skill_marker"]
-        and by_case[case]["native_arguments_exact"]
-        for case in required
-    ) and all(
-        [
-            by_case["claude_context_hook"]["context_marker"],
-            by_case["codex_exec"]["exit"] == 0,
-            by_case["codex_exec"]["skill_marker"],
-            by_case["codex_exec"]["response_argument"],
-        ]
+    passed = (
+        all(
+            by_case[case]["exit"] == 0 and by_case[case]["skill_marker"]
+            for case in ("claude_plain", "claude_context_hook", "codex_exec")
+        )
+        and by_case["claude_plain"]["native_arguments_exact"]
+        and by_case["claude_context_hook"]["native_arguments_exact"]
+        and by_case["claude_context_hook"]["context_marker"]
+        and by_case["codex_exec"]["response_argument"]
     )
     return 0 if passed else 1
 

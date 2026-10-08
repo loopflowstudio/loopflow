@@ -72,6 +72,9 @@ claim that unavailable GUI testing blocks ordinary implementation.
 
 ## Delete — do not maintain
 
+These cuts require the replacement launch path; the retained probe replaces none
+of them. Keep the production cut together after resolving the boundary above.
+
 - `lf/discovery.rs`'s separate external-source catalog, rams alias, fuzzy npx
   lookup/fetch path, and recursive Markdown name scan. Already installed npx
   skills remain discoverable as ordinary `.agents/skills` folders.
@@ -103,10 +106,8 @@ fallback that listing misses. Frontmatter retains only lf `agent`,
 `default_agent`, `action_style`; other declarations are discarded. Full prompts
 inline skill text and lose the source directory. Codex's transport currently
 sends text input only. Claude terminal launch explicitly documents positional
-slash invocation as unreliable. Scratch was empty on entry; no prior accepted
-design artifact was supplied. The incomplete production cut was removed after
-review exposed the surface/fidelity conflict; existing production behavior is
-unchanged.
+slash invocation as unreliable. The incomplete production cut was removed after
+review exposed the surface/fidelity conflict.
 
 Installed lf 0.13.9 in a disposable ordinary directory reproduced the discovery
 gap: `help` cannot resolve `.claude/skills` or `.codex/prompts`; `.agents/skills`
@@ -114,19 +115,15 @@ loads by name but `list skill --json` omits its bare name. This is installed
 baseline evidence, not a candidate pass.
 
 Claude 2.1.293 and Codex 0.160.1 ran native synthetic skills without conversion.
-The repeatable [probe](../scripts/benchmarks/skill-invocation/README.md) records
-provider versions, model-output markers and Claude's native argument receipts.
-It does not prove third-party fidelity, permissions, model selection, bundles,
-app-server, IDE handoff, lf capture or current-conversation behavior. Single-shot
-elapsed times cannot prove startup parity with an existing slash-command session.
+The [probe](../scripts/benchmarks/skill-invocation/README.md) owns reproduction
+instructions and evidence limits; its original live run passed at `1f6e744c3`.
 
 Review finding: a successful provider exit and a plausible final answer cannot
 prove native dispatch or faithful argument delivery. Provider input receipts are
-the required evidence at that boundary. Release memory's misleading green cron
-receipt lesson applies; release-specific state is unchanged.
+the required evidence at that boundary. The probe now reads answers and receipts
+in one pass, keeping them separate in its observations and acceptance checks.
 
-Check: `uv run ruff check scripts/benchmarks/skill-invocation/probe.py` and
-`uv run python scripts/benchmarks/skill-invocation/probe.py --claude /Users/jack/.local/bin/claude --codex /Users/jack/.local/bin/codex` passed; product implementation and gate remain open.
+Check: `uv run ruff check scripts/benchmarks/skill-invocation/probe.py` and `uv run python` offline equivalence checks passed (72 cases against `1f6e744c3`: receipts, answer-only output, contaminated arguments, exit failures, timeouts and acceptance); live providers not rerun; product implementation and gate remain open.
 
 Protocol references: [Codex skill input](https://learn.chatgpt.com/docs/app-server#skills),
 [Claude skill declarations](https://code.claude.com/docs/en/skills),

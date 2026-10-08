@@ -498,3 +498,28 @@ The disposable Sessions were `session_787c00c79b9142e38145b3b927fe147c`
 receipts remain in Codex thread `01a11922-4b62-7011-9213-ce33542394a3` and Claude
 Session `a162c8e3-4001-43fe-af9b-d6af17181c38`. These are evidence identities,
 not control authority over a running provider.
+
+## LF driver settlement and native queue
+
+```sh
+uv run python scripts/test_network.py uv run --script tests/e2e/codex_connect.py \
+  --codex /path/to/codex --lf target/debug/lf --queued-exit \
+  --output .lf/tmp/native-queued-exit
+```
+
+Requires one held native turn and a later queued input to survive public
+`session connect` driver exit, retaining the endpoint, open Session and pending
+bytes, then completing on distinct turns without resubmission. The extra
+inspector unsubscribes before exit. This fixture uses the real Codex engine,
+fake local Responses and the controlled native-protocol client; no live
+credentials or model, replacement terminal or installed store is involved.
+A failure remains nonzero. The current engine-close path fails this acceptance.
+
+October 8's removed engine-retention candidate passed queue preservation but
+failed the existing `--shared-provider-home` proof: plain Codex could not resume
+its saved conversation (`already has an active writer`). Unsubscribe from a
+new subscriber returned success without unloading the thread within five seconds;
+unsubscribe on the original LF connection also failed plain resume. Keeping
+only the passing queue result would conceal a regression. Both proofs constrain
+the lifetime repair. The candidate was removed; production admission, per-input
+capture attribution and matching completion remain unfinished.

@@ -145,10 +145,47 @@ on-disk skill. LF admission, active-capture preservation, driver fences, capture
 catalog/source fidelity and Claude parity remain separate implementation work.
 The probe and its limitations live in the benchmark README.
 
+## Driver settlement counterexample (October 8)
+
+The requested coordinated admission cut encountered a conflicting lifetime
+assumption before admission was changed. `finish_session_driver` closes the
+whole Codex engine. `inspect_engine_threads` excludes other root threads, but
+accepts later work in the same thread. The driver fence cannot serialize native
+clients' admission; adding a queue-empty check would retain a check/signal race.
+
+The public `session connect` fixture now has `--queued-exit`: start a held turn,
+queue another input through the current fenced client, remove the inspector's
+subscription, and exit the driver. Acceptance requires the endpoint and open
+Session, unchanged pending bytes, then two separate completed native turns with
+one matching queued message and no resubmission. This is a deliberately failing
+acceptance check on the retained production path, not a green counterexample mode.
+It exercises native input through the LF relay, not `lf audit` admission, distinct
+LF captures, native draft preservation or pending recovery after engine death.
+
+A removed production candidate deleted `close_engine`, its runtime wrapper and
+provider-close callback; driver exit retained the endpoint and open Session. Its
+queue check passed, but the existing shared-provider-home proof failed: plain
+Codex's `thread/resume` returned `already has an active writer`. Native
+`thread/unsubscribe` from a fresh subscriber returned `unsubscribed`, yet the
+thread remained loaded after a bounded five-second observation and emitted no
+`thread/closed`. Sending unsubscribe on the original LF connection before drop
+also failed the shared-home proof. Queue preservation still passed with the
+inspector unsubscribed. These observations do not prove native detachment is
+impossible; they rule out the tested retained-engine and unsubscribe candidates.
+The failed production edits were removed; no engine-lifetime policy was adopted.
+
+The next design must release native writer custody for ordinary plain-Codex
+resume while preserving admitted and concurrently arriving native work. Keep the
+shared-home proof beside queued-exit acceptance. Do not add snapshot-based kill
+authority, replace the terminal, add a provider extension, or drop plain-provider
+continuity. Until that lifetime path is viable, dependent admission work must not
+build on either known-broken settlement assumption. Full Task scope is unchanged.
+
 ## Remaining implementation
 
 1. **Current-owner admission, capture ownership and native consumption together.**
-   `02a073349` establishes the provider candidate described above. LF still needs
+   `02a073349` establishes the provider candidate described above. Resolve the
+   driver-settlement contradiction above before the dependent cut. LF still needs
    to retain each pending `SkillInvocation`, context, capture and dispatch identity in existing
    Session history without replacing the active capture or claiming another
    driver. No migration, new queue owner, extra Session or provider extension is
@@ -176,10 +213,9 @@ The probe and its limitations live in the benchmark README.
      only the runner's event channel would leave SQLite history misattributed.
      `codex_history::History` currently attributes Process origin only through a
      `turn/start` reply; queued starts need their retained dispatch association.
-   - `session_record::runtime::finish_session_driver` calls `close_engine` after
-     settling its capture. `inspect_engine_threads` protects other threads but
-     does not inspect later queued/active work in the same thread. Matching one
-     capture's completion must not authorize terminating another admitted input.
+   - Driver settlement has the native writer-custody conflict above. The
+     existing engine-close path remains; the candidate deletion failed plain
+     Codex resume and was removed. Resolve lifetime before admission depends on it.
    - Claude's canonical headless path uses file-backed stdin through
      `_run_agent_once`; only Codex/OpenCode enter `_run_harness_once`. A Harness
      trait change alone cannot supply Claude parity. Native Claude terminal
@@ -375,4 +411,4 @@ dispatch and admission. Related Intelligence context/attribution findings were
 read selectively. The local `origin/main` reference remains at the PR base
 `812d8cc55`; no upstream fetch or provider refresh was performed.
 
-Check (2026-10-08): reuse recorded probe pytest (25), Ruff and isolated queue-headless/queue-restart (4/3 requests, no titles), queue-race/boundary (7 each, 2 titles); prose reconciliation checked with `git diff --check` and `lf context --skill realign --json`. LF admission, fidelity and gate/review acceptance remain.
+Check (2026-10-08): restored-source build, isolated codex_connect `--public-connect` and `--shared-provider-home`, Ruff and diff checks pass; `--queued-exit` fails because driver exit clears the live endpoint with native work pending; removed retention/unsubscribe candidates fail plain resume. Gate/review and LF admission remain.

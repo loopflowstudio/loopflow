@@ -55,3 +55,11 @@ the input; absence during that gap cannot authorize resubmission. This mechanism
 remains the LF integration candidate, without a provider extension or replacement
 terminal. Admission, capture attribution, matching completion and teardown remain
 one coordinated repair. These are observations, not new decisions by Jack Heart.
+
+2026-10-08: removing automatic Codex engine closure preserves native queued work
+but fails existing plain-Codex resume with `already has an active writer`.
+Unsubscribe from a fresh subscriber and from the original LF connection did not
+repair that boundary. The candidate was removed. Native writer-custody release
+and preservation of concurrent admissions need one viable lifetime design;
+neither indefinite engine retention nor an idle-check/signal race is selected.
+This is an observed design contradiction, not Jack Heart's scope reduction.

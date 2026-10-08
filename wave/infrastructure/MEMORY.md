@@ -398,13 +398,11 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (curated 2026-10-07)
+## Installed worker recovery (curated 2026-10-08)
 
-October 2 recovery evidence:
-`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-under this heading. Later acceptance above closes LOO-295/292; LOO-373 retains
-the placement defect. Manual releases prove no automatic settlements. The
-operator's batching proposal was not Jack Heart's release-policy approval.
+October 2 evidence: `6448e3c9e7:wave/infrastructure/MEMORY.md`, this heading.
+LOO-295/292 closed above; LOO-373 retains placement repair. Manual releases prove
+no scheduled settlements; the operator's batching proposal remains unapproved.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -1082,20 +1080,20 @@ lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
 `c91648d63`. Exact receipts can belong to another active turn without expansion.
 Historical expansion proves no new application.
 
-October 8's `02a073349` proves native queue admission across dropped reply,
-cancellation and handoff, preserving draft/sibling/history. `ed9ad8a61` retains
-terminal-free and pending-restart proofs: queue bytes survive; resume completes
-two inputs on separate turns without resubmission. `34e77951d` shares waits;
-each input requires one match and its own outcome. An empty queue before native
-history appears cannot authorize resend. LF admission, idempotency and external
-effects remain unproved.
+October 8: `02a073349` proves queue admission despite dropped reply, cancellation
+and handoff; `ed9ad8a61` covers terminal-free consumption and two pending inputs
+across engine death. `34e77951d` requires each input's unique receipt and own
+outcome. Queue absence before history appears never authorizes resend. Provider
+proofs establish no LF admission, idempotency or external effects.
 
-LF maps only its first start per writer; retries retain distinct IDs and ambiguous
-receipts stay uncertain. Controlled handoff preserves text/capture/siblings/ancestry.
-Admission, SQLite start attribution, per-input events and completion must change
-together: the driver records one capture and exits on first completion; settlement
-can close later same-thread work. Resume clears structured invocation. Held-owner
-delivery, LF lost-ack/draft recovery, catalog/resources, Claude parity and cost
-acceptance remain. Prior detail:
-`94006060f`, `302fbd7cf`, this heading.
-[Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).
+LF still maps only its writer's first start; native starts borrow current capture,
+and first completion ends the driver. Admission, attribution and settlement remain
+one repair. Resume clears structured invocation. `--queued-exit` adds public LF
+relay settlement acceptance, not skill admission. Engine retention preserved native
+queued work but failed plain Codex resume (`already has an active writer`);
+unsubscribe from a new subscriber or the original LF connection did not repair it.
+The production candidate was removed. Writer-custody release must preserve
+concurrent admissions; an idle snapshot grants no engine-wide kill authority.
+No candidate was adopted. Held-owner delivery, LF
+lost-ack/draft recovery, distinct captures across pending restart, catalog/resources,
+Claude parity and cost acceptance remain. Prior detail: `4e5afeb10`, this heading. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

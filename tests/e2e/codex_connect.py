@@ -216,10 +216,15 @@ def main() -> None:
     parser.add_argument("--gated", action="store_true")
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--public-connect", action="store_true")
+    parser.add_argument(
+        "--queued-exit",
+        action="store_true",
+        help="Require native queued work to survive LF driver settlement",
+    )
     parser.add_argument("--flow-decision-retry", choices=("missing", "replace"))
     parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
-    args.launch = args.launch or args.shared_provider_home
+    args.launch = args.launch or args.shared_provider_home or args.queued_exit
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
     if not args.launch:
@@ -298,6 +303,11 @@ enabled = false
                     if args.shared_provider_home:
                         _shared_provider_home_contract(
                             binary, args.codex, root, work, env, server, results
+                        )
+                        return
+                    if args.queued_exit:
+                        results["queued_exit"] = _live_driver_contract(
+                            binary, work, env, server, shared_engine=False, queued_exit=True
                         )
                         return
                     if args.public_connect:
@@ -501,6 +511,7 @@ def _public_connection_contract(
     results: dict,
     headless: subprocess.Popen,
     shared_engine: bool,
+    queued_exit: bool = False,
 ) -> None:
     session = results["session_id"]
     processes = []
@@ -738,7 +749,79 @@ def _public_connection_contract(
         call(2, 1, "thread/read", {"threadId": thread, "includeTurns": True})
         replay = _command(history_command, work, env, timeout=15)
         assert replay.returncode == 0 and json.loads(replay.stdout) == history, replay
-        if not shared_engine:
+        if queued_exit:
+            server.held.clear()
+            server.release.clear()
+            first = call(
+                2,
+                2,
+                "turn/start",
+                {
+                    "threadId": thread,
+                    "input": [{"type": "text", "text": "Run the held next turn."}],
+                },
+            )["turn"]["id"]
+            assert server.held.wait(15)
+            message = "queued-after-driver-exit"
+            call(
+                2,
+                3,
+                "thread/queue/add",
+                {
+                    "threadId": thread,
+                    "clientUserMessageId": message,
+                    "input": [{"type": "text", "text": "Complete the queued successor."}],
+                },
+            )
+            pending = engine.call("thread/queue/list", {"threadId": thread})["data"]
+            assert [item["clientUserMessageId"] for item in pending] == [message], pending
+            # No extra observer subscription may keep the native thread alive.
+            engine.call("thread/unsubscribe", {"threadId": thread})
+            engine.close()
+            (controls[2] / "4.request").write_text(json.dumps({"method": "exit"}))
+            _, error = processes[2].communicate(timeout=15)
+            assert processes[2].returncode == 0, error.decode()
+            with sqlite3.connect(_database(env)) as database:
+                retained = database.execute(
+                    "SELECT provider_endpoint,provider_thread,driver_process_lfid,completed_at "
+                    "FROM agent_sessions WHERE id=?",
+                    (session,),
+                ).fetchone()
+            assert retained == (endpoint, thread, None, None), (
+                "LF driver exit discarded the live engine with a running turn and pending input",
+                retained,
+                pending,
+            )
+            engine = Client(Path(endpoint))
+            inspectors.append(engine)
+            assert engine.call("thread/queue/list", {"threadId": thread})["data"] == pending
+            server.release.set()
+            deadline = time.monotonic() + 30
+            while True:
+                turns = engine.call(
+                    "thread/read",
+                    {
+                        "threadId": thread,
+                        "includeTurns": True,
+                    },
+                )["thread"]["turns"]
+                matches = [
+                    (turn, item)
+                    for turn in turns
+                    for item in turn["items"]
+                    if item.get("type") == "userMessage" and item.get("clientId") == message
+                ]
+                assert len(matches) <= 1, matches
+                if matches and matches[0][0]["status"] == "completed":
+                    break
+                assert time.monotonic() < deadline, turns
+                time.sleep(0.05)
+            completed, receipt = matches[0]
+            assert receipt["content"] == pending[0]["input"]
+            assert completed["id"] != first
+            assert next(turn for turn in turns if turn["id"] == first)["status"] == "completed"
+            results["owner_exit_preserved_native_queue"] = True
+        elif not shared_engine:
             # Closing the current native UI releases the engine; obsolete UIs
             # and the original headless driver's exit could not release it.
             (controls[2] / "2.request").write_text(json.dumps({"method": "exit"}))
@@ -780,7 +863,12 @@ def _public_connection_contract(
 
 
 def _live_driver_contract(
-    binary: Path, work: Path, env: dict[str, str], server: Responses, shared_engine: bool
+    binary: Path,
+    work: Path,
+    env: dict[str, str],
+    server: Responses,
+    shared_engine: bool,
+    queued_exit: bool = False,
 ) -> dict:
     _init_repo(work, env)
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
@@ -815,7 +903,14 @@ def _live_driver_contract(
         assert len(sessions) == 1, sessions
         result = {"session_id": sessions[0]}
         _public_connection_contract(
-            binary, work, env, server, result, headless=child, shared_engine=shared_engine
+            binary,
+            work,
+            env,
+            server,
+            result,
+            headless=child,
+            shared_engine=shared_engine,
+            queued_exit=queued_exit,
         )
         return result
     finally:

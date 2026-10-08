@@ -8,7 +8,7 @@ is all-or-nothing for the repository. Delete personal/shared namespaces,
 `personal_plans`, personal-only workflows and `project_authority_on`; provider
 mappings are links, not planning authorities. During an outage, local edits succeed
 and show pending sync. Preserve uncertain effects and concurrent edits; no resident
-or automatic turn/Flow retry. This supersedes the branch's mixed-authority design.
+or automatic turn/Flow retry.
 
 Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
 independent inbound completion, membership and comments during pending writes and
@@ -62,7 +62,9 @@ October 8 Task creation/edit now use common SQLite transactions. Creation
 input/Project survive edits and rotation; names, notes, assignment and ordering save
 field receipts before mapping. Changed neighbors retain rank receipts. Inbound reads
 preserve pending values/conflicts; actual field changes advance local revisions.
-Unchanged retries preserve receipt identity. Provider-first create/marker lookup and
+Unchanged retries preserve receipt identity. Task/Project receipts share
+`sqlite/planning_changes.rs`; foreign-key tables stay separate. Creation uses one
+original-input reader in `children.rs`. Provider-first create/marker lookup and
 edit/readback writers are deleted. Paired offline CLI proofs cover connection/mapping
 combinations, rollback and conflicts; they establish no export or field delivery.
 Wave provisioning still uses personal routing. Project creation, membership, rotation,
@@ -902,10 +904,8 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the source references.
-Historical identity, execution eligibility and consumed launch evidence remain
-separate. LOO-287's architecture pass and weekly observations remain unproved;
-local deletion and checks establish no KR. Intelligence owns prompt assembly.
+Unproved LOO-287 acceptance and prompt ownership constraints remain at
+`b6e291dd4:wave/infrastructure/MEMORY.md`, this heading. Intelligence owns prompt assembly.
 
 ## Installation and command scope (curated 2026-10-02)
 

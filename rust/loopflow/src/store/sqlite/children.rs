@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use crate::child::AbandonIntent;
 use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
-use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
+use crate::planning::{LinearIssueId, LinearProjectId, NewTask, ProjectPlan, TaskPlan};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
@@ -27,6 +27,23 @@ use crate::work::task::{
 
 use super::durable::{inherit_project_placement, inherit_task_placement};
 use super::SqliteStore;
+
+fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
+    conn.query_row(
+        "SELECT project_id,title,description FROM task_creation_intents WHERE task_id=?1",
+        [task.as_str()],
+        |row| {
+            Ok(NewTask {
+                id: task.clone(),
+                project_id: ProjectId::from_raw(row.get::<_, String>(0)?),
+                title: row.get(1)?,
+                description: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
 
 impl SqliteStore {
     pub(crate) fn task_deleted(&self, task: &Task) -> StoreResult<bool> {
@@ -86,21 +103,16 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub fn create_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {
+    pub(crate) fn task_creation_intent(&self, task: &TaskId) -> StoreResult<Option<NewTask>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_creation_in(&conn, task)
+    }
+
+    pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let intent: Option<(String, String, String)> = tx
-            .query_row(
-                "SELECT project_id,title,description FROM task_creation_intents WHERE task_id=?1",
-                [input.id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        if let Some((project, title, description)) = intent {
-            if project != input.project_id.as_str()
-                || title != input.title
-                || description != input.description
-            {
+        if let Some(intent) = task_creation_in(&tx, &input.id)? {
+            if intent != *input {
                 return Err(StoreError::InvalidData(
                     "creation identity already belongs to a different request".into(),
                 ));

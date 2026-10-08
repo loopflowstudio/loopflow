@@ -220,25 +220,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn local_task_creation_project(
-        &self,
-        task: &crate::durable::TaskId,
-    ) -> StoreResult<Option<ProjectId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let project: Option<String> = conn
-            .query_row(
-                "SELECT project_id FROM task_creation_intents WHERE task_id=?1",
-                [task.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?;
-        project
-            .map(|id| {
-                ProjectId::parse(&id).map_err(|error| StoreError::InvalidData(error.to_string()))
-            })
-            .transpose()
-    }
-
     pub(crate) fn update_personal_wave_document(
         &self,
         wave: &WaveId,

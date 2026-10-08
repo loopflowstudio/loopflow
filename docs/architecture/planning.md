@@ -83,9 +83,10 @@ the common offline checkout and launch paths do not establish common planning ow
 Task creation and edits use one SQLite writer, regardless of provider mapping.
 Creation receipts retain the original Project and input; field receipts retain
 stable mutation identity, baseline and the first conflicting provider value.
-`sqlite/task_content.rs` preserves pending edits during inbound ingestion, including
-rank changes to neighboring Tasks. No-op retries retain revision and receipt IDs;
-actual inbound field changes advance the local optimistic-write revision. The
+`sqlite/task_content.rs` saves field edits and rank changes to neighboring Tasks.
+Task and Project writers share `sqlite/planning_changes.rs` for receipt creation,
+pending fields and inbound conflict retention; their tables retain separate foreign
+keys. No-op retries retain revision and receipt IDs; actual inbound field changes advance the local optimistic-write revision. The
 provider-first creation, marker lookup and edit writers are deleted. Connected
 CLI commands report pending sync; Task export, field delivery/resolution and
 Desktop pending presentation remain unfinished.

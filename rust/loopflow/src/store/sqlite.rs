@@ -29,6 +29,7 @@ mod local_planning;
 mod metrics;
 mod plan_read;
 mod planning;
+mod planning_changes;
 mod pr_landings;
 mod processes;
 mod program_status;

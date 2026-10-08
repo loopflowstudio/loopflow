@@ -525,7 +525,8 @@ fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
-        let project = super::project_content::retain_edits(tx, &id, &project)?;
+        let project =
+            super::planning_changes::PlanningChanges::Project(&id).retain(tx, &project)?;
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
              project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
@@ -579,7 +580,8 @@ fn project_accepted_planning(
     for (id, body, observed_at, project) in updates {
         let item: PmItem = serde_json::from_str(&body)?;
         let item =
-            super::task_content::retain_edits(tx, &crate::durable::TaskId::from_raw(&id), &item)?;
+            super::planning_changes::PlanningChanges::Task(&crate::durable::TaskId::from_raw(&id))
+                .retain(tx, &item)?;
         tx.execute(
             "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
                  AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))

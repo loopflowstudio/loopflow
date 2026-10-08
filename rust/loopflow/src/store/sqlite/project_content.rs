@@ -9,102 +9,8 @@ use crate::planning::PlanningChange;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
+use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
-
-fn record_change(
-    conn: &Connection,
-    project: &ProjectId,
-    field: &str,
-    previous: Value,
-    value: Value,
-) -> StoreResult<()> {
-    if previous == value {
-        return Ok(());
-    }
-    let body: Option<String> = conn
-        .query_row(
-            "SELECT o.body FROM projects p JOIN waves w ON w.id=p.wave_id
-         JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
-         WHERE p.id=?1",
-            [project.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let base = body
-        .map(|body| -> StoreResult<Value> {
-            let body: Value = serde_json::from_str(&body)?;
-            Ok(serde_json::json!({"revision": body["revision"], "value": body[field]}))
-        })
-        .transpose()?;
-    conn.execute(
-        "INSERT INTO project_changes(id,project_id,field,value_json,base_json)
-         VALUES(?1,?2,?3,?4,?5)",
-        params![
-            uuid::Uuid::new_v4().to_string(),
-            project.as_str(),
-            field,
-            value.to_string(),
-            base.map(|v| v.to_string())
-        ],
-    )?;
-    Ok(())
-}
-
-/// Provider reads retain conflicts; neither matching values nor clocks acknowledge writes.
-pub(super) fn retain_edits(
-    conn: &Connection,
-    id: &ProjectId,
-    observed: &crate::pm::PmProject,
-) -> StoreResult<crate::pm::PmProject> {
-    let mut saved = serde_json::to_value(observed)?;
-    for change in pending_in(conn, id)? {
-        let remote = saved[&change.field].clone();
-        if remote != change.value
-            && change
-                .base
-                .as_ref()
-                .is_none_or(|base| base["value"] != remote)
-        {
-            conn.execute(
-                "UPDATE project_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL",
-                params![
-                    change.id,
-                    serde_json::json!({"revision":observed.revision,"value":remote}).to_string()
-                ],
-            )?;
-        }
-        saved[&change.field] = change.value;
-    }
-    Ok(serde_json::from_value(saved)?)
-}
-
-fn pending_in(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
-    let mut query = conn.prepare(
-        "SELECT id,field,value_json,base_json,conflict_json FROM project_changes c
-         WHERE project_id=?1 AND acknowledged=0 AND seq=(SELECT max(seq) FROM project_changes
-             WHERE project_id=c.project_id AND field=c.field) ORDER BY seq",
-    )?;
-    let rows = query.query_map([project.as_str()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    })?;
-    rows.map(|row| {
-        let (id, field, value, base, conflict) = row?;
-        Ok(PlanningChange {
-            id,
-            field,
-            value: serde_json::from_str(&value)?,
-            base: base.map(|v| serde_json::from_str(&v)).transpose()?,
-            conflict: conflict.map(|v| serde_json::from_str(&v)).transpose()?,
-        })
-    })
-    .collect()
-}
 
 impl SqliteStore {
     pub(crate) fn project_with_changes(
@@ -115,7 +21,7 @@ impl SqliteStore {
         let tx = conn.unchecked_transaction()?;
         let result = (
             super::plan_read::project_in(&tx, project)?,
-            pending_in(&tx, project)?,
+            PlanningChanges::Project(project).pending(&tx)?,
         );
         tx.commit()?;
         Ok(result)
@@ -123,7 +29,7 @@ impl SqliteStore {
 
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        pending_in(&conn, project)
+        PlanningChanges::Project(project).pending(&conn)
     }
 
     pub fn edit_project(
@@ -145,9 +51,8 @@ impl SqliteStore {
             ("summary", current.summary, summary),
         ] {
             if let Some(value) = value {
-                record_change(
+                PlanningChanges::Project(project).record(
                     &tx,
-                    project,
                     field,
                     Value::String(previous),
                     Value::String(value.into()),
@@ -247,7 +152,7 @@ fn write_content(
             serde_json::to_value(&content.metric_targets)?,
         ),
     ] {
-        record_change(conn, project, field, previous, value)?;
+        PlanningChanges::Project(project).record(conn, field, previous, value)?;
     }
     if let Some(definition) = workflow_definition {
         let name = &content.workflow;

@@ -1290,10 +1290,11 @@ pub fn task_create(
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
         let creation_project = match store
             .sqlite
-            .local_task_creation_project(&identity)
+            .task_creation_intent(&identity)
             .map_err(task_error)?
         {
-            Some(id) => {
+            Some(intent) => {
+                let id = intent.project_id;
                 let original = store
                     .get_project(&id)
                     .await

@@ -1,115 +1,22 @@
 //! Task fields and their delivery evidence commit together, before provider I/O.
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, TransactionBehavior};
 use serde_json::Value;
 
 use crate::durable::TaskId;
 use crate::planning::PlanningChange;
-use crate::pm::{PmItem, PmItemUpdate};
+use crate::pm::PmItemUpdate;
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::Task;
 
+use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
-
-fn record_change(
-    conn: &Connection,
-    task: &TaskId,
-    field: &str,
-    previous: Value,
-    value: Value,
-) -> StoreResult<bool> {
-    if previous == value {
-        return Ok(false);
-    }
-    let body: Option<String> = conn
-        .query_row(
-            "SELECT i.body FROM tasks t JOIN projects p ON p.id=t.project_id
-         JOIN waves w ON w.id=p.wave_id
-         JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
-         WHERE t.id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let base = body
-        .map(|body| -> StoreResult<Value> {
-            let body: Value = serde_json::from_str(&body)?;
-            Ok(serde_json::json!({"revision":body["revision"],"value":body[field]}))
-        })
-        .transpose()?;
-    conn.execute(
-        "INSERT INTO task_changes(id,task_id,field,value_json,base_json) VALUES(?1,?2,?3,?4,?5)",
-        params![
-            uuid::Uuid::new_v4().to_string(),
-            task.as_str(),
-            field,
-            value.to_string(),
-            base.map(|v| v.to_string())
-        ],
-    )?;
-    Ok(true)
-}
-
-pub(super) fn retain_edits(
-    conn: &Connection,
-    task: &TaskId,
-    observed: &PmItem,
-) -> StoreResult<PmItem> {
-    let mut saved = serde_json::to_value(observed)?;
-    for change in pending_in(conn, task)? {
-        let remote = saved[&change.field].clone();
-        if remote != change.value
-            && change
-                .base
-                .as_ref()
-                .is_none_or(|base| base["value"] != remote)
-        {
-            conn.execute(
-                "UPDATE task_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL",
-                params![
-                    change.id,
-                    serde_json::json!({"revision":observed.revision,"value":remote}).to_string()
-                ],
-            )?;
-        }
-        saved[&change.field] = change.value;
-    }
-    Ok(serde_json::from_value(saved)?)
-}
-
-fn pending_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
-    let mut query = conn.prepare(
-        "SELECT id,field,value_json,base_json,conflict_json FROM task_changes c
-         WHERE task_id=?1 AND acknowledged=0 AND seq=(SELECT max(seq) FROM task_changes
-             WHERE task_id=c.task_id AND field=c.field) ORDER BY seq",
-    )?;
-    let rows = query.query_map([task.as_str()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    })?;
-    rows.map(|row| {
-        let (id, field, value, base, conflict) = row?;
-        Ok(PlanningChange {
-            id,
-            field,
-            value: serde_json::from_str(&value)?,
-            base: base.map(|v| serde_json::from_str(&v)).transpose()?,
-            conflict: conflict.map(|v| serde_json::from_str(&v)).transpose()?,
-        })
-    })
-    .collect()
-}
 
 impl SqliteStore {
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        pending_in(&conn, task)
+        PlanningChanges::Task(task).pending(&conn)
     }
 
     pub fn edit_task(
@@ -161,7 +68,7 @@ impl SqliteStore {
             ),
         ] {
             if let Some(value) = value {
-                changed |= record_change(&tx, id, field, previous, value)?;
+                changed |= PlanningChanges::Task(id).record(&tx, field, previous, value)?;
             }
         }
         if changed {
@@ -188,9 +95,8 @@ impl SqliteStore {
                 (id.to_string(), current.rank),
             );
             for (rank, (other, previous)) in ordered.iter().enumerate() {
-                if record_change(
+                if PlanningChanges::Task(&TaskId::from_raw(other)).record(
                     &tx,
-                    &TaskId::from_raw(other),
                     "rank",
                     serde_json::json!(previous),
                     serde_json::json!(rank),

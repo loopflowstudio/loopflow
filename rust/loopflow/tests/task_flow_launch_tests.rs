@@ -413,14 +413,10 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         .unwrap()
         .unwrap();
     let select = |name: &str| {
-        sqlite.update_project_content(
+        sqlite.select_project_workflow(
             &task.project_id,
-            &loopflow::pm::ProjectContent {
-                workflow: name.into(),
-                krs: Vec::new(),
-                metric_targets: Vec::new(),
-            },
-            Some("nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n"),
+            name,
+            "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
         ).unwrap();
     };
     select("before-checkout");

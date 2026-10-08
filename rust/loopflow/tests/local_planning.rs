@@ -475,6 +475,7 @@ fn personal_fields_preserve_order_assignment_and_project_summary() {
         home.path(),
         &["wave", "status", "personal:inbox", "--json"],
     );
+    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["tasks"]["items"][0]["task"]["id"], id);
     assert_eq!(wave["tasks"]["items"][1]["task"]["rank"], 1);
 }
@@ -1133,6 +1134,16 @@ fn project_creation_binding_and_activation_save_offline() {
                 &["wave", "bind-project", "product", id.as_str(), "--json"],
             );
             assert_eq!(bound["status"], "backlog");
+            if mapped {
+                assert_eq!(
+                    lf(
+                        repo.path(),
+                        home.path(),
+                        &["wave", "bind-project", "product", provider, "--json"]
+                    ),
+                    bound
+                );
+            }
             let active = lf(repo.path(), home.path(), &args);
             assert_eq!(active["status"], "started");
             assert_eq!(active["name"], "Authored name");

@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::durable::ProjectId;
 use crate::id::WaveId;
 use crate::planning::PlanningChange;
+use crate::pm::{PmProject, ProjectContent};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 
@@ -46,12 +47,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
+        let mut changed = false;
         for (field, previous, value) in [
             ("name", current.name, name),
             ("summary", current.summary, summary),
         ] {
             if let Some(value) = value {
-                PlanningChanges::Project(project).record(
+                changed |= PlanningChanges::Project(project).record(
                     &tx,
                     field,
                     Value::String(previous),
@@ -59,11 +61,13 @@ impl SqliteStore {
                 )?;
             }
         }
-        tx.execute(
-            "UPDATE projects SET project_name=COALESCE(?2,project_name),
+        if changed {
+            tx.execute(
+                "UPDATE projects SET project_name=COALESCE(?2,project_name),
              project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
-            params![project.as_str(), name, summary, now_unix()],
-        )?;
+                params![project.as_str(), name, summary, now_unix()],
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -94,18 +98,28 @@ impl SqliteStore {
         name: &str,
         definition: &str,
     ) -> StoreResult<()> {
+        if name.trim().is_empty() || name.contains([':', '/', '\\']) {
+            return Err(StoreError::InvalidData("invalid Workflow name".into()));
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
         write_content(
             &tx,
             project,
-            &crate::pm::ProjectContent {
+            &current,
+            &ProjectContent {
                 workflow: name.into(),
-                krs: current.krs,
-                metric_targets: current.metric_targets,
+                krs: current.krs.clone(),
+                metric_targets: current.metric_targets.clone(),
             },
-            Some(definition),
+        )?;
+        tx.execute(
+            "INSERT INTO wave_workflows(wave_id,name,content)
+                SELECT wave_id,?2,?3 FROM projects WHERE id=?1
+                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content
+                WHERE content IS NOT excluded.content",
+            params![project.as_str(), name, definition],
         )?;
         tx.commit()?;
         Ok(())
@@ -114,15 +128,15 @@ impl SqliteStore {
     pub fn update_project_content(
         &self,
         project: &ProjectId,
-        content: &crate::pm::ProjectContent,
-        workflow_definition: Option<&str>,
+        content: &ProjectContent,
     ) -> StoreResult<()> {
         content
             .validate()
             .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        write_content(&tx, project, content, workflow_definition)?;
+        let current = super::plan_read::project_in(&tx, project)?;
+        write_content(&tx, project, &current, content)?;
         tx.commit()?;
         Ok(())
     }
@@ -131,10 +145,9 @@ impl SqliteStore {
 fn write_content(
     conn: &Connection,
     project: &ProjectId,
-    content: &crate::pm::ProjectContent,
-    workflow_definition: Option<&str>,
+    current: &PmProject,
+    content: &ProjectContent,
 ) -> StoreResult<()> {
-    let current = super::plan_read::project_in(conn, project)?;
     for (field, previous, value) in [
         (
             "workflow",
@@ -154,20 +167,9 @@ fn write_content(
     ] {
         PlanningChanges::Project(project).record(conn, field, previous, value)?;
     }
-    if let Some(definition) = workflow_definition {
-        let name = &content.workflow;
-        if name.trim().is_empty() || name.contains([':', '/', '\\']) {
-            return Err(StoreError::InvalidData("invalid Workflow name".into()));
-        }
-        conn.execute(
-            "INSERT INTO wave_workflows(wave_id,name,content)
-                SELECT wave_id,?2,?3 FROM projects WHERE id=?1
-                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content",
-            params![project.as_str(), name, definition],
-        )?;
-    }
-    let changed = conn.execute(
-        "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4 WHERE id=?1",
+    conn.execute(
+        "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4
+         WHERE id=?1 AND (project_prompt_context IS NOT ?2 OR workflow IS NOT ?3)",
         params![
             project.as_str(),
             crate::pm::render_project_content(content),
@@ -175,9 +177,6 @@ fn write_content(
             now_unix()
         ],
     )?;
-    if changed != 1 {
-        return Err(StoreError::NotFound);
-    }
     Ok(())
 }
 
@@ -250,8 +249,17 @@ mod tests {
                 )
                 .unwrap();
             store
-                .update_project_content(&project, &content, Some(definition))
+                .select_project_workflow(&project, &content.workflow, definition)
                 .unwrap();
+            let before = store.revisions().unwrap();
+            let changes = store.pending_project_changes(&project).unwrap();
+            store
+                .select_project_workflow(&project, &content.workflow, definition)
+                .unwrap();
+            store.update_project_content(&project, &content).unwrap();
+            store.edit_project(&project, Some(name), Some("")).unwrap();
+            assert_eq!(store.revisions().unwrap(), before);
+            assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
             owners.push((wave.id().clone(), project));
         }
         drop(store);
@@ -269,12 +277,8 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
-            let invalid = crate::pm::ProjectContent {
-                workflow: "personal:review".into(),
-                ..content.clone()
-            };
             assert!(store
-                .update_project_content(&project, &invalid, Some("changed"))
+                .select_project_workflow(&project, "personal:review", "changed")
                 .is_err());
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
@@ -286,11 +290,7 @@ mod tests {
             );
         }
         assert!(store
-            .update_project_content(
-                &crate::durable::ProjectId::new(),
-                &content,
-                Some(definition)
-            )
+            .update_project_content(&crate::durable::ProjectId::new(), &content)
             .is_err());
     }
 }

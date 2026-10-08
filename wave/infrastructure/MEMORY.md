@@ -58,15 +58,16 @@ and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project sele
 `22477da8e` owns Project edits/Workflow selection and per-field receipts.
 `921fc68ba` moves complete-plan edits onto that writer and removes inspection locking.
 
-`b6e291dd4` saves Task creation/edit, original input/Project and field/rank receipts.
-`71c8e445c` shares receipt/creation readers, retaining foreign-key owners, pending
-values, first conflicts and retry identity. Provider-first Task create/edit is deleted.
+`b6e291dd4` shares Task creation/edit; `71c8e445c` shares receipt/creation reads.
+Original input/Project, foreign-key owners, pending values, first conflicts and
+retry identity survive; provider-first creation/edit is deleted.
 
-October 8 Project creation, exact-ID binding and activation now save through
-`sqlite/project_selection.rs` without provider I/O. Creation/selection and original
-name commit together; reservations retain UUIDs/mappings. Status receipts retain
-conflicts and later edits. YAML imports require exact saved identity; terminal/invalid
-facts cannot replace selection. Offline proofs establish no delivery. Active Workflow state now proves started work for rotation without inventing Started.
+`764e90ae3` shares Project creation/binding/activation without provider I/O.
+Creation/selection and original name commit together; reservations retain UUIDs
+and mappings. Status receipts preserve conflicts/later edits. Binding/import resolve exact IDs in SQLite. Workflow selection owns definitions;
+unchanged saves retain receipts/revisions. Terminal/invalid facts cannot replace selection.
+Active Workflow state proves started work for rotation without inventing Started.
+Offline proofs establish no delivery.
 
 Wave schema/provisioning/definitions, membership, rotation and deletion/refiling
 still block LOO-412's coherent boundary. Export, safe field delivery/resolution,

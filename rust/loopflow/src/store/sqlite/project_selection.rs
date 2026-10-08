@@ -22,6 +22,43 @@ pub(crate) fn read_project_binding(
     read_in(&conn, wave)
 }
 
+// Selection accepts exact saved identities; display names and slugs never select a plan.
+fn resolve_project_id(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM projects WHERE wave_id=?1 AND (id=?2 OR external_project_id=?2)",
+            params![wave, project],
+            |row| row.get(0),
+        )
+        .optional()?;
+    id.map(ProjectId::from_raw).ok_or_else(|| {
+        StoreError::InvalidAuthority("Project ID has no saved record in this Wave".into())
+    })
+}
+
+// Initial binding and one-time import share the same identity decision.
+fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
+    let id = resolve_project_id(conn, wave, project)?;
+    let selected: Option<String> = conn.query_row(
+        "SELECT current_project_id FROM waves WHERE id=?1",
+        [wave],
+        |row| row.get(0),
+    )?;
+    if selected
+        .as_deref()
+        .is_some_and(|selected| selected != id.as_str())
+    {
+        return Err(StoreError::InvalidAuthority(
+            "Wave already has a different configured Project".into(),
+        ));
+    }
+    conn.execute(
+        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NULL",
+        params![wave, id.as_str()],
+    )?;
+    Ok(id)
+}
+
 fn write_in(
     conn: &Connection,
     wave: &WaveId,
@@ -33,21 +70,10 @@ fn write_in(
             "Project selection changed; preserve the intervening decision".into(),
         ));
     }
-    let id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM projects WHERE wave_id=?1 AND (id=?2 OR external_project_id=?2)",
-            params![wave, project],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let id = id.ok_or_else(|| {
-        StoreError::InvalidAuthority(
-            "Project selection requires accepted facts owned by this Wave".into(),
-        )
-    })?;
+    let id = resolve_project_id(conn, wave, project)?;
     conn.execute(
         "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NOT ?2",
-        params![wave, id],
+        params![wave, id.as_str()],
     )?;
     Ok(())
 }
@@ -68,24 +94,11 @@ pub(crate) fn write_project_binding(
 }
 
 impl SqliteStore {
-    pub(crate) fn bind_project(
-        &self,
-        wave: &WaveId,
-        project: &ProjectId,
-    ) -> StoreResult<PmProject> {
+    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<PmProject> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let selected: Option<String> = tx.query_row(
-            "SELECT current_project_id FROM waves WHERE id=?1",
-            [wave],
-            |row| row.get(0),
-        )?;
-        if selected.as_deref().is_some_and(|id| id != project.as_str()) {
-            return Err(StoreError::InvalidAuthority(
-                "Wave already has a different configured Project".into(),
-            ));
-        }
-        let candidate = super::plan_read::project_in(&tx, project)?;
+        let project = bind_in(&tx, wave, project)?;
+        let candidate = super::plan_read::project_in(&tx, &project)?;
         let competing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL
             AND (successor_id NOT IN (?2,?3) OR predecessor_id IS NOT NULL OR reset_name IS NOT NULL))",
             params![wave,project.as_str(),candidate.id],|row|row.get(0))?;
@@ -94,8 +107,6 @@ impl SqliteStore {
                 "an unfinished Project transition owns selection".into(),
             ));
         }
-        let expected = read_in(&tx, wave)?;
-        write_in(&tx, wave, expected.as_deref(), project.as_str())?;
         match readiness_in(&tx,wave)?.state {
             ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
                 "Project is terminal or has unresolved provider evidence; selection is unchanged".into())),
@@ -247,13 +258,7 @@ impl SqliteStore {
         )?;
         if !imported {
             if let Some(project) = project {
-                let selected = read_in(&tx, wave)?;
-                if selected.as_deref().is_some_and(|id| id != project) {
-                    return Err(StoreError::InvalidAuthority(
-                        "YAML import conflicts with the Wave's selected Project".into(),
-                    ));
-                }
-                write_in(&tx, wave, selected.as_deref(), project)?;
+                bind_in(&tx, wave, project)?;
             }
             tx.execute("INSERT INTO project_binding_imports(wave_id,original_yaml,imported_at) VALUES(?1,?2,unixepoch())", params![wave, original])?;
         }
@@ -445,10 +450,19 @@ mod tests {
             ProjectReadinessState::Unconfigured
         );
         assert_eq!(store.revisions().unwrap(), before);
-        store
-            .import_project_binding(wave.id(), Some(&original), Some(first), &guard)
-            .unwrap();
+        assert!(store
+            .import_project_binding(wave.id(), Some(&original), Some("missing"), &guard)
+            .is_err());
+        assert!(!store.project_binding_imported(wave.id()).unwrap());
+        assert_eq!(store.revisions().unwrap(), before);
+        write_project_binding(&store, wave.id(), None, first, &guard).unwrap();
         assert!(store.revisions().unwrap().planning > before.planning);
+        let selected = store.revisions().unwrap();
+        // Local and provider IDs select the same stored Project during import too.
+        store
+            .import_project_binding(wave.id(), Some(&original), Some("one"), &guard)
+            .unwrap();
+        assert_eq!(store.revisions().unwrap(), selected);
         write_project_binding(&store, wave.id(), Some(first), second, &guard).unwrap();
         let selected = store.revisions().unwrap();
         store

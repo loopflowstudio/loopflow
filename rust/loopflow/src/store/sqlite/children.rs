@@ -332,7 +332,7 @@ impl SqliteStore {
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{TASK_COLUMNS} WHERE EXISTS (
+            "{} WHERE EXISTS (
                 SELECT 1 FROM task_prs matched
                 WHERE matched.task_id=t.id AND matched.branch=?1
                   AND matched.abandoned_at IS NULL
@@ -345,7 +345,8 @@ impl SqliteStore {
                           AND active.abandoned_at IS NULL
                     )
                   )
-            )"
+            )",
+            task_columns()
         );
         let mut statement = conn.prepare(&query)?;
         let tasks = statement
@@ -360,8 +361,10 @@ impl SqliteStore {
             Some(_) => "p.wave_id=?1 AND ",
             None => "",
         };
-        let query =
-            format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
+        let query = format!(
+            "{} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC",
+            task_columns()
+        );
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params_from_iter(wave_id), map_task_row)?;
         rows.collect::<rusqlite::Result<_>>()
@@ -1185,15 +1188,17 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
 )";
 const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
-const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
-    SELECT 7 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
-) SELECT
-    t.id, t.external_issue_id,
-    CASE WHEN t.issue_identifier='lf-' || substr(t.id,6) THEN
-        'lf-' || substr(t.id,6,COALESCE((SELECT min(n) FROM selector_lengths
+// Both Work records and planning projections display the same unique local prefix.
+pub(super) const TASK_IDENTIFIER: &str = "CASE WHEN t.issue_identifier='lf-' || substr(t.id,6) THEN
+        'lf-' || substr(t.id,6,COALESCE((WITH RECURSIVE selector_lengths(n) AS (
+            SELECT 7 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
+        ) SELECT min(n) FROM selector_lengths
             WHERE NOT EXISTS(SELECT 1 FROM tasks other WHERE other.id!=t.id
                 AND substr(other.id,6,n)=substr(t.id,6,n))),32))
-        ELSE t.issue_identifier END,
+        ELSE t.issue_identifier END";
+
+fn task_columns() -> String {
+    format!("SELECT t.id,t.external_issue_id,{TASK_IDENTIFIER},
     t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
@@ -1203,9 +1208,10 @@ const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
         FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
-        '{\"state\":\"current\"}'),
+        json_object('state','current')),
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision
-    FROM tasks t JOIN projects p ON p.id=t.project_id";
+    FROM tasks t JOIN projects p ON p.id=t.project_id")
+}
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
@@ -1425,7 +1431,7 @@ fn task_pr_github_observation_json(pr: &TaskPr) -> StoreResult<Option<String>> {
 
 pub(super) fn task_on(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<Task>> {
     conn.query_row(
-        &format!("{TASK_COLUMNS} WHERE t.id=?1"),
+        &format!("{} WHERE t.id=?1", task_columns()),
         [task_id.as_str()],
         map_task_row,
     )

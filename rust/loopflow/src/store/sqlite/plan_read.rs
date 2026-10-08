@@ -7,6 +7,7 @@ use crate::id::WaveId;
 use crate::pm::{PmItem, PmProject, PmSnapshot};
 use crate::store::{PlanningState, PmTaskObservation, PmTaskRecord, StoreError, StoreResult};
 
+use super::children::TASK_IDENTIFIER;
 use super::SqliteStore;
 
 impl SqliteStore {
@@ -99,12 +100,12 @@ pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> StoreResult<PmPro
 pub(super) fn task_in(conn: &Connection, id: &TaskId) -> StoreResult<PmTaskObservation> {
     let (mut item, observed_at, repo, project_id, issue, deleted):
         (PmItem, i64, String, String, Option<String>, bool) = conn.query_row(
-        "SELECT t.planning_provider_revision,COALESCE(t.external_issue_id,t.id),issue_identifier,
+        &format!("SELECT t.planning_provider_revision,COALESCE(t.external_issue_id,t.id),{TASK_IDENTIFIER},
             planning_branch_name,planning_url,issue_title,issue_description,t.planning_rank,
             planning_completed,planning_completed_at,planning_state,planning_team_id,planning_assignee,
             COALESCE(t.pm_snapshot_synced_at,t.updated_at,t.created_at),w.repo,t.project_id,
             t.external_issue_id,t.planning_deleted_at IS NOT NULL
-         FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE t.id=?1",
+         FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id WHERE t.id=?1"),
         [id.as_str()], |row| Ok((PmItem {
             revision: row.get(0)?, id: row.get(1)?, identifier: row.get(2)?,
             branch_name: row.get(3)?, url: row.get(4)?, name: row.get(5)?, description: row.get(6)?,

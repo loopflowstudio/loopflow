@@ -77,7 +77,7 @@ A mixed Local/Linear rotation retains each authority's recovery records; a SQLit
 transaction cannot make the external provider effects atomic.
 
 LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished. Wave definitions, Project creation, membership,
+optional Linear synchronization. That cutover remains unfinished. Wave definitions/provisioning, membership,
 rotation and deletion/refiling retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
 Task creation and edits use one SQLite writer, regardless of provider mapping.
@@ -96,7 +96,9 @@ receipts commit together, including before a provider mapping exists. Inbound
 acquisition preserves pending fields and their first conflicting provider value;
 unrelated fields advance. Neither matching readback nor a provider timestamp
 acknowledges an unsent change. Workflow selection reads KRs and targets inside the
-write transaction. `wave update-plan` uses the same writer for the complete plan;
+write transaction and owns definition writes. Repeated field, content and definition
+saves preserve receipts without notifying readers of an unchanged plan.
+`wave update-plan` uses the same content writer for the complete plan;
 it no longer selects provider-first behavior. Workflow inspection reads committed
 planning without taking the Wave mutation lock. The CLI exposes pending fields/conflicts; Project delivery and
 Desktop pending presentation remain unfinished. Comments use `sqlite/task_comments.rs`. `sqlite/plan_read.rs` supplies registered Task status
@@ -150,10 +152,12 @@ A pending transition or unfinished Process is unresolved evidence, not proof of 
 Watchers and status reads never provision or import.
 
 The first explicit ensure, binding setup or applied rotation imports an existing
-`<Machine>/waves/<WaveId>/config.yaml` selection once, after exact provider ownership
-validation. SQLite commits the selected Project and original YAML bytes together in
-`project_binding_imports`; absent files are recorded too. Malformed files or failed
-provider reads leave import retryable and prohibit creation. After import, the file
+`<Machine>/waves/<WaveId>/config.yaml` selection once. Binding and import resolve
+exact durable or mapped IDs in the same SQLite transaction as selection; names and
+slugs never select a Project. SQLite commits the selected Project and original YAML
+bytes together in `project_binding_imports`; absent files are recorded too. Malformed
+files, missing identities or a conflicting selection leave import retryable and
+prohibit creation. After import, the file
 is inert, even if a stale checkout or old writer changes it. Other YAML bytes remain
 untouched. An imported completed Project stays selected history and cannot be reopened.
 Activation records its exact Process on the Wave; that Process remains the sole owner of
@@ -383,7 +387,7 @@ effect, so it cannot settle a newer decision. Explicit state resolution supersed
 the delivery identity without changing the Workflow. No local/provider clock
 comparison orders edits. The provider read and mutation remain separate requests;
 they do not prevent a concurrent Linear edit between them. The complete unified
-planning-owner cutover remains in progress; Project creation and rotation still use
+planning-owner cutover remains in progress; Wave provisioning and rotation still use
 split paths. Abandonment of an existing Task saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation

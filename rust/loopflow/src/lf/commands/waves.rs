@@ -1094,13 +1094,10 @@ async fn snapshot_tasks(
     }
 
     for task in &tasks {
-        if requests.iter().any(|request| {
-            task.plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == request.item.id)
-                || request.item.identifier == task.plan.identifier
-        }) {
+        if requests
+            .iter()
+            .any(|request| request.task.is_some_and(|matched| matched.id == task.id))
+        {
             continue;
         }
         let status = store.task_state(&task.id).await?;

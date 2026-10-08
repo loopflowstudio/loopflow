@@ -42,24 +42,10 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
     .await
     .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    import_binding(&store, &wave, &acquisition).await?;
-    let project = store
-        .list_projects(Some(wave.id()))
-        .await
-        .map_err(project_error)?
-        .into_iter()
-        .find(|project| {
-            project.id.as_str() == project_id
-                || project
-                    .plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == project_id)
-        })
-        .ok_or_else(|| project_error("Project ID has no saved record in this Wave"))?;
+    import_binding(&store, &wave, &acquisition)?;
     store
         .sqlite
-        .bind_project(wave.id(), &project.id)
+        .bind_project(wave.id(), project_id)
         .map_err(project_error)
 }
 
@@ -101,7 +87,7 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         .record_project_activation(wave.id(), crate::journal::current_process_lfid().as_ref())
         .map_err(project_error)?;
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    import_binding(&store, &wave, &acquisition).await?;
+    import_binding(&store, &wave, &acquisition)?;
     let id = store
         .sqlite
         .ensure_project(wave.id(), wave.slug())
@@ -161,18 +147,14 @@ pub async fn update_plan(
         .map_err(project_error)?;
     store
         .sqlite
-        .update_project_content(&project.id, &content, None)
+        .update_project_content(&project.id, &content)
         .map_err(project_error)?;
     planning(&store, &project, repo)
 }
 
 /// One-time supported import at an explicit mutation boundary. A failed read is
 /// never permission to create; the original bytes remain durable evidence.
-pub(crate) async fn import_binding(
-    store: &Store,
-    wave: &Wave,
-    guard: &Arc<PlanningLocks>,
-) -> OpsResult<()> {
+pub(crate) fn import_binding(store: &Store, wave: &Wave, guard: &PlanningLocks) -> OpsResult<()> {
     if store
         .sqlite
         .project_binding_imported(wave.id())
@@ -212,15 +194,6 @@ pub(crate) async fn import_binding(
         .map_err(project_error)?
         .and_then(|config| config.pm)
         .and_then(|pm| pm.linear_project);
-    if let Some(id) = &selected {
-        let project = store.get_project_by_project(id).await.map_err(project_error)?
-            .ok_or_else(|| project_error(format!("imported Project {id} has no saved record; acquire its exact identity before binding")))?;
-        if project.wave_id != *wave.id() {
-            return Err(project_error(
-                "imported Project belongs to a different Wave",
-            ));
-        }
-    }
     store
         .sqlite
         .import_project_binding(wave.id(), original.as_deref(), selected.as_deref(), guard)

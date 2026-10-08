@@ -1840,7 +1840,7 @@ mod tests {
             };
             store
                 .sqlite
-                .update_project_content(&project.id, &content, None)
+                .update_project_content(&project.id, &content)
                 .unwrap();
             let mut expected = snapshot.snapshot.projects[0].clone();
             expected.workflow = content.workflow;

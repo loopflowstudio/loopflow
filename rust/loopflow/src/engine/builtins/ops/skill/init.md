@@ -5,7 +5,7 @@ Connect this repository to Loopflow's distributed control system.
 
 Loopflow is not primarily a prompt launcher. It is the shared control surface
 for durable Waves, chapter plans and Linear-backed Tasks, GitHub delivery, stable
-execution Homes, and the agents that do the work. Establish that system first.
+execution Machines, and the agents that do the work. Establish that system first.
 Skills, flows, models, and launch preferences are secondary configuration.
 
 ## Reviewer mode
@@ -49,13 +49,13 @@ find wave -mindepth 2 -maxdepth 2 -name GOAL.md -print 2>/dev/null
 Do not reconstruct distributed state from processes, worktrees, or provider
 web pages. `lf wave list`, `lf wave status`, and `lf roadmap` are the shared read surfaces.
 If `lf id` says the local store is not initialized, record that plainly
-and continue; do not invent a Home identity.
+and continue; do not invent a Machine identity.
 
 Present one compact topology:
 
 ```text
 Repository  /path/to/repo
-Home        home_... on this machine | not initialized
+Machine        home_... on this machine | not initialized
 Agents      codex, claude
 Accounts    GitHub connected; Linear missing
 Waves       designer running here; infrastructure stopped on home_...
@@ -65,7 +65,7 @@ Config      repo present; personal present
 
 Separate observed facts from missing capabilities. Do not call a repository
 "uninitialized" merely because it has no `.lf/config.yaml`; existing Wave,
-Home, account, or planning state still counts.
+Machine, account, or planning state still counts.
 
 ## 2. Establish the minimum local authority
 
@@ -79,24 +79,24 @@ unset), preserving other settings. Blank or absent preferences fall through to
 Git. Never infer a name from an account, directory, or commit author, and never
 put a personal name in repo Loopflow configuration.
 On SSH, preserve the destination owner's preference; the caller's preference
-belongs on the originating Home. In unattended work, leave an absent name unknown.
+belongs on the originating Machine. In unattended work, leave an absent name unknown.
 
 At least one supported agent must be available: Claude Code, Codex, or
 OpenCode. If none is installed, stop with install commands and end with
 `lf init` as the retry. Do not run a package manager.
 
-Installed harnesses are a capability of this Home, not repository policy. One
-Home may have Codex while another has Claude or OpenCode. Never rewrite
+Installed harnesses are a capability of this Machine, not repository policy. One
+Machine may have Codex while another has Claude or OpenCode. Never rewrite
 team-wide repo configuration merely to mirror `command -v` on this machine.
 
 Resolve repo agent configuration conservatively:
 
 - Preserve a valid existing `agent` override.
 - An absent `agent` is valid: Loopflow then uses the first of Codex, Claude,
-  and OpenCode installed on this Home. Do not write `agent` to work around a
+  and OpenCode installed on this Machine. Do not write `agent` to work around a
   missing harness.
 - Change `agent` or `supported_harnesses` only when the user explicitly wants
-  a team-wide policy. Ask whether the choice is repo-wide or Home-local before
+  a team-wide policy. Ask whether the choice is repo-wide or Machine-local before
   writing it.
 - A local harness mismatch affects where work can run. It does not invalidate
   the repository.
@@ -242,32 +242,32 @@ author reusable behavior.
 
 ## 5. Place execution deliberately
 
-The current Home is the default execution authority. Do not place or start a
+The current Machine is the default execution authority. Do not place or start a
 Wave merely to prove setup.
 
 If the user wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
-lf ssh <host> home id --json
-lf observe <home-id> ssh://<user>@<host>
-lf ssh <home-id> account --cached
-lf ssh <home-id> account route
+lf ssh <host> machine id --json
+lf observe <machine-id> ssh://<user>@<host>
+lf ssh <machine-id> account --cached
+lf ssh <machine-id> account route
 lf wave list --json
-lf wave place <wave-id> <home-id>
+lf wave place <wave-id> <machine-id>
 lf wave status <wave> --json
-lf ssh <home-id> --wave <wave> wave/operate
+lf ssh <machine-id> --wave <wave> wave/operate
 ```
 
 `lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. The remote process can select from subscription accounts forwarded
-for that invocation and accounts installed on the remote Home. GitHub, PM, and
+for that invocation and accounts installed on the remote Machine. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
 required accounts, and the intended route. `lf observe` records the
-mutable SSH route for the stable HomeId. Placement is allowed only while no execution
+mutable SSH route for the stable MachineId. Placement is allowed only while no execution
 is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
-`lf ssh <home-id>` to run on the remote Home. Observing a route,
+`lf ssh <machine-id>` to run on the remote Machine. Observing a route,
 changing placement, and starting a Wave each change durable execution state.
 
 ## 6. Prove the result
@@ -294,8 +294,8 @@ Finish with observed state and one primary next command:
 ```text
 Loopflow is connected for this repository.
 
-Home         home_... (local)
-Home agents  Codex + Claude installed
+Machine         home_... (local)
+Machine agents  Codex + Claude installed
 Repo policy  inherited defaults
 Accounts     GitHub + Linear connected
 Wave         designer placed on home_...
@@ -306,7 +306,7 @@ Also         lf roadmap --wave designer | lf task run DES-123 | lf debug -c
 ```
 
 If something remains unavailable, say exactly which authority is missing and
-the command that would establish it. Never hide a missing account, Home,
+the command that would establish it. Never hide a missing account, Machine,
 Wave/PM binding, or agent behind "setup complete."
 
 On macOS, offer `lf desktop` as an optional interactive control surface after the
@@ -317,5 +317,5 @@ selected path is proved. Do not launch it automatically.
 - Lead with the observed topology, not configuration trivia.
 - Ask one consequential question at a time.
 - Prefer a working durable path over exhaustive optional setup.
-- Expose Wave and Task; keep the chapter Project internal. Keep Home, account, and skill distinct.
+- Expose Wave and Task; keep the chapter Project internal. Keep Machine, account, and skill distinct.
 - Stop when the chosen path is proved and the next command is obvious.

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{HomeId, WorkRef, WorkStatus};
+use loopflow::durable::{MachineId, WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig};
@@ -319,9 +319,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .placement(&WorkRef::Wave(alpha.id().clone()))
         .await
         .unwrap();
-    let foreign_home = HomeId::new();
+    let foreign_home = MachineId::new();
     store
-        .observe_home(&foreign_home, "ssh://operator@foreign-home")
+        .observe_machine(&foreign_home, "ssh://operator@foreign-home")
         .await
         .unwrap();
     let foreign_place = lf_command(
@@ -342,8 +342,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .placement(&WorkRef::Wave(alpha.id().clone()))
             .await
             .unwrap()
-            .home_id,
-        alpha_placement.home_id
+            .machine_id,
+        alpha_placement.machine_id
     );
 
     store
@@ -552,8 +552,8 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .placement(&WorkRef::Wave(alpha.id().clone()))
             .await
             .unwrap()
-            .home_id,
-        placement.home_id
+            .machine_id,
+        placement.machine_id
     );
     assert_eq!(
         store

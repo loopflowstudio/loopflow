@@ -1095,7 +1095,7 @@ impl CodexHarness {
         command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
-        // machine installation, losing a development Session's executable/Home.
+        // installation, losing a development Session's executable/Machine.
         command.args([
             "-c",
             "allow_login_shell=false",
@@ -1106,7 +1106,7 @@ impl CodexHarness {
         // Codex's shell policy need not inherit arbitrary engine environment.
         // Tool authority belongs to this conversation, including when another
         // conversation later shares its engine. Pass only explicit launch and
-        // freshly resolved lf executable/Home values as thread configuration.
+        // freshly resolved lf executable/Machine values as thread configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
         // The engine can host another conversation. Only this thread receives
         // its caller/capture provenance; engine defaults must not lend it to a

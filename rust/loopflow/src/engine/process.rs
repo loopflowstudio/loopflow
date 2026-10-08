@@ -75,7 +75,7 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
             return PathBuf::from(path);
         }
     } else if let Ok(Some(cli)) =
-        crate::machine_install::root().and_then(|root| crate::machine_install::installed_cli(&root))
+        crate::installation::root().and_then(|root| crate::installation::installed_cli(&root))
     {
         return cli.path;
     }
@@ -101,8 +101,7 @@ pub(crate) fn resolve_lf_binary() -> PathBuf {
 /// executable is not created.
 pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
     if !crate::store::custom_home_selected() {
-        if let Some(cli) = crate::machine_install::installed_cli(&crate::machine_install::root()?)?
-        {
+        if let Some(cli) = crate::installation::installed_cli(&crate::installation::root()?)? {
             // One read resolves this for every Task; hash unchanged bytes once.
             static VERIFIED: Mutex<Option<(PathBuf, String, u64, SystemTime)>> = Mutex::new(None);
             let metadata = std::fs::metadata(&cli.path)?;
@@ -144,12 +143,12 @@ pub(crate) fn resolve_pinned_lf_binary() -> Result<PathBuf> {
 /// The installed `lf` is normally a mutable symlink. Exact-frontier promotion
 /// may repoint it while a body is running, so the body carries the
 /// canonical target in `LF_BIN`. A later body launch deliberately
-/// resolves the current Home again and picks up the promoted binary.
+/// resolves the current Machine again and picks up the promoted binary.
 pub(crate) fn pin_control_binary(lf_bin: &Path) -> PathBuf {
     std::fs::canonicalize(lf_bin).unwrap_or_else(|_| lf_bin.to_path_buf())
 }
 
-/// Capture the resolved CLI and Home for a provider child.
+/// Capture the resolved CLI and Machine for a provider child.
 pub(crate) fn execution_context() -> Result<crate::child::ChildExecutionContext> {
     crate::store::database_path_from_env()
         .map_err(|error| anyhow!("cannot resolve the Run database path: {error}"))?;
@@ -355,7 +354,7 @@ pub(crate) async fn start_tmux_session(
     Ok(())
 }
 
-/// What one lf process is: its Home, binary, Process, Flow step and claims. A new
+/// What one lf process is: its Machine, binary, Process, Flow step and claims. A new
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::lf::WORK_DECLARATION_ENV,
@@ -373,300 +372,5 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
     crate::ops::flow_process::FLOW_ID_ENV,
-    crate::machine_install::INSTALL_SWITCH_ENV,
-    crate::lf::commands::ssh::EXPECTED_HOME_ID_ENV,
-    "LF_TERMINAL_ID",
-    "LF_TERMINAL_TTY",
-    "LOOPFLOW_DIRECTIVE_FILE",
-    "LOOPFLOW_FLOW_NAME",
-    "LF_BIN",
-    "LF_HOME",
-];
-
-/// Credentials and account authority forwarded to one process, never onward.
-const FORWARDED_AUTHORITY_ENV: &[&str] = &[
-    crate::provider_account::lease::ACCOUNT_LEASE_ENV,
-    crate::provider_account::lease::ACCOUNT_SELECTION_ENV,
-    crate::provider_account::activation::ACCOUNT_ISOLATION_ENV,
-    crate::ops::pm::FORWARDED_PM_TOKEN_ENV,
-    crate::ops::pm::FORWARDED_PM_PROVIDER_ENV,
-    "LF_FORWARDED_SECRET_NAMES",
-    DISCORD_TOKEN_ENV,
-    "GH_TOKEN",
-    "OPENCODE_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "OPENAI_API_KEY",
-];
-
-fn forwarded_authority_env_names() -> Vec<String> {
-    let mut names = FORWARDED_AUTHORITY_ENV
-        .iter()
-        .map(|name| name.to_string())
-        .collect::<Vec<_>>();
-    if let Ok(forwarded) = std::env::var("LF_FORWARDED_SECRET_NAMES") {
-        names.extend(forwarded.split_whitespace().map(str::to_string));
-    }
-    names
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::{
-        forwarded_authority_env_names, lf_session_shell_command, pin_control_binary,
-        DISCORD_TOKEN_ENV,
-    };
-
-    #[test]
-    fn detached_child_enters_quoted_directory_and_reports_missing_directory() {
-        let directory = tempfile::tempdir().unwrap();
-        let cwd = directory.path().join("checkout with 'quotes'");
-        std::fs::create_dir(&cwd).unwrap();
-        let command = lf_session_shell_command(&cwd, &["pwd".into(), "-P".into()], &[]);
-        let output = std::process::Command::new("/bin/sh")
-            .args(["-c", &command])
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        assert_eq!(
-            String::from_utf8(output.stdout).unwrap().trim(),
-            cwd.canonicalize().unwrap().to_str().unwrap()
-        );
-        std::fs::remove_dir(&cwd).unwrap();
-        let output = std::process::Command::new("/bin/sh")
-            .args(["-c", &command])
-            .output()
-            .unwrap();
-        assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
-        assert!(!output.stderr.is_empty());
-    }
-
-    #[test]
-    #[ignore = "requires a local tmux executable; uses an isolated server"]
-    fn detached_child_recovers_deleted_tmux_server_directory() {
-        let directory = tempfile::Builder::new()
-            .prefix("lf-tmux-")
-            .tempdir_in("/tmp")
-            .unwrap();
-        let socket = directory.path().join("socket");
-        let original = directory.path().join("deleted");
-        let cwd = directory.path().join("checkout with 'quotes'");
-        let output_path = directory.path().join("pwd");
-        std::fs::create_dir(&original).unwrap();
-        std::fs::create_dir(&cwd).unwrap();
-        let tmux = || {
-            let mut command = std::process::Command::new("tmux");
-            command
-                .env_remove("TMUX")
-                .args(["-S"])
-                .arg(&socket)
-                .args(["-f", "/dev/null"]);
-            command
-        };
-        assert!(tmux()
-            .current_dir(&original)
-            .args(["new-session", "-d", "-s", "anchor", "sleep 15"])
-            .status()
-            .unwrap()
-            .success());
-        std::fs::remove_dir(&original).unwrap();
-        let command = lf_session_shell_command(
-            &cwd,
-            &[
-                "/bin/sh".into(),
-                "-c".into(),
-                format!(
-                    "pwd -P > {}",
-                    super::shell_escape(output_path.to_str().unwrap())
-                ),
-            ],
-            &[],
-        );
-        let launched = tmux()
-            .args(["new-session", "-d", "-s", "child", "-c"])
-            .arg(&cwd)
-            .args(["/bin/sh", "-lc", &command])
-            .status()
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !output_path.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let output = std::fs::read_to_string(&output_path);
-        let _ = tmux().arg("kill-server").status();
-        assert!(launched.success());
-        assert_eq!(
-            output.unwrap().trim(),
-            cwd.canonicalize().unwrap().to_str().unwrap()
-        );
-    }
-
-    #[test]
-    fn a_body_generation_keeps_one_binary_across_a_global_repoint() {
-        let dir = tempfile::tempdir().unwrap();
-        let old = dir.path().join("lf-old");
-        let new = dir.path().join("lf-new");
-        let installed = dir.path().join("lf");
-        std::fs::write(&old, b"old").unwrap();
-        std::fs::write(&new, b"new").unwrap();
-        std::os::unix::fs::symlink(&old, &installed).unwrap();
-
-        let pinned = pin_control_binary(&installed);
-        assert_eq!(pinned, std::fs::canonicalize(&old).unwrap());
-        std::fs::remove_file(&installed).unwrap();
-        std::os::unix::fs::symlink(&new, &installed).unwrap();
-
-        assert_eq!(std::fs::read(&pinned).unwrap(), b"old");
-        assert_eq!(
-            std::fs::read(std::fs::canonicalize(&installed).unwrap()).unwrap(),
-            b"new"
-        );
-    }
-
-    #[test]
-    fn lf_session_clears_parent_identity_and_exports_its_own() {
-        let argv = vec![
-            "lf".to_string(),
-            "work".to_string(),
-            "execute".to_string(),
-            "task".to_string(),
-            "tsk_123".to_string(),
-        ];
-        let command =
-            lf_session_shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
-
-        assert!(command.contains(
-            "if [ -n \"${LF_FORWARDED_SECRET_NAMES:-}\" ]; then unset $LF_FORWARDED_SECRET_NAMES; fi; unset "
-        ));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
-        assert!(command.contains("LF_DISCORD_TOKEN"));
-        assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
-        assert!(command
-            .ends_with("exec env 'LF_WAVE_ID'='infra' 'lf' 'work' 'execute' 'task' 'tsk_123'"));
-    }
-
-    #[test]
-    fn lf_session_drops_a_stale_run_step_binary_and_home() {
-        let argv = vec![
-            "sh".into(),
-            "-c".into(),
-            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_FLOW_ID-}${LF_BIN-}${LF_HOME-unset}\""
-                .into(),
-        ];
-        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
-        let output = std::process::Command::new("sh")
-            .args(["-c", &command])
-            .env("LF_RUN_ID", "run_dead")
-            .env("LF_RUN_DIR", "/dead/run")
-            .env("LF_FLOW_ID", "stale-flow")
-            .env("LF_BIN", "/stale/lf")
-            .env("LF_HOME", "/stale/home")
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), "unset");
-    }
-
-    #[test]
-    fn lf_session_without_explicit_identity_does_not_inherit_its_parent() {
-        let argv = vec!["lf".to_string(), "wave".to_string(), "child".to_string()];
-
-        let command = lf_session_shell_command(std::path::Path::new("."), &argv, &[]);
-
-        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
-        assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
-    }
-
-    #[test]
-    fn preferred_name_in_durable_sessions_requires_explicit_context() {
-        let argv = vec![
-            "sh".into(),
-            "-c".into(),
-            "printf '%s' \"${LF_USER_NAME-unset}\"".into(),
-        ];
-        for name in [None, Some("Maya")] {
-            let env = name
-                .map(|name| vec![(crate::engine::config::USER_NAME_ENV, name)])
-                .unwrap_or_default();
-            let command = lf_session_shell_command(std::path::Path::new("."), &argv, &env);
-            let output = std::process::Command::new("sh")
-                .args(["-c", &command])
-                .env(crate::engine::config::USER_NAME_ENV, "Jack")
-                .output()
-                .unwrap();
-            assert!(output.status.success());
-            assert_eq!(
-                String::from_utf8(output.stdout).unwrap(),
-                name.unwrap_or_default()
-            );
-        }
-    }
-
-    #[test]
-    fn durable_session_scrubs_every_named_forwarded_secret() {
-        let _lock = crate::journal::test_env_lock();
-        let previous = std::env::var_os("LF_FORWARDED_SECRET_NAMES");
-        std::env::set_var("LF_FORWARDED_SECRET_NAMES", "SENTRY_TOKEN STRIPE_KEY");
-
-        let names = forwarded_authority_env_names();
-
-        match previous {
-            Some(value) => std::env::set_var("LF_FORWARDED_SECRET_NAMES", value),
-            None => std::env::remove_var("LF_FORWARDED_SECRET_NAMES"),
-        }
-        assert!(names.iter().any(|name| name == "LF_ACCOUNT_LEASE"));
-        assert!(names.iter().any(|name| name == "GH_TOKEN"));
-        assert!(names.iter().any(|name| name == "LF_DISCORD_TOKEN"));
-        assert!(names.iter().any(|name| name == "SENTRY_TOKEN"));
-        assert!(names.iter().any(|name| name == "STRIPE_KEY"));
-    }
-
-    #[test]
-    fn discord_chat_token_is_scrubbed_from_durable_provider_children() {
-        assert!(forwarded_authority_env_names()
-            .iter()
-            .any(|name| name == DISCORD_TOKEN_ENV));
-        let command = lf_session_shell_command(
-            std::path::Path::new("."),
-            &["lf".into(), "wave".into()],
-            &[],
-        );
-        assert!(command.contains("unset "));
-        assert!(command.contains(DISCORD_TOKEN_ENV));
-    }
-
-    #[test]
-    fn lf_session_replaces_tmux_invocation_context() {
-        let argv = vec![
-            "lf".to_string(),
-            "work".to_string(),
-            "execute".to_string(),
-            "task".to_string(),
-            "tsk_123".to_string(),
-        ];
-        let command = lf_session_shell_command(
-            std::path::Path::new("."),
-            &argv,
-            &[
-                ("LF_TRACE_ID", "run-1"),
-                ("LF_PROCESS_LFID", "process-1"),
-                ("LF_HOME", "/tmp/lf"),
-            ],
-        );
-
-        assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_LEASE LF_ACCOUNT_SELECTION"));
-        assert!(command.ends_with(
-            "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_LFID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
-        ));
-    }
-}
-
-#[cfg(not(test))]
-pub(crate) async fn start_home_session(session: &str, cwd: &Path, argv: &[String]) -> Result<()> {
-    start_lf_session_with_env(session, cwd, argv, &[]).await
-}
+    crate::installation::INSTALL_SWITCH_ENV,
+    crate::lf::commands::ssh::EXPECTED_MACHINE_ID_ENV,

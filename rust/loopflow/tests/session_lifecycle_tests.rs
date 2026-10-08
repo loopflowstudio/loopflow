@@ -1,5 +1,5 @@
 //! Conversations own admission, immutable inputs, and history through completion.
-//! The real `lf` binary runs in a private Home; a script stands in for the provider.
+//! The real `lf` binary runs in a private Machine; a script stands in for the provider.
 #![cfg(unix)]
 
 mod support;
@@ -1042,7 +1042,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
 #[ignore = "requires disposable Linux account with no installed Loopflow"]
 fn declared_agent_can_start_another_tasks_flow() {
     assert!(Path::new("/.dockerenv").is_file());
-    assert!(!loopflow::machine_install::root().unwrap().exists());
+    assert!(!loopflow::installation::root().unwrap().exists());
     let fixture = Fixture::new(false);
     support::bind_task_planning(&fixture.repo);
     let y = fixture.repo.create_named_worktree("task-y");

@@ -424,11 +424,10 @@ impl TaskPr {
         (self.head_sha() == Some(request.head_sha.as_str())).then_some(request)
     }
 
-    /// Settlement disposition. A PR merged without an explicit request safely
-    /// continues the Task; only a head-pinned request may complete it.
+    /// Verified delivery completes by default; explicit continuation remains recorded.
     pub fn after_merge(&self) -> AfterMerge {
         self.merge_request()
-            .map_or(AfterMerge::ContinueTask, |request| request.after_merge)
+            .map_or(AfterMerge::CompleteTask, |request| request.after_merge)
     }
 
     pub fn next_slug(&self) -> Option<&str> {
@@ -646,6 +645,30 @@ impl Task {
     }
 }
 
+/// Accepted work remaining after source delivery. Time calls for a check, not success.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskFollowUp {
+    pub outcome: String,
+    pub evidence: String,
+    pub check_at: i64,
+}
+
+impl TaskFollowUp {
+    pub fn summary(&self, now: i64) -> String {
+        let due = if now >= self.check_at {
+            "overdue"
+        } else {
+            "pending"
+        };
+        let at = OffsetDateTime::from_unix_timestamp(self.check_at)
+            .expect("follow-up timestamp validated when written");
+        format!(
+            "Remaining work: {}; evidence: {}; next check {at} ({due})",
+            self.outcome, self.evidence
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskEventKind {
@@ -663,6 +686,11 @@ pub enum TaskEventKind {
     Progress {
         summary: String,
     },
+    FollowUp {
+        remaining: Option<TaskFollowUp>,
+        reason: String,
+    },
+    // Retained for reading recorded decisions; no current writer.
     HistoricalUncertaintyAccepted {
         #[serde(alias = "exec_ids")] // Append-only decisions keep their original bytes.
         process_lfids: Vec<crate::id::ProcessLfid>,

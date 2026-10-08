@@ -83,7 +83,7 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
 const LANDING_COLUMNS: &str = "
     id, repo, pr_number, worktree, branch, task_id,
     requested_head_sha, observed_head_sha, merge_commit, after_merge,
-    next_slug, state, generation, supervisor_placement, supervisor_home_id,
+    next_slug, state, generation, supervisor_placement, supervisor_machine_id,
     supervisor_process_id, supervisor_heartbeat_at,
     blocked_reason, created_at, updated_at";
 
@@ -121,7 +121,7 @@ impl super::SqliteStore {
     pub fn release_pr_landing(&self, landing: &PrLanding) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE pr_landings SET supervisor_placement=NULL, supervisor_home_id=NULL,
+            "UPDATE pr_landings SET supervisor_placement=NULL, supervisor_machine_id=NULL,
              supervisor_process_id=NULL, supervisor_heartbeat_at=NULL, generation=generation+1
              WHERE id=?1 AND generation=?2",
             params![landing.id.as_str(), landing.generation as i64],
@@ -166,7 +166,7 @@ impl super::SqliteStore {
                 transaction.execute(
                     "UPDATE pr_landings
                      SET state='watching', generation=?2, blocked_reason=NULL,
-                         supervisor_placement=NULL, supervisor_home_id=NULL,
+                         supervisor_placement=NULL, supervisor_machine_id=NULL,
                          supervisor_process_id=NULL, supervisor_heartbeat_at=NULL,
                          worktree=?3, branch=?4
                      WHERE id=?1",
@@ -223,7 +223,7 @@ impl super::SqliteStore {
             "INSERT INTO pr_landings (
                 id, repo, pr_number, worktree, branch, task_id,
                 requested_head_sha, observed_head_sha, merge_commit, after_merge,
-                next_slug, state, generation, supervisor_placement, supervisor_home_id,
+                next_slug, state, generation, supervisor_placement, supervisor_machine_id,
                 supervisor_process_id, supervisor_heartbeat_at,
                 blocked_reason, created_at, updated_at
              ) VALUES (
@@ -312,7 +312,7 @@ impl super::SqliteStore {
         let now = claim.heartbeat_at;
         let changed = transaction.execute(
             "UPDATE pr_landings
-             SET generation=?2, supervisor_placement=?3, supervisor_home_id=?4,
+             SET generation=?2, supervisor_placement=?3, supervisor_machine_id=?4,
                  supervisor_process_id=?5, supervisor_heartbeat_at=?6, updated_at=?6
              WHERE id=?1 AND generation=?7 AND state IN ('watching', 'repairing', 'blocked')",
             params![

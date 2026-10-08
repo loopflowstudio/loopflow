@@ -269,15 +269,15 @@ fn admit_ci_fix(
             {
                 return Err(repair_error("Task automation is held"));
             }
-            let local = store.local_home().await.map_err(repair_error)?;
+            let local = store.local_machine().await.map_err(repair_error)?;
             let placement = store
                 .placement(&crate::durable::WorkRef::Task(task_id.clone()))
                 .await
                 .map_err(repair_error)?;
-            if placement.home_id != local.id {
+            if placement.machine_id != local.id {
                 return Err(repair_error(format!(
-                    "Task is placed on Home {}",
-                    placement.home_id
+                    "Task is placed on Machine {}",
+                    placement.machine_id
                 )));
             }
             if let Some(reason) = super::task_automation::admission_blocker(
@@ -1288,7 +1288,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task move {} end` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
@@ -1569,6 +1569,28 @@ async fn reconcile_repository_async(
             }
             Err(_) => {
                 errors.push(format!("PR #{number}: observation deadline exceeded"));
+                break;
+            }
+        }
+    }
+    for mut task in super::task_automation::repository_tasks(store, &repo).await? {
+        if tokio::time::Instant::now() >= deadline {
+            errors.push("Task delivery coverage overdue: pass deadline exceeded".into());
+            break;
+        }
+        match tokio::time::timeout_at(
+            deadline,
+            super::task::reconcile_delivered_task(store, &mut task),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => errors.push(format!("{}: {error}", task.plan.identifier)),
+            Err(_) => {
+                errors.push(format!(
+                    "{}: delivery observation deadline exceeded",
+                    task.plan.identifier
+                ));
                 break;
             }
         }

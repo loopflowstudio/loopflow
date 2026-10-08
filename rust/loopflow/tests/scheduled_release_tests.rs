@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::{Local, Timelike, Utc};
-use loopflow::durable::HomeId;
+use loopflow::durable::MachineId;
 use loopflow::ops::cron::accounting::ScheduledReleaseOutcome;
 use loopflow::ops::cron::history::release_history;
 use loopflow::ops::{
@@ -186,7 +186,7 @@ fn closed_release_history_records_repair_without_settling_or_transferring_work()
             "--owner",
             task.task.id.as_str(),
             "--reason",
-            "reconcile v1.2.3 on the original Home",
+            "reconcile v1.2.3 on the original Machine",
         ])
         .current_dir(repo.path())
         .output()
@@ -461,12 +461,12 @@ esac
         let agents = home.path().join("Library/LaunchAgents");
         let lf_home = home.path().join(".lf");
         let mut host = CronHost {
-            home_id: HomeId::new(),
+            machine_id: MachineId::new(),
             lf_home: lf_home.clone(),
             path_env: std::env::var("PATH").unwrap(),
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        host.home_id = runtime.block_on(async {
+        host.machine_id = runtime.block_on(async {
             let store = loopflow::store::open_ephemeral_store(
                 &loopflow::store::StorageConfig::sqlite(host.lf_home.join("loopflow.db")),
             )
@@ -478,7 +478,7 @@ esac
                 repo_path.display().to_string(),
             );
             store.create_wave(&wave).await.unwrap();
-            store.local_home().await.unwrap().id
+            store.local_machine().await.unwrap().id
         });
         let scheduled = Local::now() - chrono::Duration::minutes(1);
         let schedule = schedule_from_cron(&format!(
@@ -553,8 +553,8 @@ exit 0
                 &agents,
                 &telemetry.wave,
                 &telemetry.flow,
-                &host.home_id,
-                &host.home_id,
+                &host.machine_id,
+                &host.machine_id,
                 CronSource::Scheduled,
             );
             assert_eq!(
@@ -602,7 +602,7 @@ exit 0
             original_receipts.push(tied);
         }
 
-        // Model an already-installed daily obligation in a disposable Home. No
+        // Model an already-installed daily obligation in a disposable Machine. No
         // production schedule or clock is changed; these are synthetic due dates.
         let mut release = CronSpec {
             flow: "release-template".into(),
@@ -705,8 +705,8 @@ exit 0
                 &agents,
                 &release.wave,
                 &release.flow,
-                &host.home_id,
-                &host.home_id,
+                &host.machine_id,
+                &host.machine_id,
                 CronSource::Scheduled
             )
             .is_err());
@@ -744,8 +744,8 @@ exit 0
                 &agents,
                 &release.wave,
                 &release.flow,
-                &host.home_id,
-                &host.home_id,
+                &host.machine_id,
+                &host.machine_id,
                 CronSource::Scheduled
             )
             .is_err());
@@ -842,8 +842,8 @@ exit 0
                 &agents,
                 &release.wave,
                 &release.flow,
-                &host.home_id,
-                &host.home_id,
+                &host.machine_id,
+                &host.machine_id,
                 CronSource::Scheduled
             )
             .is_err());
@@ -1061,8 +1061,8 @@ exit 0
             &agents,
             &release.wave,
             &release.flow,
-            &host.home_id,
-            &host.home_id,
+            &host.machine_id,
+            &host.machine_id,
             CronSource::Scheduled,
         );
         let log =
@@ -1461,8 +1461,8 @@ exit 0
                 &agents,
                 &release.wave,
                 &release.flow,
-                &host.home_id,
-                &host.home_id,
+                &host.machine_id,
+                &host.machine_id,
                 CronSource::Scheduled,
             );
             assert!(result.is_ok(), "{result:?}");

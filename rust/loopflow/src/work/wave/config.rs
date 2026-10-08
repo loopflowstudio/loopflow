@@ -21,7 +21,7 @@ pub(crate) enum WaveConfigError {
 }
 
 /// One cron line from GOAL.md frontmatter: `crons: [{flow, schedule}]`.
-/// `lf wave cron sync` installs these schedules on the placed Home.
+/// `lf wave cron sync` installs these schedules on the placed Machine.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct WaveCronDef {
     pub flow: String,
@@ -387,13 +387,13 @@ mod tests {
                 if guild_id == "guild" && channel_id == "channel"
         ));
 
-        // The binding is local: `home_id` is no longer a Discord-config field.
+        // The binding is local: `machine_id` is no longer a Discord-config field.
         // `deny_unknown_fields` rejects it, so a stale GOAL.md fails closed.
         fs::write(
             dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  home_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
+            "---\nchat:\n  provider: discord\n  machine_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
-        .expect("write stale home_id");
+        .expect("write stale machine_id");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })

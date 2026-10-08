@@ -4,7 +4,7 @@
 uv run python scripts/benchmarks/desktop-performance/startup.py capture --repo ~/src/loopflow --output /tmp/startup-capture
 uv run python scripts/benchmarks/desktop-performance/startup.py run --capture /tmp/startup-capture --output /tmp/startup-run
 
-`capture` runs the app's read-only startup verbs once against the current Home
+`capture` runs the app's read-only startup verbs once against the current Machine
 and records their output and wall time; the capture holds private planning
 text, so keep it out of the repository. `run` replays it in-process and writes
 `journal.ndjson`, `report.json` and `report.md`. The endpoint is the model
@@ -42,7 +42,7 @@ def capture(repo: Path, output: Path) -> None:
         reads.append({"verb": verb, "file": name, "ms": round(ms, 1), "bytes": len(text.encode())})
         return text
 
-    home = json.loads(record("home", "home.json", ["home", "id", "--json"]))["id"]
+    home = json.loads(record("home", "home.json", ["machine", "id", "--json"]))["id"]
     record("wave", "waves.json", ["wave", "list", "--all", "--current", "--json"])
     record("roadmap", "roadmap.json", ["roadmap", "--all", "--json"])
     record("activity", "activity.json", ["activity", "--since", "7d", "--limit", "50", "--json"])
@@ -56,7 +56,7 @@ def capture(repo: Path, output: Path) -> None:
         if not after:
             break
     version = subprocess.run(["lf", "--version"], capture_output=True, text=True).stdout.strip()
-    manifest = {"repo": str(repo), "homeId": home, "lf": version, "reads": reads}
+    manifest = {"repo": str(repo), "machineId": home, "lf": version, "reads": reads}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     for read in reads:
         print(f"{read['verb']:9} {read['ms']:9.0f} ms {read['bytes']:8} B")

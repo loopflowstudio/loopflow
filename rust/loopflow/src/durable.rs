@@ -60,7 +60,8 @@ pub enum DurableDataError {
 
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
-durable_id!(HomeId, "home_");
+// Opaque IDs retain their released spelling, including references in scheduled jobs.
+durable_id!(MachineId, "home_");
 durable_id!(ToolResponseId, "response_");
 durable_id!(CronReceiptId, "cron_");
 
@@ -103,8 +104,8 @@ impl WorkRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Home {
-    pub id: HomeId,
+pub struct Machine {
+    pub id: MachineId,
     pub route: String,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
@@ -115,7 +116,7 @@ pub struct Home {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Placement {
     pub work: WorkRef,
-    pub home_id: HomeId,
+    pub machine_id: MachineId,
     #[serde(with = "time::serde::rfc3339")]
     pub placed_at: OffsetDateTime,
 }

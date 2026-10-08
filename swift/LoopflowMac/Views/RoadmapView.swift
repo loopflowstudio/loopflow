@@ -28,7 +28,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
         if startable { return .run }
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
-    case .startNextPr, .complete, .noAction, .none:
+    case .startNextPr, .noAction, .none:
         break
     }
     return nil
@@ -424,7 +424,7 @@ struct RoadmapView: View {
         await model.refresh()
     }
 
-    /// Navigate to the Wave. Starting a stopped Wave remains the Home control's
+    /// Navigate to the Wave. Starting a stopped Wave remains the Machine control's
     /// job; this only opens the detail.
     private func openWave(_ wave: WaveSnapshot) {
         onOpenWave(wave)
@@ -511,7 +511,7 @@ private struct RoadmapWaveCard: View {
                     selection == .wave(id: roadmap.wave.id) ? [.isSelected] : []
                 )
                 Spacer()
-                Text(roadmap.wave.home.route == "local" ? roadmap.wave.home.id : roadmap.wave.home.route)
+                Text(roadmap.wave.machine.route == "local" ? roadmap.wave.machine.id : roadmap.wave.machine.route)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)

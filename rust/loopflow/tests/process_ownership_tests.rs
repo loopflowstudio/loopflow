@@ -340,7 +340,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["home", "install", "preflight", "--json"],
+        &["installation", "install", "preflight", "--json"],
     )
     .output()
     .unwrap();
@@ -349,7 +349,7 @@ async fn early_observation_records_preflight_and_screenshot_child_ancestry() {
     let output = command(
         home.path(),
         home.path(),
-        &["home", "screenshot", "missing.html", "-o", "missing.png"],
+        &["machine", "screenshot", "missing.html", "-o", "missing.png"],
     )
     .env("PATH", "")
     .output()
@@ -390,7 +390,7 @@ fn remote_command_status_is_the_local_process_status() {
     let output = command(
         home.path(),
         repo.path(),
-        &["home", "ssh", "proof@example.invalid", "catalog"],
+        &["machine", "ssh", "proof@example.invalid", "catalog"],
     )
     .env_clear()
     .env("HOME", home.path())
@@ -840,7 +840,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires actual Codex and uv; private Homes and synthetic Responses only"]
+#[ignore = "requires actual Codex and uv; private Machines and synthetic Responses only"]
 async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();

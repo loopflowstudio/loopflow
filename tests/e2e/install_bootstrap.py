@@ -7,7 +7,7 @@ Optionally put a checksum-verified older release pair in /fixture/prior.
 
 The HTTPS release transport is local; binaries, checksum checks, promotion,
 store initialization, activation and recovery are real. Each case owns a fresh
-OS account because HOME overrides cannot isolate machine installation state.
+OS account because HOME overrides cannot isolate installation state.
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ def release_server(version: str) -> http.server.HTTPServer:
 
 def main() -> None:
     if not Path("/.dockerenv").exists() or os.getuid() != 0:
-        raise SystemExit("Run only as root in a disposable container without host Home mounts.")
+        raise SystemExit("Run only as root in a disposable container without host Machine mounts.")
     version = run(str(CLI), "--version").removeprefix("lf ")
     fresh = account("lf-fresh")
     recovery = account("lf-recovery")

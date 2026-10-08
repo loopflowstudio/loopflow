@@ -187,7 +187,7 @@ user, container, or VM when same-user code should not receive that authority.
 The broker closes with the foreground SSH process. Its handle stops working,
 temporary sockets are removed, and a surviving child cannot request another
 token. Broker failure, an expired handle, a missing credential, an incompatible
-remote `lf`, and a failed Home identity check all fail closed.
+remote `lf`, and a failed Machine identity check all fail closed.
 
 Nested `lf ssh` is rejected so borrowed authority cannot cross a second SSH
 hop. Obvious detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
@@ -231,19 +231,19 @@ the configured model provider as part of an agent run. Browser tools, MCP
 servers, GitHub, Linear, and other integrations receive the data sent to them
 by their commands.
 
-Loopflow keeps Home-local captured inputs and conversation history with prompt, conversation, and raw
+Loopflow keeps Machine-local captured inputs and conversation history with prompt, conversation, and raw
 provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
-sensitive material, so treat the Home store and payloads as sensitive even though it is
+sensitive material, so treat the Machine store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Home. Reading another Home with `lf ssh <home-id> monitor list` executes the read on
+Machine. Reading another Machine with `lf ssh <machine-id> monitor list` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
 `lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
-or Home HTTP service is required. Use `lf ssh` for remote operation.
+or Machine HTTP service is required. Use `lf ssh` for remote operation.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

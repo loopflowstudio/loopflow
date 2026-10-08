@@ -48,6 +48,11 @@ Classify the shape:
   the target architecture, integration/deletion path, forbidden near-misses,
   and acceptance conditions intact while `This slice` moves.
 
+A redesign deletes what it replaces. Before choosing an approach, find earlier
+attempts: partial implementations, unreachable branches, hidden commands, and
+unused tables. List the predecessors this change replaces under **Delete — do
+not maintain**, so the implementation removes them in the same diff.
+
 Sequence the deepest cuts first: remove obsolete concepts, authorities, and
 paths before building on what remains. Mark concrete files/symbols and their
 exclusive tests/fixtures **Delete — do not maintain** in the plan so later
@@ -64,7 +69,7 @@ A design beyond roughly 1,000 words or an implementation beyond roughly 1,000 li
 
 ### 4. Place
 
-Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Home state out of the design.
+Choose exactly one Wave by matching its objective and bounds. The current chapter resolves automatically. If no Wave fits, record unresolved placement instead of inventing ownership. If a state lookup fails, report the dated command and failure in evidence notes; keep ambient Machine state out of the design.
 
 Tighten the artifact to:
 
@@ -106,7 +111,7 @@ only build and run focused tests; scratch keeps one command/result line.
 ## Handoff
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Home
+plan. Record one check-result line. Omit session instructions and ambient Machine
 facts; the plan must not direct its next reader. Keep transcripts separate and
 historical skill names unprefixed.
 

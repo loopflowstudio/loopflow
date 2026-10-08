@@ -130,7 +130,7 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-/// Insert clap's internal `--` at the public `lf home ssh` target boundary.
+/// Insert clap's internal `--` at the public `lf machine ssh` target boundary.
 ///
 /// The public syntax omits it, but making the boundary explicit before parsing
 /// prevents a remote `--account` from being consumed by the origin command.
@@ -142,10 +142,10 @@ fn normalize_ssh_args(mut args: Vec<String>) -> Vec<String> {
     let Some(command_index) = first_target_index(rest) else {
         return args;
     };
-    let Some(home) = arg_tables().subcommands.get("home") else {
+    let Some(home) = arg_tables().subcommands.get("machine") else {
         return args;
     };
-    if rest[command_index] != "home" {
+    if rest[command_index] != "machine" {
         return args;
     }
     let path = selected_command_path(rest, command_index, home);
@@ -311,12 +311,12 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return args;
     };
     if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        // `lf home ssh` has a deliberate positional boundary: origin options come
+        // `lf machine ssh` has a deliberate positional boundary: origin options come
         // before the target and every later token belongs to the remote lf.
         // Moving global flags across that boundary changes which machine owns
         // an account selection.
         let path = selected_command_path(rest, target_index, command);
-        if rest[target_index] == "home"
+        if rest[target_index] == "machine"
             && path
                 .get(1)
                 .is_some_and(|selected| rest[selected.index] == "ssh")
@@ -924,6 +924,39 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
+        TaskCommand::FollowUp {
+            issue,
+            outcome,
+            evidence,
+            check_at,
+            clear,
+        } => {
+            let remaining = match (outcome, evidence, check_at) {
+                (Some(outcome), Some(evidence), Some(at)) => {
+                    Some(loopflow::work::task::TaskFollowUp {
+                        outcome: outcome.clone(),
+                        evidence: evidence.clone(),
+                        check_at: time::OffsetDateTime::parse(
+                            at,
+                            &time::format_description::well_known::Rfc3339,
+                        )?
+                        .unix_timestamp(),
+                    })
+                }
+                _ => None,
+            };
+            println!(
+                "{}",
+                loopflow::ops::task::task_follow_up(
+                    issue,
+                    remaining,
+                    clear
+                        .as_deref()
+                        .unwrap_or("Accepted work remains after delivery")
+                )?
+            );
+            Ok(())
+        }
         TaskCommand::Automate { issue, state } => Ok(loopflow::ops::task_automation::select(
             issue,
             state == "on",
@@ -975,7 +1008,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             node,
             reason,
             force,
-            accept_unknown_process,
         } => {
             println!(
                 "{}",
@@ -984,10 +1016,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     issue,
                     node,
                     reason.as_deref(),
-                    &loopflow::ops::task::EndOptions {
-                        force: *force,
-                        accept_unknown_process: accept_unknown_process.clone(),
-                    },
+                    &loopflow::ops::task::EndOptions { force: *force },
                 )?
             );
             Ok(())
@@ -1297,7 +1326,7 @@ fn main() -> std::process::ExitCode {
 }
 
 fn run() -> anyhow::Result<()> {
-    loopflow::machine_install::dispatch_entry_gate(&loopflow::machine_install::ArtifactRole::Cli)?;
+    loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1339,54 +1368,33 @@ fn run() -> anyhow::Result<()> {
     }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
-    let bypasses_machine_startup_gate = matches!(
+    let bypasses_installation_startup_gate = matches!(
         &cli.command,
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Install { .. }
-                | loopflow::lf::HomeCommand::Doctor {
-                    planning: false,
-                    ..
-                }
-        })
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. }
+        }) | Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Doctor {
+                planning: false,
+                ..
+            } | loopflow::lf::MachineCommand::Screenshot { .. }
+        }) | Some(Commands::ScreenshotSupervisor { .. })
     );
-    if !bypasses_machine_startup_gate
-        && !matches!(
-            &cli.command,
-            Some(
-                Commands::Home {
-                    cmd: loopflow::lf::HomeCommand::Screenshot { .. }
-                } | Commands::ScreenshotSupervisor { .. }
-            )
-        )
-    {
-        loopflow::machine_install::dispatch_default_cli()?;
+    if !bypasses_installation_startup_gate {
+        loopflow::installation::dispatch_default_cli()?;
     }
     ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
         .expect("failed to set Ctrl+C handler");
 
-    if matches!(
-        &cli.command,
-        Some(
-            Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Install { .. }
-                    | loopflow::lf::HomeCommand::Doctor {
-                        planning: false,
-                        ..
-                    }
-            } | Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Screenshot { .. }
-            } | Commands::ScreenshotSupervisor { .. }
-        )
-    ) {
+    if bypasses_installation_startup_gate {
         journal::observe_process(&args);
     }
 
-    // Screenshot capture owns no Home, repository, account, or Session state. Its
+    // Screenshot capture owns no Machine, repository, account, or Session state. Its
     // hidden supervisor must also be able to clean up after its public parent
     // dies, so both forms dispatch before those unrelated boundaries.
     match &cli.command {
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Screenshot { screenshot },
+        Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Screenshot { screenshot },
         }) => {
             return loopflow::lf::commands::screenshot::run(screenshot);
         }
@@ -1396,11 +1404,11 @@ fn run() -> anyhow::Result<()> {
         _ => {}
     }
 
-    // Machine diagnosis must reach incompatible or uninitialized Homes without
+    // Machine diagnosis must reach incompatible or uninitialized Machines without
     // ordinary admission creating or migrating the database first.
-    if let Some(Commands::Home {
+    if let Some(Commands::Machine {
         cmd:
-            loopflow::lf::HomeCommand::Doctor {
+            loopflow::lf::MachineCommand::Doctor {
                 json,
                 planning: false,
             },
@@ -1412,10 +1420,10 @@ fn run() -> anyhow::Result<()> {
     // Global-promotion commands dispatch before home routing, journal emission,
     // and any ordinary store open: a candidate that does not know the live
     // migration frontier must reach the preflight refusal, not fail in
-    // trace/store capture. `lf home install` opens the store only read-only, inside
+    // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
-    if let Some(Commands::Home {
-        cmd: loopflow::lf::HomeCommand::Install { cmd },
+    if let Some(Commands::Installation {
+        cmd: loopflow::lf::InstallationCommand::Install { cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
@@ -1468,9 +1476,9 @@ fn run() -> anyhow::Result<()> {
         // catalog through LF_ACCOUNT_SELECTION.
         let mut preferred_accounts = cli.account.clone();
         let mut restricted_accounts = cli.only_account.clone();
-        if let Some(Commands::Home {
+        if let Some(Commands::Machine {
             cmd:
-                loopflow::lf::HomeCommand::Ssh {
+                loopflow::lf::MachineCommand::Ssh {
                     origin_account,
                     origin_only_account,
                     ..
@@ -1513,10 +1521,10 @@ fn dispatch(
     args: &[String],
     account_selection: loopflow::provider_account::lease::AccountSelection,
 ) -> anyhow::Result<()> {
-    // Every HomeId-addressed SSH hop proves it reached the intended authority
+    // Every MachineId-addressed SSH hop proves it reached the intended authority
     // before reads or mutations dispatch. Raw-host bootstrap carries no
     // expectation and falls through.
-    loopflow::lf::commands::home::validate_expected_home_process()?;
+    loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
     let mut direct_binding = None;
     let mut _work_declaration = None;
@@ -1541,10 +1549,7 @@ fn dispatch(
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions {
-            force: *force,
-            accept_unknown_process: Vec::new(),
-        };
+        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
@@ -1669,8 +1674,8 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(None, Some(&text), cli),
             })
         }
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Desktop,
+        Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Desktop,
         }) => loopflow::lf::commands::desktop::run(),
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
@@ -1730,14 +1735,14 @@ fn execute_command(
             }
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
-        Some(Commands::Home {
+        Some(Commands::Machine {
             cmd:
-                cmd @ (loopflow::lf::HomeCommand::User { .. }
-                | loopflow::lf::HomeCommand::Id { .. }
-                | loopflow::lf::HomeCommand::Observe { .. }),
-        }) => loopflow::lf::commands::home::run(cmd),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::SyncSkills { yes, no_prune },
+                cmd @ (loopflow::lf::MachineCommand::User { .. }
+                | loopflow::lf::MachineCommand::Id { .. }
+                | loopflow::lf::MachineCommand::Observe { .. }),
+        }) => loopflow::lf::commands::machine::run(cmd),
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
         Some(Commands::Wave {
             cmd:
@@ -1878,8 +1883,8 @@ fn execute_command(
         Some(Commands::TelemetryScorecard { json }) => in_repo_runtime(args, |repo| {
             loopflow::ops::run_telemetry_scorecard(repo, *json).map_err(Into::into)
         }),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Doctor { json, planning },
+        Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Doctor { json, planning },
         }) => {
             if *planning {
                 let repo = loopflow::repo::working_directory()?;
@@ -1907,22 +1912,22 @@ fn execute_command(
         }) => in_repo_runtime(args, |repo| {
             loopflow::lf::commands::discord::serve(repo, wave)
         }),
-        Some(Commands::Home {
-            cmd: loopflow::lf::HomeCommand::Install { .. },
+        Some(Commands::Installation {
+            cmd: loopflow::lf::InstallationCommand::Install { .. },
         }) => {
             unreachable!("install dispatches before home routing")
         }
         Some(
-            Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Screenshot { .. },
+            Commands::Machine {
+                cmd: loopflow::lf::MachineCommand::Screenshot { .. },
             }
             | Commands::ScreenshotSupervisor { .. },
         ) => {
             unreachable!("screenshot dispatches before home routing")
         }
-        Some(Commands::Home {
+        Some(Commands::Machine {
             cmd:
-                loopflow::lf::HomeCommand::Ssh {
+                loopflow::lf::MachineCommand::Ssh {
                     target,
                     repo,
                     secret,
@@ -2143,11 +2148,11 @@ mod tests {
 
     #[test]
     fn desktop_remains_an_explicit_app_command() {
-        let cli = Cli::try_parse_from(["lf", "home", "desktop"]).unwrap();
+        let cli = Cli::try_parse_from(["lf", "machine", "desktop"]).unwrap();
         assert!(matches!(
             cli.command,
-            Some(Commands::Home {
-                cmd: loopflow::lf::HomeCommand::Desktop
+            Some(Commands::Machine {
+                cmd: loopflow::lf::MachineCommand::Desktop
             })
         ));
     }
@@ -2160,13 +2165,13 @@ mod tests {
     }
 
     #[test]
-    fn ssh_help_prefers_home_identity() {
-        let help = Cli::try_parse_from(["lf", "home", "ssh", "--help"])
+    fn ssh_help_prefers_machine_identity() {
+        let help = Cli::try_parse_from(["lf", "machine", "ssh", "--help"])
             .expect_err("help exits through clap")
             .to_string();
 
         assert!(help.contains("<TARGET>"));
-        assert!(help.contains("HomeId (preferred), SSH alias, or user@host"));
+        assert!(help.contains("MachineId (preferred), SSH alias, or user@host"));
     }
 
     /// `serve` is retired. The parser can't reject it outright — the
@@ -2304,7 +2309,7 @@ mod tests {
     fn reorder_args_preserves_the_ssh_target_boundary() {
         let args = vec![
             "lf".to_string(),
-            "home".to_string(),
+            "machine".to_string(),
             "ssh".to_string(),
             "build-vm".to_string(),
             "--account".to_string(),
@@ -2320,7 +2325,7 @@ mod tests {
     fn normalize_ssh_args_makes_the_target_a_hard_boundary() {
         let args = [
             "lf",
-            "home",
+            "machine",
             "ssh",
             "--account",
             "origin@example.com",
@@ -2338,7 +2343,7 @@ mod tests {
             normalized,
             [
                 "lf",
-                "home",
+                "machine",
                 "ssh",
                 "--account",
                 "origin@example.com",
@@ -2353,7 +2358,7 @@ mod tests {
         let cli = Cli::try_parse_from(normalized).expect("parse normalized SSH command");
         assert!(matches!(
             cli.command,
-            Some(Commands::Home { cmd: loopflow::lf::HomeCommand::Ssh {
+            Some(Commands::Machine { cmd: loopflow::lf::MachineCommand::Ssh {
                 origin_account,
                 lf_args,
                 ..

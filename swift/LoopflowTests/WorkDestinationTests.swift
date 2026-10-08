@@ -226,7 +226,7 @@ struct WorkDestinationTests {
         document.editor.string = "unsaved draft"
         let retained = SessionsContentView(
             model: destination, repoPath: wave.wave.repo,
-            workspaces: registry, homeId: "local", query: exactQuery
+            workspaces: registry, machineId: "local", query: exactQuery
         )
         #expect(throws: Never.self) {
             try retained.inspect().find(viewWithAccessibilityIdentifier: "task-worktree-location")
@@ -279,7 +279,7 @@ struct WorkDestinationTests {
         for response in ["failure", data, current] {
             let model = WorkModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
-                    if response == "failure" { throw RegistryQueryError("Home unavailable") }
+                    if response == "failure" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
                 if args.first == "roadmap" { return current }
@@ -351,7 +351,7 @@ struct WorkDestinationTests {
         for response in [data, #"{"generated_at":"2026-09-26T00:00:00Z","waves":[]}"#, "transport-error"] {
             let model = WorkModel(query: RegistryQuery { args, _ in
                 if args.contains("--task") {
-                    if response == "transport-error" { throw RegistryQueryError("Home unavailable") }
+                    if response == "transport-error" { throw RegistryQueryError("Machine unavailable") }
                     return response
                 }
                 if args.first == "roadmap" { return data }
@@ -366,7 +366,7 @@ struct WorkDestinationTests {
             #expect(model.selection == .wave(id: wave.wave.id))
             #expect(model.showsTaskLink)
             if response == "transport-error" {
-                #expect(model.taskLinkReading.errorMessage == "Home unavailable")
+                #expect(model.taskLinkReading.errorMessage == "Machine unavailable")
             } else {
                 #expect(model.taskLinkReading.errorMessage == nil)
             }

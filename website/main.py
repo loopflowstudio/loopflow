@@ -292,8 +292,8 @@ ARCHITECTURE_AREA = DocArea(
             parent="architecture",
         ),
         DocPage(
-            "Homes and processes",
-            "architecture/homes",
+            "Machines and processes",
+            "architecture/machines",
             "Placement, services, SSH, process authority, and promotion",
             parent="architecture",
         ),
@@ -342,13 +342,13 @@ def generate_llms_txt() -> str:
         if doc_path(slug)
     )
     return f"""# Loopflow
-> A software instrument that runs on your machine: durable Work, replaceable agents. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Home-local evidence.
+> A software instrument that runs on your machine: durable Work, replaceable agents. lf is the CLI for daily work and the API agents call to run Skills, conduct Waves, deliver Tasks, and observe Machine-local evidence.
 
 Loopflow runs one Skill through a provider and records that launch in an
-immutable Home-local Run record. Stable Wave, Project, and Task Work preserves
+immutable Machine-local Run record. Stable Wave, Project, and Task Work preserves
 purpose across provider processes. Authored behavior lives in the repository;
-bounded planning state lives on its Home; shared planning and delivery truth
-lives in Linear and GitHub. Reach another Home explicitly with `lf ssh`.
+bounded planning state lives on its Machine; shared planning and delivery truth
+lives in Linear and GitHub. Reach another Machine explicitly with `lf ssh`.
 Install: `curl -fsSL
 https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
 raw markdown at its `.md` URL (or request the canonical URL with `Accept:

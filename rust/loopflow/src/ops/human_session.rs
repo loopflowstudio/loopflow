@@ -80,7 +80,7 @@ async fn most_recent(
 
 pub(crate) const HUMAN_SESSION_ENV: &str = "LF_HUMAN_SESSION";
 pub(crate) const PREPARED_CAPTURE_ENV: &str = "LF_PREPARED_CAPTURE";
-/// Launch exclusion is process state beside the Home, not a Session record.
+/// Launch exclusion is process state beside the Machine, not a Session record.
 const LAUNCH_LOCK_DIRECTORY: &str = "human-sessions";
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -427,7 +427,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     };
     let mut unavailable = None;
     // Sessions run where this registry recorded them; no read places one elsewhere.
-    let remote: Option<&crate::durable::HomeId> = None;
+    let remote: Option<&crate::durable::MachineId> = None;
     let clients = if remote.is_none() && unavailable.is_none() {
         match (&session.provider, local_capture_dir(&session.artifact_key)) {
             (Some(provider), Some(dir)) => {
@@ -471,10 +471,10 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         workspace: remote.map(|home| SessionWorkspace {
-            home_id: home.clone(),
+            machine_id: home.clone(),
             worktree: session.cwd.clone(),
             task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
         }),
         interactive: session.interactive,
         work,
@@ -886,7 +886,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let remote: Option<crate::durable::HomeId> = None;
+    let remote: Option<crate::durable::MachineId> = None;
     let dir = local_capture_dir(&session.artifact_key)
         .ok_or_else(|| anyhow!("Session {} has an invalid Run reference", session.id))?;
     let clients = match &session.provider {
@@ -928,10 +928,10 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         workspace: remote.as_ref().map(|home| SessionWorkspace {
-            home_id: home.clone(),
+            machine_id: home.clone(),
             worktree: session.cwd.clone(),
             task_id: session.task_id.clone(),
-            unavailable: Some("Checkout resolution is unavailable on this remote Home".into()),
+            unavailable: Some("Checkout resolution is unavailable on this remote Machine".into()),
         }),
         interactive: session.interactive,
         wave_id: session.wave_id.clone(),
@@ -1100,7 +1100,7 @@ pub(crate) async fn spawn_session_process(
     // never start; the opening Process must retain enough evidence to diagnose it.
     // Arguments and environment values can contain prompts or credentials.
     let launch = format!(
-        "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Home {}, database {}",
+        "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Machine {}, database {}",
         executable.display(),
         cwd.display(),
         home.display(),
@@ -1188,7 +1188,7 @@ pub(crate) fn resume_native_session(
 }
 
 pub(crate) fn human_open_argv(
-    remote_home: Option<&crate::durable::HomeId>,
+    remote_machine: Option<&crate::durable::MachineId>,
     worktree: Option<&Path>,
     id: &str,
 ) -> Result<Vec<String>> {
@@ -1202,14 +1202,14 @@ pub(crate) fn human_open_argv(
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
     ];
-    if let Some(home_id) = remote_home {
-        argv.extend(["home".to_string(), "ssh".to_string()]);
+    if let Some(machine_id) = remote_machine {
+        argv.extend(["machine".to_string(), "ssh".to_string()]);
         if let Some(worktree) = worktree {
-            let repo = crate::engine::wave_home::resolve_home_relative_repo(worktree)
+            let repo = crate::engine::machine_route::resolve_home_relative_repo(worktree)
                 .map_err(anyhow::Error::msg)?;
             argv.extend(["--repo".to_string(), repo]);
         }
-        argv.push(home_id.to_string());
+        argv.push(machine_id.to_string());
     }
     argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
     Ok(argv)

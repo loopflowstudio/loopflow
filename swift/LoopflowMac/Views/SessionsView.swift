@@ -83,14 +83,14 @@ final class SessionsWorkspaceRegistry {
     @ObservationIgnored private var workspaces: [WorkspaceIdentity: SessionsWorkspace] = [:]
     @ObservationIgnored private var layouts: [WorkspaceIdentity: WorktreeLayoutStore] = [:]
     let surfaces = GhosttySurfacePool()
-    private(set) var localHomeId: String?
-    private(set) var homeError: String?
+    private(set) var localMachineId: String?
+    private(set) var machineError: String?
 
-    init(localHomeId: String? = nil) { self.localHomeId = localHomeId }
+    init(localMachineId: String? = nil) { self.localMachineId = localMachineId }
 
-    func refreshHome(query: RegistryQuery) async {
-        do { localHomeId = try await query.localHomeId(); homeError = nil }
-        catch { homeError = error.localizedDescription }
+    func refreshMachine(query: RegistryQuery) async {
+        do { localMachineId = try await query.localMachineId(); machineError = nil }
+        catch { machineError = error.localizedDescription }
     }
 
     func layout(for repoPath: WorkspaceIdentity) -> WorktreeLayoutStore {
@@ -100,7 +100,7 @@ final class SessionsWorkspaceRegistry {
         return layout
     }
 
-    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) } }
+    var paths: [WorkspaceIdentity] { Array(workspaces.keys).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) } }
 
     func path(containingShell id: String) -> WorkspaceIdentity? {
         workspaces.first { $0.value.multiplexer.layout.pane(for: id)?.content == .shell }?.key
@@ -352,13 +352,13 @@ struct SessionsView: View {
 
     var body: some View {
         Group {
-            if let home = workspaces.localHomeId {
+            if let home = workspaces.localMachineId {
                 SessionsContentView(model: model, repoPath: repoPath, workspaces: workspaces,
-                                    homeId: home, query: query)
+                                    machineId: home, query: query)
             } else {
                 HStack {
                     WorkNavigator(model: model, onOpenSession: { _ in })
-                    if let error = workspaces.homeError {
+                    if let error = workspaces.machineError {
                         ContentUnavailableView("Workspace unavailable", systemImage: "folder", description: Text(error))
                     } else {
                         ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -367,16 +367,16 @@ struct SessionsView: View {
             }
         }
         .task {
-            await workspaces.refreshHome(query: query)
-            if let home = workspaces.localHomeId, workspaces.homeError == nil { model.confirmHome(home) }
+            await workspaces.refreshMachine(query: query)
+            if let home = workspaces.localMachineId, workspaces.machineError == nil { model.confirmMachine(home) }
         }
     }
 }
 
 /// Unified Work navigation around the existing retained native workspace.
 struct SessionsContentView: View {
-    let homeId: String
-    private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(homeId: homeId, worktree: store.repoPath) }
+    let machineId: String
+    private var rootIdentity: WorkspaceIdentity { WorkspaceIdentity(machineId: machineId, worktree: store.repoPath) }
     private var currentIdentity: WorkspaceIdentity {
         if navigation.showsRetainedTerminals {
             return worktreeLayout.focusedPath ?? rootIdentity
@@ -415,17 +415,17 @@ struct SessionsContentView: View {
         return store.sessions.first { $0.id == navigation.selectedSessionId }?.record.workspace
     }
     private var availablePaths: [WorkspaceIdentity] {
-        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.homeId, $0.worktree) < ($1.homeId, $1.worktree) }
+        worktreeLayout.knownPaths.union(store.sessions.compactMap { $0.record.workspace?.identity }).sorted { ($0.machineId, $0.worktree) < ($1.machineId, $1.worktree) }
     }
 
     init(model: WorkModel, repoPath: String, workspaces: SessionsWorkspaceRegistry,
-         homeId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
-        self.homeId = homeId
+         machineId: String, query: RegistryQuery = RegistryQueryLocal.shared) {
+        self.machineId = machineId
         self.model = model
         self.workspaces = workspaces
         self.query = query
-        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath))
-        let store = workspaces.workspace(for: WorkspaceIdentity(homeId: homeId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
+        worktreeLayout = workspaces.layout(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath))
+        let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
         _store = ObservedObject(wrappedValue: store)
     }
 
@@ -632,7 +632,7 @@ struct SessionsContentView: View {
     private var workspaceCreation: some View {
         Menu {
             Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
-                .disabled(taskIdentity?.homeId != homeId)
+                .disabled(taskIdentity?.machineId != machineId)
                 .accessibilityIdentifier("work-add-shell")
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
@@ -760,7 +760,7 @@ struct SessionsContentView: View {
             openSession(primary)
             return
         }
-        guard identity.homeId == homeId, model.sessions.errorMessage == nil, model.sessions.value != nil,
+        guard identity.machineId == machineId, model.sessions.errorMessage == nil, model.sessions.value != nil,
               ensuredTasks.insert(task.task.id).inserted else { return }
         let (taskId, issue, origin) = (task.task.id, task.task.task.identifier, navigation)
         Task { @MainActor in
@@ -781,7 +781,7 @@ struct SessionsContentView: View {
     private func launchSessionSkill(_ launch: SessionSkillLaunch) {
         do {
             let lf = try LocalWaveAgentLauncher.controlLfPath()
-            let identity = WorkspaceIdentity(homeId: homeId, worktree: launch.repoPath)
+            let identity = WorkspaceIdentity(machineId: machineId, worktree: launch.repoPath)
             worktreeLayout.select(identity)
             navigation.showsRetainedTerminals = true
             navigation.content = .terminals
@@ -803,8 +803,8 @@ struct SessionsContentView: View {
     /// redirect the repository now on screen.
     private func launch(_ scope: ConversationScope, in navigation: WorkNavigation, identity requestedIdentity: WorkspaceIdentity? = nil) throws {
         let lf = try LocalWaveAgentLauncher.controlLfPath()
-        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(homeId: homeId, worktree: scope.repoPath)
-        guard identity.homeId == homeId else { throw RegistryQueryError("Open a conversation on its owning Home") }
+        let identity = requestedIdentity ?? taskIdentity ?? WorkspaceIdentity(machineId: machineId, worktree: scope.repoPath)
+        guard identity.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         worktreeLayout.select(identity)
         navigation.content = .terminals
         workspaces.workspace(for: identity).multiplexer.newShell(

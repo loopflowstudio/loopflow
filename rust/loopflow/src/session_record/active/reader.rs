@@ -56,7 +56,7 @@ pub(super) struct DiscoveryCost {
 #[derive(Debug)]
 pub(crate) struct ActiveSessionReader {
     home: PathBuf,
-    home_identity: Option<(u64, u64)>,
+    directory_identity: Option<(u64, u64)>,
     subscription: Option<Subscription>,
     candidates: BTreeMap<PathBuf, Receipt>,
     errors: BTreeMap<PathBuf, String>,
@@ -75,17 +75,17 @@ impl ActiveSessionReader {
         let ancestor = home
             .ancestors()
             .find(|p| p.exists())
-            .context("Home has no existing ancestor")?;
+            .context("Loopflow data directory has no existing ancestor")?;
         let home = ancestor.canonicalize()?.join(home.strip_prefix(ancestor)?);
         let subscription = if continuous {
             Some(Subscription::start(&home)?)
         } else {
             None
         };
-        let home_identity = fs::metadata(&home).ok().map(|m| (m.dev(), m.ino()));
+        let directory_identity = fs::metadata(&home).ok().map(|m| (m.dev(), m.ino()));
         Ok(Self {
             home,
-            home_identity,
+            directory_identity,
             subscription,
             candidates: BTreeMap::new(),
             errors: BTreeMap::new(),
@@ -386,7 +386,7 @@ impl ActiveSessionReader {
                 }
                 changed |= before != self.candidates;
                 // SQL is sampled on every tick, including when its database is
-                // outside Home. Filesystem notifications are not its invalidation.
+                // outside the data directory. Filesystem notifications are not its invalidation.
                 match store
                     .sqlite
                     .session_process_ownership(&inputs, &process_lfids, &pids)
@@ -438,10 +438,10 @@ impl ActiveSessionReader {
             Err(error) => return Err(error.into()),
         };
         anyhow::ensure!(
-            self.home_identity.is_none() || self.home_identity == identity,
-            "Home directory was replaced or removed; restart the reader to resolve its authority"
+            self.directory_identity.is_none() || self.directory_identity == identity,
+            "Loopflow data directory was replaced or removed; restart the reader to resolve its authority"
         );
-        self.home_identity = identity;
+        self.directory_identity = identity;
         let changes = self.changes();
         self.rescan |= changes.rescan || self.pending.rescan;
         for path in changes.paths {

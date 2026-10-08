@@ -68,7 +68,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "completed",
         "branch": "jack/completed",
         "worktree": "/src/loopflow.completed"
@@ -384,7 +384,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "stale",
         "branch": "jack/stale",
         "worktree": "/src/loopflow.stale"
@@ -748,7 +748,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "unavailable",
         "branch": "jack/unavailable",
         "worktree": "/missing/loopflow.unavailable"
@@ -815,7 +815,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "user",
         "branch": "jack/user",
         "worktree": "/src/loopflow.user"
@@ -1180,7 +1180,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "dirty",
         "branch": "jack/dirty",
         "worktree": "/src/loopflow.dirty"
@@ -1247,7 +1247,7 @@
     "reference": {
       "issue_url": null,
       "workspace": {
-        "home_id": "home_00000000000000000000000000000001",
+        "machine_id": "home_00000000000000000000000000000001",
         "slug": "commits",
         "branch": "jack/commits",
         "worktree": "/src/loopflow.commits"

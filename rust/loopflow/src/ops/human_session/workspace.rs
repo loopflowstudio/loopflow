@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{HomeId, WorkRef};
+use crate::durable::{MachineId, WorkRef};
 use crate::store::sqlite::TaskCheckout;
 use crate::store::SharedStore;
 use crate::work::task::TaskId;
@@ -13,21 +13,21 @@ use super::SessionRecord;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionWorkspace {
-    pub home_id: HomeId,
+    pub machine_id: MachineId,
     pub worktree: PathBuf,
     pub task_id: Option<TaskId>,
     pub unavailable: Option<String>,
 }
 
 struct WorkspaceResolver {
-    home: HomeId,
+    home: MachineId,
     checkouts: Vec<TaskCheckout>,
     roots: HashMap<PathBuf, Option<PathBuf>>,
     tasks_by_root: HashMap<PathBuf, Vec<TaskId>>,
 }
 
 impl WorkspaceResolver {
-    fn new(home: HomeId, checkouts: Vec<TaskCheckout>) -> Self {
+    fn new(home: MachineId, checkouts: Vec<TaskCheckout>) -> Self {
         let mut resolver = Self {
             home,
             checkouts,
@@ -35,7 +35,7 @@ impl WorkspaceResolver {
             tasks_by_root: HashMap::new(),
         };
         for checkout in resolver.checkouts.clone() {
-            if checkout.home_id.as_ref() != Some(&resolver.home) {
+            if checkout.machine_id.as_ref() != Some(&resolver.home) {
                 continue;
             }
             if let Some(root) = resolver.root(&checkout.worktree) {
@@ -71,11 +71,11 @@ impl WorkspaceResolver {
                 .map(Vec::as_slice)
                 .unwrap_or_default();
             let missing_placement = self.checkouts.iter().any(|checkout| {
-                checkout.home_id.is_none()
+                checkout.machine_id.is_none()
                     && (checkout.worktree == root || checkout.worktree == cwd)
             });
             return Some(SessionWorkspace {
-                home_id: self.home.clone(),
+                machine_id: self.home.clone(),
                 worktree: root,
                 task_id: (tasks.len() == 1).then(|| tasks[0].clone()),
                 unavailable: if tasks.len() > 1 {
@@ -91,7 +91,7 @@ impl WorkspaceResolver {
         // checkout evidence or explicit Task attribution can retain association.
         let mut candidates = self.checkouts.iter().filter(|checkout| {
             checkout
-                .home_id
+                .machine_id
                 .as_ref()
                 .is_none_or(|home| home == &self.home)
                 && (checkout.worktree == cwd
@@ -101,13 +101,13 @@ impl WorkspaceResolver {
         let checkout = candidates.next()?;
         let ambiguous = candidates.next().is_some();
         Some(SessionWorkspace {
-            home_id: self.home.clone(),
+            machine_id: self.home.clone(),
             worktree: checkout.worktree.clone(),
             task_id: (!ambiguous).then(|| checkout.task_id.clone()),
             unavailable: Some(
                 if ambiguous {
                     "Multiple Tasks claim this unavailable checkout"
-                } else if checkout.home_id.is_none() {
+                } else if checkout.machine_id.is_none() {
                     "Task placement and checkout are unavailable"
                 } else {
                     "Task checkout is unavailable"
@@ -121,13 +121,13 @@ impl WorkspaceResolver {
 pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord]) -> Result<()> {
     // A failed snapshot propagates: callers must retain their last good inventory.
     let checkouts = store.task_checkouts().await?;
-    let home = store.local_home().await?.id;
+    let home = store.local_machine().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
         if session.primary_scope.is_some() {
             let cwd = Path::new(&session.cwd);
             session.workspace = Some(SessionWorkspace {
-                home_id: home.clone(),
+                machine_id: home.clone(),
                 worktree: resolver.root(cwd).unwrap_or_else(|| cwd.to_path_buf()),
                 task_id: None,
                 unavailable: (!cwd.exists()).then(|| "Persistent checkout is unavailable".into()),
@@ -138,7 +138,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         if session
             .workspace
             .as_ref()
-            .is_some_and(|workspace| workspace.home_id != home)
+            .is_some_and(|workspace| workspace.machine_id != home)
         {
             continue;
         }
@@ -159,7 +159,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
 #[cfg(test)]
 mod tests {
     use super::WorkspaceResolver;
-    use crate::durable::{HomeId, WorkRef};
+    use crate::durable::{MachineId, WorkRef};
     use crate::store::sqlite::TaskCheckout;
     use crate::work::task::TaskId;
 
@@ -183,18 +183,18 @@ mod tests {
     fn workspace_resolves_checkout_identity_without_changing_attribution() {
         let repo = loopflow_test_support::TestRepo::new();
         let sibling = loopflow_test_support::TestRepo::new();
-        let home = HomeId::new();
+        let home = MachineId::new();
         let id = TaskId::new();
         let checkout = TaskCheckout {
             task_id: id.clone(),
             issue_id: "issue".into(),
             issue_identifier: "TEST-1".into(),
             worktree: repo.path().to_path_buf(),
-            home_id: Some(home.clone()),
+            machine_id: Some(home.clone()),
         };
         let mut remote = checkout.clone();
         remote.task_id = TaskId::new();
-        remote.home_id = Some(HomeId::new());
+        remote.machine_id = Some(MachineId::new());
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![checkout.clone(), remote]);
         std::fs::create_dir(repo.path().join("sub")).unwrap();
         let aliases = tempfile::tempdir().unwrap();
@@ -203,7 +203,7 @@ mod tests {
         for path in [repo.path().join("sub"), aliases.path().join("alias/sub")] {
             let workspace = resolver.resolve(&path, None, Some(&other_work)).unwrap();
             assert_eq!(workspace.task_id, Some(id.clone()));
-            assert_eq!(workspace.home_id, home);
+            assert_eq!(workspace.machine_id, home);
             assert_eq!(workspace.worktree, repo.path().canonicalize().unwrap());
         }
         assert!(resolver
@@ -256,7 +256,7 @@ mod tests {
             Some(id.clone())
         );
         let mut unplaced = checkout.clone();
-        unplaced.home_id = None;
+        unplaced.machine_id = None;
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![unplaced]);
         let unplaced = resolver.resolve(repo.path(), None, None).unwrap();
         assert!(unplaced.task_id.is_none());

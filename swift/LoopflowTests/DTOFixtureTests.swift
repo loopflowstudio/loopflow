@@ -225,10 +225,10 @@ struct DTOFixtureTests {
         #expect(detail.projectReadiness.state == .ready)
         #expect(detail.projectReadiness.projectId == detail.currentProject?.id)
         #expect(detail.projectReadiness.activation == nil)
-        #expect(detail.wave.home.id == "home_00000000000000000000000000000001")
-        #expect(detail.wave.home.route == "ssh://jack@mini-heart")
+        #expect(detail.wave.machine.id == "home_00000000000000000000000000000001")
+        #expect(detail.wave.machine.route == "ssh://jack@mini-heart")
 
-        // The Home runtime evidence carries the state and the one contextual action.
+        // The Machine runtime evidence carries the state and the one contextual action.
 
 
         #expect(detail.currentProject?.workflow == "task-design")
@@ -269,13 +269,13 @@ struct DTOFixtureTests {
             sourceWindowEnd: "2026-08-20T18:00:00Z"
         ))
 
-        var missingHome = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        var wave = try #require(missingHome["wave"] as? [String: Any])
-        wave.removeValue(forKey: "home")
-        missingHome["wave"] = wave
-        let missingHomeData = try JSONSerialization.data(withJSONObject: missingHome)
+        var missingMachine = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var wave = try #require(missingMachine["wave"] as? [String: Any])
+        wave.removeValue(forKey: "machine")
+        missingMachine["wave"] = wave
+        let missingMachineData = try JSONSerialization.data(withJSONObject: missingMachine)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingHomeData)
+            try JSONDecoder().decode(WaveDetailSnapshot.self, from: missingMachineData)
         }
 
 

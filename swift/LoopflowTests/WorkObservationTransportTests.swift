@@ -10,7 +10,7 @@ import Testing
 struct WorkObservationTransportTests {
     @Test("Reader startup failure preserves the CLI diagnostic", arguments: [false, true])
     func startupFailure(closesOutputFirst: Bool) async throws {
-        let diagnosis = "Selected Home has an incompatible migration frontier"
+        let diagnosis = "Selected Machine has an incompatible migration frontier"
         let shutdown = closesOutputFirst ? "exec 1>&-; IFS= read -r request; exit 23" : "exit 23"
         let process = shell("printf '%s\\n' '\(diagnosis)' >&2; \(shutdown)")
         let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })

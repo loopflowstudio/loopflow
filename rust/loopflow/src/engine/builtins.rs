@@ -301,14 +301,14 @@ mod tests {
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
-            "lf observe <home-id>",
-            "lf ssh <home-id> --wave <wave> wave/operate",
+            "lf observe <machine-id>",
+            "lf ssh <machine-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }
 
         assert!(init.contains("Loopflow is not primarily a prompt launcher"));
-        assert!(init.contains("Installed harnesses are a capability of this Home"));
+        assert!(init.contains("Installed harnesses are a capability of this Machine"));
         assert!(init.contains("team-wide repo configuration"));
         assert!(init.contains("wave/<name>/MEMORY.md"));
         assert!(!init.contains("lf memory"));

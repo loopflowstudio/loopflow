@@ -121,13 +121,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
 
-    public func localHomeId() async throws -> String {
-        struct HomeIdentity: Decodable { let id: String }
-        return try Self.decode(HomeIdentity.self, from: await run(["home", "id", "--json"], nil)).id
+    public func localMachineId() async throws -> String {
+        struct MachineIdentity: Decodable { let id: String }
+        return try Self.decode(MachineIdentity.self, from: await run(["machine", "id", "--json"], nil)).id
     }
 
     public func userName() async throws -> String? {
-        let stdout = try await run(["home", "user", "--json"], nil)
+        let stdout = try await run(["machine", "user", "--json"], nil)
         return try Self.decode(String?.self, from: stdout)
     }
 
@@ -425,7 +425,7 @@ public struct RegistryQuery: Sendable {
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
 /// Durable execution authority and its mutable observed route.
-public struct Home: Decodable, Sendable, Hashable {
+public struct Machine: Decodable, Sendable, Hashable {
     public let id: String
     public let route: String
     public let createdAt: String
@@ -452,12 +452,12 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let retiredAt: String?
     public let supersededByWaveId: String?
     public let retirementReason: String?
-    public let home: Home
+    public let machine: Machine
 
     public var displayName: String { toWave().displayName }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, goal, repo, home
+        case id, name, status, goal, repo, machine
         case activeTasks = "active_tasks"
         case createdAt = "created_at"
         case parentWaveId = "parent_wave_id"

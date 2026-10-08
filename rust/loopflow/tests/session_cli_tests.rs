@@ -94,7 +94,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
     let bin = home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let other = bin.join("lf");
-    std::fs::write(&other, "#!/bin/sh\necho wrong-Home >&2\nexit 91\n").unwrap();
+    std::fs::write(&other, "#!/bin/sh\necho wrong-Machine >&2\nexit 91\n").unwrap();
     std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(

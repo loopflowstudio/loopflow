@@ -9,7 +9,6 @@ use crate::engine::worktrees::main_repo_root;
 use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::sqlite::OpenProcesses;
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
 use crate::work::task::{PrPhase, Task, TaskPr};
 
@@ -205,9 +204,30 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
             resolved.item.identifier
         )));
     }
-    let deletions =
-        prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?;
-    apply_abandon(repo, &store, task.as_ref(), &resolved, deletions).await
+    if let Some(task) = &task {
+        if super::task_work_status(&store, task).await? == WorkStatus::Done {
+            return Err(task_error("completed Tasks cannot be abandoned"));
+        }
+    }
+    let outcome = apply_abandon(repo, &store, task.as_ref(), &resolved, Vec::new()).await?;
+    // The decision is durable before cleanup. A retained checkout or PR never
+    // turns cancellation into a failed decision or authorizes process control.
+    let cleanup = async {
+        for deletion in
+            prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?
+        {
+            crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
+        }
+        Ok::<(), crate::ops::OpsError>(())
+    }
+    .await;
+    if let Err(error) = cleanup {
+        eprintln!(
+            "{} is canceled; retained checkout/PR: {error}",
+            resolved.item.identifier
+        );
+    }
+    Ok(outcome)
 }
 
 /// Trash the issue after its placed work has been canceled or completed.
@@ -223,7 +243,6 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
                 .is_some();
             if !deleted {
                 if super::task_work_status(&store, &task).await? == WorkStatus::Done {
-                    require_idle(&store, &task).await?;
                     cleanup_completed_task(&store, &task).await?;
                 } else {
                     abandon(&repo, issue, false).await?;
@@ -239,8 +258,8 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     })
 }
 
-// Preview and apply share every exclusion. Preparation never retires a sweep's
-// live execution.
+// Cleanup preparation is separate from explicit cancellation. A sweep uses
+// it before choosing work, so uncertain or live work is never swept.
 async fn prepare_abandon(
     repo: &Path,
     store: &SharedStore,
@@ -310,7 +329,6 @@ async fn apply_abandon(
     if let Some(task) = task {
         let work = WorkRef::Task(task.id.clone());
         if store.work_status(&work).await.map_err(task_error)? != WorkStatus::Abandoned {
-            // This transaction refuses concurrently started work.
             store
                 .abandon(&work, "explicit Task abandonment")
                 .await
@@ -466,217 +484,3 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
-/// A Task decision, never a process outcome or process-control receipt.
-pub(super) fn accept_historical_uncertainty(
-    store: &SharedStore,
-    task: &Task,
-    process_lfids: &[crate::id::ProcessLfid],
-    reason: &str,
-) -> OpsResult<()> {
-    if process_lfids.is_empty() {
-        return Ok(());
-    }
-    let work = store.sqlite.task_work(&task.id).map_err(task_error)?;
-    for id in process_lfids {
-        if !historical_unknown_process(store, &work, id)? {
-            return Err(task_error(format!(
-                "Process {id} is not an unowned historical unknown in Task {}; retained all execution protection",
-                task.plan.identifier
-            )));
-        }
-    }
-    let accepted = store
-        .sqlite
-        .task_accepted_unknown_processes(&task.id)
-        .map_err(task_error)?;
-    let mut new_ids: Vec<_> = process_lfids
-        .iter()
-        .filter(|id| !accepted.contains(*id))
-        .cloned()
-        .collect();
-    new_ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-    new_ids.dedup();
-    if !new_ids.is_empty() {
-        store
-            .sqlite
-            .append_task_event(
-                &task.id,
-                &crate::work::task::TaskEventKind::HistoricalUncertaintyAccepted {
-                    process_lfids: new_ids,
-                    reason: reason.to_string(),
-                },
-            )
-            .map_err(task_error)?;
-    }
-    Ok(())
-}
-
-fn historical_unknown_process(
-    store: &SharedStore,
-    work: &crate::task_work::TaskWork,
-    id: &crate::id::ProcessLfid,
-) -> OpsResult<bool> {
-    let Some(process) = work.processes.iter().find(|process| &process.lfid == id) else {
-        return Ok(false);
-    };
-    // Any process receipt disqualifies acceptance, regardless of liveness.
-    // Without a receipt, completion or a previous boot already proves exit.
-    if crate::journal::current_process_lfid().as_ref() == Some(id)
-        || process.completed_at.is_some()
-        || crate::journal::began_before_boot(process.started_at)
-        || crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
-            .map_err(task_error)?
-            .iter()
-            .any(|receipt| receipt.process_lfid == id.as_str())
-    {
-        return Ok(false);
-    }
-    if let Some(caller) = &process.caller_session_id {
-        if !store
-            .sqlite
-            .session(caller)
-            .map_err(task_error)?
-            .is_some_and(|session| session.completed_at.is_some())
-        {
-            return Ok(false);
-        }
-    }
-    for session in work
-        .sessions
-        .iter()
-        .filter(|session| session.completed_at.is_none())
-    {
-        if let Some(driver) = store
-            .sqlite
-            .session_driver(&session.id)
-            .map_err(task_error)?
-        {
-            if driver.process_lfid.as_ref() == Some(id) || &driver.provider_process_lfid == id {
-                return Ok(false);
-            }
-        }
-    }
-    for flow in work
-        .flow_processes
-        .iter()
-        .filter(|flow| flow.summary.state == crate::session::FlowProcessSummaryState::Current)
-    {
-        if store
-            .sqlite
-            .flow_process(&flow.summary.id)
-            .map_err(task_error)?
-            .is_some_and(|(flow, _)| {
-                &flow.driver.lfid == id || flow.steps.iter().any(|step| &step.process.lfid == id)
-            })
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-pub(super) fn completion_work_blockers(
-    store: &SharedStore,
-    task: &Task,
-    open: &OpenProcesses,
-) -> OpsResult<Vec<String>> {
-    let mut work = store
-        .sqlite
-        .task_open_work(&task.id, open)
-        .map_err(task_error)?;
-    let mut accepted = HashSet::new();
-    for id in store
-        .sqlite
-        .task_accepted_unknown_processes(&task.id)
-        .map_err(task_error)?
-    {
-        // Acceptance cannot hide a newly observed process or current owner.
-        if historical_unknown_process(store, &work, &id)? {
-            accepted.insert(id);
-        }
-    }
-    work.processes
-        .retain(|process| !accepted.contains(&process.lfid));
-    execution_blockers(store, &work)
-}
-
-/// A Flow whose driver died is history; only live or unresolved execution waits.
-pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
-    associated_execution_blockers(store, task)
-}
-
-fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
-    let open = store.sqlite.open_processes().map_err(task_error)?;
-    store
-        .sqlite
-        .task_open_work(&task.id, &open)
-        .map_err(task_error)
-}
-
-/// Restoring a checkout preserves idle Flows; only unresolved execution waits.
-pub(super) fn associated_execution_blockers(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Vec<String>> {
-    execution_blockers(store, &open_work(store, task)?)
-}
-
-fn execution_blockers(
-    store: &SharedStore,
-    work: &crate::task_work::TaskWork,
-) -> OpsResult<Vec<String>> {
-    let mut blockers = Vec::new();
-    // The caller cannot outlive the processes that launched it, nor wait on
-    // the Flow whose step it is. Lineage exempts waiting, not authority.
-    let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_process_lfid();
-    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
-        next = store
-            .sqlite
-            .process(&id)
-            .map_err(task_error)?
-            .and_then(|process| process.parent_process_lfid);
-    }
-    // A Flow is its driver and step Processes; the loop over Processes below judges
-    // them. Sessions are judged here on their own evidence.
-    for session in &work.sessions {
-        if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
-            if input.completed_at.is_none() && !input.interactive && !input.input_published {
-                blockers.push(format!("Session {} has a reserved input", session.id));
-            }
-        }
-        if store
-            .sqlite
-            .session_has_pending_turn(&session.id)
-            .map_err(task_error)?
-            && (session.completed_at.is_none()
-                || crate::ops::task_automation::session_engine_unresolved(
-                    &store.sqlite,
-                    &session.id,
-                )?)
-        {
-            blockers.push(format!(
-                "Session {} has an unresolved provider turn",
-                session.id
-            ));
-        }
-    }
-    for process in work
-        .processes
-        .iter()
-        .filter(|process| process.completed_at.is_none())
-    {
-        if lineage.contains(&process.lfid) {
-            continue;
-        }
-        if crate::journal::process_evidence(&store.sqlite, &process.lfid)
-            != crate::journal::ProcessIdentityEvidence::Dead
-        {
-            blockers.push(format!(
-                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
-                process.lfid, process.lfid
-            ));
-        }
-    }
-    Ok(blockers)
-}

@@ -205,14 +205,14 @@ struct TaskFlowTests {
             switch (args.first, args.dropFirst().first) {
             case ("session", "ensure"):
                 return try await reader.ensure(issue: args[3])
-            case ("home", "id"): return #"{"id":"\#(fixtureHomeId)"}"#
+            case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
         }
         let model = WorkModel(query: query, repoPath: repo)
         let keeping = Task { await model.keepWorkCurrent() }
         defer { keeping.cancel() }
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let view = SessionsView(model: model, repoPath: repo, workspaces: registry, query: query)
         let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1280, height: 720),
                               styleMask: [.titled], backing: .buffered, defer: false)
@@ -332,7 +332,7 @@ private final class ScriptedReader {
         var session = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("ensured-\(issue)", title: "task-conversation", work: work))) as? [String: Any])
         session["task_primary"] = true
-        session["workspace"] = ["home_id": workspace.homeId, "worktree": workspace.worktree,
+        session["workspace"] = ["machine_id": workspace.machineId, "worktree": workspace.worktree,
                                 "task_id": task.id, "unavailable": NSNull()]
         sessions = [session]
         return String(decoding: try JSONSerialization.data(withJSONObject: session), as: UTF8.self)
@@ -369,7 +369,7 @@ struct TaskFlowProofTests {
         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         GhosttyManager.shared.initialize()
         let repo = "/src/loopflow"
-        let registry = SessionsWorkspaceRegistry(localHomeId: fixtureHomeId)
+        let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         let workspace = registry.workspace(for: fixtureWorkspace(repo))
         var terminals: [GhosttyMetalView] = []
         for _ in 0..<2 {

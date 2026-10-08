@@ -285,7 +285,7 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
     result
 }
 
-/// Observe an early command without creating a Home, migrating, or requiring Git.
+/// Observe an early command without creating a Machine, migrating, or requiring Git.
 /// Failure to observe never prevents help, installation recovery or screenshot cleanup.
 pub fn observe_process(command: &[String]) {
     if current_context().is_some() {
@@ -810,7 +810,7 @@ fn create_process_context(
     crate::engine::agent::register_interrupt_cleanup(move || {
         record_process_interruption(&interrupted)
     });
-    // Never write process-control receipts into a different inherited Home.
+    // Never write process-control receipts into a different inherited Machine.
     if same_store {
         if let Err(error) = write_process_receipt(&context) {
             debug!(error = %error, process_lfid = %context.process_lfid, "live Process receipt unavailable");
@@ -1868,7 +1868,7 @@ mod tests {
             );
             context
         };
-        // An initialized Home, as every real listing has.
+        // An initialized Machine, as every real listing has.
         run(&|| {});
 
         let ledger = guard.home().join("loopflow.db");

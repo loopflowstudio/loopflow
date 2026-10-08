@@ -55,7 +55,7 @@ Run the repository's daily operator flow:
 lf telemetry-daily
 ```
 
-The flow runs the Home audit, renders the deterministic lifecycle
+The flow runs the Machine audit, renders the deterministic lifecycle
 scorecard, then publishes the weekly [context cost](context-cost.md) readings. The generator is an internal operation so it stays available to
 scheduled telemetry without becoming a general-user command or stable DTO.
 The lifecycle scorecard reports retained evidence without publishing the retired
@@ -71,7 +71,7 @@ observed value already breaches a budget. `PASS` requires complete coverage
 and at least 20 samples; smaller complete sets are `COLLECTING`.
 
 The Rust telemetry operation supplies the current `SessionHistory` projection from
-its selected Home. Python reads that projection, Task PR owner facts, and gate
+its selected Machine. Python reads that projection, Task PR owner facts, and gate
 receipts. It does not query retired SQL Runs/Turns or reduce provider streams.
 
 | Row | Eligible fact | Measured value |

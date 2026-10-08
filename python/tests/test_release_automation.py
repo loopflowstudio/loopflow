@@ -216,8 +216,8 @@ def test_release_subwave_cron_runs_the_host_release_after_telemetry():
 
     bootstrap = (ROOT / "scripts/bootstrap-cron-host.sh").read_text()
     assert "--remote-native" not in bootstrap
-    assert 'local_home="$(lf home id)"' in bootstrap
-    assert 'placed_home="$(lf wave status "$wave" --json' in bootstrap
+    assert 'local_machine="$(lf machine id)"' in bootstrap
+    assert 'placed_machine="$(lf wave status "$wave" --json' in bootstrap
     assert "--git-common-dir" in bootstrap
     assert 'lf cron preflight --wave "$wave"' in bootstrap
     assert '"${minimal_env[@]}" lf cron sync --wave "$wave"' in bootstrap
@@ -229,10 +229,10 @@ def test_release_subwave_cron_runs_the_host_release_after_telemetry():
     assert "env -i" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
-    assert "not local Home %s" not in bootstrap
-    assert "printf '%s\\n' \"$local_home\"" not in bootstrap
+    assert "not local Machine %s" not in bootstrap
+    assert "printf '%s\\n' \"$local_machine\"" not in bootstrap
     assert "bootstrap complete: %s owns" not in bootstrap
-    assert "wrong Home in installed cron: {entry!r}" not in bootstrap
+    assert "wrong Machine in installed cron: {entry!r}" not in bootstrap
     assert bootstrap.index('lf cron preflight --wave "$wave"') < bootstrap.index(
         "scripts/publish_release.py check"
     )

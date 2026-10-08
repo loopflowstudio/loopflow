@@ -197,7 +197,7 @@ def _validate_release_candidate(archives: tuple[Path, ...]) -> None:
     verdict = preview.get("verdict", {})
     if result.returncode != 0 or verdict.get("kind") not in {"promote", "promote_and_migrate"}:
         reasons = "; ".join(verdict.get("reasons", [])) or result.stderr.strip()
-        raise RuntimeError(f"release candidate cannot install into a fresh Home: {reasons}")
+        raise RuntimeError(f"release candidate cannot install into a fresh Machine: {reasons}")
 
 
 def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[str, object]:

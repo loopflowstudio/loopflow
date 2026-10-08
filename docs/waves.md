@@ -16,7 +16,7 @@ lf wave status shipper
 
 A Wave keeps an objective, memory, cadence, budget and metrics across Tasks.
 Each invocation makes one finite planning pass. Tasks own implementation and
-Flow execution; each Home retains command and conversation history.
+Flow execution; each Machine retains command and conversation history.
 
 | Path | Holds |
 |------|-------|
@@ -55,7 +55,7 @@ Registration records the Wave UUID in `GOAL.md` frontmatter as `id:`. Commit
 that field with the Wave files and retain it when moving a directory. Discovery
 reconciles its one-segment name and directory parent. Renaming Infrastructure
 changes Release's address without changing its ID, Project or Task links.
-A fresh Home uses the same authored IDs. Copying an ID into two Wave directories
+A fresh Machine uses the same authored IDs. Copying an ID into two Wave directories
 is a conflict, not a second Wave.
 
 The release prototype declares its schedule in
@@ -117,7 +117,7 @@ The Wave's SQLite selection references its accepted Project by UUID. Status and 
 retain other Projects and their Tasks, including unresolved predecessor backlog.
 JSON marks the selected Project with `current`; another In Progress Project does
 not change that selection. Reading never creates a binding or activates a Project. Explicit ensure imports a
-legacy Home-local YAML selection once, preserving its original bytes in SQLite;
+legacy Machine-local YAML selection once, preserving its original bytes in SQLite;
 later file edits cannot change selection.
 
 Projects hold Tasks, KRs, metric targets and an optional workflow. Projects
@@ -142,7 +142,7 @@ predecessor. After the switch, new historical starts stay put. An external move 
 selected work remains a conflict. Earlier settled Waves remain settled during retry;
 Project names never choose an endpoint or overwrite a later binding.
 
-The operation is recoverable within its owning Home, not atomic across provider
+The operation is recoverable within its owning Machine, not atomic across provider
 mutations. Read-only planning and unrelated Wave ensure remain independent of it.
 
 Name the workflow the Project's Tasks take up in its content:
@@ -173,7 +173,7 @@ unambiguous candidate. Resolve competing plans in Linear; names and dates never
 break the tie. A missing workflow stays missing. Creation, adoption, plan edits and
 rotation do not require one; a bare `lf task run` still needs the Task or its
 Project to name a workflow.
-Unobserved backlog on another Home is unresolved, so a missing local Task row
+Unobserved backlog on another Machine is unresolved, so a missing local Task row
 never establishes that work should be canceled.
 
 ## The Goal
@@ -200,7 +200,7 @@ Make mechanical changes directly; write a scratch design first when the blast
 radius crosses storage, auth, or public APIs.
 ```
 
-Work placement records the owning Home. Use `lf cron`
+Work placement records the owning Machine. Use `lf cron`
 for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
@@ -311,20 +311,20 @@ as the file to curate.
 At a parent Wave, `realign` explicitly reads the child Waves' top-level Markdown
 to bring relevant findings into the parent's memory.
 
-### Home
+### Machine
 
 ```bash
 lf id
-lf observe <home-id> ssh://jack@mini.local
-lf wave place <wave-id> <home-id>
-lf ssh <home-id> --wave shipper wave/operate
-lf ssh <home-id> wave status shipper --json
+lf observe <machine-id> ssh://jack@mini.local
+lf wave place <wave-id> <machine-id>
+lf ssh <machine-id> --wave shipper wave/operate
+lf ssh <machine-id> wave status shipper --json
 ```
 
-A Home is a stable machine identity with a replaceable route. Placement records
+A Machine is a stable machine identity with a replaceable route. Placement records
 where Work belongs; it does not start a process or confer signal authority.
-New Project or Task Work inherits its parent's recorded Home once. Readers
-operate on the selected Home; they never silently aggregate other Homes.
+New Project or Task Work inherits its parent's recorded Machine once. Readers
+operate on the selected Machine; they never silently aggregate other Machines.
 
 ```bash
 lf wave rename <wave-id> --name platform
@@ -332,12 +332,12 @@ lf wave rename <wave-id> --repo ../moved-repository
 ```
 
 Relocation preserves the Wave UUID, Linear projection, authored files, Work and
-Home placement. It protects unmerged authored work and uses a receipt to finish
+Machine placement. It protects unmerged authored work and uses a receipt to finish
 filesystem cleanup after the locator commits. It does not move historical Wave
-journals or Home-local execution history. Source and target PM Teams must match; use
+journals or Machine-local execution history. Source and target PM Teams must match; use
 `lf repo reteam` for a provider ownership change.
 
-See [Homes and processes](architecture/homes.md) and
+See [Machines and processes](architecture/machines.md) and
 [Security](security.md#understand-account-authority-over-ssh).
 
 ## Chapter plans and KRs

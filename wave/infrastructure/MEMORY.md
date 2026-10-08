@@ -612,23 +612,24 @@ execution and retains conservative checkout cleanup. Prior proofs and unresolved
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 
-## Tasks across machines (LOO-412, 2026-10-07)
+## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart authorized source implementation and publication for review only,
-then selected main after #1489 merged and the global `--machine` selector.
-Registered routes own target identity and repository; no per-call override.
-New Task IDs derive from Linear issue IDs; existing IDs stay. Branch, commit
-and planning facts travel; Workflow, paths and execution authority stay local.
-Fetch before remote placement decisions, including branches without PRs.
-Keep copied observation ages and target invalidation/removal evidence. Cold adoption seeds
-only an unselected Wave's exact issue Project; existing selection and rotation
-remain authoritative. Source requirements end at dispatch; descendants must not
-inherit them or the origin's Work declaration. Reuse the store's Task/issue selector
-instead of another parser. Following Release's entry-point lesson, public dispatch
-proves repeated skill execution and dirty-target preservation; simulated transport
-proves no real SSH or installation. Existing Workflow/Session history, two retained
-legacy IDs, selection/rotation and full gate remain unproved. Later slices own
-credentials and disconnect survival.
+Jack Heart selected the originating-host callback and a fresh `pursue` through
+publication for another review, superseding adoption-only PR #1491. Remote Task
+planning calls the host's ordinary writer; execution and machine/account operations
+stay on the worker. LOO-406 owns one local planning model with optional Linear
+sync; host loss must not silently select a worker plan or direct Linear fallback.
+Keep original mutation IDs through lost replies; unavailable is not failure proof.
+New worker records carry host identity; existing divergent IDs/history survive.
+Delete copied-planning/bootstrap ownership, retaining pushed-code validation,
+fetch-before-placement and dirty-checkout preservation. Nested calls retain the
+origin; clean up invocation forwarding even with a surviving SSH master.
+No automatic replay, resident service, detached-work guarantee or landing.
+
+Design: `scratch/work-on-another-machine-name.md`. Demo the worktree build.
+Five simulated adoption scenarios passed at `0cd8e7f14`; they prove no
+callback or real SSH behavior. Public callback dispatch, lost-reply recovery,
+populated history and real loopback cleanup remain. Earlier evidence: `0cd8e7f14:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Synced planning integration (LOO-334)
 

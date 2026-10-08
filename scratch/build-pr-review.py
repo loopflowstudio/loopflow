@@ -50,7 +50,7 @@ def main() -> None:
 """
     opening = f"""<a class="skip" href="#send">Skip to the walkthrough</a><main>
 <nav aria-label="Review sections"><a href="#send">Send pushed work</a><a href="#adopt">Adopt and repeat</a><a href="#identity">Identity and planning</a><a href="#preserve">Keep local work</a><a href="#evidence">Evidence</a></nav>
-<header><div class="kicker">LOO-412 · PR #1491 · October 8, 2026</div><h1>A Task, on a machine that has never seen it</h1>
+<header><p class="note"><strong>Earlier adoption review.</strong> Jack Heart subsequently selected host callbacks. This page records the previous implementation; see the <a href="work-on-another-machine-name.md">revised design</a>.</p><div class="kicker">LOO-412 · PR #1491 · October 8, 2026</div><h1>A Task, on a machine that has never seen it</h1>
 <p class="lead">Select the machine and issue. The target picks up the pushed branch, creates its local Task once, and runs the skill in that checkout.</p>
 <p class="meta"><a href="{REMOTE}/pull/1491">Published PR #1491</a> · main <code>{BASE[:9]}</code> → <code>{HEAD[:9]}</code><br>Published head and local HEAD match. Only the local demo and review artifacts are unpublished.</p>
 <p><strong>Built and exercised here.</strong> Five captured scenarios passed with this worktree’s <code>target/debug/lf</code>. The public selector ran twice against a fresh target store. Git and both CLI processes are real; SSH, GitHub and the agent provider are simulated. No installed store was used.</p>

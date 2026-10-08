@@ -1,5 +1,9 @@
 # Remote Task adoption demo — 2026-10-08
 
+Superseded scope: Jack Heart subsequently selected the host callback in
+[this Task’s design](work-on-another-machine-name.md). These results remain
+evidence of the earlier adoption path, not acceptance of callbacks.
+
 Built and exercised LOO-412 at `0cd8e7f14a6bffecd9323541e7689570316b892a`.
 [PR walkthrough](pr-review.html) follows the public command through transport,
 Task adoption, identity and preservation. [Current design](work-on-another-machine-name.md)

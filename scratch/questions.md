@@ -1,20 +1,21 @@
-# Assumptions — LOO-412
+# Implementation choices — LOO-412, 2026-10-08
 
-2026-10-07. Jack Heart authorized only the Task-on-another-machine slice and
-publication for review. The earlier remote-work research and rename evidence
-remain at `e50dbd749e3207599f9937ce45653f4c6f33a5cd:scratch/questions.md` and its
-companion design; no later slice is selected.
+Jack Heart selected host callbacks and a fresh `pursue` through publication for
+another review. [The design](work-on-another-machine-name.md) supersedes the
+adoption-only assumptions preserved at `0cd8e7f14:scratch/questions.md`.
 
-- A target has the repository cloned and a compatible installed `lf`. Machine
-  registration/version handling is supplied by merged LOO-411; the saved repository
-  replaces a per-call repository override.
-- An existing Linear issue supplies its Project identity. The cold-clone test
-  exposed SQLite's current-Project admission requirement. Preserve that authority:
-  importing absent planning seeds only an unselected Wave with the issue's exact
-  active Project, under the planning lock. An existing selection or unfinished
-  rotation is never changed. No new provider Project is created.
-- SSH transfers the existing planning record only into absent target planning.
-  It retains its timestamp and never replaces local invalidation/removal evidence.
-- An existing target checkout behind the required source commit asks for `lf sync`
-  and retains all bytes. Source uncommitted/unpushed work is reported before SSH;
-  this slice does not commit, push or reset it.
+- Host means the originating machine, including through nested remote dispatch.
+  The worker's own machine/account registry and execution stay local.
+- Local persistence with pending Linear sync is the host's ordinary LOO-406
+  behavior. Losing that host connection is different: preserve input and report
+  unavailable/unconfirmed, without worker-local creation or direct Linear fallback.
+- No direct Linear fallback, automatic edit replay, terminal relay or detached
+  work is selected here. These omissions do not weaken callback creation/read/
+  edit/comment, exact mutation retry or socket cleanup acceptance.
+- LOO-406's single planning model is being revised separately. Integrate a coherent
+  committed API through Loopflow when needed; never consume its dirty checkout or
+  resurrect its superseded personal/shared authority split. Record the actual
+  dependency if its required operation is not yet available.
+- Fresh worker identity comes from the host. Existing divergent machine-local IDs
+  and histories survive via the smallest necessary origin association. Its exact
+  storage shape is an engineering choice, not authority to renumber records.

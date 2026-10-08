@@ -1071,6 +1071,11 @@ fake-API checks pass with one request, exact arguments and separate user context
 These checks establish no native Codex skill, terminal fidelity or unchanged
 third-party acceptance. No landing or Task completion occurred.
 
+Provider-only `probe.py`, `continuity.py` and their exclusive tests survived that
+cut; the follow-up removes them from `31e0640eb`, retaining replay-argument
+checks in the ordinary lf fixture. Removing a path includes its probe dependencies;
+successful provider-only probes cannot establish the operation boundary.
+
 The `dd2cdba82` compression removed unreachable ClaudeHarness plugin state;
 `48d145b78` preserves the subsequent source audit. October 8 implementation now
 prepares selected source/arguments on both harnesses and surfaces. Headless Claude

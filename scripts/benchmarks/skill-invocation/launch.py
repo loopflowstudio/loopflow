@@ -331,10 +331,6 @@ enabled = false
                             "user_excerpt": user_text[:200],
                             "marker_in_user": marker in user_text,
                             "marker_in_privileged": marker in privileged,
-                            "context_file_retained": list(
-                                (root / "lf/runs").glob("*/*/skill-context.json")
-                            )
-                            != [],
                             "tools": [t.get("name") for t in first.get("tools", [])],
                             "tool_results": tool_results,
                         }

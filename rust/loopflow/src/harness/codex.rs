@@ -827,26 +827,20 @@ impl Harness for CodexHarness {
 
     async fn send_input(&mut self, content: &str) -> Result<()> {
         let text = content.trim();
-        if text.is_empty()
-            && !(self.should_seed_prompt
-                && self
-                    .launch
-                    .as_ref()
-                    .is_some_and(|launch| launch.skill_invocation.is_some()))
-        {
-            return Ok(());
-        }
-        if self.turn_in_progress.load(Ordering::Relaxed) {
-            return Err(HarnessError::TurnAlreadyInProgress.into());
-        }
         let invocation = self
             .should_seed_prompt
             .then(|| {
                 self.launch
                     .as_ref()
-                    .and_then(|launch| launch.skill_invocation.clone())
+                    .and_then(|launch| launch.skill_invocation.as_ref())
             })
             .flatten();
+        if text.is_empty() && invocation.is_none() {
+            return Ok(());
+        }
+        if self.turn_in_progress.load(Ordering::Relaxed) {
+            return Err(HarnessError::TurnAlreadyInProgress.into());
+        }
         let turn_text = if self.should_seed_prompt {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {

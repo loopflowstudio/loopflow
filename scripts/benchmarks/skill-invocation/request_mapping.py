@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -15,7 +16,28 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from probe import _output_events, _read_output
+
+def _output_events(output: str) -> list[dict]:
+    events = []
+    for line in output.splitlines():
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return events
+
+
+def _native_arguments(events: list[dict]) -> str | None:
+    arguments = None
+    for event in events:
+        if event.get("type") != "user" or not event.get("isReplay"):
+            continue
+        content = event.get("message", {}).get("content")
+        if isinstance(content, str):
+            match = re.search(r"<command-args>(.*?)</command-args>", content, re.DOTALL)
+            if match:
+                arguments = match.group(1)
+    return arguments
 
 
 def _marker_locations(request: dict, marker: str) -> list[str]:
@@ -244,11 +266,11 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
                 for event in events
                 if event.get("type") == "provider_output" and event.get("stream") == "stdout"
             )
-            _, native_arguments = _read_output(_output_events(raw))
+            provider_events = _output_events(raw)
             observation["checks"].update(
                 exit_zero=result.returncode == 0,
                 declared_model_applied=all("haiku" in body["model"] for body in requests),
-                native_arguments_exact=native_arguments == "alpha",
+                native_arguments_exact=_native_arguments(provider_events) == "alpha",
                 captured_bytes_retained=any(
                     origin
                     and (
@@ -276,7 +298,7 @@ def _probe(claude: str, model: str, lf: str, flow: bool) -> bool:
             print(json.dumps({"channel": "lf-flow" if flow else "lf", **observation}), flush=True)
             if result.returncode:
                 print(result.stderr, file=sys.stderr)
-                for event in _output_events(raw):
+                for event in provider_events:
                     if event.get("is_error"):
                         print(event.get("result"), file=sys.stderr)
             return all(observation["checks"].values())

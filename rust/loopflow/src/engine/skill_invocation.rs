@@ -110,7 +110,7 @@ impl SkillInvocation {
             .prefix("skill-")
             .tempdir_in(Self::capture_directory(config)?)?
             .keep();
-        self.materialize(&root.join("skills/invoke"), "claude")?;
+        self.materialize_claude(&root.join("skills/invoke"))?;
         let namespace = format!("lf-{}", uuid::Uuid::new_v4().simple());
         std::fs::create_dir(root.join(".claude-plugin"))?;
         std::fs::write(
@@ -146,12 +146,11 @@ impl SkillInvocation {
         harness: &str,
         config: &crate::engine::agent::AgentConfig,
     ) -> String {
-        let prompt = match (harness, self.codex_skill()) {
-            ("codex", Some((path, name))) => {
-                self.command(&format!("[${name}]({})", path.display()))
-            }
-            _ => self.translated_input(harness),
-        };
+        let prompt = (harness == "codex")
+            .then(|| self.codex_skill())
+            .flatten()
+            .map(|(path, name)| self.command(&format!("[${name}]({})", path.display())))
+            .unwrap_or_else(|| self.translated_input(harness));
         format!(
             "{prompt}\n\n{}\n\n{}",
             config.system_prompt, config.task_prompt
@@ -224,12 +223,7 @@ impl SkillInvocation {
             regex::Regex::new(r"(\\*)\$(ARGUMENTS\[\d+\]|[A-Za-z_]\w*|\d+)")
                 .expect("argument pattern is valid")
         });
-        let fields = self
-            .skill
-            .source
-            .as_ref()
-            .and_then(|origin| origin.frontmatter.as_deref())
-            .and_then(|value| serde_yaml_ng::from_str::<serde_yaml_ng::Value>(value).ok());
+        let fields = self.declarations();
         let names = match fields.as_ref().and_then(|fields| fields.get("arguments")) {
             Some(serde_yaml_ng::Value::String(value)) => value
                 .split_whitespace()
@@ -291,7 +285,7 @@ impl SkillInvocation {
     }
 
     /// Keep the Flow's captured text and resolve resources at their original directory.
-    fn materialize(&self, directory: &Path, harness: &str) -> std::io::Result<PathBuf> {
+    fn materialize_claude(&self, directory: &Path) -> std::io::Result<PathBuf> {
         std::fs::create_dir_all(directory)?;
         let target = directory.join("SKILL.md");
         let original = self
@@ -301,7 +295,7 @@ impl SkillInvocation {
             .and_then(|source| source.path.parent())
             .unwrap_or(Path::new("."));
         let text = self
-            .instruction_text(harness)
+            .source_text()
             .replace("${CLAUDE_SKILL_DIR}", &original.display().to_string());
         std::fs::write(&target, format!("{text}\n\nResolve supporting files and parent-relative paths from the original skill directory: {}\n", original.display()))?;
         Ok(target)
@@ -363,9 +357,6 @@ mod tests {
         assert!(text.contains("allowed-tools: Read\nmodel: sonnet"));
         assert!(text.contains("no automatic cross-harness enforcement"));
         assert!(text.contains("exec_command"));
-        let snapshot = tempfile::tempdir().unwrap();
-        let file = invocation.materialize(snapshot.path(), "codex").unwrap();
-        assert!(std::fs::read_to_string(file).unwrap().contains(&text));
     }
 
     #[test]
@@ -392,7 +383,7 @@ mod tests {
             invocation.source_text()
         );
         let snapshot = repo.path().join("snapshot");
-        let file = invocation.materialize(&snapshot, "claude").unwrap();
+        let file = invocation.materialize_claude(&snapshot).unwrap();
         let text = std::fs::read_to_string(file).unwrap();
         assert!(text.starts_with(original));
         assert!(text.contains(&bundle.display().to_string()));

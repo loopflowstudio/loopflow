@@ -531,14 +531,18 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
+        let skill_prompt = built
+            .agent_config
+            .skill_invocation
+            .as_ref()
+            .map(|skill| skill.terminal_input(&built.harness, &built.agent_config));
         let result = launch_session(
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
-            &built.prompt,
+            skill_prompt.as_deref().unwrap_or(&built.prompt),
             &environment,
             provider_session_id.as_deref(),
-            Some(&built.agent_config),
         );
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())

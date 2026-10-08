@@ -48,6 +48,8 @@ from successful exit or assistant text alone. The implementation uses captured
 instructions for undiscovered Codex sources and keeps native Claude terminal
 invocation as remaining work.
 
-Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`.
+Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`;
+provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640eb`.
+The replay-argument parser now lives with the request-mapping check that uses it.
 Baseline reconnect and plain-provider continuity remain in
 `tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.

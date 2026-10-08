@@ -147,7 +147,7 @@ impl SqliteStore {
         };
         validate_task(&task)?;
         insert_task_row(&tx, &task)?;
-        tx.execute("UPDATE tasks SET planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1",params![task.id.as_str(),task.project_id.as_str()])?;
+        tx.execute("UPDATE tasks SET planning_state='unstarted',planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1",params![task.id.as_str(),task.project_id.as_str()])?;
         tx.execute(
             "INSERT INTO task_creation_intents(task_id, project_id, title, description)
              VALUES(?1, ?2, ?3, ?4)",

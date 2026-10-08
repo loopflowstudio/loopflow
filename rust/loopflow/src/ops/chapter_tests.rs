@@ -379,7 +379,11 @@ async fn seed_project(
             linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
             slug: plan.slug.clone(),
             name: plan.name.clone(),
-            prompt_context: plan.prompt_context(),
+            prompt_context: crate::pm::render_project_content(&crate::pm::ProjectContent {
+                workflow: plan.workflow.clone(),
+                krs: plan.krs.clone(),
+                metric_targets: plan.metric_targets.clone(),
+            }),
             pm_snapshot_synced_at: Some(now.unix_timestamp()),
             workflow: plan.workflow.clone(),
             status: plan.status,

@@ -47,6 +47,10 @@ CREATE TABLE projects_migration (
     project_slug TEXT,
     project_name TEXT,
     project_summary TEXT NOT NULL DEFAULT '',
+    planning_rank INTEGER NOT NULL DEFAULT 0 CHECK(planning_rank >= 0),
+    planning_provider_revision TEXT,
+    planning_initiatives TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(planning_initiatives)),
+    planning_teams TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(planning_teams)),
     project_prompt_context TEXT,
     pm_snapshot_synced_at INTEGER,
     abandon_requested_at INTEGER,
@@ -158,6 +162,11 @@ CREATE TABLE tasks_migration (
     planning_rank INTEGER NOT NULL DEFAULT 0 CHECK (planning_rank >= 0),
     planning_assignee TEXT,
     planning_state TEXT,
+    planning_completed_at TEXT,
+    planning_provider_revision TEXT,
+    planning_url TEXT,
+    planning_branch_name TEXT,
+    planning_team_id TEXT,
     planning_completed INTEGER NOT NULL DEFAULT 0 CHECK (planning_completed IN (0,1)),
     planning_deleted_at INTEGER
 );
@@ -282,9 +291,31 @@ UPDATE projects SET project_summary=COALESCE((SELECT json_extract(observed.body,
     WHERE observed.id=projects.external_project_id AND observed.repo=w.repo
         AND observed.provider='linear'),'');
 
+UPDATE projects SET planning_rank=COALESCE((SELECT position FROM pm_wave_projects m
+    WHERE m.wave_id=projects.wave_id AND m.project_id=projects.external_project_id),0);
+
+-- Store the same editable Project content and relationship fields in every repository.
+UPDATE projects SET (planning_provider_revision,planning_initiatives,planning_teams,project_prompt_context) = (
+    SELECT json_extract(o.body,'$.revision'),json_extract(o.body,'$.initiative_ids'),
+        json_extract(o.body,'$.team_ids'),
+        '## Metric targets' || char(10) || json_extract(o.body,'$.metric_targets') || char(10) ||
+        'workflow: ' || json_extract(o.body,'$.workflow') || char(10) || '## KRs' || char(10) ||
+        COALESCE((SELECT group_concat('- [' || CASE json_extract(k.value,'$.holds') WHEN 1 THEN 'x' ELSE ' ' END || '] ' || json_extract(k.value,'$.text'),char(10))
+            FROM json_each(o.body,'$.krs') k),'')
+    FROM pm_projects o JOIN waves w ON w.id=projects.wave_id
+    WHERE o.id=projects.external_project_id AND o.repo=w.repo AND o.provider='linear'
+) WHERE EXISTS(SELECT 1 FROM pm_projects o JOIN waves w ON w.id=projects.wave_id
+    WHERE o.id=projects.external_project_id AND o.repo=w.repo AND o.provider='linear');
+
 -- Accepted planning state is retained independently of execution and provider inventory.
-UPDATE tasks SET (planning_state,planning_completed) = (
-    SELECT json_extract(i.body,'$.state'),json_extract(i.body,'$.completed')
+UPDATE tasks SET (planning_state,planning_completed,planning_completed_at,
+    planning_provider_revision,planning_url,planning_branch_name,planning_team_id,
+    planning_assignee,planning_rank,issue_identifier,issue_title,issue_description,pm_snapshot_synced_at) = (
+    SELECT json_extract(i.body,'$.state'),json_extract(i.body,'$.completed'),
+        json_extract(i.body,'$.completed_at'),json_extract(i.body,'$.revision'),
+        json_extract(i.body,'$.url'),json_extract(i.body,'$.branch_name'),
+        json_extract(i.body,'$.team_id'),json_extract(i.body,'$.assignee'),json_extract(i.body,'$.rank'),
+        json_extract(i.body,'$.identifier'),json_extract(i.body,'$.name'),json_extract(i.body,'$.description'),i.observed_at
     FROM pm_items i JOIN projects p ON p.id=tasks.project_id
     JOIN waves w ON w.id=p.wave_id
     WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear'
@@ -295,6 +326,12 @@ UPDATE tasks SET (planning_state,planning_completed) = (
     WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear'
       AND i.needs_refresh=0
 );
+
+-- The last saved local decision remains visible while delivery is uncertain.
+UPDATE tasks SET planning_state=d.target,planning_completed=(d.target='completed'),
+    planning_completed_at=CASE WHEN d.target='completed' THEN planning_completed_at ELSE NULL END
+FROM task_state_deliveries d WHERE d.task_id=tasks.id AND d.settled=0
+    AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=tasks.id);
 
 UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,updated_at,created_at)
 WHERE EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=tasks.external_issue_id AND c.removed=1);

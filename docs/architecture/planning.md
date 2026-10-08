@@ -81,10 +81,14 @@ optional Linear synchronization. That cutover remains unfinished. Creation, edit
 definitions and rotation retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
 Project content and stored Wave workflows share `sqlite/project_content.rs`;
-comments use `sqlite/task_comments.rs`. Task status still branches: local planning
-derives state/completion from Workflow state, while mapped planning reads provider
-observations. The replacement must preserve planning fields and observation age
-independently of Workflow position.
+comments use `sqlite/task_comments.rs`. `sqlite/plan_read.rs` supplies registered Task status
+and Wave/Desktop planning from saved Task and Project rows. Reads preserve state,
+completion time, ordering, assignee, provider metadata and observation age separately
+from Workflow position. Missing provider inventory cannot erase saved planning;
+malformed observations retain fields and invalidation diagnostics. Pending local
+state decisions survive inbound completion while other fields advance. Ingestion
+and the released-frontier migration retain editable Project content, including KRs
+and targets. These local guarantees do not fix Linear's unconditional update race.
 
 ## Connected Project selection
 

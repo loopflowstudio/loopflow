@@ -283,23 +283,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn local_task_fields(
-        &self,
-        task: &crate::durable::TaskId,
-    ) -> StoreResult<(u32, Option<i64>, Option<String>)> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT (SELECT count(*) FROM tasks earlier WHERE earlier.project_id=t.project_id
-                AND earlier.planning_deleted_at IS NULL
-                AND (earlier.planning_rank,earlier.created_at,earlier.id)<(t.planning_rank,t.created_at,t.id)),
-                    (SELECT max(created_at) FROM task_events e
-                     WHERE e.task_id=t.id AND json_extract(e.kind_json,'$.kind')='completed'),planning_assignee
-             FROM tasks t WHERE id=?1",
-            [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?)
-    }
-
     pub fn project_planning_authority(
         &self,
         project: &ProjectId,

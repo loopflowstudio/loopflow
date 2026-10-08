@@ -27,6 +27,7 @@ mod durable;
 mod flow_inventory;
 mod local_planning;
 mod metrics;
+mod plan_read;
 mod planning;
 mod pr_landings;
 mod processes;

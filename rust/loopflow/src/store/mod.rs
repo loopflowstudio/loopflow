@@ -1696,6 +1696,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saved_planning_retains_fields_and_decisions_independently_of_workflow() {
+        for mapped in [false, true] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let task = make_task(&wave, &project);
+            let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+            snapshot.snapshot.projects[0].krs = vec![crate::pm::PmKr {
+                text: "Work remains readable".into(),
+                holds: false,
+            }];
+            let item = &mut snapshot.snapshot.items[0];
+            item.state = Some("unstarted".into());
+            item.rank = 7;
+            item.url = Some("https://linear.app/issue/INF-123".into());
+            item.branch_name = Some("suggested-branch".into());
+            item.assignee = Some("owner".into());
+            snapshot.synced_at = 17;
+            let mut first_project = snapshot.snapshot.projects[0].clone();
+            first_project.id = "00000000-0000-4000-8000-000000000002".into();
+            first_project.slug = "ordered-first".into();
+            snapshot.snapshot.projects.insert(0, first_project);
+            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            let task = store
+                .get_task_by_issue(&task.plan.identifier)
+                .await
+                .unwrap()
+                .unwrap();
+            let record = store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap();
+            assert_eq!(record.item, snapshot.snapshot.items[0]);
+            assert_eq!(record.project, Some(snapshot.snapshot.projects[1].clone()));
+            assert_eq!(record.observed_at, 17);
+            let driver = crate::id::ProcessLfid::new();
+            rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
+                "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
+                rusqlite::params![driver,crate::id::TraceId::new()],
+            ).unwrap();
+            let definition = crate::engine::workflow::WorkflowDefinition {
+                name: "review".into(),
+                nodes: vec![crate::engine::workflow::WorkflowNode {
+                    name: "review".into(),
+                    skill: "review".into(),
+                    description: None,
+                }],
+                edges: Vec::new(),
+            };
+            store
+                .sqlite
+                .take_up_workflow(&task.id, &definition, &driver, None)
+                .unwrap();
+            store
+                .sqlite
+                .set_workflow_node(&task.id, "review", &driver, None)
+                .unwrap();
+            let workflow = store.sqlite.workflow(&task.id).unwrap();
+            snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
+            snapshot.snapshot.items[0].state = None;
+            snapshot.snapshot.items[0].completed = true;
+            snapshot.snapshot.items[0].completed_at = Some("2026-10-05T12:00:30Z".into());
+            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            assert_eq!(
+                store
+                    .sqlite
+                    .planning_task(&task.id)
+                    .unwrap()
+                    .record
+                    .unwrap()
+                    .item,
+                snapshot.snapshot.items[0]
+            );
+            assert_eq!(store.sqlite.workflow(&task.id).unwrap(), workflow);
+            store
+                .complete_task(&task, None, crate::store::sqlite::EndMove::Set, None)
+                .await
+                .unwrap();
+            let completion = store.sqlite.pending_task_state(&task.id).unwrap().unwrap();
+            store
+                .sqlite
+                .set_workflow_node(&task.id, "review", &driver, None)
+                .unwrap();
+            let reopened = store.sqlite.workflow(&task.id).unwrap();
+            store.sqlite.settle_task_state(&completion, None).unwrap();
+            snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
+            snapshot.snapshot.items[0].assignee = None;
+            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            if !mapped {
+                rusqlite::Connection::open(directory.path().join("registry.db"))
+                    .unwrap()
+                    .execute(
+                        "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+                        [task.id.as_str()],
+                    )
+                    .unwrap();
+            }
+            let record = store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap();
+            assert_eq!(record.item.state.as_deref(), Some("unstarted"));
+            assert!(!record.item.completed);
+            assert_eq!(record.item.completed_at, None);
+            assert_eq!(record.item.assignee, None);
+            assert_eq!(record.item.rank, 7);
+            assert_eq!(record.observed_at, 17);
+            assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
+            let wave_plan = store.sqlite.planning_wave(wave.id()).unwrap();
+            assert_eq!(wave_plan.items, vec![record.item]);
+            assert_eq!(wave_plan.projects, snapshot.snapshot.projects);
+            assert_eq!(
+                store.sqlite.planning_projects(wave.id()).unwrap(),
+                snapshot.snapshot.projects
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn incoming_terminal_planning_prevents_placement_without_moving_workflow() {
         for (state, completed) in [
             (Some("completed"), true),
@@ -3676,6 +3800,7 @@ mod tests {
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
+        refreshed_plan.revision += 1;
         assert_eq!(retained.plan, refreshed_plan);
         let stored = store.task_prs(&task.id).await.unwrap();
         assert_eq!(stored.len(), 1);

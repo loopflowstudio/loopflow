@@ -19,6 +19,17 @@ pub(crate) struct TaskStateDelivery {
 }
 
 pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreResult<()> {
+    let completed_at = (target == "completed")
+        .then(|| {
+            time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339)
+        })
+        .transpose()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    conn.execute(
+        "UPDATE tasks SET planning_state=?2,planning_completed=(?2='completed'),
+         planning_completed_at=?3,planning_revision=planning_revision+1 WHERE id=?1",
+        params![task.as_str(), target, completed_at],
+    )?;
     conn.execute(
         "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
          SELECT ?2,t.id,(SELECT max(seq) FROM task_workflow_moves WHERE task_id=t.id),?3,
@@ -105,6 +116,18 @@ impl SqliteStore {
                 !keep_local,
             ],
         )?;
+        if !keep_local {
+            tx.execute(
+                "UPDATE tasks SET planning_state=?2,planning_completed=?3,planning_completed_at=?4,
+                 planning_revision=planning_revision+1 WHERE id=?1",
+                params![
+                    delivery.task_id.as_str(),
+                    observed.state,
+                    observed.completed,
+                    observed.completed_at
+                ],
+            )?;
+        }
         super::children::insert_task_event_in(&tx, &delivery.task_id, &crate::work::task::TaskEventKind::Progress {
             summary: format!("Resolved planning state delivery {}: retained {}. Local Workflow unchanged. Linear state: {} at revision {}",
                 delivery.id, if keep_local { "local decision for synchronization" } else { "Linear state" },

@@ -53,7 +53,7 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject
             .list_projects(Some(wave.id()))
             .map_err(project_error)?
             .into_iter()
-            .map(super::task::local_project_item)
+            .map(|project| super::task::project_planning_item(store, project))
             .collect::<OpsResult<Vec<_>>>()?;
         return select_project(store, wave, &projects).cloned();
     }
@@ -127,7 +127,8 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     let store = super::pm::pm_store().await?;
     if let Some(name) = name.strip_prefix("personal:") {
         let repo = crate::repository::CanonicalRepo::discover(repo).map_err(project_error)?;
-        return super::task::local_project_item(
+        return super::task::project_planning_item(
+            &store,
             store
                 .sqlite
                 .ensure_personal_project(&repo.to_string(), name)
@@ -143,7 +144,8 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     .await
     .map_err(project_error)?;
     if let Some(name) = wave.slug().strip_prefix("personal:") {
-        return super::task::local_project_item(
+        return super::task::project_planning_item(
+            &store,
             store
                 .sqlite
                 .ensure_personal_project(wave.repo(), name)
@@ -614,7 +616,8 @@ pub async fn workflow(
         None => None,
     };
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let mut current = super::task::local_project_item(
+    let mut current = super::task::project_planning_item(
+        &store,
         store
             .sqlite
             .project(&project.id)
@@ -637,7 +640,8 @@ pub async fn workflow(
                 .map_err(project_error)?;
             super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition.clone())
                 .await?;
-            current = super::task::local_project_item(
+            current = super::task::project_planning_item(
+                &store,
                 store
                     .sqlite
                     .project(&project.id)

@@ -527,25 +527,45 @@ fn project_accepted_planning(
         };
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11)
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11,?12,?13,?14)
              ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
              project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary",
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary,planning_provider_revision=excluded.planning_provider_revision,
+             planning_initiatives=excluded.planning_initiatives,planning_teams=excluded.planning_teams",
             params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary],
+                crate::pm::render_project_content(&crate::pm::ProjectContent { workflow: project.workflow.clone(), krs: project.krs.clone(), metric_targets: project.metric_targets.clone() }),
+                observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary,
+                project.revision,serde_json::to_string(&project.initiative_ids)?,serde_json::to_string(&project.team_ids)?],
+        )?;
+        tx.execute(
+            "UPDATE projects SET planning_rank=COALESCE((SELECT position FROM pm_wave_projects
+                WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
+            params![id.as_str(), wave_id, project.id],
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
     // Copy accepted facts directly; execution fields and unobserved Tasks stay intact.
     tx.execute(
-        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+        &format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}),
+         pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
+             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))
          UPDATE tasks AS target SET
              issue_identifier=json_extract(i.body,'$.identifier'),
              issue_title=json_extract(i.body,'$.name'),
              issue_description=json_extract(i.body,'$.description'),
-             planning_state=json_extract(i.body,'$.state'),
-             planning_completed=json_extract(i.body,'$.completed'),
+             planning_state=CASE WHEN target.id IN (SELECT task_id FROM pending)
+                 THEN target.planning_state ELSE json_extract(i.body,'$.state') END,
+             planning_completed=CASE WHEN target.id IN (SELECT task_id FROM pending)
+                 THEN target.planning_completed ELSE json_extract(i.body,'$.completed') END,
+             planning_completed_at=CASE WHEN target.id IN (SELECT task_id FROM pending)
+                 THEN target.planning_completed_at ELSE json_extract(i.body,'$.completed_at') END,
+             planning_provider_revision=json_extract(i.body,'$.revision'),
+             planning_url=json_extract(i.body,'$.url'),
+             planning_branch_name=json_extract(i.body,'$.branch_name'),
+             planning_team_id=json_extract(i.body,'$.team_id'),
+             planning_assignee=json_extract(i.body,'$.assignee'),
+             planning_rank=json_extract(i.body,'$.rank'),
              pm_snapshot_synced_at=i.observed_at,project_id=p.id
          FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
@@ -592,10 +612,11 @@ fn project_accepted_planning(
         let item: PmItem = serde_json::from_str(&body)?;
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11)",
+             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
+             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17)",
             params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed],
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
         )?;
     }
     Ok(())

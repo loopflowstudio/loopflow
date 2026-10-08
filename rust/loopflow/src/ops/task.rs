@@ -836,15 +836,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             // A retained provider branch may already own Git work. It is metadata,
             // not a reason to reacquire planning or allocate another Task.
-            let branch = match &task.plan.linear_id {
-                Some(id) => store
-                    .sqlite
-                    .pm_task_observation(wave.repo(), "linear", id.as_str())
-                    .map_err(task_error)?
-                    .record
-                    .and_then(|record| record.item.branch_name),
-                None => None,
-            };
+            let branch = task_planning_item(&store, &task)?.branch_name;
             let placement =
                 prepare_task_placement(&main, &task, branch.as_deref(), &options).await?;
             place_prepared_task(&store, &task.id, placement).await?
@@ -1321,7 +1313,7 @@ pub fn task_create(
                 )
                 .await
                 .map_err(task_error)?;
-            local_task_item(&store, &task)
+            task_planning_item(&store, &task)
         });
     }
     let project =
@@ -1343,101 +1335,24 @@ pub fn task_create(
     Ok(created.item)
 }
 
-pub(crate) fn local_task_item(store: &Store, task: &Task) -> OpsResult<crate::pm::PmItem> {
-    let state = store.sqlite.task_state(&task.id).map_err(task_error)?;
-    let (rank, completed_at, assignee) = store
+pub(crate) fn task_planning_item(store: &Store, task: &Task) -> OpsResult<crate::pm::PmItem> {
+    store
         .sqlite
-        .local_task_fields(&task.id)
-        .map_err(task_error)?;
-    let completed_at = completed_at
-        .filter(|_| state == TaskState::Done)
-        .map(|at| crate::store::rows::unix_to_datetime(at).format(&Rfc3339))
-        .transpose()
-        .map_err(task_error)?;
-    let project = store
-        .sqlite
-        .project(&task.project_id)
+        .planning_task(&task.id)
         .map_err(task_error)?
-        .ok_or_else(|| task_error("Task Project is missing"))?;
-    Ok(crate::pm::PmItem {
-        revision: None,
-        id: task.id.to_string(),
-        identifier: task.plan.identifier.clone(),
-        branch_name: store
-            .sqlite
-            .task_prs(&task.id)
-            .map_err(task_error)?
-            .last()
-            .map(|pr| pr.branch.clone()),
-        url: None,
-        name: task.plan.title.clone(),
-        description: task.plan.description.clone(),
-        rank,
-        completed: state == TaskState::Done,
-        completed_at,
-        state: Some(
-            match state {
-                TaskState::NotReady | TaskState::Ready => "unstarted",
-                TaskState::Active => "started",
-                TaskState::Done => "completed",
-                TaskState::Abandoned => "canceled",
-            }
-            .into(),
-        ),
-        project_id: Some(project.id.to_string()),
-        project: Some(project.plan.slug),
-        team_id: None,
-        assignee,
-    })
+        .record
+        .map(|record| record.item)
+        .ok_or_else(|| task_error("Task planning is missing"))
 }
 
-pub(crate) fn local_project_item(
+pub(crate) fn project_planning_item(
+    store: &Store,
     project: crate::work::project::Project,
 ) -> OpsResult<crate::pm::PmProject> {
-    let content =
-        crate::pm::parse_project_content(&project.plan.prompt_context).map_err(task_error)?;
-    Ok(crate::pm::PmProject {
-        id: project.id.to_string(),
-        revision: None,
-        slug: project.plan.slug,
-        name: project.plan.name,
-        summary: project.plan.summary,
-        metric_targets: content.metric_targets,
-        workflow: project.plan.workflow,
-        status: project.plan.status,
-        krs: content.krs,
-        initiative_ids: Vec::new(),
-        team_ids: Vec::new(),
-    })
-}
-
-pub(crate) async fn local_wave_plan(
-    store: &Store,
-    wave: &crate::id::WaveId,
-) -> OpsResult<Option<crate::pm::PmSnapshot>> {
-    if store
+    store
         .sqlite
-        .personal_wave_definition(wave)
-        .map_err(task_error)?
-        .is_none()
-    {
-        return Ok(None);
-    }
-    let projects = store
-        .list_projects(Some(wave))
-        .await
-        .map_err(task_error)?
-        .into_iter()
-        .map(local_project_item)
-        .collect::<OpsResult<Vec<_>>>()?;
-    let items = store
-        .list_tasks(Some(wave))
-        .await
-        .map_err(task_error)?
-        .iter()
-        .map(|task| local_task_item(store, task))
-        .collect::<OpsResult<Vec<_>>>()?;
-    Ok(Some(crate::pm::PmSnapshot { projects, items }))
+        .planning_project(&project.id)
+        .map_err(task_error)
 }
 
 async fn resolve_local_task(
@@ -1923,15 +1838,10 @@ pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
 
 async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
     let wave = owning_wave(store, task).await?;
-    let url = if let Some(issue) = &task.plan.linear_id {
-        let observation = store
-            .pm_task_observation(wave.repo(), "linear", issue.as_str())
-            .await
-            .map_err(task_error)?;
+    let url = if task.plan.linear_id.is_some() {
         Some(
-            observation
-                .record
-                .and_then(|record| record.item.url)
+            task_planning_item(store, task)?
+                .url
                 .filter(|url| _valid_task_url(url))
                 .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?,
         )
@@ -3622,43 +3532,20 @@ pub struct TaskStatus {
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     let task = task_execution_status(repo, issue)?;
     if let Some(task) = &task {
-        let local = block_on_task(async {
+        let read = block_on_task(async {
             let store = task_store().await?;
-            if store
-                .sqlite
-                .project_planning_authority(&task.project_id)
-                .map_err(task_error)?
-                != crate::planning::PlanningAuthority::Local
-            {
-                return Ok(None);
-            }
-            let project = store
-                .get_project(&task.project_id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("Task Project is missing"))?;
-            Ok(Some((
-                crate::store::PmTaskRecord {
-                    item: local_task_item(&store, task)?,
-                    project: Some(local_project_item(project)?),
-                    observed_at: task.updated_at.unix_timestamp(),
-                },
-                store.sqlite.task_deleted(task).map_err(task_error)?,
-            )))
+            Ok(crate::ops::pm::TaskPlanningInspection {
+                observation: store.sqlite.planning_task(&task.id).map_err(task_error)?,
+                refresh_error: None,
+            })
         })?;
-        if let Some((planning, deleted)) = local {
-            return Ok(TaskStatus {
-                planning: Some(planning),
-                planning_error: None,
-                planning_stale: false,
-                planning_state: if deleted {
-                    crate::store::PlanningState::Removed
-                } else {
-                    crate::store::PlanningState::Available
-                },
-                execution: Some(task_snapshot(task)?),
-            });
-        }
+        return Ok(TaskStatus {
+            planning_stale: task.plan.linear_id.is_some() && read.is_stale(),
+            planning_state: read.observation.state,
+            planning: read.observation.record,
+            planning_error: read.refresh_error,
+            execution: Some(task_snapshot(task)?),
+        });
     }
     let selector = task
         .as_ref()
@@ -3766,28 +3653,14 @@ pub(crate) fn planning_conflict_of(
     })
 }
 
-/// The conflict as last read from Linear; unread planning shows none.
+/// Saved planning and Workflow position are independent facts.
 pub(crate) async fn planning_conflict(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Option<String>> {
-    let Some(issue_id) = &task.plan.linear_id else {
-        return Ok(None);
-    };
     let state = store.task_state(&task.id).await.map_err(task_error)?;
-    if state != TaskState::Active {
-        return Ok(None);
-    }
-    let wave = owning_wave(store, task).await?;
-    let record = crate::ops::pm::read_task_planning_async(
-        Path::new(wave.repo()),
-        issue_id.as_str(),
-        crate::ops::pm::PmRefresh::Never,
-    )
-    .await;
-    Ok(record
-        .ok()
-        .and_then(|record| planning_conflict_of(state, &record.item, &task.plan.identifier)))
+    let item = task_planning_item(store, task)?;
+    Ok(planning_conflict_of(state, &item, &task.plan.identifier))
 }
 
 /// Record or resolve accepted work remaining after delivery. History keeps both decisions.

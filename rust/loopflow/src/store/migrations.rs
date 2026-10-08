@@ -4298,6 +4298,87 @@ mod tests {
     }
 
     #[test]
+    fn planning_cutover_preserves_provider_fields_and_editable_project_content() {
+        let conn = open();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        apply_before_current_draft(&conn, "local_planning");
+        if !_draft_is_canonical("local_planning") {
+            for draft in crate::build_info::migration_draft_manifest() {
+                if draft.name == "local_planning" {
+                    break;
+                }
+                conn.execute_batch(draft.sql).unwrap();
+            }
+        }
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let project = &mut snapshot.projects[0];
+        project.krs = vec![crate::pm::PmKr {
+            text: "Saved planning survives".into(),
+            holds: true,
+        }];
+        let item = &mut snapshot.items[0];
+        item.state = None;
+        item.completed = true;
+        item.completed_at = Some("2026-10-05T12:00:00Z".into());
+        item.url = Some("https://linear.app/example".into());
+        item.branch_name = Some("saved-branch".into());
+        item.rank = 7;
+        item.assignee = Some("person-id".into());
+        conn.execute_batch("INSERT INTO waves(id,name,repo,created_at) VALUES('wave_fields','fields','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('project_fields','wave_fields','current',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at)
+                VALUES('task_fields','project_fields','LOO-318','LOO-318',1);").unwrap();
+        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body) VALUES('/repo','linear','current',17,?1)", [serde_json::to_string(project).unwrap()]).unwrap();
+        conn.execute("INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES('wave_fields','current',11)", []).unwrap();
+        conn.execute("INSERT INTO pm_items(repo,provider,id,identifier,project_id,observed_at,body) VALUES('/repo','linear','LOO-318','LOO-318','current',17,?1)", [serde_json::to_string(item).unwrap()]).unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql("local_planning"))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        let fields: serde_json::Value = conn.query_row("SELECT json_object('state',planning_state,'completed',planning_completed,
+            'completed_at',planning_completed_at,'revision',planning_provider_revision,'url',planning_url,
+            'branch_name',planning_branch_name,'team_id',planning_team_id,'assignee',planning_assignee,'rank',planning_rank)
+            FROM tasks WHERE id='task_fields'", [], |row| row.get::<_, String>(0)).map(|json| serde_json::from_str(&json).unwrap()).unwrap();
+        let expected = serde_json::to_value(item).unwrap();
+        for field in [
+            "state",
+            "completed_at",
+            "revision",
+            "url",
+            "branch_name",
+            "team_id",
+            "assignee",
+            "rank",
+        ] {
+            assert_eq!(fields[field], expected[field], "{field}");
+        }
+        assert_eq!(fields["completed"], 1);
+        assert_eq!(
+            conn.query_row(
+                "SELECT planning_rank FROM projects WHERE id='project_fields'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            11
+        );
+        let text: String = conn
+            .query_row(
+                "SELECT project_prompt_context FROM projects WHERE id='project_fields'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let content = crate::pm::parse_project_content(&text).unwrap();
+        assert_eq!(content.krs, project.krs);
+        assert_eq!(content.workflow, project.workflow);
+        assert_eq!(content.metric_targets, project.metric_targets);
+    }
+
+    #[test]
     fn local_planning_preserves_pending_decisions_without_workflow_history() {
         let conn = open();
         conn.pragma_update(None, "foreign_keys", "OFF").unwrap();

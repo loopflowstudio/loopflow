@@ -421,7 +421,8 @@ pub(crate) async fn rotate(
         .map_err(error)?;
     for (input, result) in &mut personal {
         let id = crate::durable::ProjectId::parse(&input.successor_id).map_err(error)?;
-        result.successor = Some(super::task::local_project_item(
+        result.successor = Some(super::task::project_planning_item(
+            &store,
             store
                 .sqlite
                 .project(&id)
@@ -430,7 +431,8 @@ pub(crate) async fn rotate(
         )?);
         if let Some(predecessor) = &mut result.predecessor {
             let id = crate::durable::ProjectId::parse(&predecessor.id).map_err(error)?;
-            *predecessor = super::task::local_project_item(
+            *predecessor = super::task::project_planning_item(
+                &store,
                 store
                     .sqlite
                     .project(&id)
@@ -440,7 +442,7 @@ pub(crate) async fn rotate(
         }
         for task in &mut result.tasks {
             let id = crate::durable::TaskId::parse(&task.task.id).map_err(error)?;
-            task.task = super::task::local_task_item(
+            task.task = super::task::task_planning_item(
                 &store,
                 &store
                     .sqlite
@@ -518,7 +520,7 @@ async fn prepare_local_rotation(
         .await
         .map_err(error)?
         .into_iter()
-        .map(super::task::local_project_item)
+        .map(|project| super::task::project_planning_item(store, project))
         .collect::<OpsResult<Vec<_>>>()?;
     let predecessor = predecessor_id
         .as_ref()
@@ -551,7 +553,7 @@ async fn prepare_local_rotation(
         {
             continue;
         }
-        let item = super::task::local_task_item(store, &task)?;
+        let item = super::task::task_planning_item(store, &task)?;
         let mut decision = disposition(store, item).await?;
         if task.worktree.is_none() && decision.disposition == TaskDisposition::Unresolved {
             decision.disposition = TaskDisposition::Historical;

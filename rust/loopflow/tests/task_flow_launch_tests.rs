@@ -812,6 +812,12 @@ fn linear_completing_an_active_task_is_shown_and_holds_it_from_end() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
     task.complete_in_linear();
+    let planning = task.run(&["task", "status", "INF-123", "--json"]);
+    assert!(planning.status.success());
+    let planning: serde_json::Value = serde_json::from_slice(&planning.stdout).unwrap();
+    assert_eq!(planning["planning"]["item"]["completed"], true);
+    assert_eq!(planning["planning"]["item"]["state"], "completed");
+    assert_eq!(planning["execution"]["status"], "active");
     let conflict = task.status()["planning_conflict"]
         .as_str()
         .unwrap()

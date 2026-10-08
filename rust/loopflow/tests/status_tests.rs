@@ -760,24 +760,25 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(view["projects"]["state"], "ok");
             assert_eq!(view["projects"]["truncated"], false);
             let projects = view["projects"]["items"].as_array().unwrap();
+            assert_eq!(projects.len(), 2);
+            let projects: Vec<_> = projects
+                .iter()
+                .filter(|project| project["id"] == "95159066-9098-4d0b-8903-01459dc7ec14")
+                .collect();
             assert_eq!(projects.len(), 1);
-            assert_eq!(projects[0]["id"], "95159066-9098-4d0b-8903-01459dc7ec14");
             assert_eq!(projects[0]["slug"], "auditability");
             assert_eq!(projects[0]["status"], "started");
             assert_eq!(projects[0]["workflow"], "feature");
             assert_eq!(view["tasks"]["state"], "ok");
-            assert_eq!(view["tasks"]["items"].as_array().unwrap().len(), 1);
-            assert_eq!(view["tasks"]["items"][0]["task"]["identifier"], "PRD-52");
-            let unavailable = view["unavailable_tasks"].as_array().unwrap();
-            assert_eq!(unavailable.len(), 1);
-            assert_eq!(unavailable[0]["work_id"], PERSISTED_TASK_ID);
-            assert_eq!(unavailable[0]["task_identifier"], "W2-127");
-            assert_eq!(unavailable[0]["status"], "not_ready");
-            assert_eq!(unavailable[0]["owner"], "wave");
-            assert!(unavailable[0]["recovery"]
-                .as_str()
-                .unwrap()
-                .contains(PERSISTED_TASK_ID));
+            let tasks = view["tasks"]["items"].as_array().unwrap();
+            assert_eq!(tasks.len(), 2);
+            assert!(tasks
+                .iter()
+                .any(|task| task["task"]["identifier"] == "PRD-52"));
+            assert!(tasks
+                .iter()
+                .any(|task| task["task"]["identifier"] == "W2-127"));
+            assert!(view["unavailable_tasks"].as_array().unwrap().is_empty());
         }
         assert_eq!(wave["projects"], status["projects"]);
         assert_eq!(wave["unavailable_tasks"], status["unavailable_tasks"]);
@@ -785,10 +786,11 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
 }
 
 #[test]
-fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
+fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
     for payload in [None, Some("{}"), Some("not-json")] {
         let home = tempfile::tempdir().unwrap();
         seed_stale_project_work(home.path(), false, false);
+        let before = status_json(home.path(), &["product"], None);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
             conn.execute("UPDATE pm_projects SET body=?1", [payload])
@@ -799,16 +801,19 @@ fn unreadable_chapter_keeps_durable_tasks_visible_in_both_views() {
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
         for view in [&status, &roadmap["waves"][0]] {
-            assert!(view["chapter"].is_null());
-            assert_eq!(view["tasks"]["state"], "unavailable");
-            let unavailable = view["unavailable_tasks"].as_array().unwrap();
-            assert_eq!(unavailable.len(), 2);
-            assert!(unavailable
-                .iter()
-                .any(|task| task["work_id"] == PERSISTED_TASK_ID));
-            assert!(unavailable
-                .iter()
-                .any(|task| task["task_identifier"] == "PRD-52"));
+            assert_eq!(view["projects"], before["projects"]);
+            assert_eq!(view["tasks"]["state"], "ok");
+            let tasks = view["tasks"]["items"].as_array().unwrap();
+            assert_eq!(tasks.len(), 2);
+            for task in tasks {
+                let previous = before["tasks"]["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|old| old["task"]["id"] == task["task"]["id"])
+                    .unwrap();
+                assert_eq!(task["task"], previous["task"]);
+            }
         }
     }
 }

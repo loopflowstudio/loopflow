@@ -55,15 +55,15 @@ The obsolete registration writer, provider-plan rewrite and launch ownership dis
 are deleted. One SQLite admission reader preserves state/completion, removal,
 invalidation and Project/Team mismatch evidence; no observation moves Workflow or
 cleans checkouts. Known issue changes remain invalid even without inventory rows.
-Wave/checkout locks and winning PR/path survive cancellation. Public paired offline
-checkout/Flow fixtures preserve saved edits; existing CLI proofs retain active work
-after remote completion and prevent unstarted work. October 8's uncommitted
-extraction places shared content/workflows in `sqlite/project_content.rs`. Local
-Task projection still derives planning state/completion from Workflow state, while
-mapped status uses provider observations; deleting the branch alone changes semantics.
-Common schema, definitions, creation/edit, membership, rotation and projections
-remain; LOO-412 has no coherent committed writer boundary. Public resolution and
-composed reconnect remain unproved; the enabled reopening failure is unchanged.
+Cancellation preserves Wave/checkout locks and winning PR/path. `7fb5a5f1b`
+commits shared Project/workflow storage. October 8's CLI/Desktop reader uses saved
+planning independently of Workflow and inventory. Pending decisions survive inbound
+completion and late acknowledgements; unrelated fields advance. Generated Project
+prompt text lost KRs/targets under the editable parser; ingestion and the draft now
+retain editable content. Conversion, saved-field, public Flow and offline Desktop
+proofs establish local preservation only. Wave definitions, creation/edit, membership
+and rotation still prevent the LOO-412 writer boundary. Composed reconnect/public
+resolution remain unproved; outbound reopening still fails.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

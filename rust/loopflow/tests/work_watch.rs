@@ -827,6 +827,22 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                         for task in items {
                             if let Some(runtime) = task.runtime {
                                 if runtime.status == expected && runtime.pending_sync.is_some() {
+                                    assert_eq!(
+                                        task.task.completed,
+                                        expected == loopflow::durable::TaskState::Done
+                                    );
+                                    assert_eq!(
+                                        task.task.state.as_deref(),
+                                        Some(if task.task.completed {
+                                            "completed"
+                                        } else {
+                                            "unstarted"
+                                        })
+                                    );
+                                    assert_eq!(
+                                        task.task.completed_at.is_some(),
+                                        task.task.completed
+                                    );
                                     return runtime;
                                 }
                             }

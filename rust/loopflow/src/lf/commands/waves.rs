@@ -416,25 +416,8 @@ pub struct ProjectSummary {
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
         let registered = store.list_projects(Some(wave.id())).await?;
-        let (observed, partial) = if store.sqlite.personal_wave_definition(wave.id())?.is_some() {
-            let projects = registered
-                .iter()
-                .cloned()
-                .map(crate::ops::task::local_project_item)
-                .collect::<crate::ops::OpsResult<Vec<_>>>()?;
-            (projects, false)
-        } else {
-            match store.pm_snapshot(wave.id()).await? {
-                Some(row) => (row.snapshot.projects, false),
-                None => {
-                    let projects = store.sqlite.accepted_projects(wave.id())?;
-                    if projects.is_empty() {
-                        return Err(anyhow!("Project planning has not been synced"));
-                    }
-                    (projects, true)
-                }
-            }
-        };
+        let observed = store.sqlite.planning_projects(wave.id())?;
+        let partial = false;
         let current = crate::store::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
@@ -829,27 +812,14 @@ async fn wave_tasks(
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
     // Selection does not discard other Projects' backlog or ongoing work.
-    let planning_read = match crate::ops::task::local_wave_plan(store, wave.id()).await? {
-        Some(plan) => Ok(Some(plan)),
-        None => store
-            .pm_snapshot(wave.id())
-            .await
-            .map(|row| row.map(|row| row.snapshot)),
-    };
-    let (mut planning, unavailable) = match planning_read {
-        Ok(Some(planning)) => (planning, None),
-        result => (
+    let (mut planning, unavailable) = match store.sqlite.planning_wave(wave.id()) {
+        Ok(planning) => (planning, None),
+        Err(error) => (
             PmSnapshot {
                 projects: Vec::new(),
                 items: Vec::new(),
             },
-            Some(match result {
-                Err(error) => error.to_string(),
-                _ => format!(
-                    "no local Project plan; run `lf repo refresh {}`",
-                    wave.slug()
-                ),
-            }),
+            Some(error.to_string()),
         ),
     };
     if let Some(identifier) = identifier {
@@ -1139,11 +1109,12 @@ async fn snapshot_tasks(
             .find(|project| project.id == task.project_id);
         let current_plan = parent.and_then(|parent| {
             planning.projects.iter().find(|plan| {
-                parent
-                    .plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == plan.id)
+                parent.id.as_str() == plan.id
+                    || parent
+                        .plan
+                        .linear_id
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == plan.id)
             })
         });
         if current_plan.is_none() {
@@ -1154,26 +1125,12 @@ async fn snapshot_tasks(
                 continue;
             }
         }
-        let parent = parent
-            .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
-        let item = PmItem {
-            branch_name: None,
-            revision: None,
-            id: task.plan.linear_id()?.as_str().to_string(),
-            identifier: task.plan.identifier.clone(),
-            url: None,
-            name: task.plan.title.clone(),
-            description: task.plan.description.clone(),
-            rank: u32::MAX,
-            // Missing planning is unknown, even when local execution has settled.
-            completed: false,
-            completed_at: None,
-            state: None,
-            project_id: Some(parent.plan.linear_id()?.as_str().to_string()),
-            project: Some(parent.plan.slug.clone()),
-            team_id: None,
-            assignee: None,
-        };
+        let item = store
+            .sqlite
+            .planning_task(&task.id)?
+            .record
+            .ok_or_else(|| anyhow!("Task {} has no saved planning", task.id))?
+            .item;
         let recommended = current_plan
             .map_or("", |plan| plan.workflow.as_str())
             .to_string();

@@ -77,26 +77,6 @@ pub struct PmProject {
     pub team_ids: Vec<String>,
 }
 
-impl PmProject {
-    pub(crate) fn prompt_context(&self) -> String {
-        let mut context = format!(
-            "Project metric targets:\n{}",
-            serde_json::to_string(&self.metric_targets).expect("metric targets serialize")
-        );
-        if !self.workflow.trim().is_empty() {
-            context.push_str(&format!("\n\nProject Task workflow: {}", self.workflow));
-        }
-        if !self.krs.is_empty() {
-            context.push_str("\n\nKRs:");
-            for kr in &self.krs {
-                let mark = if kr.holds { "x" } else { " " };
-                context.push_str(&format!("\n- [{mark}] {}", kr.text));
-            }
-        }
-        context
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmWave {
     pub id: String,

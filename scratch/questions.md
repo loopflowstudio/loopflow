@@ -28,5 +28,6 @@
 
 Jack Heart requested continued advancement. The first implementation milestone
 is the sibling-checkout Flow launch/status repair and exact `task complete`
-alias, through demo. The full plan remains in `scratch/make-a-task-up-to.md`;
+alias, through demo. Both are implemented locally; Jack's demo review remains.
+The full plan remains in `scratch/make-a-task-up-to.md`;
 later lifecycle work and its open choices remain. No landing is authorized.

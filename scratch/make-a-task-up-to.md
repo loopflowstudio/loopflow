@@ -69,13 +69,14 @@ Inspected base: `626789dcd0382c6754ba3b7c61ea2448b57658ce`.
 
 ### The launch defect has a shared cause
 
-`bin/lf.rs` admits the Process at the caller's cwd before `dispatch` resolves
-`--task` and enters `binding.cwd`. `run_for_task` spawns its child without setting
-the target cwd. The Flow's recorded driver consequently keeps the caller's cwd.
-Both the Started trigger and `store/sqlite/task_work.rs::flows_of_task` depend on
-that location. `flow_inventory::entry_in` separately duplicates a cwd join.
-An explicitly bound Session may eventually make part of the work visible, which
-does not repair a mechanical Flow or its driver membership.
+The base admitted the Process before `--task` placement and launched the Flow
+child from the caller's cwd. Started and Flow membership use that recorded
+location. The milestone now resolves existing `--task`/`--wt` placement before
+admission, observes resolution failures, and gives Task Flow children their
+checkout explicitly. Physical cwd resolves lexical aliases. Flow inventory
+uses the shared checkout/Session membership predicates; Flow registration and
+Started commit together before any step launches. Historical Process rows are
+unchanged.
 
 A disposable SQLite probe executed the actual released Started trigger with one
 Task and one recorded Flow. Caller cwd reproduced “Started requires recorded Task
@@ -389,7 +390,8 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. None of these slices is implemented yet.
+its own Task and child-specific design. Slice 1 and the completion alias are
+implemented locally; slices 2–4 remain, apart from that alias.
 
 **Current milestone:** slice 1 and the `task complete` alias from slice 3,
 through focused verification and demo. The alias shares today's end operation;
@@ -398,14 +400,16 @@ remaining scope below, and do not present the milestone as the complete Task.
 Jack has not settled the remaining product choices under Remaining review
 boundary; this milestone does not require them.
 
-1. **First demonstration — truthful Flow launch.** Correct admission/child cwd and
-   shared Flow association. Add a held mechanical Flow in
-   `task_flow_launch_tests` launched from a sibling checkout; assert target
-   Started, target inventory and status while still running, plus retained
-   caller attribution. Cover direct `--task`, plain checkout invocation, alias
-   paths and a read-only command that must not set Started. Focused command:
-   `cargo test -p loopflow --test task_flow_launch_tests` using the isolated
-   fixture conventions in TESTING.md. Show the real CLI result before moving on.
+1. **First demonstration — truthful Flow launch (implemented locally).**
+   `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
+   Task run from a sibling, direct `--task`, plain checkout, symlink and `--wt`
+   all show target Started and current Flow in status and inventory, retain
+   caller ancestry, and finish successfully. Passive inspection leaves Started
+   absent; failed placement remains an observed failed Process. Store tests
+   prove atomic refusal and explicit Session membership after checkout removal.
+   `task complete` shares `workflow_set(..., end)` with move; tests cover
+   refusal without movement, force/reason, retained input and idempotent retry.
+   No provider or native Desktop acceptance follows from these fixtures.
 2. **Remove serial authority and placeholder coupling.** Migrate placement,
    optional current PR and read-only history; delete rotation and cut CLI/Swift
    consumers over in the same slice. Preserve stack/restore/file operations.
@@ -465,4 +469,13 @@ and due follow-ups returning to the owning Wave without enabling a schedule.
 Live migration, closing LOO-385, automatic filing of unrelated improvements,
 publishing/landing this branch and claimed production acceptance are excluded.
 
-Check (2026-10-07): `uv run --no-project python` disposable SQLite trigger probe passed (caller cwd rejected; target cwd accepted); source/API inspection only, implementation suites deferred to their slices and gate.
+Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
+rows and shared membership predicates, avoiding a scan of all Process history
+for each Task. Completion adds no authority or state. The suspected combined
+`--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
+no extra guard remains. Fixture corrections selected an authored workflow edge,
+used `flow list --sessions`, and decoded the actual flattened inventory DTO.
+Full lifecycle checks remain with later slices and gate; rendered judgment is
+the demo boundary.
+
+Check (2026-10-07): `cargo test -p loopflow --test task_flow_launch_tests` 17 passed; focused store/graph/CLI tests 14 passed; `cargo test -p loopflow --test documented_commands` 3 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `uv run python scripts/check_architecture.py` passed. Gate owns the affected suite plan; demo owns Jack's review.

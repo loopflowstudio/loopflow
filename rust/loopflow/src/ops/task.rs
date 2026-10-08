@@ -4799,6 +4799,18 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
+        let mut pending_changes = store
+            .sqlite
+            .pending_task_changes(&edited.id)
+            .map_err(task_error)?;
+        pending_changes.extend(
+            store
+                .sqlite
+                .pending_project_changes(&edited.project_id)
+                .map_err(task_error)?
+                .into_iter()
+                .filter(|change| change.field == "task_order"),
+        );
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
@@ -4806,10 +4818,7 @@ pub fn task_edit(
                 .pm
                 .and_then(|pm| pm.linear_team)
                 .is_some(),
-            pending_changes: store
-                .sqlite
-                .pending_task_changes(&edited.id)
-                .map_err(task_error)?,
+            pending_changes,
         })
     })
 }

@@ -103,9 +103,10 @@ values and advance unrelated fields. It never grants execution or provider-write
 Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
 foreign keys. Each receipt retains a stable mutation identity, baseline and first
 conflicting provider value. An observed conflict adopts Linear and retires that
-intention; an unchanged baseline preserves the pending save. `sqlite/task_content.rs` owns Task fields and neighboring
-rank changes; `sqlite/project_content.rs` owns Project fields, content and Workflow
-selection. Edits and receipts commit together before provider mapping or I/O.
+intention; an unchanged baseline preserves the pending save. `sqlite/task_content.rs`
+owns Task fields; `sqlite/project_content.rs` owns Project fields, content and Workflow
+selection. `sqlite/planning_order.rs` saves one Project `task_order` receipt and the
+neighboring Tasks' ranks in the same transaction. Edits and receipts commit together before provider mapping or I/O.
 No-op saves preserve revisions and receipts without notifying readers. Accepted
 inbound changes advance the local optimistic-write revision; unrelated fields keep
 advancing during pending delivery. Matching readback acknowledges only an attempted
@@ -117,9 +118,16 @@ observation before any further effect; an unresolved attempt is never blindly re
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured
 content. Content patches retain unrelated provider prose. The foreground lifetime
-runs this independently of comment/state delivery and acquisition. Relative Task
-rank remains pending: it is derived from the complete Project list, and independent
-ordinal writes would conflict with each other's effects.
+runs this independently of comment/state delivery and acquisition. Project order
+delivery reads the complete list and moves individual issues using Linear's
+`prioritySortOrder` and `sortOrder` intervals. Each attempted move retains its input
+and before/after lists in the Project receipt. Complete-list acquisition recognizes
+partial progress, advances later saves' baselines and preserves their desired order.
+Lost replies require matching list readback; an unchanged list after an attempt stays
+uncertain without replay. Observed competing order adopts Linear and retains the
+losing list. New members survive; omission alone cannot retire a retained Task.
+Detail reads never change rank. Project scalar fields continue during uncertain
+ordering. These observations do not provide an atomic provider snapshot or write fence.
 
 Workflow selection reads KRs and targets inside its definition-write transaction.
 `wave update-plan` uses the same content writer; inspection takes no Wave mutation

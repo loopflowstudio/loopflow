@@ -126,7 +126,8 @@ async fn planning_graphql(
         || (state.field_reads_blocked
             && (query.contains("IssueOwnership")
                 || query.contains("ProjectOwnership")
-                || query.contains("ListInitiativeProjects")))
+                || query.contains("ListInitiativeProjects")
+                || query.contains("ListProjectIssues")))
     {
         return axum::Json(json!({"errors":[{"message":"planning offline"}]}));
     }
@@ -3598,3 +3599,6 @@ fn planning_export_removal_during_uncertain_creation_retains_identity() {
             .is_empty());
     });
 }
+
+#[path = "planning_order_tests.rs"]
+mod planning_order_tests;

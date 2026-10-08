@@ -751,6 +751,23 @@ impl LinearClient {
         }
     }
 
+    pub(crate) async fn ordered_items(&self, project: &str) -> PmResult<Vec<OrderedIssue>> {
+        self.list_issue_nodes(project, false)
+            .await?
+            .into_iter()
+            .enumerate()
+            .map(|(rank, issue)| {
+                let priority_sort_order = issue.fields.priority_sort_order;
+                let sort_order = issue.fields.sort_order;
+                Ok(OrderedIssue {
+                    item: issue.into_pm_item(rank as u32)?,
+                    priority_sort_order,
+                    sort_order,
+                })
+            })
+            .collect()
+    }
+
     pub async fn list_items(&self, project_id: &str) -> PmResult<Vec<PmItem>> {
         self.list_items_including_archived(project_id, false).await
     }
@@ -1567,6 +1584,13 @@ struct IssueNode<P = ProjectRef> {
 
 // List and detail observations require the same complete issue fields.
 // Nullable fields must be present; omission is not a value to store.
+#[derive(Debug)]
+pub(crate) struct OrderedIssue {
+    pub item: PmItem,
+    pub priority_sort_order: f64,
+    pub sort_order: f64,
+}
+
 #[derive(Deserialize)]
 struct IssueFields {
     #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]

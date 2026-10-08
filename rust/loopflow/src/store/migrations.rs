@@ -4354,6 +4354,17 @@ mod tests {
                 .unwrap(),
             0
         );
+        let order: String = conn
+            .query_row(
+                "SELECT task_order_json FROM pm_projects WHERE id='current'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&order).unwrap(),
+            ["task_fields"]
+        );
         let fields: serde_json::Value = conn.query_row("SELECT json_object('state',planning_state,'completed',planning_completed,
             'completed_at',planning_completed_at,'revision',planning_provider_revision,'url',planning_url,
             'branch_name',planning_branch_name,'team_id',planning_team_id,'assignee',planning_assignee,'rank',planning_rank)

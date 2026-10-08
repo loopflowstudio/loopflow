@@ -42,10 +42,10 @@ Tasks' comments/state plus Task/Project field receipts. Attempted writes retain
 identity and uncertainty. Matching observations acknowledge only that attempt and
 advance later saves' unchanged baselines, preserving newer edits. Linear conflicts
 retain losing values and retire their delivery. Effect locks block neither saves
-nor acquisition. Relative Task rank needs complete-list reconciliation: one move
-changes several ordinals, so independent field writes would conflict with themselves.
-Fixtures prove recovery, lost-reply and late-save preservation;
-installed acceptance remains unproved.
+nor acquisition. Project ordering now uses one receipt and captured individual moves.
+Complete-list acquisition recognizes partial progress before reconciling later saves;
+detail reads never set rank. Fixtures prove reconnect, lost-reply recovery, late-save
+preservation and Linear conflict adoption, not composed or installed acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -72,11 +72,12 @@ Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundar
 Personal owners and provider-first deletion are removed; execution, PRs, checkouts
 and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
 attempt errors and acknowledged revisions.
-Task/Project export now uses saved UUIDs and existing creation receipts. Separate
+`e68f2a423` exports Task/Project UUIDs through existing creation receipts. Separate
 Project creation/Initiative attachment attempts retain uncertainty without replay.
 Exact ingestion attaches identities before inventory can duplicate them, preserving
-later saves against captured baselines. Installed conversion, historical uncertainty,
-relative ordering, complete pending presentation and composed reconnect remain unfinished.
+later saves against captured baselines. Operation fixtures prove reconnect and lost-reply
+recovery; composed CLI/Desktop acceptance remains unproved, per Release's entry-point lesson.
+Installed conversion, historical uncertainty, pending presentation and composed reconnect remain unfinished.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

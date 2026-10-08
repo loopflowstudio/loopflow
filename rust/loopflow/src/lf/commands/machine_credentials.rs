@@ -591,8 +591,8 @@ pub(super) async fn prepare_launch(
     if requested.is_empty() && launching {
         let repo = super::util::find_repo_root().ok();
         let config = crate::engine::config::load_config_or_default(repo.as_deref());
-        let model = cli.model.as_deref().unwrap_or_else(|| config.agent());
-        let (harness, _) = crate::engine::config::parse_agent(model);
+        let agent = cli.agent.as_deref().unwrap_or_else(|| config.agent());
+        let (harness, _) = crate::engine::config::parse_agent(agent);
         let provider = harness.parse::<Provider>()?;
         let repo_id = crate::provider_account::current_repo_id()?;
         if let Some(accounts) = crate::provider_account::inspect_provider_route(

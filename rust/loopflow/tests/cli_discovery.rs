@@ -614,7 +614,9 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     machine_commands.sort();
     assert_eq!(
         machine_commands,
-        ["add", "id", "list", "remove", "rename", "status"]
+        [
+            "add", "connect", "credentials", "id", "list", "remove", "rename", "status"
+        ]
     );
     let help =
         String::from_utf8(success(run(repo.path(), home.path(), &["help", "--all"]))).unwrap();

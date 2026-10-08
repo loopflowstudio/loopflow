@@ -269,14 +269,15 @@ fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
     Ok(checkout)
 }
 
-fn comparison_context(issue: &str) -> OpsResult<(TaskCheckout, TaskPr)> {
+fn comparison_context(issue: &str, base: &str) -> OpsResult<(TaskCheckout, String)> {
     let store = file_store()?;
     let checkout = file_context(&store, issue)?;
     let pr = store
         .active_task_pr(&checkout.task_id)
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
         .ok_or_else(|| task_error("Task has no active PR"))?;
-    Ok((checkout, pr))
+    let base = resolve_file_base(&checkout.worktree, &pr.base_commit, base)?;
+    Ok((checkout, base))
 }
 
 fn task_error(message: impl std::fmt::Display) -> OpsError {
@@ -4358,15 +4359,10 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub const MAX_FILE_BYTES: usize = 1_000_000;
 
 pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
-    let (checkout, pr) = comparison_context(issue)?;
-    let workspace = TaskComparison {
-        checkout: TaskWorkspace::from(&checkout),
-        base_commit: &pr.base_commit,
-    };
-    let base = resolve_file_base(workspace, base)?;
+    let (checkout, base) = comparison_context(issue, base)?;
     changes_snapshot(TaskComparison {
+        checkout: TaskWorkspace::from(&checkout),
         base_commit: &base,
-        ..workspace
     })
 }
 
@@ -4431,15 +4427,10 @@ pub fn task_diff(
     base: &str,
     draft: Option<&str>,
 ) -> OpsResult<TaskDiffSnapshot> {
-    let (checkout, pr) = comparison_context(issue)?;
+    let (checkout, base) = comparison_context(issue, base)?;
     let workspace = TaskComparison {
         checkout: TaskWorkspace::from(&checkout),
-        base_commit: &pr.base_commit,
-    };
-    let base = resolve_file_base(workspace, base)?;
-    let workspace = TaskComparison {
         base_commit: &base,
-        ..workspace
     };
     match draft {
         Some(draft) => draft_snapshot(
@@ -4632,9 +4623,9 @@ fn file_snapshot(workspace: TaskWorkspace<'_>, path: &str) -> OpsResult<TaskFile
     Ok(snapshot)
 }
 
-fn resolve_file_base(workspace: TaskComparison<'_>, selection: &str) -> OpsResult<String> {
+fn resolve_file_base(worktree: &Path, parent: &str, selection: &str) -> OpsResult<String> {
     let reference = match selection {
-        "parent" => workspace.base_commit,
+        "parent" => parent,
         "head" => "HEAD",
         sha if sha.len() == 40 && sha.bytes().all(|byte| byte.is_ascii_hexdigit()) => sha,
         _ => {
@@ -4644,7 +4635,7 @@ fn resolve_file_base(workspace: TaskComparison<'_>, selection: &str) -> OpsResul
         }
     };
     Ok(git_output(
-        workspace.checkout.worktree,
+        worktree,
         &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
     )?
     .trim()
@@ -5993,7 +5984,7 @@ mod tests {
         assert_eq!(changes.scratch, ["scratch/nested/notes.md"]);
         let patch = super::diff_snapshot(workspace, Some("new.txt")).unwrap();
         assert!(patch.patch.contains("rename from old.txt"));
-        let head = super::resolve_file_base(workspace, "head").unwrap();
+        let head = super::resolve_file_base(repo.path(), &parent, "head").unwrap();
         let head_changes = super::changes_snapshot(super::TaskComparison {
             base_commit: &head,
             ..workspace

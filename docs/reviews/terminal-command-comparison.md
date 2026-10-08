@@ -89,6 +89,9 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   exchange. Workflow, checkout and process authority remain local. The shared
   model is selected; writer/exchange integration is tracked in the working
   design. Selecting the prototype authorizes no publication of real planning data.
+  Later LOO-406 memory (`f027890ab`) records Jack's user-keyed plan default,
+  explicit shared-plan opt-in and Linear conflict precedence. A shared code
+  remote never implicitly merges plans; LOO-412 owns binding and ordering.
 
 The [owner map](#implementation-scope-and-existing-owners) below retains the
 related Tasks' boundaries; this Task exposes the existing workspace owners.

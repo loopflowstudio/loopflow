@@ -1,8 +1,7 @@
 # product wave memory
 
-Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wave's
-scope widened past the Mac app: product now owns the shared API and every surface
-(CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
+Renamed from `concerto` July 8, 2026. Product owns the shared API and CLI, Mac,
+iOS, agent and worker surfaces. Older “Concerto” notes mean Mac.
 
 ## Current direction after the October 7 Tasks
 
@@ -49,23 +48,25 @@ and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
-Jack Heart clarified in LOO-427: the repo window is built on one shared Work
-model, “all fromone place”; its subtrees can be delegated to Machines. Machines
-execute that Work, not independent trees Desktop pairs later. The repository-group
-proposal is withdrawn. Extend Work placement/routing; inheritance and live reassignment remain to design. LOO-411's SSH override removal
-is not a general veto on Work-directed routing. Never rewrite a Machine default
-per request. Current placements copy inheritance once; delegation is unimplemented.
-Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
-Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
+Shared Work replaces repository pairing; never rewrite a Machine default per
+request. Started Tasks stay on their Machine; inheritance remains open. Placements
+still copy once; delegation, Work opening, Linux guidance and pane control remain.
+Exact targets do not protect unsent drafts; retain LOO-387's boundary.
 
 October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
 assignment; unknown stays unavailable. Jack selected local operations and Git-ref
 Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions, Processes,
 checkouts and control stay local; imported completion cannot move or clean them.
 Preserve pending changes, semi-live comments/completion, causal reopening and
-stable mutation IDs. No real plan publication is authorized. 406 shares Task/Project writes (`a16ca211f`); Wave provisioning/deletion
-still split. 412 (`985ed148c`) has causal merge/transport, without SQLite
-import/export or callers. Integration/native proof remain.
+stable mutation IDs. No real plan publication is authorized. 406/412 writer and
+exchange integration, repository identity and native proof remain unfinished.
+Jack's later decisions (`f027890ab:wave/infrastructure/MEMORY.md`): user-keyed Git
+plans by default, shared plans by explicit opt-in through the same records/APIs.
+A code remote implies neither shared planning nor permission to publish it.
+Linear wins planning conflicts; otherwise prefer the host where possible, then
+last-write-wins with recoverable losing edits. 412 owns keys, binding and ordering;
+its `985ed148c` causal prototype predates this policy. Precedence cannot fix
+Linear's read/write race or grant execution authority.
 
 ## Terminal-host adoption (2026-10-07)
 

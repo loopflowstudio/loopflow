@@ -7,8 +7,8 @@ use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use loopflow::engine::target::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::discovery::DefinitionKind;
 use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -462,7 +462,7 @@ fn resolve_cli_target(
         cli.resolved_invocation = Some(invocation);
         return Ok(Some((target, message)));
     }
-    let target = loopflow::lf::discovery::resolve_definition(&repo, &name, kind)?;
+    let target = loopflow::engine::target::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
 

@@ -6,7 +6,8 @@ use anyhow::Result;
 use clap::Command;
 use serde::Serialize;
 
-use crate::lf::discovery::{definition_source, resolve_definition, DefinitionKind};
+use crate::engine::target::{resolve_definition, DefinitionKind};
+use crate::lf::discovery::definition_source;
 use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
 
 #[derive(Debug, Serialize)]

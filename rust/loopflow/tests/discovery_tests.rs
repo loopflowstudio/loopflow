@@ -3,10 +3,10 @@ use std::fs;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
-use loopflow::engine::{load_flow, skill_catalog::SkillCatalog};
+use loopflow::engine::target::{resolve_definition, Target};
+use loopflow::engine::{load_flow, load_skill, skill_catalog::SkillCatalog};
 use loopflow::lf::discovery::{
-    builtin_skill_description, discover_skill, resolve_definition, Target, BUILTIN_FLOW_CATEGORIES,
-    BUILTIN_SKILL_CATEGORIES,
+    builtin_skill_description, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -207,7 +207,7 @@ fn categorized_listing_includes_known_skills() {
 }
 
 /// Every builtin skill file on disk must appear in exactly one category and
-/// must resolve via `discover_skill`. New files are picked up automatically by
+/// must resolve via `load_skill`. New files are picked up automatically by
 /// `build.rs`; this test guards against a skill existing in the binary but not
 /// in the list output.
 #[test]
@@ -227,7 +227,7 @@ fn every_builtin_skill_is_categorized_and_discoverable() {
         );
 
         // Resolves by exact name.
-        let skill = discover_skill(tmp.path(), name)
+        let skill = load_skill(name, tmp.path())
             .unwrap_or_else(|err| panic!("builtin skill {name} did not resolve: {err}"));
         assert!(
             skill
@@ -310,7 +310,7 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
     );
     assert!(catalog.resolve("design").unwrap().path.is_none());
     assert_eq!(
-        discover_skill(repo.path(), "explain-code")
+        load_skill("explain-code", repo.path())
             .unwrap()
             .content
             .as_deref(),

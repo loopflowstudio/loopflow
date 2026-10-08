@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -84,6 +86,20 @@ impl SqliteStore {
         thread: &str,
         turns: &[Value],
     ) -> StoreResult<()> {
+        let mut receipts: HashMap<&str, Vec<Value>> = HashMap::new();
+        for turn in turns {
+            for item in turn["items"].as_array().into_iter().flatten() {
+                if item["type"] != "userMessage" {
+                    continue;
+                }
+                if let Some(message) = item["clientId"].as_str() {
+                    receipts
+                        .entry(message)
+                        .or_default()
+                        .push(serde_json::json!({"turn_id":turn["id"],"item":item}));
+                }
+            }
+        }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let dispatches = {
@@ -107,23 +123,10 @@ impl SqliteStore {
                 .ok_or_else(|| {
                     StoreError::InvalidData("Codex dispatch has no native message identity".into())
                 })?;
-            let receipts: Vec<_> = turns
-                .iter()
-                .flat_map(|turn| {
-                    turn["items"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter(|item| {
-                            item["type"] == "userMessage"
-                                && item["clientId"].as_str() == Some(message)
-                        })
-                        .map(|item| serde_json::json!({"turn_id":turn["id"],"item":item}))
-                })
-                .collect();
+            let matches = receipts.get(message).map(Vec::as_slice).unwrap_or_default();
             let payload = serde_json::to_string(&serde_json::json!({
                 "type":"codex_input_receipts", "input_id":capture,
-                "provider_thread":thread, "client_id":message, "receipts":receipts,
+                "provider_thread":thread, "client_id":message, "receipts":matches,
             }))?;
             let key = format!(
                 "{capture}:codex_receipts:{:x}",
@@ -632,6 +635,29 @@ mod tests {
         assert!(history.iter().any(|event| event.payload["receipts"]
             .as_array()
             .is_some_and(|receipts| receipts.len() == 2)));
+        duplicate.push(json!({"id":"later-turn","items":[
+            {"id":"later-item","type":"userMessage","clientId":"message-1","content":input}
+        ]}));
+        store
+            .record_codex_input_receipts(&session.id, "thread", &duplicate)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let receipts = history
+            .iter()
+            .rev()
+            .find(|event| {
+                event.payload["type"] == "codex_input_receipts"
+                    && event.payload["client_id"] == "message-1"
+            })
+            .unwrap();
+        assert_eq!(
+            receipts.payload["receipts"],
+            json!([
+                {"turn_id":"turn","item":turns[0]["items"][0]},
+                {"turn_id":"turn","item":turns[0]["items"][0]},
+                {"turn_id":"later-turn","item":duplicate[1]["items"][0]},
+            ])
+        );
         assert_eq!(store.session_driver(&session.id).unwrap(), Some(successor));
     }
 

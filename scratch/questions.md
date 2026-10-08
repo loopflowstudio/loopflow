@@ -37,7 +37,10 @@ No replacement terminal, weaker fidelity, automatic ambiguous retry or new
 provider protocol is selected. This is observed implementation evidence, not a
 new product decision attributed to Jack Heart.
 
-2026-10-08: use the retained capture key with Codex’s existing `clientUserMessageId`
-as the candidate native receipt correlation. This is a reversible implementation
-choice, not a new decision attributed to Jack Heart. The provider probe passes;
-production admission, fencing and ambiguity handling remain unimplemented.
+2026-10-08: the capture-key-as-native-message-ID candidate is superseded by LF's
+retry path: one capture can contain an original invocation and a different
+continuation. A per-dispatch native ID is now retained beside its capture and exact
+input before the fenced send. This is an implementation choice, not Jack Heart's
+new product decision. Future pending-input consumption must reuse that retained
+ID through handoff; it must not generate another ID and resend uncertain input.
+Native receipt observations do not settle delivery or establish native expansion.

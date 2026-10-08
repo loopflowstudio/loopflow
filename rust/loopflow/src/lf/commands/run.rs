@@ -337,7 +337,7 @@ fn build_prompt_at(
     let discovered_skill = match invocation {
         Some(invocation) => Some(invocation.skill.clone()),
         None => skill
-            .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
+            .map(|name| crate::engine::load_skill(name, &repo_root))
             .transpose()?,
     };
     let arguments = invocation.map_or(arguments, |invocation| invocation.arguments.as_str());

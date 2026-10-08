@@ -7,10 +7,12 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against compression checkpoint `b2228bce8` and the native
-turn-boundary probe. `cbb402869` retains the resume-workspace repair and steering
-counterexample. The new probe proves Codex provider-level lost-reply recovery and
-terminal draft preservation; LF admission/dispatch integration remains unimplemented.
+Reconciled October 8 against probe `54b309ab6` and compression `b5f26fee8`.
+`cbb402869` retains the resume-workspace repair and steering counterexample.
+The probe supersedes the earlier feedback's unproved lost-reply boundary: it proves
+provider-level recovery and terminal draft preservation. LF now retains native
+message correlation and recovers receipt evidence across driver handoffs; pending
+skill admission and native-boundary consumption remain unimplemented.
 The locally available main ref remains `812d8cc55`; no newer upstream state was fetched.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
@@ -141,12 +143,27 @@ The probe and its limitations live in the benchmark README.
    admit retained `SkillInvocation` plus context into the Session's own history without replacing its active capture.
    Its existing driver must consume pending input at a native turn boundary.
    The caller must not start another driver or steal an in-progress draft.
+   Current `run::resume` explicitly clears `skill_input` and `resolved_invocation`;
+   `continue_with_context` replaces input and claims a driver atomically through
+   `claim_session_input`. Those paths prove safe continuation/refusal, not pending
+   structured delivery through a held owner. Codex `send_input` still emits only
+   text. Its writer now adds a durable native message ID, but does not consume
+   pending structured input. The next integration proof must traverse LF admission
+   and that owner, not just repeat the socket experiment.
    Capture identity must correlate dispatch with native history before retry;
    RPC ids and turn-id acknowledgements alone cannot do that. A lost reply stays
    uncertain until native evidence resolves it. The Codex probe establishes native
    receipt recovery, caller cancellation, connection handoff and draft preservation.
-   LF must use the retained capture key as `clientUserMessageId` at its existing
-   owner, then reconcile exactly one matching user receipt before settling delivery.
+   The capture-key-as-message-ID candidate is superseded: LF's existing retry
+   can send a different continuation within the same capture. The writer retains
+   a distinct native message ID with its capture, exact outgoing parameters,
+   Process and provider generation before dispatch under the Session fence.
+   A queued input must retain that same message ID through handoff; a new
+   continuation gets its own ID. Receipt observations retain every matching
+   user message, including empty/duplicate sets, without granting origin or
+   completion authority. Pending-input settlement must still validate exactly
+   one receipt against retained skill/path, arguments and context. Native
+   completion/interruption and external effects remain separate facts.
    Prove active-capture preservation and LF driver handoff end to end before any
    automatic resubmission. Missing or duplicate native receipts remain uncertain.
    No migration, new queue owner, extra Session or provider protocol
@@ -173,55 +190,69 @@ preservation on refusal, not successful delivery through a held owner. Full
 third-party fidelity and cost comparisons follow implementation; partial headless
 dispatch is not Task acceptance.
 
-## Implemented admission and compression
+## LF receipt recovery (October 8)
 
-Compression checkpoint `423ff2ec2` removes prompt assembly’s second read of `--skill-input` and the
-skill-only CLI cache. `resolved_invocation` retains the selected definition and
-exact arguments together through Work binding; the transport file can disappear
-after selection without changing either. Native context rendering uses borrowed
-content sections instead of cloning the full context. Prepared and continued
-captures share `capture_subjects`; listings and help share `definition_source`,
-removing `SkillSource::display_source`. Driver custody and publication fences
-remain unchanged. String-only next-turn input remains a deletion target; text steering retains
-its separate meaning and cannot acquire skill invocation by changing its type.
+The headless Codex writer commits `codex_input_dispatch` in Session history before
+its socket write, under the existing driver fence. A failed write leaves that
+intent; reusing its native message ID is rejected without another send. No queue,
+input replacement, migration, automatic retry or new driver is introduced.
+A fresh continuation can share a capture while retaining a different native ID.
 
-Checkpoint `b2228bce8` removes `SkillScope`, which only tests consumed; selected paths
-already prove repository/personal precedence and embedded selection. It deletes
-the retired listing tuple adapter and `builtin_skills` wrapper. Skill loading now
-splits and parses declarations once, removing `SkillFrontmatter` and its three
-conversion helpers. Raw declarations, native fallback, Loopflow validation and
-subagent/harness separation remain. Review found the malformed-native fixture
-expected frontmatter inside the body despite the preceding implementation storing
-it separately; it now proves exact source reconstruction and Loopflow rejection.
+Public `session connect` reads full native turn items when the Session has retained
+dispatches, then records complete receipt sets across all pages. Older Sessions
+keep the smaller history read. These are observations, not settled delivery:
+content validation, turn-boundary admission and pending consumption remain above.
+The controlled-client real Codex/fake-API LF proof preserves exact text, the active
+capture, sibling work and native generation across handoffs. It retains stale-client
+rejection and nested Process ancestry. Its fixture now uses `exec_command`; external
+egress stays denied by the outer wrapper rather than an invalid nested macOS sandbox.
+The store proof retains structured input across a failed transport write and handoff,
+with missing/duplicate matches and separate continuation identity. Neither proof
+performs new skill admission through a held owner, drops an LF RPC acknowledgement,
+or demonstrates LF terminal draft preservation; the earlier provider-only draft and
+lost-reply evidence remains separate.
 
-Removed `human_session::continue_conversation` and headless resume's prepared-file
-round trip. `claim_session_input` reserves the next capture and claims its driver
-in one transaction, using the existing shared driver writer and custody checks.
-`continue_with_context` publishes context and the process request under that claim.
-Rejected admission leaves the previous capture untouched; failed publication retains
-an unpublished reservation, releases only its driver and records no provider turn.
+Review found that using the capture itself as the native ID would reject legitimate
+retry continuations or conflate their different input bytes. Keeping the mapping in
+existing Session history fixes that boundary without a new execution owner.
 
-The CLI fixture proves held-owner preservation for Claude and Codex. Store/capture
-fixtures prove rollback after a competing claim, unchanged native thread/provider
-generation through driver handoff, and publication failure without completion.
-The taskless Flow correction fixture still succeeds through the real `session resume`
-entry point. These are source/fixture results, not installed continuity or native
-terminal draft-preservation proofs. Review also fenced publication against driver
-handoff and retained its original failure if release fails. The later workspace
-repair separates capture/provider cwd from LF Process cwd, as described below.
+## Retained implementation boundaries
 
-## Resume workspace repair
+`7cccd33fe` preserves the complete pre-compression notes; `423ff2ec2` and
+`b2228bce8` preserve the earlier catalog/parser reductions and their checks.
+`resolved_invocation` keeps source and exact arguments together after its transport
+file disappears. One parser retains raw native declarations while validating
+Loopflow declarations. Prepared and continued captures share attribution.
 
-Headless `session resume ID MESSAGE` builds directly from the saved Session cwd,
-Task and Wave, bypassing caller-checkout binding and ambient Wave fallback.
-The provider and replayable capture use that workspace; the LF Process retains
-its actual caller cwd. Old captures, Session attribution and the original skill
-remain unchanged. The cross-directory CLI fixture proves saved scratch context,
-exclusion of caller scratch and a registered ambient Wave, native resume identity,
-no original-skill rerun and preserved historical bytes. It uses a stub provider,
-not live-model or installed acceptance. Held-owner and taskless correction proofs
-still pass. Review retained the provider cwd in the manifest because replay uses
-it, and corrected nested Wave selection to use the full slug.
+Headless resume reserves input and claims its driver in one transaction. Losing
+claims leave the old capture untouched; failed publication retains an unpublished
+reservation and releases only its driver, without recording a provider turn.
+Publication is fenced against handoff and preserves its original failure.
+Fixtures establish those boundaries and native identity across handoff, not
+successful delivery through a held owner or installed continuity.
+
+`cbb402869` repairs resume placement: saved Session cwd/Task/Wave supply context,
+provider cwd and replay; LF Process cwd remains the caller's. CLI fixtures cover
+cross-directory context, excluded ambient Wave, preserved historical bytes and
+native identity, no original-skill rerun, held owners and taskless Flow correction.
+No second workspace owner is introduced.
+
+`b5f26fee8` separates Codex catalog, steering and recovery experiments.
+One app-server context owns spawn, initialization and bounded shutdown; recovery
+closes that context before starting the engine that reads persisted receipts.
+Socket history reads share one decoder; waiter cancellation has one cleanup path.
+Argparse owns mutually exclusive probe selection. All receipt assertions remain,
+including ambiguous duplicates, distinct interrupted/completed outcomes and title
+request counts. Review retained separate stdio and socket readers because they
+exercise different transports; no new provider or LF authority follows.
+
+Compression after `efd635728` removes the CLI's `discover_skill` and
+`resolve_definition` adapters; execution, help and listing call the engine
+resolver directly. Two adapter tests duplicated the engine's namespaced/colon
+coverage and are deleted. Native receipt recovery groups user messages by client
+ID once before acquiring the store transaction, preserving order, missing matches
+and duplicates across turns. Review retained observation-only writes and the
+existing dispatch fence; no delivery or completion authority changes.
 
 ## Delete — do not maintain
 
@@ -234,15 +265,12 @@ it, and corrected nested Wave selection to use the full slug.
   `build_prompt_at` now receives saved Session placement directly. Process cwd
   and replay cwd remain distinct facts; no second workspace owner is introduced.
 
-## Removed mechanisms
-
-The catalog replaces external/npx/rams discovery, separate Flow/export resolvers
-and repeated source lookup. Generated-file pruning never follows directory
-symlinks or enters third-party bundles. Captured definitions own dispatch and
-attribution; follow-up does not rerun the original skill. Native context
-acknowledgement cannot finish the command. Admission removes pre-claim capture
-replacement, but current-owner delivery remains unfinished. Earlier deletion
-details: `d6848011f:scratch/run-any-claude-or-codex.md` under this heading.
+The catalog replaced external/npx/rams discovery, Flow/export resolvers, CLI
+discovery adapters and repeated source lookup. Export pruning preserves third-party bundles and symlinks.
+Capture admission replaced pre-claim input replacement; native context
+acknowledgements cannot complete the command. Earlier deletion details remain at
+`d6848011f:scratch/run-any-claude-or-codex.md`; the complete prior account is at
+`7cccd33fe:scratch/run-any-claude-or-codex.md`.
 
 ## Acceptance still outstanding
 
@@ -270,4 +298,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08): isolated Codex `--boundary`/`--redelivery` and Claude `--channel terminal` pass; 14 probe regressions and Ruff pass. `lf context --skill implement --json` fits all token and byte budgets. Compression’s recorded Rust build/focused tests/fmt/Clippy remain applicable; gate/review own full fidelity, cost and third-party acceptance.
+Check (2026-10-08, compress): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`, isolated focused `cargo test` (15 unit + 3 discovery/CLI tests), `git diff --check` and `lf context --skill compress --json` pass; gate/review retain pending-input admission, LF lost-ack/draft proofs, native fidelity, costs and third-party acceptance.

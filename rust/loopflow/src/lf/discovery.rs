@@ -1,18 +1,9 @@
-use crate::engine::{Skill, Step, XorPath};
-use anyhow::Result;
+use crate::engine::{Step, XorPath};
 use std::collections::HashMap;
 use std::path::Path;
 
 pub use crate::engine::builtins::{builtin_skill_description, BUILTIN_SKILL_CATEGORIES};
-pub use crate::engine::target::{DefinitionKind, Target};
-
-pub fn resolve_definition(repo: &Path, name: &str, kind: Option<DefinitionKind>) -> Result<Target> {
-    crate::engine::target::resolve_definition(repo, name, kind).map_err(Into::into)
-}
-
-pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
-    crate::engine::load_skill(name, repo).map_err(Into::into)
-}
+use crate::engine::target::Target;
 
 pub(crate) fn definition_source(repo: &Path, path: Option<&Path>) -> String {
     path.map(|path| {
@@ -72,7 +63,7 @@ fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_skill, resolve_definition, Target};
+    use crate::engine::target::{resolve_definition, DefinitionKind, Target};
     use std::fs;
     use tempfile::TempDir;
 
@@ -106,7 +97,7 @@ mod tests {
         );
 
         let Target::Skill(skill) =
-            resolve_definition(repo.path(), "review", Some(super::DefinitionKind::Skill)).unwrap()
+            resolve_definition(repo.path(), "review", Some(DefinitionKind::Skill)).unwrap()
         else {
             panic!("explicit skill must resolve to a skill");
         };
@@ -143,33 +134,6 @@ mod tests {
     }
 
     #[test]
-    fn discover_skill_loads_user_namespaced_override() {
-        let tmp = TempDir::new().expect("tempdir");
-        let skills_dir = tmp.path().join(".lf/skills/gstack");
-        fs::create_dir_all(&skills_dir).expect("create namespaced skills dir");
-        fs::write(
-            skills_dir.join("office-hours.md"),
-            "---\ninteractive: false\n---\n# user override\n",
-        )
-        .expect("write skill");
-
-        let skill = discover_skill(tmp.path(), "gstack/office-hours").expect("discover skill");
-
-        assert!(skill
-            .content
-            .as_deref()
-            .expect("content")
-            .contains("# user override"));
-    }
-
-    #[test]
-    fn discover_skill_rejects_legacy_colon_form() {
-        let tmp = TempDir::new().expect("tempdir");
-        let err = discover_skill(tmp.path(), "gstack:office-hours").unwrap_err();
-        assert!(err.to_string().contains("not found"));
-    }
-
-    #[test]
     fn untyped_names_resolve_available_definitions() {
         let tmp = TempDir::new().expect("tempdir");
         for name in ["design", "launch-plan", "debug", "unbreak", "implement"] {
@@ -193,10 +157,7 @@ mod tests {
         // A workflow is traversed by `lf task run`, never run as a Flow.
         for name in ["feature", "code"] {
             let error = resolve_definition(tmp.path(), name, None).unwrap_err();
-            assert!(matches!(
-                error.downcast_ref::<crate::engine::LoadError>(),
-                Some(crate::engine::LoadError::Workflow(_))
-            ));
+            assert!(matches!(error, crate::engine::LoadError::Workflow(_)));
         }
     }
 }

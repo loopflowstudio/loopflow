@@ -4,7 +4,8 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
-use crate::lf::discovery::{definition_source, resolve_definition, DefinitionKind, Target};
+use crate::engine::target::{resolve_definition, DefinitionKind, Target};
+use crate::lf::discovery::definition_source;
 use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {

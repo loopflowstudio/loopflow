@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{
-    check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
-};
+use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
 use crate::store::sqlite::SqliteStore;
@@ -650,10 +648,6 @@ fn session_command_status_with_env(
             Ok(launch)
         })
         .transpose()?;
-    if !check_cli_available(&command.program) {
-        return Err(anyhow!(missing_agent_message(&command.program)));
-    }
-
     let provider = match command.program.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -730,6 +724,9 @@ fn session_command_status_with_env(
         Err(error) => {
             if let Some((store, session, driver)) = &owned {
                 store.record_native_provider_exit(session, driver, false)?;
+            }
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return Err(anyhow!(missing_agent_message(&command.program)));
             }
             return Err(error.into());
         }

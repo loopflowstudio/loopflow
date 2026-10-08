@@ -76,6 +76,7 @@ impl PlanningEnvironment {
 #[derive(Default)]
 struct PlanningState {
     issues: Vec<serde_json::Value>,
+    project_edit: Option<serde_json::Value>,
     extra_projects: Vec<serde_json::Value>,
     fail_confirmation: bool,
     fail_snapshot: bool,
@@ -137,7 +138,10 @@ async fn planning_graphql(
         .current_project_id
         .clone()
         .unwrap_or_else(|| initial_project_id.clone());
-    let project = planning_project(&project_id, &project_id);
+    let project = state
+        .project_edit
+        .clone()
+        .unwrap_or_else(|| planning_project(&project_id, &project_id));
     let data = if query.contains("query ListTeams") {
         json!({"teams":{"nodes":[{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
@@ -180,10 +184,18 @@ async fn planning_graphql(
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query FindProject") {
-        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
+        let owned = state
+            .project_edit
+            .clone()
+            .filter(|p| p["id"] == vars["id"])
+            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap(), &project_id));
         json!({"projects":page(vec![owned])})
     } else if query.contains("query ProjectOwnership") {
-        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
+        let owned = state
+            .project_edit
+            .clone()
+            .filter(|p| p["id"] == vars["id"])
+            .unwrap_or_else(|| planning_project(vars["id"].as_str().unwrap(), &project_id));
         json!({"project": owned})
     } else if query.contains("query IssueOwnership") {
         if let Some(remaining) = state.fail_issue_read_after.as_mut() {
@@ -269,25 +281,46 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
         json!({"commentCreate":{"comment":{"id":id}}})
+    } else if query.contains("mutation EditProject") {
+        let mut project = project;
+        if let Some(name) = vars["input"].get("name") {
+            project["name"] = name.clone();
+        }
+        if let Some(summary) = vars["input"].get("description") {
+            project["description"] = summary.clone();
+        }
+        project["updatedAt"] = json!(time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap());
+        state.project_edit = Some(project);
+        json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation UpdateIssue") {
         let issue = state
             .issues
             .iter_mut()
             .find(|issue| issue["id"] == vars["id"])
             .unwrap();
-        for key in ["title", "description"] {
+        for key in ["title", "description", "sortOrder", "prioritySortOrder"] {
             if let Some(value) = vars["input"].get(key) {
                 issue[key] = value.clone();
             }
+        }
+        if let Some(id) = vars["input"].get("assigneeId") {
+            issue["assignee"] = if id.is_null() {
+                serde_json::Value::Null
+            } else {
+                json!({"id":id})
+            };
         }
         mark_issue_updated(issue);
         json!({"issueUpdate":{"success":true}})
     } else if query.contains("query UnstartedWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"unstarted"}]}})
     } else if query.contains("mutation CreateIssue") {
+        let number = state.issues.len() + 1;
         state
             .issues
-            .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
+            .push(json!({"id":format!("issue-{number}"), "identifier":format!("FIX-{number}"), "url":null,
             "title":vars["title"], "description":vars["description"], "completedAt": null, "prioritySortOrder":0.0,
             "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":project_id,"name":"Chapter"}}));
@@ -296,6 +329,102 @@ async fn planning_graphql(
         panic!("unexpected creation fixture query: {query}");
     };
     axum::Json(json!({"data":data}))
+}
+
+#[tokio::test]
+async fn connected_fields_match_personal_order_assignment_and_summary() {
+    let fixture = Fixture::new().await;
+    fixture.seed(now() + 86_400).await;
+    let (repo, wave) = planning_repo(&fixture).await;
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = serve(state).await;
+    let fields: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../tests/fixtures/dto/planning_fields.json"
+    ))
+    .unwrap();
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            for (name, marker) in [("First", "first"), ("Second", "second")] {
+                super::pm_create_task_idempotent(
+                    &repo,
+                    "product",
+                    name,
+                    "",
+                    marker,
+                    |_, _| async { Ok(()) },
+                )
+                .await
+                .unwrap();
+            }
+            let update = crate::pm::PmItemUpdate {
+                name: Some(fields["name"].as_str().unwrap().into()),
+                description: Some(fields["description"].as_str().unwrap().into()),
+                rank: Some(0),
+                assignee: Some(Some(fields["assignee"].as_str().unwrap().into())),
+            };
+            super::pm_update_async(
+                &repo,
+                &super::PmUpdateOptions {
+                    wave: None,
+                    id: "issue-2".into(),
+                    update: super::PmTaskUpdate::Edit(update),
+                },
+                &NullProgress,
+            )
+            .await
+            .unwrap();
+            let read = crate::ops::task_pm::resolve_task_async(&repo, "issue-2", PmRefresh::Never)
+                .await
+                .unwrap();
+            let item = serde_json::to_value(read.item).unwrap();
+            for field in ["name", "rank", "assignee"] {
+                assert_eq!(item[field], fields[field]);
+            }
+            assert!(item["description"]
+                .as_str()
+                .unwrap()
+                .starts_with(fields["description"].as_str().unwrap()));
+            crate::ops::project::edit(
+                &repo,
+                "project-1",
+                Some("Current"),
+                fields["summary"].as_str(),
+            )
+            .await
+            .unwrap();
+            let project = fixture
+                .store
+                .sqlite
+                .accepted_projects(wave.id())
+                .unwrap()
+                .remove(0);
+            assert_eq!(project.summary, fields["summary"]);
+            assert_eq!(project.name, "Current");
+            super::pm_update_async(
+                &repo,
+                &super::PmUpdateOptions {
+                    wave: None,
+                    id: "issue-2".into(),
+                    update: super::PmTaskUpdate::Edit(crate::pm::PmItemUpdate {
+                        assignee: Some(None),
+                        ..Default::default()
+                    }),
+                },
+                &NullProgress,
+            )
+            .await
+            .unwrap();
+            assert!(
+                crate::ops::task_pm::resolve_task_async(&repo, "issue-2", PmRefresh::Never)
+                    .await
+                    .unwrap()
+                    .item
+                    .assignee
+                    .is_none()
+            );
+        })
+        .await;
+    server.abort();
 }
 
 #[tokio::test]
@@ -390,6 +519,7 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
                     update: super::PmTaskUpdate::Edit(crate::pm::PmItemUpdate {
                         name: Some("Persisted edited title".into()),
                         description: Some("Edited notes".into()),
+                        ..Default::default()
                     }),
                 },
                 &NullProgress,
@@ -500,8 +630,10 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
             &repo,
             &created.identifier,
             None,
-            Some("Continue the existing training Task".into()),
-            None,
+            crate::pm::PmItemUpdate {
+                name: Some("Continue the existing training Task".into()),
+                ..Default::default()
+            },
         )
         .unwrap();
         let record =
@@ -568,8 +700,11 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
                 &repo,
                 "FIX-1",
                 None,
-                Some("Edited future work".into()),
-                Some("Edited full directive".into()),
+                crate::pm::PmItemUpdate {
+                    name: Some("Edited future work".into()),
+                    description: Some("Edited full directive".into()),
+                    ..Default::default()
+                },
             )
         };
         {

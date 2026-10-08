@@ -50,6 +50,7 @@ CREATE TABLE projects_migration (
     created_at INTEGER NOT NULL,
     project_slug TEXT,
     project_name TEXT,
+    project_summary TEXT NOT NULL DEFAULT '',
     project_prompt_context TEXT,
     pm_snapshot_synced_at INTEGER,
     abandon_requested_at INTEGER,
@@ -133,7 +134,9 @@ CREATE TABLE tasks_migration (
     abandoned_at INTEGER,
     primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
     planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0),
-    planning_rank INTEGER NOT NULL DEFAULT 0 CHECK (planning_rank >= 0)
+    planning_rank INTEGER NOT NULL DEFAULT 0 CHECK (planning_rank >= 0),
+    planning_assignee TEXT,
+    planning_deleted_at INTEGER
 );
 
 INSERT INTO tasks_migration (
@@ -240,5 +243,10 @@ WHERE i.provider='linear' AND i.needs_refresh=0
     AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.external_issue_id=i.id)
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=w.id AND d.issue_id=i.id)
     AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1);
+
+UPDATE projects SET project_summary=COALESCE((SELECT json_extract(observed.body,'$.summary')
+    FROM pm_projects observed JOIN waves w ON w.id=projects.wave_id
+    WHERE observed.id=projects.external_project_id AND observed.repo=w.repo
+        AND observed.provider='linear'),'');
 
 PRAGMA legacy_alter_table = OFF;

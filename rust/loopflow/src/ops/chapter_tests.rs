@@ -375,6 +375,7 @@ async fn seed_project(
         id: crate::work::project::ProjectId::new(),
         wave_id: wave.id().clone(),
         plan: crate::planning::ProjectPlan {
+            summary: String::new(),
             linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
             slug: plan.slug.clone(),
             name: plan.name.clone(),

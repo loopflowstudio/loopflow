@@ -45,6 +45,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             linear_id: Some(
@@ -214,6 +215,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let stale = Project {
         id: ProjectId::parse(STALE_WORK_ID).expect("recorded Project Work id"),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             linear_id: Some(
@@ -290,6 +292,7 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     let current = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             linear_id: Some(

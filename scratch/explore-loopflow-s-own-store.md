@@ -5,9 +5,9 @@ Jack Heart selected the complete local lifecycle, echoing Linear APIs and fields
 for compatibility with particular attention to ID generation, then requested
 “move towards pursuit”. Deliver one coherent PR through publication for review.
 Landing, installation, callbacks, Git synchronization and Linear export are outside
-this slice. Reconciled on 2026-10-08: the local CLI core is implemented and
-exercised in disposable stores; the complete accepted lifecycle remains unfinished
-and is not ready for publication.
+this slice. Reconciled on 2026-10-08: the local lifecycle is implemented, with
+focused public CLI, migration and headless Desktop proofs in disposable stores.
+The affected acceptance matrix and publication remain with gate and delivery.
 The older feedback describing mandatory provider IDs and placement is superseded
 by storage checkpoint `3615ac424`, local lifecycle checkpoint `b094fc2d4`, and
 compression checkpoint `149f47c0e`. Retaining deletion-recovery evidence is an engineering correction
@@ -50,9 +50,11 @@ plan material to the code remote.
 
 ## First showable slice
 
-Accepted target behavior. Local CLI planning, placement, operation-only workflow
-execution and rotation have source proofs. Native launch, resume and skill-Flow execution now pass contained public fixtures;
-hosted delivery remains open. A shared CLI fixture passes headless Desktop rendering.
+Accepted target behavior. Public fixtures cover planning, placement, native
+launch/resume, skill-Flow execution, rotation and GitHub delivery through confirmed
+merge reconciliation. Provider/GitHub effects are contained stubs. Shared CLI
+fixtures pass headless Desktop reading and workflow controls; no installation or
+live-provider acceptance is claimed.
 
 In a repository with no Linear configuration or credentials, run
 `lf task create --title "Fix the parser"`. It creates a durable Task immediately. With no
@@ -84,13 +86,13 @@ headless Desktop readers, without restoring that launcher.
 
 - `planning.rs`: Task and Project retain their existing durable IDs; nested plans
   now carry optional `linear_id` mappings and optional provider observation times.
-  `Task.worktree` is optional. Planning-only cached issues still live in `pm_items`;
-  importing owned issues into durable Tasks remains unfinished.
+  `Task.worktree` is optional. Accepted owned issues import into durable Tasks
+  without placement; unresolved observations remain in `pm_items`.
 - `store/sqlite/planning.rs` accepts normalized provider facts and projects them
   into durable rows. The `local_planning` draft makes external mappings nullable
   while retaining uniqueness. Local create/edit/read use the existing Task rows;
   local operations and public projections now select explicit personal authority;
-  owned Linear issues now import; remaining field consumers still need the cutover. `store/sqlite.rs::task_issue_identity` separately reads
+  owned Linear issues import transactionally with their mappings. `store/sqlite.rs::task_issue_identity` separately reads
   deletion-recovery evidence; its only operation caller is `ops/pm.rs::delete_task`.
 - `ops/task_pm.rs` resolves Team/Initiative ownership and delegates creation and
   completion to `ops/pm.rs`. `pm_create_task_idempotent` searches UUID operation
@@ -450,8 +452,8 @@ allocates no PR, Session, Process, workflow or checkout. SQLite row readers acce
 optional provider mapping/observation and placement; Task status and Wave projections
 now expose those absences without requiring a provider.
 The store resolver accepts
-full IDs and `lf-` UUID prefixes and rejects ambiguity. Stored local display labels
-currently use the full UUID; automatic shortest-unique display remains to build.
+full IDs and `lf-` UUID prefixes and rejects ambiguity. Stored local labels retain the full UUID; the shared reader displays the
+shortest unique prefix of at least twelve digits, extending it on collision.
 
 The draft rebuilds Task/Project tables without changing existing IDs or child rows.
 It depends on the integrated `process_names` draft so retained Started triggers use
@@ -483,59 +485,56 @@ Implemented local boundaries (2026-10-08):
 - Local rotation commits destination, selection, started Task membership and its
   receipt together, preserving backlog. Original input survives for retry checking.
   Public fixtures exercise rotation twice, retained workflow/checkout and creation
-  retry across that switch. Mixed Local/Linear rotation and cancellation races need
-  further proof; a local transaction does not make provider effects atomic.
+  retry across that switch. Multi-Wave rollback, concurrent creation/rotation and
+  conflicting retry input are covered. Mixed-authority recovery remains an affected
+  gate check; a local transaction does not make provider effects atomic.
 - The same migration also retains `pm_items.body` and `pm_projects.body` byte-for-byte
   and parses their historical fixture shapes through current observation readers.
   PR, Session, workflow, move and orphan deletion-recovery preservation still pass.
   No historical Task/Project JSON payload owner was found beyond those provider
-  observation records; complete supported-field coverage remains below.
+  observation records; paired field coverage is described below.
 
-Remaining work is the complete accepted lifecycle, in this same PR:
+Implementation and focused acceptance now cover the remaining boundaries:
 
-- Extend native-provider fixtures for connected deletion refusal alongside the passing
-  local terminal launch/resume and headless skill-Flow proof. Exact Session/process
-  authority remains unchanged. Native terminal identity is event evidence, not the
-  headless `provider_thread` column.
-- Owned issue import and connected placement are implemented. Repeat imports and alias
-  changes reuse identity; the released-frontier migration imports accepted owned issues
-  without checkout/PR/Started. Orphan deletion recovery remains separate. Broader
-  connected suites belong to gate; first-placement failure and concurrency remain.
-- Finish paired supported-field semantics (including rank edits, assignee and
-  Project summary), personal workflow catalog/customization,
-  scope resolution across every operation, and shortest-unique display selectors.
-  Nested personal definitions and `project workflow set ID personal:NAME --file FILE`
-  now persist without repository files. Personal rename/move/delete and mixed-authority
-  operations still need inspection.
-- Prove public GitHub publication and verified `land -c`/reconciliation with strict
-  stubs, plus refusal of hosted success without a code remote. Local link/copy and
-  completion paths select authority, but no hosted-delivery acceptance is claimed.
-- Shared `local_task.json` is checked against public CLI roadmap/comments and decoded
-  by Rust and Swift. A headless production `TaskCommentsView` proof renders its author
-  and thread for an unplaced Task. The shared reader now keeps unplaced Tasks runnable
-  instead of reporting a missing checkout as a failure. Finish documentation and
-  broader Desktop scope/workflow reading; this proof uses no native window.
-- Extend preservation/concurrency proofs: first-placement filesystem failure,
-  creation/rotation races, multiple personal Waves committing together, conflicting
-  rotation retry input and late completion. Continue the same draft; run the full
-  proposed gate only after the cutover.
+- Native launch and same-Session resume, a managed skill Flow, terminal launch
+  refusal and connected deletion refusal run through public CLI with contained
+  Codex providers. A retained alias cannot select authority. Personal deletion
+  hides the plan, preserves its row/history and refuses later mutation/resume.
+- Owned Linear issue import and connected placement reuse identity and provider
+  branches. Released-frontier fixtures preserve serialized observations, Task/PR/
+  Session/workflow links and orphan deletion evidence. Repeat import and alias
+  changes allocate no second Task.
+- The shared `PmItemUpdate` replaces the local patch type and redundant text
+  adapter. Paired local/Linear fixtures cover title, empty description, ordering,
+  assignment/clearing and Project name/summary. Existing lifecycle fixtures cover
+  state, completion, relationship ownership, branch/URL and comments. Native
+  provider revisions remain distinct from local concurrency revisions.
+- Nested personal definitions, renaming/refiling, stable Wave selectors and private
+  workflow import/catalog/source operate through SQLite. Desktop edits personal
+  workflows in its sheet using that writer. `local_task.json` is compared with
+  public CLI output, decoded by Rust/Swift and rendered in headless production views.
+  Local selectors extend on collisions without changing identity or stored spelling.
+- The strict GitHub fixture reaches `pr publish`, `land -c` and `pr reconcile`;
+  pending merge does not complete the Task, and confirmed merge does. The no-remote
+  fixture proves refusal with Task/PR state retained. These prove public dispatch
+  and readback, not live GitHub permissions or installed continuity.
+- Concurrent same-ID creation retains one Task; failed filesystem placement retries
+  the same PR/allocation. Multi-Wave rotation rolls back together on conflict.
+  New creation and rotation serialize, started work moves and backlog remains.
+  A failing race test found Project selection before the Wave lock; selection now
+  occurs under that lock while retries keep their original Project receipt.
 
-Compression review: rotation SQL now exposes its transaction and parameter order;
-Project content renders once per destination. The obsolete DTO test requiring
-every Task to have a Team now checks explicit null preservation. Connected
-ownership assertions remain. The local execution fixture runs `flow show proof`,
-then uses an explicit `task move end`; it proves neither a native skill step nor
-verified hosted delivery. The no-remote fixture now attempts `land -c`, verifies explicit refusal and
-retained Task/PR state before any GitHub call. Those acceptance conditions remain above.
+Review corrections: deletion checks select actual authority; import retains orphan
+recovery evidence; creation and rotation receipts retain original input; optional
+checkout is resolved before Git operations. Refiles lock source/destination Waves
+in stable order before choosing the current destination. Public fixtures scrub
+inherited Loopflow/Linear authority, and unknown provider/GitHub stub calls fail.
+Personal deletion uses a timestamp on its Task, never Linear's recovery table.
 
-Review corrections: provider mapping never selects authority; creation and rotation
-receipts retain original input; a public retry follows its creation Project even
-when the Task has moved. Optional checkout is resolved once before Git operations.
-Public fixtures use subprocesses with inherited Loopflow/Linear authority removed.
-Release's inspected child memory reinforces operation-entry tests and rejecting
-unknown stub commands. No hosted effect, installation or complete Desktop outcome
-is established by these local fixtures. No product decision blocks the remaining
-implementation; the full outcome has not been reduced to this checkpoint.
+Remaining before publication: run the affected gate below, including connected
+planning/rotation recovery and the full headless app/model matrix. Repair actual
+failures in this same PR. No product decision blocks it, and no installation,
+live-provider continuity, callback, synchronization or export is claimed.
 
 Select concrete authority at the planning operation boundary. Local lookups must
 not enter `resolve_owned_issue` or acquire a provider token. Linear ingestion keeps
@@ -582,4 +581,4 @@ nullable Linear IDs without planning-only Tasks; namespace separation mistaken f
 privacy; a write-once mapping mistaken for duplicate-safe export; remote completion
 mistaken for local workflow arrival. Remaining choices are in `questions.md`.
 
-Check (2026-10-08): network-isolated local CLI (4), native lifecycle (1), released-frontier migration (1), focused PM lifecycle (17; 1 fixture ignored), `scripts/test_desktop.sh --filter personalTaskComments` (1), formatting and Clippy pass; full acceptance/gate remains after the cutover.
+Check (2026-10-08): isolated local CLI (8), native lifecycle/deletion (1), local store/migration (5), connected lifecycle/paired fields (18; 1 fixture ignored), DTO fixtures (21), headless Desktop (9), formatting and Clippy pass; the final field/scope rerun passes, and the affected gate remains.

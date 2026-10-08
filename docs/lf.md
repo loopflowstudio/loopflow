@@ -147,7 +147,27 @@ Creation prints its retry identity before attempting the write. Repeat the origi
 options with `--creation-id <task-id>` to recover an interrupted creation. A new
 creation without that identity creates a distinct Task, even with the same title.
 Full Task IDs and unambiguous `lf-` UUID prefixes select local Tasks. Existing
-Linear ticket aliases continue to select connected Tasks.
+Linear ticket aliases continue to select connected Tasks. Displayed local selectors
+start at twelve UUID digits and extend when needed; retain full IDs in automation.
+
+```bash
+lf task edit <id> --rank 0 --assignee <person-id>
+lf task edit <id> --unassign
+lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
+lf project workflow set <project-id> personal:review --file /tmp/review.yaml
+lf project workflow list --project <project-id> --json
+lf project workflow source <project-id> personal:review
+```
+
+Ranks are zero-based within a Project. Personal workflows stay in SQLite; Desktop's
+Customize and Edit controls save them there too. Nested personal Waves use names
+such as `personal:parser/tokenizer`. Renaming them retains their IDs and descendants.
+Connected Wave definitions and workflow customizations keep their repository files.
+
+Placement, native Sessions, workflow skills and GitHub delivery use the same Task
+identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
+settles it. A repository without a code remote supports local work and refuses
+hosted landing. Personal planning does not require Linear at any of these boundaries.
 
 ## Connect planning and create work
 
@@ -166,8 +186,8 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
-After Linear accepts a Task creation or update, Loopflow confirms that issue
-directly without another Wave-wide snapshot. If Linear commits but issue
+After Linear accepts a Task creation or text update, Loopflow confirms that issue
+directly. Rank edits also reread Project ordering. If Linear commits but issue
 confirmation fails, the error names the retained issue. Retry the same command
 with the original creation options and printed `--creation-id` to reuse it without
 filing a duplicate.

@@ -1152,15 +1152,49 @@ impl LinearClient {
     }
 
     pub async fn update_item(&self, item_id: &str, update: &PmItemUpdate) -> PmResult<()> {
-        let Some(update) = update.text_update() else {
-            return Ok(());
-        };
         let mut input = serde_json::Map::new();
-        if let Some(name) = update.name {
+        if let Some(name) = &update.name {
             input.insert("title".to_string(), json!(name));
         }
-        if let Some(description) = update.description {
+        if let Some(description) = &update.description {
             input.insert("description".to_string(), json!(description));
+        }
+        if let Some(assignee) = &update.assignee {
+            input.insert("assigneeId".into(), json!(assignee));
+        }
+        if let Some(rank) = update.rank {
+            let (_, project) = self
+                .issue_ownership(item_id)
+                .await?
+                .ok_or_else(|| PmError::Message("issue is unavailable".into()))?;
+            let project =
+                project.ok_or_else(|| PmError::Message("ordering requires a Project".into()))?;
+            let mut ordered = self.list_issue_nodes(&project.id, false).await?;
+            ordered.retain(|issue| issue.fields.id != item_id);
+            let index = (rank as usize).min(ordered.len());
+            let key =
+                |issue: &IssueNode| (issue.fields.priority_sort_order, issue.fields.sort_order);
+            let before = index.checked_sub(1).map(|i| key(&ordered[i]));
+            let after = ordered.get(index).map(key);
+            let (priority, order) = match (before, after) {
+                (Some((left, order)), None) => (left + 1.0, order),
+                (None, Some((right, order))) => (right - 1.0, order),
+                (Some((left, lo)), Some((right, hi))) if left == right => {
+                    (left, lo + (hi - lo) / 2.0)
+                }
+                (Some((left, order)), Some((right, _))) => (left + (right - left) / 2.0, order),
+                (None, None) => (0.0, 0.0),
+            };
+            if before.is_some_and(|before| before >= (priority, order))
+                || after.is_some_and(|after| after <= (priority, order))
+            {
+                return Err(PmError::Message("Linear's neighboring ranks have no distinct position; reorder them in Linear before retrying".into()));
+            }
+            input.insert("prioritySortOrder".into(), json!(priority));
+            input.insert("sortOrder".into(), json!(order));
+        }
+        if input.is_empty() {
+            return Ok(());
         }
 
         let _: Value = self
@@ -1172,6 +1206,29 @@ impl LinearClient {
                 }),
             )
             .await?;
+        Ok(())
+    }
+
+    pub async fn edit_project(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        summary: Option<&str>,
+    ) -> PmResult<()> {
+        let mut input = serde_json::Map::new();
+        if let Some(name) = name {
+            input.insert("name".into(), json!(name));
+        }
+        if let Some(summary) = summary {
+            input.insert("description".into(), json!(summary));
+        }
+        let result: Value = self.graphql("mutation EditProject($id:String!,$input:ProjectUpdateInput!){projectUpdate(id:$id,input:$input){success}}",
+            json!({"id":id,"input":input})).await?;
+        if result["projectUpdate"]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm Project edit".into(),
+            ));
+        }
         Ok(())
     }
 
@@ -3157,6 +3214,7 @@ mod tests {
                 &PmItemUpdate {
                     name: Some("Implement Linear client".to_string()),
                     description: Some("Build the GraphQL adapter and tests".to_string()),
+                    ..Default::default()
                 },
             )
             .await
@@ -3277,6 +3335,7 @@ mod tests {
                 &PmItemUpdate {
                     name: None,
                     description: Some("Only the description changes".to_string()),
+                    ..Default::default()
                 },
             )
             .await

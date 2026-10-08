@@ -10,13 +10,54 @@ lf repo new-chapter 2026-10 --plan scratch/chapter.json --dry-run
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
-cadence, budget and metric instruments across plans. Its one In Progress Linear
+cadence, budget and metric instruments across plans. Its one In Progress
 Project owns Tasks, KRs, targets and an optional workflow. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the explicit shared Project binding. Rotation retains exact destinations and selected
 issue IDs for recovery, while unreviewed backlog stays in its original Project.
 [Cutover status](../architecture-reference.md#cutover-status) records
 other implementation and proof gaps.
+
+## Planning authority and identity
+
+```bash
+lf task create --title "Fix the parser" --json
+lf task comment <id> "Keep quoted input"
+lf checkout <id>
+```
+
+Explicit creation without a Wave provisions `personal:inbox` and its Project.
+Personal plans bind a canonical repository in SQLite. Their Waves, nested definitions,
+goals, memory, workflows and comments remain there; reads provision nothing and no
+personal definition is written into the code checkout. Explicitly connected Waves
+retain Linear authority and repository-owned definitions. Authority follows stored
+Wave ownership, never the presence of an external alias.
+
+Task and Project rows own identity for both paths. Random UUIDs are minted before
+placement; provider UUIDs and ticket aliases remain optional mappings. Accepted
+owned Linear issues become durable, unplaced Tasks in the ingestion transaction.
+Repeated import and ticket changes retain identity. Unowned observations stay in
+the provider evidence tables; orphan deletion identities remain recovery evidence.
+The released-frontier migration preserves existing identities, serialized provider
+observations, PRs, workflows and Session links.
+
+`--creation-id` identifies one creation request. Its transactional receipt retains
+the original Project and input through later edits and rotation. Independent requests
+with identical titles remain distinct. The same transaction owns local field edits,
+assignment, Project ordering and comments. Revisions are local write concurrency,
+not fabricated provider observation times. Local Task selection displays the shortest
+unique UUID prefix of at least twelve digits; full IDs remain stable.
+
+Checkout allocation records the Task's first PR and placement before filesystem
+creation, so retry repairs the same allocation. Native launch and resume retain the
+ordinary Session and Process authority checks; only connected Tasks consult provider
+deletion evidence. Local completion records its decision and workflow arrival together.
+GitHub delivery still requires confirmed merge evidence. Local chapter rotation commits
+all selected personal Waves together, carrying started Tasks and preserving backlog.
+A mixed Local/Linear rotation retains each authority's recovery records; a SQLite
+transaction cannot make the external provider effects atomic.
+
+## Connected Project selection
 
 ```bash
 lf wave bind-project product <project-uuid> --json
@@ -361,7 +402,8 @@ lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 
-Linear owns authored Task comments. The shared skill path supplies Task context
+The selected planning authority owns authored Task comments: SQLite for personal
+Waves and Linear for connected Waves. The shared skill path supplies Task context
 and live steers when the checkout or explicit attribution selects a Task.
 Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite

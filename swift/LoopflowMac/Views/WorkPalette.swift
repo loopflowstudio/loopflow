@@ -261,19 +261,24 @@ struct WorkflowCatalogInspector: View {
     let entry: WorkflowCatalogEntry?
     let model: WorkModel
     @State private var sourceError: String?
+    @State private var editingPersonal = false
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry?.name ?? "Workflow unavailable").font(Typography.sectionTitle(26))
             if let entry {
-                Text(entry.source ?? "builtin Workflow").font(Typography.code(11))
+                Text(entry.source == "personal" ? "Stored in this Wave" : (entry.source ?? "builtin Workflow")).font(Typography.code(11))
                 Button(entry.source == nil ? "Customize" : "Edit") {
-                    Task {
-                        do {
-                            let url = try await model.definitionSource(entry)
-                            sourceError = nil
-                            NSWorkspace.shared.open(url)
-                        } catch { sourceError = error.localizedDescription }
+                    if model.breadcrumb?.wave?.roadmap.wave.name.hasPrefix("personal:") == true {
+                        editingPersonal = true
+                    } else {
+                        Task {
+                            do {
+                                let url = try await model.definitionSource(entry)
+                                sourceError = nil
+                                NSWorkspace.shared.open(url)
+                            } catch { sourceError = error.localizedDescription }
+                        }
                     }
                 }
             }
@@ -286,6 +291,11 @@ struct WorkflowCatalogInspector: View {
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)
+            .sheet(isPresented: $editingPersonal) {
+                if let entry, let wave = model.breadcrumb?.wave?.roadmap.wave {
+                    PersonalWorkflowEditor(model: model, wave: wave, name: entry.name)
+                }
+            }
     }
 }
 

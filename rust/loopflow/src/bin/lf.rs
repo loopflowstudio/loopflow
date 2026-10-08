@@ -1192,14 +1192,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             issue,
             title,
             notes,
+            rank,
+            assignee,
+            unassign,
             wave,
         } => {
             let result = loopflow::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                title.clone(),
-                notes.clone(),
+                loopflow::pm::PmItemUpdate {
+                    name: title.clone(),
+                    description: notes.clone(),
+                    rank: *rank,
+                    assignee: if *unassign {
+                        Some(None)
+                    } else {
+                        assignee.clone().map(Some)
+                    },
+                },
             )?;
             println!("{}: updated task {}", result.wave, result.id);
             Ok(())
@@ -1758,13 +1769,40 @@ fn execute_command(
                 | TaskCommand::Save { .. }),
         }) => run_task_command(&std::env::current_dir()?, cmd),
         Some(Commands::Project {
+            cmd:
+                loopflow::lf::ProjectCommand::Edit {
+                    project,
+                    name,
+                    summary,
+                },
+        }) => {
+            let cwd = std::env::current_dir()?;
+            let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
+            tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::edit(
+                &repo,
+                project,
+                name.as_deref(),
+                summary.as_deref(),
+            ))?;
+            Ok(())
+        }
+        Some(Commands::Project {
             cmd: loopflow::lf::ProjectCommand::Workflow { cmd },
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
             match cmd {
-                loopflow::lf::ProjectWorkflowCommand::List { json } => {
-                    let entries = loopflow::engine::workflow::workflow_catalog(&repo)?;
+                loopflow::lf::ProjectWorkflowCommand::Source { project, name } => {
+                    let source = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow_source(&repo, project, name),
+                    )?;
+                    print!("{source}");
+                    Ok(())
+                }
+                loopflow::lf::ProjectWorkflowCommand::List { json, project } => {
+                    let entries = tokio::runtime::Runtime::new()?.block_on(
+                        loopflow::ops::project::workflow_catalog(&repo, project.as_deref()),
+                    )?;
                     if *json {
                         println!("{}", serde_json::to_string(&entries)?);
                     } else {

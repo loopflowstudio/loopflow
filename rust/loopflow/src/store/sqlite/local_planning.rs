@@ -29,6 +29,99 @@ pub(super) fn project_authority_on(
 }
 
 impl SqliteStore {
+    pub(crate) fn task_deleted(&self, task: &crate::work::task::Task) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        super::children::task_deleted_on(&conn, task)
+    }
+
+    pub(crate) fn delete_local_task(&self, id: &crate::durable::TaskId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if project_authority_on(&tx, &task.project_id)? != PlanningAuthority::Local {
+            return Err(StoreError::InvalidAuthority(
+                "Task belongs to Linear".into(),
+            ));
+        }
+        tx.execute(
+            "UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,?2) WHERE id=?1",
+            params![id.as_str(), now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn personal_workflows(&self, wave: &WaveId) -> StoreResult<Vec<(String, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT name,content FROM personal_workflows WHERE wave_id=?1 ORDER BY name",
+        )?;
+        let rows = query.query_map([wave], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
+    pub(crate) fn edit_local_project(
+        &self,
+        id: &ProjectId,
+        name: Option<&str>,
+        summary: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if project_authority_on(&tx, id)? != PlanningAuthority::Local {
+            return Err(StoreError::InvalidAuthority(
+                "Project belongs to Linear".into(),
+            ));
+        }
+        tx.execute(
+            "UPDATE projects SET project_name=COALESCE(?2,project_name),
+            project_summary=COALESCE(?3,project_summary),updated_at=?4 WHERE id=?1",
+            params![id.as_str(), name, summary, now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn refile_unplaced_task(
+        &self,
+        task: &crate::durable::TaskId,
+        destination: &ProjectId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&tx, &current)?;
+        if current.project_id == *destination {
+            return Ok(());
+        }
+        if project_authority_on(&tx, &current.project_id)?
+            != project_authority_on(&tx, destination)?
+        {
+            return Err(StoreError::InvalidAuthority(
+                "refiling cannot transfer planning authority".into(),
+            ));
+        }
+        let changed = tx.execute(
+            "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
+            WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
+            AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
+            AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)",
+            params![task.as_str(), destination.as_str(), now_unix()],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "a Task with recorded work retains its owning Wave".into(),
+            ));
+        }
+        super::durable::inherit_task_placement(
+            &tx,
+            &super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?,
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn personal_workflow(&self, wave: &WaveId, name: &str) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -260,18 +353,20 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn local_task_order_and_completion(
+    pub(crate) fn local_task_fields(
         &self,
         task: &crate::durable::TaskId,
-    ) -> StoreResult<(u32, Option<i64>)> {
+    ) -> StoreResult<(u32, Option<i64>, Option<String>)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT planning_rank,
+            "SELECT (SELECT count(*) FROM tasks earlier WHERE earlier.project_id=t.project_id
+                AND earlier.planning_deleted_at IS NULL
+                AND (earlier.planning_rank,earlier.created_at,earlier.id)<(t.planning_rank,t.created_at,t.id)),
                     (SELECT max(created_at) FROM task_events e
-                     WHERE e.task_id=t.id AND json_extract(e.kind_json,'$.kind')='completed')
+                     WHERE e.task_id=t.id AND json_extract(e.kind_json,'$.kind')='completed'),planning_assignee
              FROM tasks t WHERE id=?1",
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?)
     }
 
@@ -312,6 +407,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&tx, &task)?;
         if project_authority_on(&tx, &task.project_id)? != PlanningAuthority::Local {
             return Err(StoreError::InvalidAuthority(
                 "this Task's planning is owned by Linear".into(),

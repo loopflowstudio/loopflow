@@ -115,7 +115,14 @@ pub async fn relocate_wave(
             )
         })?,
     };
-    let target = WaveLocator::new(target_repo, target_name.unwrap_or(wave.slug()))?;
+    let personal = store.sqlite.personal_wave_definition(wave.id())?.is_some();
+    let name = target_name.unwrap_or(wave.slug());
+    let name = if personal && !name.starts_with("personal:") {
+        format!("personal:{name}")
+    } else {
+        name.to_string()
+    };
+    let target = WaveLocator::new(target_repo, &name)?;
     let source_repo = CanonicalRepo::discover(Path::new(wave.repo())).ok();
     match source_repo.as_ref() {
         Some(source) if source != &invoking_repo => {
@@ -157,6 +164,33 @@ pub async fn relocate_wave(
             wave.id(),
             wave.parent_wave_id().expect("parent checked as present")
         ));
+    }
+    if personal {
+        let moves = plan_moves(store, wave, target).await?;
+        let root = &moves[0];
+        let receipt = WaveRelocationReceipt {
+            wave_id: root.wave.id().to_string(),
+            from_repo: root.wave.repo().to_string(),
+            from_name: root.wave.slug().to_string(),
+            to_repo: root.target.repo().to_string(),
+            to_name: root.target.slug().to_string(),
+            waves_moved: moves.len(),
+        };
+        store
+            .relocate_waves(
+                moves
+                    .iter()
+                    .map(|planned| WaveLocatorUpdate {
+                        wave_id: planned.wave.id().clone(),
+                        expected_repo: planned.wave.repo().to_string(),
+                        expected_slug: planned.wave.slug().to_string(),
+                        target: planned.target.clone(),
+                        retire_collision: None,
+                    })
+                    .collect(),
+            )
+            .await?;
+        return Ok(receipt);
     }
     ensure_repository_team_compatible(&wave, &target)?;
 

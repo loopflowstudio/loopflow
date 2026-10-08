@@ -312,6 +312,7 @@ fn register_task_fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             linear_id: Some(

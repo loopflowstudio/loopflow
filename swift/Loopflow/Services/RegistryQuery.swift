@@ -194,9 +194,18 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["project", "workflow", "list", "--json"], cwd)
+    public func workflowCatalog(cwd: String?, project: String? = nil) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["project", "workflow", "list", "--json"] + (project.map { ["--project", $0] } ?? []), cwd)
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
+    }
+
+    public func workflowSource(_ name: String, project: String, cwd: String?) async throws -> String {
+        try await run(["project", "workflow", "source", project, name], cwd)
+    }
+
+    public func savePersonalWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
+        let selector = name.hasPrefix("personal:") ? name : "personal:\(name)"
+        _ = try await runWithInput(["project", "workflow", "set", project, selector, "--file", "/dev/stdin"], cwd, content)
     }
 
     public func customizeFlow(_ name: String, cwd: String?) async throws -> String {

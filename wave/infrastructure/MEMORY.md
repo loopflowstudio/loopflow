@@ -7,28 +7,28 @@ stable IDs, through publication for review, not landing. Preserve IDs/history;
 UUID, selector and provider mapping remain distinct. Callback, Git and export
 are follow-ups. Design: `scratch/explore-loopflow-s-own-store.md`.
 
-Jack leans toward Git refs outside code branches with pending local data; the
-laptop authors and workers remain disposable. Cover personal machines, shared
-Linear and independent company developers. Namespaces provide no privacy; personal
-definitions stay out of shared files. The callback draft interprets host as origin,
-retains execution on X and routes Linear through the online host; disconnect/direct
-fallback remain open. No resident or automatic work retry. Callbacks provide no
+Jack leans toward Git refs outside code branches; the laptop authors and workers
+remain disposable. Cover personal machines, shared Linear and independent company
+developers. Namespaces provide no privacy. The callback draft treats host as origin,
+keeps execution on X and routes Linear through the online host; disconnect/direct
+fallback remain open. No resident or automatic retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-October 8 checkpoints `b094fc2d4`/`149f47c0e` add personal authority, local CLI
-planning, unplaced completion, placement and rotation. `--creation-id` replaces
-content hashing; receipts retain original input/Project across edits and rotation.
-Aliases grant no authority. Personal goal/memory stay in SQLite. One draft preserves
-IDs, serialized provider payloads and deletion recovery; redundant routing is removed.
-Native launch/resume and skill-Flow execution now pass public CLI fixtures with
-contained Codex stubs. Owned accepted Linear issues import once, unplaced; the
-released-frontier proof preserves orphan recovery evidence. Nested personal Waves
-and imported workflow definitions stay in SQLite. A CLI-generated fixture passes
-headless Desktop comment rendering. Unplaced Tasks remain runnable; no-remote
-landing refuses before GitHub access. These prove source boundaries, not installed
-or live-provider continuity. Paired fields, private catalog, hosted delivery and
-concurrency remain. Release's child memory reinforces public-entry proofs and
-strict stubs. The complete one-PR scope remains; no product decision blocks it.
+October 8 checkpoints `b094fc2d4`/`149f47c0e` add personal planning, unplaced Tasks
+and rotation. Creation receipts retain original input/Project across edits and
+rotation. Aliases grant no authority. One draft preserves IDs, serialized provider
+payloads and deletion recovery; redundant routing is removed.
+Native launch/resume, skill Flows and connected deletion refusal pass contained
+public fixtures. Owned Linear issues import once, unplaced. Nested personal Waves,
+private workflow editing/catalogs and tombstones stay in SQLite; deletion preserves
+history. Paired fields and shared CLI/headless Desktop views pass. Strict GitHub
+fixtures reach publication and confirmed-merge completion; no-remote landing refuses.
+These prove source boundaries, not installed/live-provider continuity. Creation
+selected its Project before the Wave lock: a failing rotation race exposed it;
+selection now follows the lock, while retries retain their receipt. Concurrent
+creation, first-placement recovery and multi-Wave rollback pass. Gate owns the
+broader matrix and mixed-authority recovery before publication. No scope reduction,
+installation or landing authority; no product decision blocks the complete PR.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
@@ -993,12 +993,11 @@ commands belong in docs/lf.md and TESTING.md.
 
 Jack Heart closed LOO-292 on actual machine evidence: published 0.13.0 preserved
 its Home; isolated Ubuntu repaired a missing entry; checkout sync preserved caller
-bytes. Details: `32607f1d2:wave/infrastructure/MEMORY.md` under this heading and
-`6448e3c9e` there. Install owns artifacts, sync owns checkouts. Cadence is opt-in
-login plus Monday 09:00 local, with daily/hourly/5min options. No Monday firing,
-sleep-coalesced wake or interactive app acceptance was proved. Redundant download
-under load remains unexplained; reload stopped it without damaging installation.
-Reinstall does not heal a hand-truncated entry gate.
+bytes. Install owns artifacts, sync owns checkouts. Cadence is opt-in login plus
+Monday 09:00 local; scheduled firing and interactive acceptance remain unproved.
+Reload stopped unexplained redundant downloads without damaging installation;
+reinstall does not heal a hand-truncated entry gate. Exact records and cadence
+options: `817ec2634:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Shipped history
 

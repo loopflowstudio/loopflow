@@ -24,11 +24,11 @@ do not block the single-machine lifecycle.
   store-owned definitions; no selected Wave creates `personal:inbox` only on an
   explicit mutation. Shared names remain distinct. A provider alias does not
   change authority. Root provisioning and goal/memory editing are implemented;
-  nested definitions and workflow import now persist in SQLite; private catalog/customization remain.
+  nested definitions and workflow import/catalog/customization persist in SQLite.
 - **Local selector:** the resolver accepts `lf-<12 UUID hex digits>` and longer
-  prefixes, rejecting ambiguity. Stored display labels currently use the full UUID;
-  shortest-unique display remains part of the CLI/reader cutover. Full IDs remain
-  authoritative. This does not change Jack's accepted scope.
+  prefixes, rejecting ambiguity. Shared readers display the shortest unique prefix
+  of at least twelve digits; stored IDs/labels retain full UUIDs. Automation uses
+  full IDs. This does not change Jack's accepted scope.
 - **Callback follow-up:** interpret host as origin. Resolve disconnect handling and
   whether X may access Linear directly after origin loss. The narrower proposal
   retains uncertain-write IDs and authored text for deliberate retry.

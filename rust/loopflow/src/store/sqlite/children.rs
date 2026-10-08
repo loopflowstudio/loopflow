@@ -161,11 +161,12 @@ impl SqliteStore {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::planning::TaskPatch,
+        patch: &crate::pm::PmItemUpdate,
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        require_task_not_deleted(&tx, &task)?;
         if super::local_planning::project_authority_on(&tx, &task.project_id)?
             != crate::planning::PlanningAuthority::Local
         {
@@ -179,7 +180,7 @@ impl SqliteStore {
             ));
         }
         if patch
-            .title
+            .name
             .as_ref()
             .is_some_and(|title| title.trim().is_empty())
         {
@@ -188,10 +189,35 @@ impl SqliteStore {
         tx.execute(
             "UPDATE tasks SET issue_title=COALESCE(?2, issue_title),
                 issue_description=COALESCE(?3, issue_description),
-                planning_revision=planning_revision+1, updated_at=?4
+                planning_revision=planning_revision+1, updated_at=?4,
+                planning_assignee=CASE WHEN ?5 THEN ?6 ELSE planning_assignee END
              WHERE id=?1",
-            params![id.as_str(), patch.title, patch.description, now_unix()],
+            params![
+                id.as_str(),
+                patch.name,
+                patch.description,
+                now_unix(),
+                patch.assignee.is_some(),
+                patch.assignee.as_ref().and_then(|id| id.as_deref())
+            ],
         )?;
+        if let Some(rank) = patch.rank {
+            let mut query = tx.prepare("SELECT id FROM tasks WHERE project_id=?1 AND id!=?2 AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id")?;
+            let mut ordered = query
+                .query_map(params![task.project_id.as_str(), id.as_str()], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            ordered.insert((rank as usize).min(ordered.len()), id.to_string());
+            for (rank, task_id) in ordered.iter().enumerate() {
+                tx.execute(
+                    "UPDATE tasks SET planning_rank=?2,
+                    planning_revision=planning_revision+CASE WHEN id=?3 THEN 0 ELSE 1 END
+                    WHERE id=?1 AND planning_rank!=?2",
+                    params![task_id, rank as u32, id.as_str()],
+                )?;
+            }
+        }
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(task)
@@ -888,6 +914,7 @@ impl SqliteStore {
                 project.iteration,
                 project.plan.workflow,
                 project.plan.status.as_str(),
+                project.plan.summary,
             ],
         )?;
         inherit_project_placement(&transaction, &project.id)?;
@@ -1082,22 +1109,34 @@ fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
     Ok(())
 }
 
-fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let deleted: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?1 AND issue_id=?2)",
-        params![
-            task.wave_id.as_str(),
-            task.plan.linear_id.as_ref().map(|id| id.as_str())
-        ],
-        |row| row.get(0),
-    )?;
-    if deleted {
+pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
+    if task_deleted_on(conn, task)? {
         return Err(StoreError::InvalidAuthority(format!(
             "Task {} was deleted; create a new Task",
             task.plan.identifier
         )));
     }
     Ok(())
+}
+
+pub(super) fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
+    if super::local_planning::project_authority_on(conn, &task.project_id)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND planning_deleted_at IS NOT NULL)",
+            [task.id.as_str()],
+            |row| row.get(0),
+        )?);
+    }
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?1 AND issue_id=?2)",
+        params![
+            task.wave_id.as_str(),
+            task.plan.linear_id.as_ref().map(|id| id.as_str())
+        ],
+        |row| row.get(0),
+    )?)
 }
 
 fn accept_registration_planning(conn: &Connection, task: &mut Task) -> StoreResult<()> {
@@ -1283,11 +1322,20 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
 )";
-const TASK_VISIBLE: &str = "NOT EXISTS (
-    SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id
+const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL AND (
+    EXISTS(SELECT 1 FROM waves w WHERE w.id=p.wave_id AND w.personal_plan_id IS NOT NULL)
+    OR NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)
 )";
-const TASK_COLUMNS: &str = "SELECT
-    t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
+const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
+    SELECT 12 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
+) SELECT
+    t.id, t.external_issue_id,
+    CASE WHEN t.issue_identifier='lf-' || substr(t.id,6) THEN
+        'lf-' || substr(t.id,6,COALESCE((SELECT min(n) FROM selector_lengths
+            WHERE NOT EXISTS(SELECT 1 FROM tasks other WHERE other.id!=t.id
+                AND substr(other.id,6,n)=substr(t.id,6,n))),32))
+        ELSE t.issue_identifier END,
+    t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision
@@ -1890,19 +1938,19 @@ const PROJECT_INSERT: &str = "INSERT INTO projects (
     id, wave_id, external_project_id, project_slug, project_name,
     project_prompt_context, pm_snapshot_synced_at,
     abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, workflow, status
+    created_at, updated_at, iteration, workflow, status, project_summary
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
 )";
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, workflow, status
+    created_at, updated_at, iteration, workflow, status, project_summary
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, project_prompt_context,
     wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
-    created_at, updated_at, iteration, workflow, status
+    created_at, updated_at, iteration, workflow, status, project_summary
     FROM projects WHERE id=?1";
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
     let abandon_intent = match (
@@ -1918,6 +1966,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
         plan: ProjectPlan {
+            summary: row.get(14)?,
             linear_id: row
                 .get::<_, Option<String>>(1)?
                 .map(LinearProjectId::from_raw),
@@ -2014,7 +2063,8 @@ mod local_planning_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
-    use crate::planning::{NewTask, TaskPatch};
+    use crate::planning::NewTask;
+    use crate::pm::PmItemUpdate;
     use crate::store::sqlite::SqliteStore;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
@@ -2041,9 +2091,10 @@ mod local_planning_tests {
             .edit_local_task(
                 &task.id,
                 task.plan.revision,
-                &TaskPatch {
-                    title: Some("Fix quoted input".into()),
+                &PmItemUpdate {
+                    name: Some("Fix quoted input".into()),
                     description: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -2053,9 +2104,10 @@ mod local_planning_tests {
             .edit_local_task(
                 &task.id,
                 0,
-                &TaskPatch {
-                    title: Some("Stale".into()),
-                    description: None
+                &PmItemUpdate {
+                    name: Some("Stale".into()),
+                    description: None,
+                    ..Default::default()
                 }
             )
             .is_err());
@@ -2124,9 +2176,10 @@ mod local_planning_tests {
             .edit_local_task(
                 &local.id,
                 0,
-                &TaskPatch {
-                    title: Some("A mapping does not transfer authority".into()),
+                &PmItemUpdate {
+                    name: Some("A mapping does not transfer authority".into()),
                     description: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -2144,6 +2197,7 @@ mod local_planning_tests {
             description: String::new(),
         };
         let first = store.create_local_task(&input).unwrap();
+        assert_eq!(first.plan.identifier, "lf-0123456789ab");
         assert!(store.task_by_issue("lf-0123456789a").unwrap().is_none());
         assert_eq!(
             store.task_by_issue("lf-0123456789ab").unwrap().unwrap().id,
@@ -2156,6 +2210,9 @@ mod local_planning_tests {
             })
             .unwrap();
         assert!(store.task_by_issue("lf-0123456789ab").is_err());
+        let first = store.task(&first.id).unwrap().unwrap();
+        assert_eq!(first.plan.identifier.len(), 35);
+        assert_eq!(second.plan.identifier.len(), 35);
         for task in [first, second] {
             assert_eq!(
                 store.task_by_issue(task.id.as_str()).unwrap().unwrap().id,

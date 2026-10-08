@@ -484,6 +484,14 @@ pub enum SkillCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCommand {
+    /// Update a Project's name or summary
+    Edit {
+        project: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+    },
     /// Select and inspect reusable Workflows
     Workflow {
         #[command(subcommand)]
@@ -493,8 +501,13 @@ pub enum ProjectCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectWorkflowCommand {
+    /// Read the authored definition without creating a repository file
+    Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
+        /// Include this Project's personal Wave definitions
+        #[arg(long)]
+        project: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -995,6 +1008,14 @@ pub enum TaskCommand {
         title: Option<String>,
         #[arg(long)]
         notes: Option<String>,
+        /// Zero-based position in the Project's Task order
+        #[arg(long)]
+        rank: Option<u32>,
+        /// Assignee identity; provider user ID in connected plans
+        #[arg(long, conflicts_with = "unassign")]
+        assignee: Option<String>,
+        #[arg(long)]
+        unassign: bool,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },

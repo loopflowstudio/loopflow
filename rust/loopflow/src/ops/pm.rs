@@ -1112,12 +1112,23 @@ pub(crate) async fn pm_refile_async(
     let store = pm_store().await?;
     let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
     let ResolvedTask { wave, item, .. } = resolve_owned_issue(repo, issue).await?;
-    let placed = store
+    let task = store
         .get_task_by_issue(&item.id)
         .await
-        .map_err(|error| message(&error))?
-        .is_some();
-    if placed && wave != to_wave {
+        .map_err(|error| message(&error))?;
+    let recorded = task
+        .as_ref()
+        .map(|task| store.sqlite.task_work(&task.id))
+        .transpose()
+        .map_err(|error| message(&error))?;
+    let has_work = task.as_ref().is_some_and(|task| task.worktree.is_some())
+        || recorded.as_ref().is_some_and(|work| {
+            !work.sessions.is_empty()
+                || !work.processes.is_empty()
+                || !work.flow_processes.is_empty()
+                || work.workflow.is_some()
+        });
+    if has_work && wave != to_wave {
         return Err(OpsError::Message(format!(
             "{} has work recorded under wave/{wave}; a placed Task keeps its Wave",
             item.identifier
@@ -1148,6 +1159,17 @@ pub(crate) async fn pm_refile_async(
                 item.identifier, project.name
             )));
         }
+    }
+    if let Some(task) = task {
+        let destination = store
+            .get_project_by_project(&project.id)
+            .await
+            .map_err(|error| message(&error))?
+            .ok_or_else(|| OpsError::Message("destination Project is unavailable".into()))?;
+        store
+            .sqlite
+            .refile_unplaced_task(&task.id, &destination.id)
+            .map_err(|error| message(&error))?;
     }
     Ok(PmUpdateResult {
         wave: to_wave.to_string(),
@@ -1366,6 +1388,9 @@ pub(crate) async fn pm_update_async(
         apply_update(&ctx, &options, progress).await?;
     }
     let reconcile = async {
+        if matches!(&options.update, PmTaskUpdate::Edit(update) if update.rank.is_some()) {
+            refresh_pm_snapshot(repo, &wave, &ctx).await?;
+        }
         progress.status(&format!("confirming Linear task {}", item.identifier));
         let record = crate::ops::task_pm::resolve_task_async(repo, &item.id, PmRefresh::Force).await?;
         if record.wave != wave {
@@ -1375,6 +1400,13 @@ pub(crate) async fn pm_update_async(
             )));
         }
         let item = &record.item;
+        if let PmTaskUpdate::Edit(update) = &options.update {
+            if update.name.as_ref().is_some_and(|name| name != &item.name)
+                || update.description.as_ref().is_some_and(|description| description != &item.description)
+                || update.assignee.as_ref().is_some_and(|assignee| assignee != &item.assignee) {
+                return Err(OpsError::Message("Task edit was sent but its readback differs".into()));
+            }
+        }
         if matches!(options.update, PmTaskUpdate::Complete { .. }) {
             validate_completion_outcome(item)?;
         }

@@ -29,7 +29,7 @@ impl Store {
         &self,
         id: &TaskId,
         expected_revision: u64,
-        patch: &crate::planning::TaskPatch,
+        patch: &crate::pm::PmItemUpdate,
     ) -> StoreResult<Task> {
         let id = id.clone();
         let patch = patch.clone();

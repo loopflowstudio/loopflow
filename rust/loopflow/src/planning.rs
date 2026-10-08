@@ -57,6 +57,7 @@ validated_string_id!(LinearProjectId, "Linear project id");
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectPlan {
+    pub summary: String,
     /// Optional provider mapping; the owning Project carries durable identity.
     pub linear_id: Option<LinearProjectId>,
     pub slug: String,
@@ -103,10 +104,4 @@ pub struct NewTask {
     pub project_id: crate::durable::ProjectId,
     pub title: String,
     pub description: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskPatch {
-    pub title: Option<String>,
-    pub description: Option<String>,
 }

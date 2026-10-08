@@ -202,6 +202,15 @@ pub fn names_workflow(name: &str, repo: &Path) -> bool {
 
 /// Load a Workflow; a local Workflow overrides only a builtin Workflow.
 pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinition>, LoadError> {
+    let Some(content) = workflow_source(name, repo)? else {
+        return Ok(None);
+    };
+    parse_workflow(name, &content, repo)
+        .map(Some)
+        .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
+}
+
+pub fn workflow_source(name: &str, repo: &Path) -> Result<Option<String>, LoadError> {
     let content = match workflow_path(name, repo) {
         Some(path) => fs::read_to_string(path)?,
         None => match builtin_workflow(name) {
@@ -209,9 +218,7 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
             None => return Ok(None),
         },
     };
-    parse_workflow(name, &content, repo)
-        .map(Some)
-        .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
+    Ok(Some(content))
 }
 
 pub fn parse_workflow(

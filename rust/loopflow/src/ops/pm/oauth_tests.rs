@@ -109,6 +109,7 @@ async fn pm_read_linear_oauth_recovers() {
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("project-1").unwrap()),

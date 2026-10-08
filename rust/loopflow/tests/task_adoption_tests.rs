@@ -97,6 +97,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             id: ProjectId::new(),
             wave_id: wave.id().clone(),
             plan: ProjectPlan {
+                summary: String::new(),
                 linear_id: Some(LinearProjectId::new("project-1").unwrap()),
                 slug: "chapter".into(),
                 name: "Chapter".into(),

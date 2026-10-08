@@ -269,6 +269,23 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
+            if store
+                .sqlite
+                .project_planning_authority(&task.project_id)
+                .map_err(task_error)?
+                == crate::planning::PlanningAuthority::Local
+            {
+                if !store.sqlite.task_deleted(&task).map_err(task_error)? {
+                    if super::task_work_status(&store, &task).await? != WorkStatus::Done {
+                        abandon(&repo, issue, false).await?;
+                    }
+                    store
+                        .sqlite
+                        .delete_local_task(&task.id)
+                        .map_err(task_error)?;
+                }
+                return Ok(task.plan.identifier);
+            }
             let deleted = store
                 .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())
                 .await

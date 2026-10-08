@@ -318,8 +318,10 @@ final class WorkModel {
         flowCatalogReadings[repoPath ?? ""] ?? .loading
     }
     private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
+    private var workflowProject: String? { breadcrumb?.wave?.roadmap.projects.currentProject?.id }
+    private var workflowCatalogKey: String { "\(repoPath ?? "")|\(workflowProject ?? "")" }
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
-        workflowCatalogReadings[repoPath ?? ""] ?? .loading
+        workflowCatalogReadings[workflowCatalogKey] ?? .loading
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -1098,7 +1100,7 @@ final class WorkModel {
     /// from an editor, read the catalogue this window already shows again, so
     /// a saved mistake shows as invalid.
     func rereadDefinitions() async {
-        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[repoPath ?? ""] != nil else { return }
+        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[workflowCatalogKey] != nil else { return }
         await loadFlowCatalog(force: true)
         await loadWorkflowCatalog(force: true)
     }
@@ -1116,13 +1118,29 @@ final class WorkModel {
     }
 
     func loadWorkflowCatalog(force: Bool = false) async {
-        let key = repoPath ?? ""
+        let key = workflowCatalogKey
         if !force, workflowCatalogReadings[key]?.value != nil { return }
         let previous = workflowCatalogReadings[key]?.value
         let result: Result<[WorkflowCatalogEntry], Error>
-        do { result = .success(try await query.workflowCatalog(cwd: repoPath)) }
+        do { result = .success(try await query.workflowCatalog(cwd: repoPath, project: workflowProject)) }
         catch { result = .failure(error) }
         workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
+    }
+
+    func workflowSource(_ name: String, wave: WaveSnapshot) async throws -> String {
+        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
+            throw RegistryQueryError("Current Project is unavailable")
+        }
+        return try await query.workflowSource(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+    }
+
+    func savePersonalWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
+        guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
+            throw RegistryQueryError("Current Project is unavailable")
+        }
+        try await query.savePersonalWorkflow(name, content: content, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+        await refresh()
+        await loadWorkflowCatalog(force: true)
     }
 
     /// Why a Wave's last workflow or source change was refused, by Wave.

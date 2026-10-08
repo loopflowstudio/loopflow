@@ -372,9 +372,42 @@ esac
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
     assert_eq!(flows[0].1.len(), 1);
+    // Provider deletion remains a refusal at native resume; it grants no provider launch.
+    // Change only planning ownership in this disposable fixture, retaining the Session.
+    fixture.db().execute("UPDATE waves SET personal_plan_id=NULL WHERE id=(SELECT p.wave_id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1)", [task_id]).unwrap();
+    fixture
+        .db()
+        .execute(
+            "UPDATE tasks SET external_issue_id='fixture-deleted' WHERE id=?1",
+            [task_id],
+        )
+        .unwrap();
+    fixture.db().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT p.wave_id,'fixture-deleted','FIX-1',1 FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1", [task_id]).unwrap();
+    let refused = fixture
+        .command(&["session", "resume", &session])
+        .current_dir(worktree)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("deleted"),
+        "{refused:?}"
+    );
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    fixture.db().execute("UPDATE waves SET personal_plan_id=(SELECT id FROM personal_plans LIMIT 1) WHERE id=(SELECT p.wave_id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1)", [task_id]).unwrap();
+    // A retained alias/deletion observation cannot transfer personal authority.
     fixture.json(&["task", "abandon", task_id, "--json"]);
     let terminal = fixture.run(&["-b", "--agent", "codex", "task", "run", task_id]);
     assert!(!terminal.status.success());
+    assert_eq!(fixture.count("agent_sessions"), 2);
+    let removed = fixture.run(&["task", "delete", task_id]);
+    assert!(removed.status.success(), "{removed:?}");
+    let refused = fixture
+        .command(&["session", "resume", &session])
+        .current_dir(fixture.repo.path())
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
     assert_eq!(fixture.count("agent_sessions"), 2);
     if worktree.exists() {
         std::fs::remove_dir_all(worktree).unwrap();

@@ -61,6 +61,7 @@ fn project(wave: &Wave) -> Project {
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
             linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),

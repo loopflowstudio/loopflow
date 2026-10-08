@@ -1,3 +1,4 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -22,7 +23,99 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("LF_USER_NAME", "Fixture Person")
         .args(args);
+    if home.join("bin").is_dir() {
+        let mut paths = vec![home.join("bin")];
+        paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        command.env("PATH", std::env::join_paths(paths).unwrap());
+    }
     command
+}
+
+#[test]
+fn personal_task_publishes_and_completes_after_verified_merge() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    for args in [
+        vec![
+            "remote".to_string(),
+            "set-url".into(),
+            "origin".into(),
+            "https://github.com/fixture/local.git".into(),
+        ],
+        vec![
+            "config".into(),
+            format!("url.{}.insteadOf", repo.bare_path().display()),
+            "https://github.com/fixture/local.git".into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .current_dir(repo.path())
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+    std::fs::create_dir(home.path().join("bin")).unwrap();
+    let gh = home.path().join("bin/gh");
+    std::fs::write(&gh, include_str!("../../../tests/fixtures/local_gh.sh")).unwrap();
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--title",
+            "Deliver locally owned work",
+            "--json",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
+    let worktree = Path::new(placed["worktree"].as_str().unwrap());
+    std::fs::write(worktree.join("proof.txt"), "Delivered work\n").unwrap();
+    lf(
+        worktree,
+        home.path(),
+        &["commit", "-m", "Deliver locally owned work"],
+    );
+    lf(
+        worktree,
+        home.path(),
+        &[
+            "pr",
+            "publish",
+            "--title",
+            "Deliver locally owned work",
+            "--body",
+            "Local planning through delivery.",
+        ],
+    );
+    let published = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_ne!(published["execution"]["status"], "done");
+    lf(worktree, home.path(), &["land", "-c"]);
+    let armed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_ne!(armed["execution"]["status"], "done");
+    assert!(home.path().join("gh-armed").exists());
+    let head = std::fs::read_to_string(home.path().join("gh-head")).unwrap();
+    assert!(Command::new("git")
+        .arg("--git-dir")
+        .arg(repo.bare_path())
+        .args(["update-ref", "refs/heads/main", head.trim()])
+        .status()
+        .unwrap()
+        .success());
+    std::fs::write(home.path().join("gh-merged"), "confirmed").unwrap();
+    lf(repo.path(), home.path(), &["pr", "reconcile"]);
+    let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_eq!(completed["execution"]["status"], "done");
+    assert_eq!(completed["execution"]["task_id"], id);
+    assert!(completed["planning"]["item"]["completed_at"].is_string());
+    assert!(
+        !home.path().join("gh-unexpected").exists(),
+        "{}",
+        std::fs::read_to_string(home.path().join("gh-unexpected")).unwrap_or_default()
+    );
 }
 
 fn lf(repo: &Path, home: &Path, args: &[&str]) -> Value {
@@ -37,6 +130,212 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> Value {
     }
     serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| Value::String(String::from_utf8(output.stdout).unwrap()))
+}
+
+#[test]
+fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "personal:inbox", "--json"],
+    );
+    let id = loopflow::durable::TaskId::new();
+    let args = [
+        "task",
+        "create",
+        "--title",
+        "Concurrent work",
+        "--creation-id",
+        id.as_str(),
+        "--json",
+    ];
+    let children: Vec<_> = (0..3)
+        .map(|_| {
+            command(repo.path(), home.path(), &args)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in children {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let task: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(task["id"], id.as_str());
+    }
+    let wave = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "personal:inbox", "--json"],
+    );
+    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
+    let git = Command::new("/bin/sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    assert!(git.status.success());
+    let git = String::from_utf8(git.stdout).unwrap();
+    std::fs::create_dir(home.path().join("bin")).unwrap();
+    let shim = home.path().join("bin/git");
+    std::fs::write(&shim, format!("#!/bin/sh\nif [ \"$1\" = worktree ] && [ \"$2\" = add ] && [ -f \"$LF_HOME/fail-checkout\" ]; then\n  rm \"$LF_HOME/fail-checkout\"\n  echo 'fixture: checkout interrupted' >&2\n  exit 1\nfi\nexec '{}' \"$@\"\n", git.trim().replace('\'', "'\\''"))).unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(home.path().join("fail-checkout"), "once").unwrap();
+    let failed = command(
+        repo.path(),
+        home.path(),
+        &["checkout", id.as_str(), "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!failed.status.success());
+    assert!(String::from_utf8_lossy(&failed.stderr).contains("fixture: checkout interrupted"));
+    let retained = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", id.as_str(), "--json"],
+    );
+    assert_eq!(retained["execution"]["task_id"], id.as_str());
+    assert_eq!(retained["execution"]["prs"].as_array().unwrap().len(), 1);
+    let placed = lf(
+        repo.path(),
+        home.path(),
+        &["checkout", id.as_str(), "--json"],
+    );
+    assert_eq!(
+        placed["prs"][0]["id"],
+        retained["execution"]["prs"][0]["id"]
+    );
+    assert_eq!(placed["worktree"], retained["execution"]["worktree"]);
+    assert!(Path::new(placed["worktree"].as_str().unwrap()).is_dir());
+    std::fs::remove_dir_all(placed["worktree"].as_str().unwrap()).unwrap();
+}
+
+#[test]
+fn personal_rotation_commits_all_waves_and_serializes_new_work() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let mut entries = Vec::new();
+    let mut predecessors = Vec::new();
+    let successor = uuid::Uuid::new_v4().to_string();
+    for name in ["personal:first", "personal:second"] {
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "ensure", name, "--json"],
+        );
+        let wave = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", name, "--json"],
+        );
+        predecessors.push(
+            wave["projects"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|project| project["current"] == true)
+                .unwrap()
+                .clone(),
+        );
+        entries.push(serde_json::json!({"wave_id":wave["wave"]["id"],"successor_id":successor,"create":true,"project_name":"Next","content":{"workflow":"","metric_targets":[],"krs":[{"text":"Keep private work","holds":false}]}}));
+    }
+    let path = home.path().join("rotation.json");
+    let args = [
+        "repo",
+        "new-chapter",
+        "Next",
+        "--plan",
+        path.to_str().unwrap(),
+        "--json",
+    ];
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({"name":"Next","waves":entries})).unwrap(),
+    )
+    .unwrap();
+    let failed = command(repo.path(), home.path(), &args).output().unwrap();
+    assert!(!failed.status.success());
+    for (i, name) in ["personal:first", "personal:second"].iter().enumerate() {
+        let wave = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", name, "--json"],
+        );
+        assert!(predecessors[i].is_object(), "{wave}");
+        assert_eq!(
+            wave["projects"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|project| project["current"] == true)
+                .unwrap(),
+            &predecessors[i]
+        );
+    }
+    entries[1]["successor_id"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({"name":"Next","waves":entries})).unwrap(),
+    )
+    .unwrap();
+    let children: Vec<_> = (0..3)
+        .map(|_| {
+            command(
+                repo.path(),
+                home.path(),
+                &[
+                    "task",
+                    "create",
+                    "--wave",
+                    "personal:first",
+                    "--title",
+                    "Concurrent work",
+                    "--json",
+                ],
+            )
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap()
+        })
+        .collect();
+    lf(repo.path(), home.path(), &args);
+    let current = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "personal:first", "--json"],
+    );
+    let destination = &current["projects"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|project| project["current"] == true)
+        .unwrap()["id"];
+    assert_ne!(destination, &predecessors[0]["id"]);
+    let mut identities = std::collections::HashSet::new();
+    for child in children {
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let created: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let id = created["id"].as_str().unwrap();
+        assert!(identities.insert(id.to_string()));
+        let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+        let project = &status["planning"]["project"]["id"];
+        assert!(project == destination || project == &predecessors[0]["id"]);
+        assert!(status["execution"]["worktree"].is_null());
+    }
+    assert!(!repo.path().join("wave").exists());
 }
 
 #[test]
@@ -106,6 +405,81 @@ fn public_local_plan_matches_desktop() {
 }
 
 #[test]
+fn personal_fields_preserve_order_assignment_and_project_summary() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let fields: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/planning_fields.json"
+    ))
+    .unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "First", "--json"],
+    );
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Second", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "edit",
+            id,
+            "--title",
+            fields["name"].as_str().unwrap(),
+            "--notes",
+            fields["description"].as_str().unwrap(),
+            "--rank",
+            "0",
+            "--assignee",
+            fields["assignee"].as_str().unwrap(),
+        ],
+    );
+    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    for field in ["name", "description", "rank", "assignee"] {
+        assert_eq!(status["planning"]["item"][field], fields[field]);
+    }
+    let project = status["planning"]["project"]["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "project",
+            "edit",
+            project,
+            "--name",
+            "Current",
+            "--summary",
+            fields["summary"].as_str().unwrap(),
+        ],
+    );
+    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_eq!(status["planning"]["project"]["summary"], fields["summary"]);
+    assert_eq!(status["planning"]["project"]["name"], "Current");
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "edit", id, "--unassign", "--notes", ""],
+    );
+    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert!(status["planning"]["item"]["assignee"].is_null());
+    assert_eq!(status["planning"]["item"]["description"], "");
+    assert_eq!(status["planning"]["item"]["rank"], 0);
+    let wave = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "personal:inbox", "--json"],
+    );
+    assert_eq!(wave["tasks"]["items"][0]["task"]["id"], id);
+    assert_eq!(wave["tasks"]["items"][1]["task"]["rank"], 1);
+}
+
+#[test]
 fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
@@ -149,12 +523,70 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
         status["planning"]["project"]["id"],
         other["planning"]["project"]["id"]
     );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "rename",
+            "personal:tools",
+            "--name",
+            "instruments",
+            "--json",
+        ],
+    );
+    let renamed = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "personal:instruments/parser", "--json"],
+    );
+    assert_eq!(renamed["tasks"]["items"][0]["task"]["id"], created["id"]);
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "refile",
+            created["id"].as_str().unwrap(),
+            "--wave",
+            "personal:instruments/lexer",
+        ],
+    );
+    let moved = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", created["id"].as_str().unwrap(), "--json"],
+    );
+    assert_ne!(
+        moved["planning"]["project"]["id"],
+        status["planning"]["project"]["id"]
+    );
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:tools/parser", "--json"],
+        &["wave", "status", "personal:instruments/parser", "--json"],
     );
-    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
+    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
+    let wave_id = wave["wave"]["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", wave_id, "--json"],
+    );
+    let by_id = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            wave_id,
+            "--title",
+            "Stable scope",
+            "--json",
+        ],
+    );
+    assert!(by_id["id"].as_str().unwrap().starts_with("task_"));
     assert!(!repo.path().join("wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
@@ -344,6 +776,34 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
         &["task", "status", other_id, "--json"],
     );
     assert_eq!(canceled["execution"]["status"], "abandoned");
+    for _ in 0..2 {
+        lf(repo.path(), home.path(), &["task", "delete", other_id]);
+    }
+    let wave = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "status", "personal:inbox", "--json"],
+    );
+    assert!(wave["tasks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["task"]["id"] != other_id));
+    let retained = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", other_id, "--json"],
+    );
+    assert_eq!(retained["execution"]["status"], "abandoned");
+    assert_eq!(retained["planning_state"], "removed");
+    let rejected = command(
+        repo.path(),
+        home.path(),
+        &["task", "edit", other_id, "--title", "Late edit"],
+    )
+    .output()
+    .unwrap();
+    assert!(!rejected.status.success());
     assert!(!repo.path().join("wave").exists());
     assert!(!repo.path().join(".lf/config.yaml").exists());
     assert!(!repo.path().join(".lf/workflows").exists());
@@ -392,6 +852,42 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             definition.to_str().unwrap(),
         ],
     );
+    let catalog = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "project",
+            "workflow",
+            "list",
+            "--project",
+            project_id,
+            "--json",
+        ],
+    );
+    let private = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == "personal:proof")
+        .unwrap();
+    assert_eq!(private["source"], "personal");
+    assert!(private["workflow"].is_object());
+    let source = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "project",
+            "workflow",
+            "source",
+            project_id,
+            "personal:proof",
+        ],
+    );
+    assert_eq!(
+        source.as_str().unwrap().trim(),
+        std::fs::read_to_string(&definition).unwrap().trim()
+    );
+    assert!(!repo.path().join(".lf/workflows").exists());
     let placed = lf(
         repo.path(),
         home.path(),
@@ -447,6 +943,15 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let rotation = lf(repo.path(), home.path(), &rotate);
     assert_eq!(rotation["waves"][0]["successor"]["status"], "started");
     lf(repo.path(), home.path(), &rotate);
+    let original_plan = std::fs::read_to_string(&plan_file).unwrap();
+    std::fs::write(
+        &plan_file,
+        original_plan.replace("Retain active work", "Conflicting retry"),
+    )
+    .unwrap();
+    let conflict = command(repo.path(), home.path(), &rotate).output().unwrap();
+    assert!(!conflict.status.success());
+    std::fs::write(&plan_file, original_plan).unwrap();
     let moved = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(
         moved["planning"]["project"]["id"],

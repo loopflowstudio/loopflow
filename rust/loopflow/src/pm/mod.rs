@@ -311,11 +311,12 @@ pub struct PmItemCreate {
     pub description: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PmItemUpdate {
-    #[serde(default)]
+    pub rank: Option<u32>,
+    /// Omitted preserves assignment; explicit None clears it.
+    pub assignee: Option<Option<String>>,
     pub name: Option<String>,
-    #[serde(default)]
     pub description: Option<String>,
 }
 
@@ -346,25 +347,6 @@ pub struct IssueComment {
     pub author_id: Option<String>,
     /// Provider display name for attribution, independent of the provider user ID.
     pub author_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PmTextUpdate<'a> {
-    pub(crate) name: Option<&'a str>,
-    pub(crate) description: Option<&'a str>,
-}
-
-impl PmItemUpdate {
-    pub(crate) fn text_update(&self) -> Option<PmTextUpdate<'_>> {
-        if self.name.is_none() && self.description.is_none() {
-            return None;
-        }
-
-        Some(PmTextUpdate {
-            name: self.name.as_deref(),
-            description: self.description.as_deref(),
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -696,29 +678,6 @@ pub(crate) mod test_server {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pm_item_update_text_update_skips_empty_changes() {
-        let update = PmItemUpdate::default();
-
-        assert_eq!(update.text_update(), None);
-    }
-
-    #[test]
-    fn pm_item_update_text_update_preserves_name_and_description() {
-        let update = PmItemUpdate {
-            name: Some("Ship roadmap".to_string()),
-            description: Some("Build the roadmap client".to_string()),
-        };
-
-        assert_eq!(
-            update.text_update(),
-            Some(PmTextUpdate {
-                name: Some("Ship roadmap"),
-                description: Some("Build the roadmap client"),
-            })
-        );
-    }
 
     #[test]
     fn project_slug_is_deterministic() {

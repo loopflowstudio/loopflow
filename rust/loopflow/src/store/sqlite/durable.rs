@@ -19,6 +19,8 @@ impl SqliteStore {
     /// planned in its Wave's current chapter.
     pub(crate) fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let task = super::children::task_on(&conn, task_id)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&conn, &task)?;
         let work = WorkRef::Task(task_id.clone());
         require_ready_work(&conn, &work)?;
         let abandoning: bool = conn.query_row(
@@ -860,6 +862,7 @@ mod durable_store_tests {
         let project = Project {
             id: project_id.clone(),
             plan: ProjectPlan {
+                summary: String::new(),
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 linear_id: Some(

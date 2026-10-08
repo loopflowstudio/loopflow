@@ -2022,6 +2022,26 @@ impl SqliteStore {
                     (Some(parent), name)
                 });
             let repo = update.target.repo().to_string();
+            let personal: bool = tx.query_row(
+                "SELECT personal_plan_id IS NOT NULL FROM waves WHERE id=?1",
+                [&update.wave_id],
+                |row| row.get(0),
+            )?;
+            let name = if personal && parent_slug.is_none() {
+                name.strip_prefix("personal:").ok_or_else(|| {
+                    StoreError::InvalidAuthority(
+                        "personal Wave relocation retains personal authority".into(),
+                    )
+                })?
+            } else {
+                name
+            };
+            if personal {
+                tx.execute("INSERT INTO personal_plans(id,repo) VALUES(?1,?2) ON CONFLICT(repo) DO NOTHING",
+                    params![crate::durable::PlanId::new().as_str(), repo])?;
+                tx.execute("UPDATE waves SET personal_plan_id=(SELECT id FROM personal_plans WHERE repo=?2) WHERE id=?1",
+                    params![update.wave_id, repo])?;
+            }
             let parent: Option<WaveId> = match parent_slug {
                 Some(slug) => Some(tx.query_row(
                     "SELECT id FROM wave_addresses

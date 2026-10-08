@@ -517,13 +517,13 @@ fn project_accepted_planning(
         };
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
-             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10)
+             project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,?10,?11)
              ON CONFLICT(id) DO UPDATE SET project_slug=excluded.project_slug,
              project_name=excluded.project_name,project_prompt_context=excluded.project_prompt_context,
-             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status",
+             pm_snapshot_synced_at=excluded.pm_snapshot_synced_at,workflow=excluded.workflow,status=excluded.status,project_summary=excluded.project_summary",
             params![id.as_str(),wave_id,project.id,project.slug,project.name,
-                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str()],
+                project.prompt_context(),observed_at,super::super::rows::now_unix(),project.workflow,project.status.as_str(),project.summary],
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }

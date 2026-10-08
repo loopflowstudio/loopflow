@@ -160,6 +160,14 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     )
     .await
     .map_err(project_error)?;
+    if let Some(name) = wave.slug().strip_prefix("personal:") {
+        return super::task::local_project_item(
+            store
+                .sqlite
+                .ensure_personal_project(wave.repo(), name)
+                .map_err(project_error)?,
+        );
+    }
     super::pm::require_planning_home(&store, &wave).await?;
     store
         .sqlite
@@ -463,23 +471,24 @@ pub(crate) async fn import_binding(
 
 /// Address a retained Project by durable ID, provider ID, or unique slug/name.
 /// A read uses accepted planning; a write refreshes provider facts under its lock.
-pub async fn workflow(
-    repo: &Path,
-    selector: &str,
-    selection: Option<&str>,
-    file: Option<&Path>,
-) -> OpsResult<PmProject> {
-    let store = super::pm::pm_store().await?;
+async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResult<Project> {
+    let repo = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(project_error)?
+        .to_string();
+    let waves = store.list_waves(None).await.map_err(project_error)?;
     let projects = store.list_projects(None).await.map_err(project_error)?;
-    let mut matches = projects.iter().filter(|project| {
-        project.id.as_str() == selector
-            || project
-                .plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == selector)
-            || project.plan.slug == selector
-            || project.plan.name == selector
+    let mut matches = projects.into_iter().filter(|project| {
+        waves
+            .iter()
+            .any(|wave| wave.id() == &project.wave_id && wave.repo() == repo)
+            && (project.id.as_str() == selector
+                || project
+                    .plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == selector)
+                || project.plan.slug == selector
+                || project.plan.name == selector)
     });
     let project = matches
         .next()
@@ -487,6 +496,126 @@ pub async fn workflow(
     if matches.next().is_some() {
         return Err(project_error("Project name is ambiguous; use its ID"));
     }
+    Ok(project)
+}
+
+pub async fn workflow_catalog(
+    repo: &Path,
+    selector: Option<&str>,
+) -> OpsResult<Vec<crate::engine::workflow::WorkflowCatalogEntry>> {
+    let mut entries = crate::engine::workflow::workflow_catalog(repo).map_err(project_error)?;
+    if let Some(selector) = selector {
+        let store = super::pm::pm_store().await?;
+        let project = resolve_project(&store, repo, selector).await?;
+        for (name, content) in store
+            .sqlite
+            .personal_workflows(&project.wave_id)
+            .map_err(project_error)?
+        {
+            let name = format!("personal:{name}");
+            let (workflow, unavailable) =
+                match crate::engine::workflow::parse_workflow(&name, &content, repo) {
+                    Ok(workflow) => (Some(workflow), None),
+                    Err(error) => (None, Some(error)),
+                };
+            entries.push(crate::engine::workflow::WorkflowCatalogEntry {
+                name,
+                source: Some("personal".into()),
+                workflow,
+                unavailable,
+            });
+        }
+    }
+    Ok(entries)
+}
+
+pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
+    let store = super::pm::pm_store().await?;
+    let project = resolve_project(&store, repo, selector).await?;
+    let content = if let Some(name) = name.strip_prefix("personal:") {
+        store
+            .sqlite
+            .personal_workflow(&project.wave_id, name)
+            .map_err(project_error)?
+    } else {
+        crate::engine::workflow::workflow_source(name, repo).map_err(project_error)?
+    };
+    content.ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
+}
+
+pub async fn edit(
+    repo: &Path,
+    selector: &str,
+    name: Option<&str>,
+    summary: Option<&str>,
+) -> OpsResult<()> {
+    if name.is_none() && summary.is_none() {
+        return Err(project_error("project edit requires --name or --summary"));
+    }
+    if name.is_some_and(|name| name.trim().is_empty()) {
+        return Err(project_error("Project name cannot be empty"));
+    }
+    let store = super::pm::pm_store().await?;
+    let project = resolve_project(&store, repo, selector).await?;
+    let wave = store
+        .get_wave(&project.wave_id)
+        .await
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("Project Wave is unavailable"))?;
+    let acquisition = super::pm::lock_wave_planning(&wave).await?;
+    if store
+        .sqlite
+        .project_planning_authority(&project.id)
+        .map_err(project_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return store
+            .sqlite
+            .edit_local_project(&project.id, name, summary)
+            .map_err(project_error);
+    }
+    let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+    let id = project.plan.linear_id()?.as_str();
+    let current = require_project(&ctx, id).await?;
+    accept_project(
+        &store,
+        &wave,
+        &ctx,
+        current,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        &acquisition,
+    )
+    .await?;
+    ctx.client
+        .edit_project(id, name, summary)
+        .await
+        .map_err(project_error)?;
+    let edited = require_project(&ctx, id).await?;
+    if name.is_some_and(|name| name != edited.name)
+        || summary.is_some_and(|summary| summary != edited.summary)
+    {
+        return Err(project_error("Project edit was sent but readback differs; inspect its current values before retrying"));
+    }
+    accept_project(
+        &store,
+        &wave,
+        &ctx,
+        edited,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+        &acquisition,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn workflow(
+    repo: &Path,
+    selector: &str,
+    selection: Option<&str>,
+    file: Option<&Path>,
+) -> OpsResult<PmProject> {
+    let store = super::pm::pm_store().await?;
+    let project = resolve_project(&store, repo, selector).await?;
     let wave = store
         .get_wave(&project.wave_id)
         .await

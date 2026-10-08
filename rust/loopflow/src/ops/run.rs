@@ -319,6 +319,7 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                summary: String::new(),
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
                 linear_id: Some(LinearProjectId::new(planning_id).unwrap()),

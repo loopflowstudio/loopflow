@@ -161,9 +161,8 @@ class _Tui:
         raise AssertionError("TUI did not become ready: " + "\n".join(self.screen.display))
 
     def has_title(self, title: str) -> bool:
-        return any(
-            title.encode() in value for value in re.findall(rb"\x1b\][02];([^\x07]*)\x07", self.raw)
-        )
+        titles = re.findall(rb"\x1b\][02];([^\x07]*)\x07", self.raw)
+        return bool(titles) and title.encode() in titles[-1]
 
     def close(self) -> None:
         if self.child.poll() is None:
@@ -187,7 +186,6 @@ def _probe(
     provider: str,
     unnamed: bool,
     output: Path,
-    codex_title_defaults: bool,
 ) -> None:
     # Short paths are required by AF_UNIX. Retain only synthetic evidence on failure.
     root = Path(tempfile.mkdtemp(prefix="lf-title-", dir="/tmp"))
@@ -239,7 +237,6 @@ def _probe(
         command = [str(executable), "--model", "sonnet"]
     else:
         env["CODEX_HOME"] = str(native)
-        title_config = "" if codex_title_defaults else '[tui]\nterminal_title=["thread-name"]\n'
         (native / "config.toml").write_text(f'''model="gpt-5.4"
 model_provider="fixture"
 cli_auth_credentials_store="file"
@@ -257,7 +254,6 @@ requires_openai_auth=false
 enabled=false
 [feedback]
 enabled=false
-{title_config}
 [projects."{work}"]
 trust_level="trusted"
 ''')
@@ -306,11 +302,7 @@ trust_level="trusted"
         tui = None
         if unnamed:
             (work / ".lf").mkdir()
-        resume = (
-            [str(executable), "resume", "--no-alt-screen", session]
-            if provider == "codex"
-            else [str(executable), "--model", "sonnet", "--resume", session]
-        )
+        resume = [*command, "resume" if provider == "codex" else "--resume", session]
         tui = _Tui(resume, work, env)
         tui.ready()
         tui.drain(5)
@@ -326,7 +318,6 @@ trust_level="trusted"
                 {
                     "provider": provider,
                     "unnamed_resume": unnamed,
-                    "codex_title_defaults": codex_title_defaults,
                     "passed": True,
                     "evidence": str(output),
                 }
@@ -364,22 +355,14 @@ def main() -> None:
     )
     parser.add_argument("--provider", choices=["claude", "codex"], required=True)
     parser.add_argument("--unnamed-resume", action="store_true")
-    parser.add_argument(
-        "--codex-title-defaults",
-        action="store_true",
-        help="Check Codex's default terminal title without enabling thread-name",
-    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.codex_title_defaults and args.provider != "codex":
-        parser.error("--codex-title-defaults requires --provider codex")
     _probe(
         args.lf.resolve(),
         args.native.resolve(),
         args.provider,
         args.unnamed_resume,
         args.output,
-        args.codex_title_defaults,
     )
 
 

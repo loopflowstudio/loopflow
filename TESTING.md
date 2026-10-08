@@ -112,9 +112,9 @@ OSC titles, native manual rename and resume. `--unnamed-resume` checks an older
 unnamed conversation: Claude passes; Codex currently reproduces the missing
 SessionStart callback when its daemon still has the thread loaded. No installed
 accounts, host shims, or cmux windows participate.
-`--codex-title-defaults` omits the fixture's `thread-name` presentation override;
-Codex 0.161.0 passes first-request naming, manual rename and named resume that way.
-This does not cover embedded execution or the configured shim.
+The probe uses native terminal-title defaults and checks the latest OSC title,
+so an earlier correct title cannot hide a later overwrite. This does not cover
+embedded execution or the configured shim.
 
 ```bash
 uv sync

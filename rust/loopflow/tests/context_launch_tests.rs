@@ -47,6 +47,10 @@ fn terminal_context_uses_files_and_preserves_failed_sessions() {
         let provider = bin.join(harness);
         fs::write(&provider, r#"#!/bin/sh
 if [ "$1" = --version ]; then echo fixture; exit 0; fi
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
 for arg in "$@"; do
     [ "${#arg}" -lt 122880 ] || exit 99
     printf '%s\n' "$arg" >> "$HOME/argv"
@@ -71,7 +75,7 @@ exit 23
         }
         let output = command
             .current_dir(repo.path())
-            .args(["--tui", "-a", harness, "probe", "Find the fixture goal."])
+            .args(["-i", "-a", harness, "probe", "Find the fixture goal."])
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
             .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))

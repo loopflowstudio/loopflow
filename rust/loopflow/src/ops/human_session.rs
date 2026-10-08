@@ -581,7 +581,7 @@ async fn serve_locked(
 
 async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "-i".to_string(),
         "--agent".to_string(),
         launch_model(session),
         "--__cwd".to_string(),

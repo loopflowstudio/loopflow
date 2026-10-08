@@ -215,7 +215,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
 const PATIENCE: Duration = Duration::from_secs(180);
 
-const LAUNCH: [&str; 5] = ["--tui", "--agent", "opencode", ":", "Review the parser"];
+const LAUNCH: [&str; 5] = ["-i", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
 fn task_conversation_reopens_after_terminal_startup_failure() {
@@ -739,7 +739,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
     let later = launch(&[
         "--task",
         "INF-123",
-        "--tui",
+        "-i",
         "--agent",
         "opencode",
         ":",
@@ -999,12 +999,12 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
-        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--agent", "opencode", ":", "Work in Y"], "cwd": y,
+        "argv": [env!("CARGO_BIN_EXE_lf"), "-i", "--agent", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
         "--task",
         "INF-123",
-        "--tui",
+        "-i",
         "--agent",
         "opencode",
         ":",
@@ -1089,7 +1089,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     .unwrap();
     let output = fixture
         .command(&[
-            "--task", "INF-124", "--tui", "--agent", "opencode", ":", "Start Y",
+            "--task", "INF-124", "-i", "--agent", "opencode", ":", "Start Y",
         ])
         .env("LF_BIN", bin.join("lf"))
         .output()
@@ -1123,7 +1123,7 @@ fn declared_agent_can_start_another_tasks_flow() {
 const BOUND_LAUNCH: [&str; 7] = [
     "--task",
     "INF-123",
-    "--tui",
+    "-i",
     "--agent",
     "opencode",
     ":",

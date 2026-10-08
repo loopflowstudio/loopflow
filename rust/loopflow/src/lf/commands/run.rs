@@ -23,7 +23,7 @@ use tracing::{debug, info, instrument, trace};
 /// | None    | Some    | Run inline prompt                     |
 /// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
-#[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
+#[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.process_options();
@@ -501,10 +501,13 @@ fn is_interactive_run_with_tty(
     if cli.batch {
         return false;
     }
-    cli.interactive || cli.tui || attached_tty || (skill.is_none() && message.is_none())
+    cli.interactive || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
+    if !cli.verbose {
+        return;
+    }
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
     let cli_agent = if cli.agent.is_some() {
@@ -530,7 +533,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
-    if cli.tui || built.skill_name.as_deref() == Some("default") || !built.process.auto {
+    if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
         let provider_session_id = if built.harness == "claude" {
@@ -656,8 +659,6 @@ fn run_headless_prompt(
     if let Some(ref path) = relay_path {
         agent_config.directive_relay = Some(path.clone());
     }
-
-    debug!(launch = ?agent_config, ?process, ?built.capabilities, "launching agent");
 
     info!(harness = built.harness, "launching agent");
     let process_start = Instant::now();
@@ -1709,10 +1710,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn forced_session_handoff_counts_as_interactive() {
-        let cli = Cli::parse_from(["lf", "--tui", "gate"]);
+    fn explicit_interactive_runs_without_a_tty() {
+        let cli = Cli::parse_from(["lf", "-i", "gate"]);
 
-        assert!(is_interactive_run(&cli, Some("gate"), None));
+        assert!(is_interactive_run_with_tty(&cli, Some("gate"), None, false));
     }
 
     #[test]
@@ -1739,13 +1740,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn explicit_tui_skill_launch_uses_the_assembled_prompt() {
+    fn explicit_interactive_skill_launch_uses_the_assembled_prompt() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(
             ".lf/skills/proof.md",
             "# Proof\n\nInstructions that must reach the provider.",
         );
-        let cli = Cli::parse_from(["lf", "--tui", "proof"]);
+        let cli = Cli::parse_from(["lf", "-i", "proof"]);
 
         let built = build_prompt_at(
             Some("proof"),
@@ -1780,7 +1781,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let goal =
             "## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         repo.create_file("wave/release/GOAL.md", goal);
-        let cli = Cli::parse_from(["lf", "--tui", "--wave", "release", "design"]);
+        let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),

@@ -1826,7 +1826,7 @@ fn _run_agent_once(
         elapsed_ms = start.elapsed().as_millis(),
         "run_agent prepared command"
     );
-    tracing::debug!(program, args = ?args, "spawning agent command");
+    tracing::debug!(program, "spawning agent command");
 
     let mut cmd = Command::new(program);
     for name in EXECUTION_IDENTITY_ENV {

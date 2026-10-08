@@ -4131,7 +4131,7 @@ pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) 
     })
 }
 
-pub fn task_sync(issue: &str, resolve: Option<&str>) -> OpsResult<String> {
+pub fn task_sync(issue: &str, resolve: Option<&str>, comment: Option<&str>) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -4139,6 +4139,27 @@ pub fn task_sync(issue: &str, resolve: Option<&str>) -> OpsResult<String> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        if let Some(comment) = comment {
+            let keep_local = match resolve {
+                Some("local") => true,
+                Some("linear") => false,
+                _ => return Err(task_error("comment resolution must be local or linear")),
+            };
+            let replacement = store
+                .sqlite
+                .resolve_task_comment(&task.id, comment, keep_local)
+                .map_err(task_error)?;
+            return Ok(match replacement {
+                Some(id) => format!(
+                    "{}: resolved comment {comment}; local body saved as {id} for synchronization",
+                    task.plan.identifier
+                ),
+                None => format!(
+                    "{}: resolved comment {comment}; retained Linear's body",
+                    task.plan.identifier
+                ),
+            });
+        }
         if let Some(choice) = resolve {
             if !matches!(choice, "local" | "linear") {
                 return Err(task_error("resolution must be local or linear"));

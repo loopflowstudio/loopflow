@@ -833,11 +833,14 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// Synchronize a Task; explicitly resolve a completion/reopening conflict
+    /// Synchronize a Task; explicitly resolve a state or comment conflict
     Sync {
         issue: String,
         #[arg(long, value_parser = ["local", "linear"])]
         resolve: Option<String>,
+        /// Resolve this comment instead of the Task state; local keeps a new copy
+        #[arg(long, requires = "resolve")]
+        comment: Option<String>,
     },
     /// Inspect or reset this Task's captured Workflow
     Workflow {

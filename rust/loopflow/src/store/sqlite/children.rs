@@ -1386,7 +1386,8 @@ fn ingest_linear_comment(
     let id = comment_id.split_once('@').map_or(comment_id, |(id, _)| id);
     let own_echo: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN task_comment_deliveries d
-         ON d.comment_id=c.id WHERE c.id=?1 AND c.task_id=?2 AND d.acknowledged=1 AND d.body=c.body)",
+         ON d.comment_id=c.id WHERE c.id=?1 AND c.task_id=?2 AND d.acknowledged=1 AND d.conflicting_comment_json IS NULL AND d.resolution IS NULL
+         AND json_extract(d.comment_json,'$.body')=c.body)",
         params![id, task_id], |row| row.get(0),
     )?;
     if inserted == 1 && !own_echo {

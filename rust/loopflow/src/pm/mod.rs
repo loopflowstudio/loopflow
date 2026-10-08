@@ -337,7 +337,7 @@ pub struct IssueObservation {
 /// from Loopflow's own writeback. `author_id` is the provider user id; `None`
 /// for an integration/bot actor with no backing user, which is never treated
 /// as participant direction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueComment {
     pub id: String,
     /// Provider creation time; display order. `revision` orders direction.

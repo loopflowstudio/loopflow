@@ -1,5 +1,6 @@
 //! `lf task comment ISSUE` against an isolated Linear GraphQL fixture.
 
+use clap::Parser;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
@@ -413,6 +414,54 @@ exit 0
             store.sqlite.record_comment_delivery(&collision, None).unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert_eq!(super::read_task_comments(&store, &task).unwrap().conflicts, conflict.conflicts);
+
+            // An acknowledged create with a retained collision must not hide
+            // newer provider direction as an echo of the saved local body.
+            {
+                let mut remote = provider.lock().await;
+                let amended = remote.posted.iter_mut().find(|c| c["id"] == collision).unwrap();
+                amended["body"] = json!("Provider correction survives");
+                amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
+            }
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert_eq!(store.sqlite.task_comment_conflicts(&task.id).unwrap()[&collision], "Provider correction survives");
+            assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
+
+            let before_resolution = store.task_steers(&task.id).await.unwrap();
+            let context = PM_TEST_CONTEXT.with(Clone::clone);
+            let selected_task = task.id.to_string();
+            let selected_comment = collision.clone();
+            let output = tokio::task::spawn_blocking(move || {
+                let parsed = crate::lf::Cli::try_parse_from([
+                    "lf", "task", "sync", &selected_task, "--comment", &selected_comment,
+                    "--resolve", "local",
+                ]).unwrap();
+                let Some(crate::lf::Commands::Task { cmd: crate::lf::TaskCommand::Sync { issue, resolve, comment } }) = parsed.command else {
+                    panic!("expected Task synchronization");
+                };
+                PM_TEST_CONTEXT.sync_scope(context, || crate::ops::task::task_sync(
+                    &issue, resolve.as_deref(), comment.as_deref(),
+                ).unwrap())
+            }).await.unwrap();
+            let replacement = store.sqlite.pending_task_comments(&task.id).unwrap();
+            assert_eq!(replacement.len(), 1);
+            let replacement = &replacement[0];
+            assert!(output.contains(&replacement.id));
+            assert_ne!(replacement.id, collision);
+            assert!(store.sqlite.task_comment_conflicts(&task.id).unwrap().is_empty());
+            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_resolution);
+            let posted_before = provider.lock().await.posted.len();
+            provider.lock().await.lose_reply = true;
+            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
+            crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
+            assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
+            let posted = provider.lock().await;
+            assert_eq!(posted.posted.len(), posted_before + 1);
+            assert_eq!(posted.posted.iter().find(|c| c["id"] == collision).unwrap()["body"], "Provider correction survives");
+            assert_eq!(posted.posted.iter().find(|c| c["id"] == replacement.id).unwrap()["body"], replacement.body);
+            drop(posted);
+            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_resolution);
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);

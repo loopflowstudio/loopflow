@@ -40,11 +40,12 @@ investigation authorized without further approval. Safe outbound updates remain
 unproved; weakening preservation or automatic propagation would need a product
 decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
 
-Ownership deletion, fields, offline abandonment, comment resolution and unmapped
-export remain unfinished. Abandonment is provider-first. Rollback/lost/late-reply
-fixtures pass; watcher reconnect proves local retention only. Inventory helpers and
-pending display prove no composed native/Flow/Desktop or installed outcome; Release's
-operation-entry lesson applies. No webhook receiver was found.
+Comment resolution retains both full comments and its choice. Keeping the local
+body queues one new UUID; retry reuses it without repeating direction or overwriting
+the provider comment. Late echoes cannot erase conflicts. Ownership deletion,
+fields, provider-first abandonment and unmapped export remain unfinished. Watcher
+reconnect proves local retention only; no composed native/Flow/Desktop or installed
+outcome is established. Release's operation-entry lesson applies.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

@@ -1467,7 +1467,7 @@ fn task_completion_lost_reply_followed_by_reopening_requires_explicit_resolution
             runtime.block_on(async { state.lock().await.completion_writes }),
             1
         );
-        crate::ops::task::task_sync(task.id.as_str(), Some("local")).unwrap();
+        crate::ops::task::task_sync(task.id.as_str(), Some("local"), None).unwrap();
         assert!(fixture
             .store
             .sqlite

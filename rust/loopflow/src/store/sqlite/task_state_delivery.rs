@@ -43,7 +43,7 @@ impl SqliteStore {
                 AND d.conflict_json IS NULL
                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)) OR EXISTS(
                 SELECT 1 FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
-                WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_body IS NULL))")?;
+                WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_comment_json IS NULL AND d.resolution IS NULL))")?;
         let ids = query
             .query_map([repo], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;

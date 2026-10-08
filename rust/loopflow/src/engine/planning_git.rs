@@ -1,5 +1,6 @@
 //! Custom-ref transport for an exported planning document. The common planning
-//! writer owns serialization, semantic reconciliation and transactional import.
+//! writer owns transactional import; the exchange layer supplies the portable
+//! format and semantic reconciliation.
 //! This module never opens a store or uses the source branch, index or worktree.
 
 use std::fs::File;

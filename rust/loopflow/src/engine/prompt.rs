@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -17,7 +18,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
-use uuid::Uuid;
 
 /// Source of a context document or context token bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -193,6 +193,17 @@ pub struct PromptComponents {
     pub diff_file_count: usize,
     /// Source reductions carried into the existing Run context evidence.
     pub budget_decisions: Vec<crate::trace::ContextDecision>,
+}
+
+impl PromptComponents {
+    pub fn is_standalone_skill(&self) -> bool {
+        !self.operate
+            && self.skill.as_ref().is_some_and(|skill| {
+                skill.source.as_ref().is_some_and(|source| {
+                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                })
+            })
+    }
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -1497,6 +1508,9 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
 
 /// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
+    if components.is_standalone_skill() {
+        return Vec::new();
+    }
     let mut parts = Vec::new();
 
     if components.operate {
@@ -1707,7 +1721,7 @@ pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied c
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{trace_id}-{id}-{sources}.{skill}.md`, with the
+/// File format: `{timestamp}-{trace_id}-{unique}-{sources}.{skill}.md`, with the
 /// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
 /// to its command trace.
 ///
@@ -1735,15 +1749,17 @@ pub fn write_prompt_log(
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
-    // Steps share a trace and may launch within the same second. Retain each input.
-    let id = Uuid::new_v4();
-    let filename = match trace_part {
-        Some(trace_id) => format!("{timestamp}-{trace_id}-{id}-{name_part}.md"),
-        None => format!("{timestamp}-{id}-{name_part}.md"),
+    let prefix = match trace_part {
+        Some(trace_id) => format!("{timestamp}-{trace_id}-"),
+        None => format!("{timestamp}-"),
     };
-    let path = prompts_dir.join(&filename);
-
-    fs::write(&path, prompt)?;
+    // A later step must not overwrite context retained by an earlier invocation.
+    let mut file = tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(&format!("-{name_part}.md"))
+        .tempfile_in(&prompts_dir)?;
+    file.write_all(prompt.as_bytes())?;
+    let (_, path) = file.keep().map_err(|error| error.error)?;
 
     Ok(path)
 }
@@ -2175,6 +2191,7 @@ mod tests {
     fn format_prompt_with_skill() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
@@ -2195,6 +2212,7 @@ mod tests {
     fn format_prompt_with_skill_no_content() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "review".to_string(),
                 content: None,
                 agent: None,
@@ -2287,6 +2305,7 @@ mod tests {
                 source: DocumentSource::Docs,
             }],
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
@@ -2799,6 +2818,22 @@ mod tests {
         assert_ne!(path, next);
         assert_eq!(fs::read_to_string(&path).unwrap(), prompt);
         assert_eq!(fs::read_to_string(&next).unwrap(), "Next step");
+    }
+
+    #[test]
+    fn write_prompt_log_retains_each_invocations_context() {
+        let repo = init_repo();
+        let prompts: Vec<_> = (0..16)
+            .map(|turn| {
+                let text = format!("Context for invocation {turn}");
+                let path = write_prompt_log(repo.path(), &text, "work.context", None).unwrap();
+                (path, text)
+            })
+            .collect();
+
+        for (path, text) in prompts {
+            assert_eq!(fs::read_to_string(path).unwrap(), text);
+        }
     }
 
     #[test]

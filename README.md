@@ -73,8 +73,9 @@ Omit owners or abbreviate commands when the result is unique. Commands take prec
 and list stay local.
 A same-named flow takes precedence in untyped execution; invalid flows report
 an error. Use `lf skill NAME` to select the skill explicitly.
-External skills honor the same frontmatter as local skills, on first fetch and
-when read from cache. Malformed definitions report their parse error.
+Skills resolve from repository and personal Claude, Codex, and Loopflow folders.
+Help names the selected source; bundled reference files stay inside their skill.
+See [skill sources](docs/config.md#skill-sources) for precedence and export behavior.
 
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
@@ -156,6 +157,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 lf session list
 lf resume                         # last interactive Session in this worktree
 lf resume SESSION                 # Loopflow, Claude, or Codex ID
+lf -b resume SESSION "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
 lf session connect SESSION
 lf session history SESSION --json
@@ -175,6 +177,8 @@ ones, and `--waiting` keeps those waiting on you. `--all` means all repositories
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
 order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
+Headless continuation reads the saved workspace's context and native history,
+even from another directory, without re-running the original skill.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 

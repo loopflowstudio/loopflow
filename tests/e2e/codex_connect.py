@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
                 "type": "function_call",
                 "id": "fc_provenance",
                 "call_id": "call_provenance",
-                "name": "process_command",
+                "name": "exec_command",
                 "arguments": json.dumps(
                     {
                         "cmd": "printf sibling-only"
@@ -244,6 +244,8 @@ def main() -> None:
 model_provider = "fixture"
 cli_auth_credentials_store = "file"
 allow_login_shell = false
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
 [features]
 shell_snapshot = false
 [model_providers.fixture]
@@ -745,7 +747,7 @@ def _live_driver_contract(
     server.release.clear()
     log = tempfile.TemporaryFile(mode="w+t")
     child = subprocess.Popen(
-        [str(binary), "--mode", "batch", "--agent", "codex", ":", "held conversation"],
+        [str(binary), "--batch", "--agent", "codex", ":", "held conversation"],
         stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,
@@ -851,7 +853,7 @@ def _shared_provider_home_contract(
     def converse(*flags: str, prompt: str = "say hi") -> tuple[str, list[dict]]:
         """Run one headless conversation; its provider id and engine launches."""
         known, before = conversations(), len(launches())
-        lf(*flags, "--mode", "batch", "--agent", "codex", ":", prompt)
+        lf(*flags, "--batch", "--agent", "codex", ":", prompt)
         started = [id for id in conversations() if id not in known]
         assert len(started) == 1, started
         engines = [launch for launch in launches()[before:] if "app-server" in launch["argv"]]
@@ -1008,7 +1010,7 @@ def _shared_provider_home_contract(
     known, before = conversations(), len(launches())
     log = tempfile.TemporaryFile(mode="w+t")
     running = subprocess.Popen(
-        [str(binary), "--mode", "batch", "--agent", "codex", ":", "held conversation"],
+        [str(binary), "--batch", "--agent", "codex", ":", "held conversation"],
         stdin=subprocess.DEVNULL,
         cwd=work,
         env=env,

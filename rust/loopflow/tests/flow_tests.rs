@@ -793,6 +793,7 @@ fn flow_parsing_parity() {
         flow.items[1],
         Step {
             target: loopflow::engine::target::Target::Skill(Skill {
+                source: None,
                 name: "review".to_string(),
                 agent: None,
                 default_agent: None,

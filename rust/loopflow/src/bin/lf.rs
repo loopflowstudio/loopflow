@@ -7,8 +7,8 @@ use clap::Parser;
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
+use loopflow::engine::target::DefinitionKind;
 use loopflow::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
-use loopflow::lf::discovery::DefinitionKind;
 use loopflow::lf::{
     Cli, Commands, FlowCommand, InstallCommand, SkillCommand, TaskCommand, WaveCommand,
 };
@@ -361,11 +361,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(Some("default"), None, cli)
+                loopflow::lf::commands::run::run(&worktree.path, Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(Some("default"), None, cli)
+            loopflow::lf::commands::run::run(&repo_root, Some("default"), None, cli)
         }),
     }
 }
@@ -413,7 +413,7 @@ fn with_skill_runtime<T>(
 }
 
 fn resolve_cli_target(
-    cli: &Cli,
+    cli: &mut Cli,
     args: &[String],
 ) -> anyhow::Result<Option<(loopflow::engine::target::Target, Option<String>)>> {
     use loopflow::engine::target::Target;
@@ -452,7 +452,17 @@ fn resolve_cli_target(
         None => return Ok(None),
     };
     let repo = loopflow::repo::working_directory()?;
-    let target = loopflow::lf::discovery::resolve_definition(&repo, &name, kind)?;
+    if let Some(path) = &cli.skill_input {
+        let invocation = loopflow::engine::skill_invocation::SkillInvocation::read(path)?;
+        anyhow::ensure!(
+            invocation.skill.name == name,
+            "captured skill does not match {name}"
+        );
+        let target = Target::Skill(invocation.skill.clone());
+        cli.resolved_invocation = Some(invocation);
+        return Ok(Some((target, message)));
+    }
+    let target = loopflow::engine::target::resolve_definition(&repo, &name, kind)?;
     Ok(Some((target, message)))
 }
 
@@ -470,6 +480,14 @@ fn execute_target(
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
+            let mut selected = cli.process_options();
+            selected.resolved_invocation.get_or_insert_with(|| {
+                loopflow::engine::skill_invocation::SkillInvocation {
+                    skill: skill.clone(),
+                    arguments: message.unwrap_or_default().to_string(),
+                }
+            });
+            let cli = &selected;
             with_runtime(&repo_root, args, || {
                 with_skill_runtime(&repo_root, name, || {
                     let shared = binding.is_some()
@@ -481,10 +499,15 @@ fn execute_target(
                             cli,
                             binding,
                         )?,
-                        None => loopflow::lf::commands::run::run(Some(name), message, cli)?,
+                        None => {
+                            loopflow::lf::commands::run::run(&repo_root, Some(name), message, cli)?
+                        }
                     }
                     // Shared contributions leave checkpoint composition to the caller.
-                    if !shared && !loopflow::journal::has_caller() {
+                    if !shared
+                        && !loopflow::journal::has_caller()
+                        && loopflow::repo::discover_repo_root(&repo_root)?.is_some()
+                    {
                         let options = loopflow::ops::CommitOptions {
                             add: true,
                             message: Some(format!("lf commit: {name}")),
@@ -1568,7 +1591,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return finish_command(result);
     }
 
-    let result = resolve_cli_target(&cli, args).and_then(|selected| match selected {
+    let result = resolve_cli_target(&mut cli, args).and_then(|selected| match selected {
         Some((target, message)) => execute_target(
             target,
             message.as_deref(),
@@ -1598,11 +1621,11 @@ fn execute_command(
     match &parsed.command {
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
-            in_directory_runtime(args, |_| match binding {
+            in_directory_runtime(args, |repo| match binding {
                 Some(binding) => {
                     loopflow::lf::commands::run::run_bound(None, Some(&text), cli, binding)
                 }
-                None => loopflow::lf::commands::run::run(None, Some(&text), cli),
+                None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
         Some(Commands::Open) => loopflow::lf::commands::open::run(),
@@ -1928,8 +1951,8 @@ mod tests {
             )
             .unwrap();
             let args = reorder_args(args);
-            let cli = Cli::try_parse_from(&args).unwrap();
-            super::resolve_cli_target(&cli, &args).unwrap().unwrap()
+            let mut cli = Cli::try_parse_from(&args).unwrap();
+            super::resolve_cli_target(&mut cli, &args).unwrap().unwrap()
         };
 
         let (target, message) = resolve(&[

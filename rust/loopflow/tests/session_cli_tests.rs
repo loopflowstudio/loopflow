@@ -492,6 +492,214 @@ fn prepare_conversation(
     (session.id, input, dir)
 }
 
+#[cfg(unix)]
+#[test]
+fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for harness in ["claude", "codex"] {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = home.path().join("work");
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&cwd).unwrap();
+        std::fs::create_dir(&bin).unwrap();
+        let provider = bin.join(harness);
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\necho unexpected-provider-launch >&2\nexit 97\n",
+        ).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (id, input, dir) =
+            prepare_conversation(home.path(), &cwd, harness, "Preserve this draft");
+        let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let process = loopflow::id::ProcessLfid::new();
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let driver = store
+            .claim_session_driver(&id, None, &process, true)
+            .unwrap();
+        let before = store.session(&id).unwrap().unwrap();
+        let history = store.session_history(&id, 0, 0).unwrap();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let output = command(
+            home.path(),
+            &[
+                "--batch",
+                "--no-loopflow",
+                "session",
+                "resume",
+                &id,
+                "another instruction",
+            ],
+        )
+        .current_dir(&cwd)
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(!error.contains("unexpected-provider-launch"), "{error}");
+        assert_eq!(store.session(&id).unwrap().unwrap(), before);
+        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
+        assert!(dir.join("prepared").exists());
+        assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "${1:-}" = --version ]; then exit 0; fi
+pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
+printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
+printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = --append-system-prompt-file ]; then
+        cat "$2" > "$LF_TEST_RESUME_PROOF.context"
+        break
+    fi
+    shift
+done
+cat > "$LF_TEST_RESUME_PROOF.input"
+printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',skill='missing-original-skill' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let original = std::fs::read(dir.join("manifest.json")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "caller-wave".into(),
+        caller.to_str().unwrap().into(),
+    );
+    store.create_wave(&wave).unwrap();
+    std::fs::create_dir_all(saved.join("wave/caller-wave")).unwrap();
+    std::fs::write(
+        saved.join("wave/caller-wave/GOAL.md"),
+        "CALLER_WAVE_CONTEXT",
+    )
+    .unwrap();
+    let before = store.session(&id).unwrap().unwrap();
+    let history = store.session_history(&id, 0, 0).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(
+        home.path(),
+        &[
+            "-b",
+            "--no-loopflow",
+            "session",
+            "resume",
+            &id,
+            "Continue here",
+        ],
+    )
+    .current_dir(&caller)
+    .env("PATH", path)
+    .env("HOME", home.path())
+    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+    // A calling agent's Wave must not supply a different conversation's context.
+    .env("LF_WAVE_ID", wave.id().as_str())
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent = std::fs::read_to_string(home.path().join("proof.context")).unwrap();
+    assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
+    assert!(sent.contains("Continue here"), "{sent}");
+    assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
+    assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
+    assert!(!sent.contains("missing-original-skill"), "{sent}");
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        saved.canonicalize().unwrap().to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd, before.cwd);
+    assert_eq!(after.skill, before.skill);
+    assert_eq!(after.task_id, before.task_id);
+    assert_eq!(after.wave_id, before.wave_id);
+    assert_ne!(after.artifact_key, input);
+    assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+    assert!(store
+        .session_history(&id, 0, 0)
+        .unwrap()
+        .starts_with(&history));
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            home.path()
+                .join("runs")
+                .join(&after.artifact_key[..2])
+                .join(&after.artifact_key)
+                .join("manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["cwd"], saved.to_str().unwrap());
+    let agent_caller: loopflow::process::AgentCaller =
+        serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
+    assert_eq!(agent_caller.session_id, id);
+    let process_cwd = store
+        .process(&agent_caller.origin_process_lfid)
+        .unwrap()
+        .unwrap()
+        .cwd
+        .unwrap();
+    assert_eq!(
+        std::path::Path::new(&process_cwd).canonicalize().unwrap(),
+        caller.canonicalize().unwrap()
+    );
+}
+
 #[test]
 fn waiting_lists_only_conversations_waiting_on_a_person() {
     let home = tempfile::tempdir().unwrap();
@@ -800,10 +1008,11 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let retry = open(&["session", "resume"]);
     assert!(retry.status.success(), "{retry:?}");
 
-    // --version succeeds, then the executable disappears before the actual spawn.
-    write_provider(
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then /bin/rm -- \"$0\"; exit 0; fi\nexit 93\n",
-    );
+    // Discovery finds an executable, but its absent interpreter prevents spawn.
+    write_provider(&format!(
+        "#!{}\n",
+        home.path().join("missing-interpreter").display()
+    ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
     assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
@@ -903,10 +1112,8 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let provider = bin.join("codex");
     std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$CODEX_HOME/opened\"\n").unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    )))
-    .unwrap();
+    // An unavailable fixture must never fall through to a real provider.
+    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
     let resume = |args: &[&str]| {
         command(home.path(), args)
             .current_dir(repo.join("subdir"))
@@ -940,7 +1147,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
         );
     }
     // An unavailable provider must not add another opening receipt.
-    std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
     let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
     assert!(!resume(&["resume", &b]).status.success());
     let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();

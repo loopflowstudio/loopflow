@@ -270,4 +270,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08): isolated Codex `--boundary`/`--redelivery` and Claude `--channel terminal` pass; 14 probe regressions and Ruff pass. `lf context --skill implement --json` fits (memory 15,974/16,000; scratch 4,043/12,000 tokens). Compression’s recorded Rust build/focused tests/fmt/Clippy remain applicable; gate/review own full fidelity, cost and third-party acceptance.
+Check (2026-10-08): isolated Codex `--boundary`/`--redelivery` and Claude `--channel terminal` pass; 14 probe regressions and Ruff pass. `lf context --skill implement --json` fits all token and byte budgets. Compression’s recorded Rust build/focused tests/fmt/Clippy remain applicable; gate/review own full fidelity, cost and third-party acceptance.

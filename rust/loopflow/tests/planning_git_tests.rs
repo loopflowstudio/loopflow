@@ -8,6 +8,7 @@ use loopflow_test_support::TestRepo;
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)
         .output()
         .unwrap();

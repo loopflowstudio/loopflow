@@ -80,18 +80,19 @@ impl PlanningGit {
     }
 
     pub fn local(&self) -> Result<Option<PlanningDocument>> {
-        self.read_ref(LOCAL_REF)
+        self.read_revision(LOCAL_REF)?
+            .map(|revision| self.read_document(revision))
+            .transpose()
     }
 
     /// Fetch only the planning ref. Absence is explicit and is not a deletion.
     pub fn fetch(&self) -> Result<Option<PlanningDocument>> {
-        let refs = self.git(
+        let refs = self.checked(
             "discover",
             &["ls-remote", "--refs", &self.remote, SHARED_REF],
             &[],
         )?;
-        self.require_success("discover", &refs)?;
-        if refs.stdout.is_empty() {
+        if refs.is_empty() {
             return Ok(None);
         }
         // Isolate concurrent fetches. A failed transfer cannot read another
@@ -111,9 +112,10 @@ impl PlanningGit {
                 ],
                 &[],
             )?;
-            let document = self
-                .read_ref(&temporary)?
+            let revision = self
+                .read_revision(&temporary)?
                 .ok_or(PlanningGitError::Invalid("fetched planning ref is missing"))?;
+            let document = self.read_document(revision)?;
             self.checked(
                 "retain observation",
                 &[
@@ -175,10 +177,10 @@ impl PlanningGit {
             &[],
         )?;
         if !updated.status.success() {
-            if self.local()?.as_ref().map(|document| &document.revision) != expected {
+            if self.read_revision(LOCAL_REF)?.as_ref() != expected {
                 return Err(PlanningGitError::ConcurrentWrite);
             }
-            self.require_success("save revision", &updated)?;
+            updated.success("save revision")?;
         }
         Ok(PlanningDocument {
             revision,
@@ -235,17 +237,13 @@ impl PlanningGit {
             ],
             &[],
         )?;
-        match output.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => Err(PlanningGitError::Command {
-                operation: "read ancestry",
-                code: output.status.code(),
-            }),
+        if output.status.code() == Some(1) {
+            return Ok(false);
         }
+        output.success("read ancestry").map(|_| true)
     }
 
-    fn read_ref(&self, reference: &str) -> Result<Option<PlanningDocument>> {
+    fn read_revision(&self, reference: &str) -> Result<Option<PlanningRevision>> {
         let output = self.git(
             "read revision",
             &["rev-parse", "--verify", "--quiet", reference],
@@ -254,8 +252,11 @@ impl PlanningGit {
         if output.status.code() == Some(1) {
             return Ok(None);
         }
-        self.require_success("read revision", &output)?;
-        let revision = PlanningRevision(object_id(&output.stdout)?);
+        let bytes = output.success("read revision")?;
+        Ok(Some(PlanningRevision(object_id(&bytes)?)))
+    }
+
+    fn read_document(&self, revision: PlanningRevision) -> Result<PlanningDocument> {
         let tree = self.checked("read tree", &["ls-tree", revision.as_str()], &[])?;
         let tree = String::from_utf8(tree)
             .map_err(|_| PlanningGitError::Invalid("invalid planning tree"))?;
@@ -277,25 +278,11 @@ impl PlanningGit {
             ));
         }
         let bytes = self.checked("read document", &["cat-file", "blob", &blob], &[])?;
-        Ok(Some(PlanningDocument { revision, bytes }))
+        Ok(PlanningDocument { revision, bytes })
     }
 
     fn checked(&self, operation: &'static str, args: &[&str], input: &[u8]) -> Result<Vec<u8>> {
-        let output = self.git(operation, args, input)?;
-        self.require_success(operation, &output)?;
-        Ok(output.stdout)
-    }
-
-    fn require_success(&self, operation: &'static str, output: &GitOutput) -> Result<()> {
-        if output.status.success() {
-            Ok(())
-        } else {
-            // Git diagnostics may contain credential-bearing URLs.
-            Err(PlanningGitError::Command {
-                operation,
-                code: output.status.code(),
-            })
-        }
+        self.git(operation, args, input)?.success(operation)
     }
 
     fn git(&self, operation: &'static str, args: &[&str], input: &[u8]) -> Result<GitOutput> {
@@ -361,6 +348,20 @@ impl PlanningGit {
 struct GitOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
+}
+
+impl GitOutput {
+    fn success(self, operation: &'static str) -> Result<Vec<u8>> {
+        if self.status.success() {
+            Ok(self.stdout)
+        } else {
+            // Git diagnostics may contain credential-bearing URLs.
+            Err(PlanningGitError::Command {
+                operation,
+                code: self.status.code(),
+            })
+        }
+    }
 }
 
 fn read_output(file: &mut File) -> Result<Vec<u8>> {

@@ -15,9 +15,8 @@ use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
-    GithubObservation, GithubObservationResult, GithubPr, Observation, PmWritebackState,
-    PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
-    TaskId, TaskPr, TaskPrId,
+    GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation,
+    PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -288,7 +287,7 @@ async fn planning_graphql(
         state
             .issues
             .push(json!({"id":"issue-1", "identifier":"FIX-1", "url":null,
-            "title":vars["title"], "description":vars["description"], "completedAt": null, "prioritySortOrder":0.0,
+            "title":vars["title"], "description":vars["description"], "completedAt": null, "dueDate": null, "prioritySortOrder":0.0,
             "sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null, "state":{"type":"unstarted"},
             "team":{"id":"team-1"}, "project":{"id":project_id,"name":"Chapter"}}));
         return axum::Json(json!({"errors":[{"message":"lost response after commit"}]}));
@@ -976,7 +975,7 @@ fi
                 .block_on(fixture.store.get_project_by_project("project-1"))
                 .unwrap()
                 .unwrap();
-            let task = Task {
+            let mut task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {
                     id: crate::planning::LinearIssueId::new(&item.id).unwrap(),
@@ -1019,9 +1018,8 @@ fi
                 updated_at: timestamp,
             };
             runtime
-                .block_on(fixture.store.create_task(&task, Some(&pr), None))
+                .block_on(fixture.store.create_task(&task, merge.map(|_| &pr), None))
                 .unwrap();
-            pr.abandoned_at = merge.is_none().then_some(timestamp);
             pr.publication = Some(PrPublication {
                 requested_at: timestamp,
                 presentation: merge.map(|_| PrPresentation {
@@ -1040,11 +1038,17 @@ fi
                     head_sha: pr.base_commit.clone(),
                 }),
             });
-            pr.github_observation = merge.is_none().then_some(GithubObservation {
-                checked_at: timestamp,
-                result: GithubObservationResult::Fresh,
-            });
-            runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
+            if merge.is_some() {
+                runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
+                // Observe the merge before recording the accepted disposition.
+                // Provider completion itself is the operation exercised below.
+                runtime.block_on(crate::ops::task::reconcile_delivered_task(
+                    &fixture.store, &mut task,
+                )).unwrap();
+                fixture.store.sqlite.finish_follow_through(
+                    &task.id, "Accepted checks complete; no later obligation", true,
+                ).unwrap();
+            }
             task
         });
         let selector = task
@@ -1069,14 +1073,7 @@ fi
                 .unwrap();
                 let settlement = crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
                 let retained = fixture.store.get_task(&task.id).await.unwrap().unwrap();
-                if let PmWritebackState::Pending { error, .. } = &retained.pm_writeback {
-                    assert_eq!(
-                        settlement.unwrap_err().to_string(),
-                        format!("Linear completion pending: {error}")
-                    );
-                } else {
-                    settlement?;
-                }
+                settlement?;
                 Ok(Some(retained))
             }),
         };
@@ -1173,11 +1170,7 @@ fi
         let mut before = None;
         if let Some(task) = &task {
             let first = first.unwrap().unwrap();
-            if merge.is_none() {
-                assert!(matches!(first.observation, Observation::Cached { .. }));
-            } else {
-                assert_eq!(first.observation, Observation::NotRequired);
-            }
+            assert_eq!(first.observation, Observation::NotRequired);
             assert!(matches!(
                 first.pm_writeback,
                 PmWritebackState::Pending { .. }

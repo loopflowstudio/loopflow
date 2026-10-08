@@ -81,19 +81,18 @@ const LANDING_COLUMNS: &str = "
     blocked_reason, created_at, updated_at";
 
 impl super::SqliteStore {
-    /// A landing of `worktree` touched since `since` that still awaits its merge.
-    pub(crate) fn watched_landing_at(
+    /// A landing of `worktree` that still awaits its merge.
+    pub(crate) fn pending_landing_at(
         &self,
         worktree: &std::path::Path,
-        since: i64,
     ) -> StoreResult<Option<String>> {
         let worktree = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT id FROM pr_landings WHERE worktree=?1 AND updated_at>=?2
+                "SELECT id FROM pr_landings WHERE worktree=?1
                  AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1",
-                rusqlite::params![worktree.to_string_lossy(), since],
+                rusqlite::params![worktree.to_string_lossy()],
                 |row| row.get(0),
             )
             .optional()?)

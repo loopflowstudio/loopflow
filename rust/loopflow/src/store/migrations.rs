@@ -1342,6 +1342,87 @@ mod tests {
     }
 
     #[test]
+    fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "optional_task_pr");
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,created_at,updated_at)
+            VALUES('research','p','research-issue','R-1','/research','research',1,1),
+                  ('single','p','single-issue','R-2','/single','single',1,1),
+                  ('chain','p','chain-issue','R-3','/chain','chain',1,1),
+                  ('continuing','p','continuing-issue','R-4','/continuing','continuing',1,1);
+            INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+            VALUES('placeholder','research',1,'research','research','research-base',1,1);
+            INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,
+              github_number,github_url,merge_commit,created_at,updated_at)
+            VALUES('single-pr','single',1,'single','single','single-base',1,1,'https://github.com/a/b/pull/1',NULL,1,1),
+                  ('old-pr','chain',1,'old','old','old-base',1,2,'https://github.com/a/b/pull/2','merged',1,1),
+                  ('current-pr','chain',2,'current','current','current-base',1,3,'https://github.com/a/b/pull/3',NULL,1,1);
+            INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,
+              github_number,github_url,merge_commit,after_merge,next_slug,merge_mode,merge_requested_at,merge_head_sha,github_head_sha,created_at,updated_at)
+            VALUES('continued-pr','continuing',1,'prior','prior','prior-base',1,4,'https://github.com/a/b/pull/4','merged','continue_task','continuing','auto',1,'head','head',1,1);
+            INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+            VALUES('successor-placeholder','continuing',2,'continuing','continuing','prior-base',2,2);
+            INSERT INTO task_events(task_id,kind_json,created_at) VALUES('chain',
+              '{"kind":"follow_up","remaining":{"outcome":"Check release","evidence":"Installed command works","check_at":42},"reason":"Accepted release check"}',1);
+        "#).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        conn.execute_batch(&current_draft_sql("optional_task_pr"))
+            .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let placement: (String, String) = conn
+            .query_row(
+                "SELECT branch,base_commit FROM tasks WHERE id='research'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(placement, ("research".into(), "research-base".into()));
+        let current: Vec<String> = conn
+            .prepare("SELECT id FROM task_prs WHERE historical=0 ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(current, vec!["current-pr", "single-pr"]);
+        assert!(conn
+            .execute(
+                "UPDATE task_prs SET base_commit='changed' WHERE id='old-pr'",
+                []
+            )
+            .is_err());
+        assert!(conn
+            .execute("DELETE FROM task_prs WHERE id='old-pr'", [])
+            .is_err());
+        // The retained placeholder cannot block first publication on this branch.
+        conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at)
+          VALUES('research-pr','research',2,'research','research','research-base',2,2,2)").unwrap();
+        assert!(conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at)
+          VALUES('duplicate','research',3,'research','research','research-base',3,3,3)").is_err());
+        let obligation: String = conn.query_row("SELECT kind_json FROM task_events WHERE task_id='chain' AND json_extract(kind_json,'$.kind')='follow_up'", [], |row| row.get(0)).unwrap();
+        assert!(obligation.contains("Check release"));
+        let conversion: String = conn.query_row("SELECT kind_json FROM task_events WHERE task_id='continuing' AND json_extract(kind_json,'$.kind')='follow_through_conversion'", [], |row| row.get(0)).unwrap();
+        assert!(conversion.contains("continuing"));
+        let current_continuation: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM task_prs WHERE task_id='continuing' AND historical=0",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(current_continuation, 0);
+        let violations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
+    }
+
+    #[test]
     fn process_names_preserves_released_history_and_constraints() {
         let conn = open();
         apply_before_current_draft(&conn, "process_names");

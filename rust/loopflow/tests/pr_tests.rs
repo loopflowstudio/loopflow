@@ -767,21 +767,10 @@ fn github_failure_leaves_publication_intent_observable() {
         .expect("active PR");
     assert_eq!(pr.phase(), PrPhase::Publishing);
     let publication = pr.publication.expect("durable publication request");
-    let presentation = publication
-        .presentation
-        .as_ref()
-        .expect("reviewer-facing Task copy");
-    assert_eq!(presentation.title, "Persist publication first");
-    assert!(presentation.body.contains(
-        "> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
-    ));
-    assert!(!presentation.body.contains("Task cycle:"));
-    assert!(presentation.body.contains(
-        "> **PR lifecycle:** The pull request is published for review; no Task settlement is requested."
-    ));
-    assert!(presentation
-        .body
-        .starts_with("The GitHub call will fail.\n\n<!--"));
+    assert!(
+        publication.presentation.is_none(),
+        "failed publication cannot confirm reviewer copy"
+    );
     assert!(publication.github.is_none());
     assert!(publication.merge.is_none());
 }

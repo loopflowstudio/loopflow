@@ -327,7 +327,7 @@ fn provider_fixture() -> Provider {
         ] {
             let issue = format!("{wave}-{suffix}");
             provider.issues.insert(issue.clone(), json!({"id":issue,"identifier":format!("FIX-{issue}"),"url":null,
-                "title":issue,"description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
+                "title":issue,"description":"","completedAt": null, "dueDate": null, "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
                 "state":{"type":state},"project":{"id":id,"name":name},"team":{"id":"team-1"}}));
         }
     }

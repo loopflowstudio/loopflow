@@ -1265,7 +1265,8 @@ mod durable_store_tests {
         pr.id = TaskPrId::new();
         pr.task_id = task.id.clone();
         pr.slug = task.workspace_slug.clone();
-        pr.branch = task.workspace_slug.clone();
+        task.branch = task.workspace_slug.clone();
+        pr.branch = task.branch.clone();
         (task, pr)
     }
 

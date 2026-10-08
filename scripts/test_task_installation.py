@@ -70,7 +70,7 @@ def main() -> None:
         targets = " ".join(f"--test {target}" for target in sorted(set(selected.values())))
         checks = "\n".join(
             f"timeout 180 cargo test -p loopflow --test {target} {name} "
-            "-- --exact --ignored --nocapture"
+            "-- --exact --include-ignored --nocapture"
             for name, target in selected.items()
         )
         command = r"""

@@ -57,6 +57,11 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
+/// Follow-up filing defaults to the source Task's Wave; an explicit Wave selects
+/// the new Task's destination without rebinding the source. Filing retry coverage
+/// lives in ops::task::follow_through::tests.
+const FOLLOW_UP_DESTINATION: &[&[&str]] = &[&["task", "follow-up"]];
+
 /// Local context previews accept authored Wave directories without registration.
 /// `global_commands` covers their config, usage and refresh behavior.
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
@@ -560,6 +565,7 @@ fn registry_is_complete() {
     let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
         .iter()
         .chain(ISSUE_OWNED)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(AUTHORED_CONTEXT)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
@@ -608,6 +614,7 @@ fn registry_is_complete() {
         .iter()
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(AUTHORED_CONTEXT)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)

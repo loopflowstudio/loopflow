@@ -4942,8 +4942,8 @@ mod tests {
         rusqlite::Connection::open(&fixture.database_path)
             .unwrap()
             .execute(
-                "UPDATE task_prs SET base_commit=?2 WHERE id=?1",
-                rusqlite::params![pr.id.as_str(), pr.base_commit],
+                "UPDATE tasks SET base_commit=?2 WHERE id=?1",
+                rusqlite::params![fixture.task.id.as_str(), pr.base_commit],
             )
             .unwrap();
         std::fs::create_dir_all(repo.path().join("scratch")).unwrap();
@@ -5619,7 +5619,8 @@ mod tests {
         let mut parent = child.clone();
         parent.id = TaskPrId::new();
         parent.task_id = parent_task.id.clone();
-        parent.branch = "test/stack-parent".into();
+        parent_task.branch = "test/stack-parent".into();
+        parent.branch = parent_task.branch.clone();
         parent.slug = "stack-parent".into();
         store
             .create_task(&parent_task, Some(&parent), None)

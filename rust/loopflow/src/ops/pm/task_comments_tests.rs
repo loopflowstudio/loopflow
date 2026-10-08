@@ -52,7 +52,7 @@ async fn graphql(
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
     } else if query.contains("query IssueOwnership") {
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
-            "description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
+            "description":"","completedAt": null, "dueDate": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
             "project":{"id":"project-1","name":"Chapter","description":"","content":"workflow: feature",
                 "status":{"type":"started"},

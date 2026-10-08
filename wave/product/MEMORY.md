@@ -24,9 +24,10 @@ Failed draft promotion retains confirmed copy. Selected design handoffs preserve
 child edits. Task placement owns the validated PR copy, never the reverse.
 Admission records performed location; Flow registration and Started are atomic.
 
-Isolated Git/SQLite, simulated providers and headless Swift prove separate paths,
-not a unified lifecycle, live migration, installed behavior or native acceptance.
-Gate and Jack's complete demo remain. Evidence: `20564402b:scratch/make-a-task-up-to.md`.
+Gate repaired fixture drift and two retry defects: held errors must exclude I/O
+failures; recent landing timestamps cannot make unrelated Flow steps wait.
+Isolated/Docker/headless checks prove separate paths, not unified lifecycle or
+native acceptance. Design retains proof and the LOO-406 integration gap.
 
 ## Live Home reconciliation (2026-10-05)
 

@@ -638,8 +638,17 @@ pub(crate) fn land_repo(
             crate::engine::agent::register_interrupt_cleanup(|| {
                 eprintln!("Landing wait interrupted; merge intent retained.");
             });
-            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr)
-                .map_err(|error| crate::process::FlowHeld(error.to_string()))?;
+            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr).map_err(|error| {
+                match error {
+                    OpsError::DeliveryHeld(reason) => {
+                        anyhow::Error::new(crate::process::FlowHeld(reason))
+                    }
+                    error @ OpsError::CheckoutBusy(_) => {
+                        anyhow::Error::new(crate::process::FlowHeld(error.to_string()))
+                    }
+                    error => anyhow::Error::new(error),
+                }
+            })?;
             progress.status("Pull request merged; follow-through can proceed.");
             return Ok(());
         }

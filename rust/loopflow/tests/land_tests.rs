@@ -2237,6 +2237,13 @@ fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
         .unwrap();
     assert_eq!(landing_state, "watching");
     db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE lfid=?1", [&unrelated]).unwrap();
+    // Even a later observation of this old request cannot turn the next
+    // Flow's read-only first command into a landing handoff.
+    db.execute(
+        "UPDATE pr_landings SET updated_at=?1",
+        [time::OffsetDateTime::now_utc().unix_timestamp() + 60],
+    )
+    .unwrap();
     let (status, output, error) = run();
     assert!(status.success(), "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);

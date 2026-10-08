@@ -5,8 +5,8 @@ demo on October 7. The launch/alias-only milestone was the agent's scope reducti
 
 Implemented defaults below remain unreviewed by Jack:
 
-- Waited landing polls every 15 seconds for 30 minutes; timeout-expiry proof
-  remains with gate. Retry and interruption have focused evidence.
+- Waited landing polls every 15 seconds for 30 minutes; the real waiting loop
+  now has timeout-expiry proof. Retry and interruption have focused evidence.
 - Redundant `-c` and serial `--next` are removed with the PR-chain implementation.
 - Surface due follow-ups on the owning Wave's next operation. Filing installs no
   timer; an unattended check must already be authorized in its brief. Exact-time
@@ -17,7 +17,8 @@ Implemented defaults below remain unreviewed by Jack:
   disposition; no closure or transfer is authorized by this work.
 
 All four slices and the landing corrections below are present locally; focused
-checks pass. Gate and the complete demo remain. No landing or installed-Home
+checks pass after gate repairs. Unified lifecycle proof, LOO-406 integration and
+the complete demo remain. No landing or installed-Home
 migration is authorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. The receipt pins the initial Team/state as well as Project and content.

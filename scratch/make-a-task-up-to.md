@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · four slices and landing corrections implemented; gate and full demo remain · reconciled 2026-10-08
+LOO-418 · four slices implemented; gate repairs checked; combined lifecycle proof and demo remain · reconciled 2026-10-08
 
 ## Decision and intended experience
 
@@ -447,15 +447,16 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. All four slices and the completion alias are implemented locally. Gate and the
-complete demo remain; the internal slices are not separate delivery boundaries.
+its own Task and child-specific design. All four slices and the completion alias are implemented locally. The combined
+lifecycle proof and complete demo remain; the internal slices are not separate delivery boundaries.
 
-**Remaining work:** gate the affected suites and automated acceptance rows below,
-then Jack's complete demo. Focused implementation checks pass.
+**Remaining work:** the unified lifecycle acceptance population below, LOO-406
+integration once its active work is ready, then Jack's complete demo. The affected
+gate ran; its failures have passing focused repairs.
 No-PR research now retains dirty files and committed findings; merged Tasks need
 the filing disposition. The implementation defaults below are reversible choices,
-not additional decisions attributed to Jack. Docker installation coverage belongs
-to capable CI; installed/native proof is absent and landing is unauthorized.
+not additional decisions attributed to Jack. Disposable Docker installation checks
+passed; configured/native acceptance is absent and landing is unauthorized.
 
 1. **Truthful Flow launch.**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
@@ -490,8 +491,8 @@ uv run python scripts/test.py
 Its Rust/Swift/format/Clippy plan must include the affected scenarios below;
 add missing coverage to existing suites rather than relying on a zero-test
 filter. Use the released-frontier installation harness for populated upgrade:
-`uv run python scripts/test_task_installation.py`. It requires capable Docker CI,
-never an experiment pointed at an installed Machine. Rust command-tree changes
+`uv run python scripts/test_task_installation.py`. Its disposable Docker installation
+is available locally and in capable CI; it never targets an installed Machine. Rust command-tree changes
 also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 
 | Observable result | Headless proof owner |
@@ -519,8 +520,8 @@ The committed implementation includes Task-owned checkout placement,
 optional current PR with immutable historical rows, post-merge disposition and
 UUID-pinned Linear filing, waited land/finishing Flows, shared due/link projections,
 and explicit design handoff. Focused implementation checks pass. The earlier
-inventory records the starting point; full affected verification and Jack's
-complete demo remain separate acceptance boundaries.
+inventory records the starting point; the affected gate ran with focused repairs.
+The combined lifecycle proof and Jack's complete demo remain.
 
 Review removed serial store settlement and PR-based placement writers as well as
 CLI rotation. Task placement writes update the validated PR copy in one direction.
@@ -547,8 +548,10 @@ then confirms the original receipt and exactly one provider issue/relation.
 The CLI proves no-PR retained research and post-merge completion within a Flow;
 Swift fixtures prove pending/done links and legacy scope text. These separate
 proofs do not establish a single configured provider-to-monitor-to-native run.
-Gate retains the unified lifecycle population, timeout-expiry and full affected
-suite acceptance rows; Docker installation belongs to capable CI.
+The unified lifecycle population remains unproven. The real wait loop now has
+paused-clock timeout proof, and the disposable Docker installation checks passed.
+The initial Docker pass silently selected zero Flow-history tests: removing its
+incorrect `--ignored` selection exposed and passed the actual test.
 
 ## Implementation defaults and delivery boundary
 
@@ -567,8 +570,8 @@ demo, with the liveness, retry, history and migration protections above intact.
 
 PR #1499 remains the single delivery boundary. Live Home migration, closing LOO-385,
 automatic filing of unrelated improvements, landing this branch and claimed
-production acceptance remain excluded. Full affected verification belongs to
-gate; unavailable Docker installation coverage stays with capable CI.
+production acceptance remain excluded. Gate findings and remaining acceptance
+are recorded below; the Docker installation ran in isolation.
 
 Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
 rows and shared membership predicates, avoiding a scan of all Process history
@@ -576,7 +579,8 @@ for each Task. Completion adds no authority or state. The suspected combined
 `--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
 no extra guard remains. Fixture corrections selected an authored workflow edge,
 used `flow list --processes`, and decoded the actual flattened inventory DTO.
-Full affected checks remain with gate; rendered judgment is the demo boundary.
+This earlier review deferred affected checks to gate; the October 8 results
+below supersede that deferral. Rendered judgment remains with demo.
 
 Compression keeps placement as a returned binding and the driver as the sole
 holder of its Task during execution. Flow registration takes its name from the
@@ -614,4 +618,20 @@ Held exit 3 now survives the Flow driver and prevents automatic whole-Flow retri
 Bare and waited land return success for a merged Task PR, including a completed
 Task and explicit worktree selection, without clearing newly written scratch.
 
-Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): renamed-flag parser, CLI shorthand, Flow graph and `land_tests waited_` passed (14 tests); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. Earlier landing/lifecycle evidence: `aae4c809c:scratch/make-a-task-up-to.md`; full gate, Docker CI, LOO-406 integration and demo remain.
+Gate review (2026-10-08): a blanket error conversion made genuine waited-landing
+failures held, suppressing Task-runner retries. Only timeout, deliberate blockage,
+closed-without-merge and checkout-busy results now stop without retry; storage
+failures remain failures. The real loop's timeout retains its original request.
+A second defect joined every mechanical step to recent landing timestamps: after
+a hold, an unrelated first command could stop a fresh Flow. Only the parsed
+nonwaiting land command now checks pending delivery at its resolved checkout;
+short command spellings and explicit worktree selection use the ordinary parser.
+The regression retains an old request with a later observation timestamp.
+
+Other gate failures came from obsolete fixtures: missing explicit nullable due
+dates and workspace base commits, PR placeholders in research completion, old
+placement writers and command inventories, and expecting confirmed presentation
+from a failed publication. The populated-upgrade test now starts before the Task's
+draft instead of applying the draft twice. No production invariant was relaxed.
+
+Check (2026-10-08, inherited execution variables cleared): `scripts/test.py --reuse-passing` initially reported 2,229/2,295 Rust and 401/402 Swift passing; all 66 Rust failures recovered in focused materialized reruns (the upgrade case moved to the migration suite), the Swift regression passed, and 49 affected Flow/Task-launch tests passed. Architecture, website, Swift CLI build and multiplatform checks passed; Docker installation ran all seven named proofs plus planning upgrade after correcting one zero-test invocation. Final two landing regressions, `cargo fmt`, all-target Clippy and diff checks passed. Unified lifecycle population, LOO-406 integration and configured demo remain; no live migration or landing.

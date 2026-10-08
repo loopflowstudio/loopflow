@@ -1042,11 +1042,11 @@ struct DesktopPerformanceTests {
             planning["completed"] = false
             task["task"] = planning
             var reference: [String: Any] = ["issue_url": NSNull(), "workspace": [
-                "slug": "benchmark", "branch": "benchmark", "machine_id": fixtureMachineId,
+                "slug": "benchmark", "branch": "benchmark", "base_commit": "benchmark-base", "machine_id": fixtureMachineId,
                 "worktree": checkout, "local_exists": true,
             ]]
             if index == 1 {
-                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "machine_id": fixtureMachineId,
+                reference["workspace"] = ["slug": "benchmark-empty", "branch": "benchmark-empty", "base_commit": "benchmark-base", "machine_id": fixtureMachineId,
                                           "worktree": NSTemporaryDirectory(), "local_exists": true]
             }
             task["reference"] = reference
@@ -1063,6 +1063,7 @@ struct DesktopPerformanceTests {
         wave["wave"] = waveInfo
         snapshot["waves"] = [wave]
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
+        _ = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmap.utf8))
         let planning = PerformancePlanning(roadmap: roadmap)
         let sessions = try JSONSerialization.data(withJSONObject: stride(from: 0, to: taskCount, by: 2).map { index in
             ["id": "perf-session-\(index)", "run_id": "perf-run-\(index)", "interactive": true,

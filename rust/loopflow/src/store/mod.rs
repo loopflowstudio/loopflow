@@ -3203,6 +3203,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
+        child.branch = child_pr.branch.clone();
+        child.base_commit = child_pr.base_commit.clone();
+        child.parent_pr_id = child_pr.parent_pr_id.clone();
         store
             .create_task(&child, Some(&child_pr), None)
             .await

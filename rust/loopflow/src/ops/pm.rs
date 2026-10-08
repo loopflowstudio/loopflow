@@ -3380,7 +3380,7 @@ mod tests {
             "url": null,
             "title": format!("Task {identifier}"),
             "description": "",
-            "completedAt": null, "prioritySortOrder": 0.0,
+            "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
             "sortOrder": 0.0, "updatedAt": time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap(),
             "assignee": null,
             "state": { "type": if completed { "completed" } else { "unstarted" } },
@@ -3996,7 +3996,7 @@ mod tests {
             issues_response(json!([
                 { "id": "issue-1", "identifier": "LOO-1", "url": null,
                   "title": "First", "description": "one",
-                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                   "assignee": null, "state": { "type": "unstarted" },
                   "project": { "id": "project-123", "name": "Scan" },
                   "team": { "id": "team-123" } }
@@ -4027,14 +4027,14 @@ mod tests {
             issues_response(json!([
                 { "id": "moved", "identifier": "LOO-1", "url": null,
                   "title": "Moved", "description": "Preserve the observed destination",
-                  "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0,
                   "updatedAt": "2026-10-05T12:00:00Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": { "id": "successor", "name": "Next work" },
                   "team": { "id": "team-123" } },
                 { "id": "detached", "identifier": "LOO-2", "url": null,
                   "title": "Detached", "description": "Do not invent membership",
-                  "completedAt": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
+                  "completedAt": null, "dueDate": null, "prioritySortOrder": 1.0, "sortOrder": 1.0,
                   "updatedAt": "2026-10-05T12:00:01Z",
                   "assignee": null, "state": { "type": "started" },
                   "project": null, "team": { "id": "team-123" } }

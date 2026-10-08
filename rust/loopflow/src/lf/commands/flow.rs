@@ -7,12 +7,13 @@ use crate::engine::{
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
-use crate::lf::Cli;
+use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::flow_process;
 use crate::ops::WorkBinding;
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use clap::Parser;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -681,24 +682,34 @@ impl SkillExecutor for &Driver<'_> {
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
         eprintln!("op: {label}");
-        let started = crate::store::rows::now_unix();
         // Authored spellings outlive the CLI's; the step runs today's.
-        let args: Vec<String> = ops
-            .item
-            .clone()
-            .current()
-            .argv()
-            .into_iter()
-            .skip(1)
-            .collect();
+        let argv = ops.item.clone().current().argv();
+        let parsed = crate::lf::navigation::normalize_args(argv.clone())
+            .and_then(Cli::try_parse_from)
+            .ok();
+        let handoff_checkout = match parsed.and_then(|cli| cli.command) {
+            Some(Commands::Pr {
+                cmd:
+                    Some(PrCommand::Land {
+                        local: false,
+                        wait_and_fix: false,
+                        worktree,
+                        ..
+                    }),
+            }) => Some(crate::ops::land::resolve_repos(self.cwd, worktree.as_deref())?.0),
+            _ => None,
+        };
+        let args: Vec<String> = argv.into_iter().skip(1).collect();
         if let (StepExit::Stopped, _) = self.spawn(&label, &args).await? {
             return Ok(SkillOutcome::Waiting);
         }
-        // A landing the step left to its watcher has not delivered yet. Its
-        // effect is recorded; the Flow stops here and neither failed.
-        if let Some(landing) = self.store.sqlite.watched_landing_at(self.cwd, started)? {
-            eprintln!("Landing {landing} is still being watched; the Flow stops here.");
-            return Ok(SkillOutcome::Waiting);
+        // Only a nonwaiting land hands delivery off. A recent landing in the
+        // same checkout says nothing about an unrelated command's result.
+        if let Some(checkout) = handoff_checkout {
+            if let Some(landing) = self.store.sqlite.pending_landing_at(&checkout)? {
+                eprintln!("Landing {landing} is still being watched; the Flow stops here.");
+                return Ok(SkillOutcome::Waiting);
+            }
         }
         Ok(SkillOutcome::Completed)
     }

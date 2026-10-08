@@ -543,13 +543,14 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
         expected.parent_pr_id = Some(parent_pr.id.clone());
         expected.updated_at = after.updated_at;
         assert_eq!(after, expected);
-        assert_eq!(
-            runtime
-                .block_on(child.store.get_task(&child.task.id))
-                .unwrap()
-                .unwrap(),
-            task_before
-        );
+        let task_after = runtime
+            .block_on(child.store.get_task(&child.task.id))
+            .unwrap()
+            .unwrap();
+        let mut expected_task = task_before.clone();
+        expected_task.parent_pr_id = Some(parent_pr.id.clone());
+        expected_task.updated_at = task_after.updated_at;
+        assert_eq!(task_after, expected_task);
         assert_eq!(
             runtime
                 .block_on(child.store.task_events_after(&child.task.id, 0))
@@ -2163,7 +2164,7 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
     let task =
-        support::register_unrun_task(home.path(), &checkout, "research-end", &repo.head_sha());
+        support::register_task_without_pr(home.path(), &checkout, "research-end", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("research-end");
     let (_bin, path) = scripted_provider(home.path(), &[WORK]);

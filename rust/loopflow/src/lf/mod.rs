@@ -2449,13 +2449,7 @@ mod tests {
         }
         assert!(!json);
 
-        for removed in [
-            "steer",
-            "follow-up",
-            "acknowledge",
-            "decide",
-            "request-decision",
-        ] {
+        for removed in ["steer", "acknowledge", "decide", "request-decision"] {
             assert!(
                 Cli::try_parse_from(["lf", "task", removed, "INF-123"]).is_err(),
                 "{removed} must not remain as a compatibility command"

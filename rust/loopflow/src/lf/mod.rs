@@ -395,6 +395,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
+    /// Project-owned planning configuration
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCommand,
+    },
     /// Concrete work and Task lifecycle
     Task {
         #[command(subcommand)]
@@ -484,13 +489,53 @@ pub enum SkillCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Select and inspect reusable Workflows
+    Workflow {
+        #[command(subcommand)]
+        cmd: ProjectWorkflowCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectWorkflowCommand {
+    /// List Workflow definitions, including unavailable local files
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the Project's selected Workflow
+    Show {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
+    Set { project: String, name: String },
+    /// Copy a builtin Workflow when needed and print its local path
+    Customize { name: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskWorkflowCommand {
+    /// Show the Task's captured graph, position and history
+    Show {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move the captured Workflow to start without executing or reloading it
+    Restart { issue: String },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum FlowCommand {
     /// List authored flows, or Flows that ran
     List {
         #[arg(long)]
         json: bool,
         #[command(flatten)]
-        inventory: commands::flow_inventory::FlowInventoryArgs,
+        inventory: commands::flow_inventory::FlowProcessInventoryArgs,
     },
     /// Inspect an authored flow, or one that ran
     Show {
@@ -498,9 +543,9 @@ pub enum FlowCommand {
         #[arg(long)]
         json: bool,
         #[arg(long)]
-        sessions: bool,
+        processes: bool,
     },
-    /// Print the repository file that defines a Flow or workflow, creating
+    /// Print the repository file that defines a Flow, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
     #[command(external_subcommand)]
@@ -528,6 +573,16 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Observe validated Program Status snapshots from an active local terminal
+    ObserveStatus {
+        id: String,
+        /// The terminal marker in the current provider client receipt
+        #[arg(long)]
+        terminal: String,
+        /// Provider generation from the Session reading
+        #[arg(long)]
+        generation: i64,
+    },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID
@@ -726,11 +781,8 @@ pub enum WaveCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
         /// The complete plan as JSON
-        #[arg(long, required_unless_present = "workflow")]
-        plan: Option<std::path::PathBuf>,
-        /// Change only the workflow, keeping KRs and targets
-        #[arg(long, conflicts_with = "plan")]
-        workflow: Option<String>,
+        #[arg(long)]
+        plan: std::path::PathBuf,
     },
 }
 
@@ -757,6 +809,11 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Inspect or reset this Task's captured Workflow
+    Workflow {
+        #[command(subcommand)]
+        cmd: TaskWorkflowCommand,
+    },
     /// Inspect delivery scheduling and Task CI repair settings
     Automation {
         #[arg(long)]
@@ -975,6 +1032,10 @@ impl TaskCommand {
             | Self::Reconcile { .. }
             | Self::Repair { .. }
             | Self::Automation { .. } => None,
+            Self::Workflow {
+                cmd:
+                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+            } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }

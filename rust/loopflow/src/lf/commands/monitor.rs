@@ -464,7 +464,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         }
         let flows = store
             .flow_inventory(
-                &crate::durable::FlowFilter {
+                &crate::durable::FlowProcessFilter {
                     repo: repo.clone(),
                     ..Default::default()
                 },
@@ -487,13 +487,13 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                 .map(crate::durable::FlowStepProcess::position)
                 .unwrap_or_else(|| "an unreadable step".into());
             let (state, reason) = match summary.state {
-                crate::session::FlowSummaryState::Completed => {
+                crate::session::FlowProcessSummaryState::Completed => {
                     ("finished", "Flow completed".to_string())
                 }
-                crate::session::FlowSummaryState::Stopped => {
+                crate::session::FlowProcessSummaryState::Stopped => {
                     ("stopped", format!("Driver exited at {at}"))
                 }
-                crate::session::FlowSummaryState::Current => {
+                crate::session::FlowProcessSummaryState::Current => {
                     match crate::id::ProcessLfid::parse(&summary.id)
                         .map(|driver| crate::journal::process_evidence(&store.sqlite, &driver))
                     {
@@ -511,7 +511,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                     }
                 }
             };
-            let next = format!("lf flow show {} --sessions", summary.id);
+            let next = format!("lf flow show {} --processes", summary.id);
             items.push(MonitorItem {
                 kind: "flow",
                 id: summary.id.clone(),
@@ -565,7 +565,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             );
         }
         if report.flows_next.is_some() {
-            println!("More Flows: lf flow list --sessions --json");
+            println!("More Flows: lf flow list --processes --json");
         }
         if report.recent_commands.next.is_some() {
             println!("More commands: lf monitor list");

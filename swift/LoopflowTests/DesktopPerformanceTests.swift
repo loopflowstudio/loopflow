@@ -566,7 +566,7 @@ struct DesktopPerformanceTests {
                 openTask(.task(id: "perf-task-1"))
                 model.syncWorkScope()
                 multiplexer.show(.flowLog(taskId: "perf-task-1"))
-            }, ready: { hasRendered(window, "task-flow-runs-empty") })
+            }, ready: { hasRendered(window, "task-flow-processes-empty") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
             }, ready: {
@@ -614,7 +614,7 @@ struct DesktopPerformanceTests {
                 }
                 try pressElement("flow-node-2", in: window)
             }, ready: {
-                model.navigation.expandedFlowRuns.contains("perf-flow-0")
+                model.navigation.expandedFlowProcesses.contains("perf-flow-0")
                     && window.allText.contains { $0.contains("realign") }
             })
             try pressElement("breadcrumb-task", in: window)
@@ -965,7 +965,7 @@ struct DesktopPerformanceTests {
         }
         // A Flow process's row shows its Flow's name.
         if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }
-        if id == "task-flow-runs-empty" {
+        if id == "task-flow-processes-empty" {
             return window.contentText.joined(separator: " ").contains("No Flow has run")
         }
         return false
@@ -1072,7 +1072,7 @@ struct DesktopPerformanceTests {
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"),
-             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "provider_generation": 1, "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1086,6 +1086,7 @@ struct DesktopPerformanceTests {
         let workJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_work.json"), encoding: .utf8)
         let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
         let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
+        let workflowJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
         let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
@@ -1095,6 +1096,7 @@ struct DesktopPerformanceTests {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
             case "roadmap": return await planning.read()
             case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
+            case "project" where args.dropFirst().prefix(2) == ["workflow", "list"]: return workflowJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
@@ -1210,7 +1212,7 @@ private final class PerformanceReader {
             }
         }
         send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"flows":\#(flows),"processes":[],"workflow":null},"flow_runs":\#(runs)}
+            {"task":"\#(task)","work":{"sessions":[],"flow_processes":\#(flows),"processes":[],"workflow":null},"flow_processes":\#(runs)}
             """#)
     }
 

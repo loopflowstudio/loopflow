@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::output::Colors;
-use crate::ops::task_execution::TaskExecutionState;
+use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
 use crate::pm::{PmItem, PmPortfolioValidator, PmSnapshot};
 use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
@@ -178,11 +178,11 @@ pub enum TaskConditionState {
     Unknown,
 }
 
+use crate::durable::FlowProcessDetail;
 pub use crate::ops::task_actions::{
     ci_failure_reason, derive_task_actions, TaskAction, TaskActionEvidence, TaskActionModel,
 };
-use crate::ops::task_flow::TaskFlowRecord;
-pub use crate::ops::task_flow::TaskFlowSnapshot;
+use crate::ops::task_run::TaskRunControl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -251,7 +251,10 @@ pub struct TaskDetailSnapshot {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub flow: TaskFlowSnapshot,
+    pub workflow_name: Option<String>,
+    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub execution: Option<TaskExecutionSnapshot>,
+    pub run_control: TaskRunControl,
     pub prs: Vec<PrSnapshot>,
     pub active_pr: Option<String>,
 }
@@ -477,7 +480,10 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub flow: TaskFlowSnapshot,
+    pub workflow_name: Option<String>,
+    pub latest_flow_process: Option<FlowProcessDetail>,
+    pub execution: Option<TaskExecutionSnapshot>,
+    pub run_control: TaskRunControl,
     pub active_pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
 }
@@ -872,7 +878,10 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         next_move: detail.next_move,
         condition: detail.condition,
         actions: detail.actions,
-        flow: detail.flow,
+        workflow_name: detail.workflow_name,
+        latest_flow_process: detail.latest_flow_process,
+        execution: detail.execution,
+        run_control: detail.run_control,
         active_pr,
         section,
     }
@@ -1114,7 +1123,7 @@ async fn snapshot_tasks(
             assignee: None,
         };
         let recommended = current_plan
-            .map_or("feature", |plan| plan.workflow.as_str())
+            .map_or("", |plan| plan.workflow.as_str())
             .to_string();
         requests.push(TaskDetailRequest {
             item,
@@ -1220,7 +1229,7 @@ fn recommended_flow(projects: &[crate::pm::PmProject], project_id: Option<&str>)
     projects
         .iter()
         .find(|project| Some(project.id.as_str()) == project_id)
-        .map_or("feature", |project| project.workflow.as_str())
+        .map_or("", |project| project.workflow.as_str())
         .to_string()
 }
 
@@ -1258,7 +1267,7 @@ async fn snapshot_task_detail(
                 flow_record,
             )
         }
-        None => (None, None, TaskFlowRecord::None),
+        None => (None, None, None),
     };
     let machine_id = task
         .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
@@ -1364,7 +1373,7 @@ async fn snapshot_task_detail(
         &next_move,
         local_progress,
         action_evidence.as_ref(),
-        &flow_record,
+        execution.as_ref(),
         observed_at,
     );
     let actions = action_evidence.as_ref().map_or_else(
@@ -1379,8 +1388,8 @@ async fn snapshot_task_detail(
         None => None,
     };
     let work_status = runtime.as_ref().map(|runtime| runtime.status.work_status());
-    let flow_controls =
-        crate::ops::task_flow::task_flow_controls(&crate::ops::task_flow::TaskFlowGate {
+    let run_control =
+        crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: work_status.as_ref(),
             // Linear completing a Task that never left `start` withdraws it.
             plan_terminal_reason: item.terminal_reason().filter(|_| {
@@ -1393,11 +1402,14 @@ async fn snapshot_task_detail(
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let flow = TaskFlowSnapshot {
-        recommended,
-        record: flow_record,
-        controls: flow_controls,
-    };
+    let workflow_name = match task {
+        Some(task) => store
+            .sqlite
+            .workflow(&task.id)?
+            .map(|workflow| workflow.definition.name),
+        None => None,
+    }
+    .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
         task: task_summary(item),
         reference,
@@ -1406,7 +1418,10 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        flow,
+        workflow_name,
+        latest_flow_process: flow_record,
+        execution,
+        run_control,
         prs: prs
             .iter()
             .map(|pr| {
@@ -1540,13 +1555,13 @@ fn derive_task_condition(
     next_move: &NextMove,
     local_progress: LocalProgressEvidence,
     action_evidence: Option<&TaskActionEvidence>,
-    flow: &TaskFlowRecord,
+    execution: Option<&TaskExecutionSnapshot>,
     observed_at: time::OffsetDateTime,
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
         !runtime.status.is_terminal()
-            || matches!(flow, TaskFlowRecord::Latest(flow) if flow.execution != TaskExecutionState::Idle)
+            || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
     });
@@ -2362,7 +2377,7 @@ mod tests {
     use super::{
         derive_task_condition, metric_portfolio_text, next_move_for_task, truncate_start,
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
-        TaskConditionState, TaskFlowRecord, TaskRuntimeSnapshot,
+        TaskConditionState, TaskRuntimeSnapshot,
     };
     use crate::durable::{TaskState, WorkStatus};
     use crate::ops::task_actions::TaskActionEvidence;
@@ -2435,7 +2450,7 @@ mod tests {
                 matches!(super::task_section(detail), super::RoadmapSection::Later),
                 terminal.is_some()
             );
-            assert_eq!(detail.flow.controls[0].unavailable.as_deref(), terminal);
+            assert_eq!(detail.run_control.unavailable.as_deref(), terminal);
             if let Some(reason) = terminal {
                 assert_eq!(detail.next_move.reason, reason);
                 assert_eq!(detail.actions.reason, reason);
@@ -3002,7 +3017,7 @@ mod tests {
 
     #[test]
     fn a_finished_task_stays_current_only_while_execution_is_unresolved() {
-        let unresolved = |status, flow: &TaskFlowRecord, state, unsettled| {
+        let unresolved = |status, execution: Option<&TaskExecutionSnapshot>, state, unsettled| {
             let runtime = TaskRuntimeSnapshot {
                 work_id: "task-1".to_string(),
                 status,
@@ -3027,30 +3042,26 @@ mod tests {
                     reason: None,
                 },
                 None,
-                flow,
+                execution,
                 OffsetDateTime::now_utc(),
             )
             .unresolved_execution
         };
-        let review = TaskFlowRecord::Latest(crate::ops::task_flow::LatestTaskFlow {
-            invocation_id: "inv".into(),
-            graph: crate::engine::flow_graph::FlowGraph::new("feature", &[]),
-            current: None,
-            completed: Vec::new(),
-            returns: Vec::new(),
-            iterations: Vec::new(),
-            execution: TaskExecutionState::Blocked,
+        let review = Some(TaskExecutionSnapshot {
+            state: TaskExecutionState::Blocked,
             reason: "Release target is unavailable".into(),
+            step: None,
+            captured: None,
         });
-        let none = TaskFlowRecord::None;
+        let none = None;
         let missing = LocalProgressEvidenceState::Missing;
         // A removed checkout alone does not reopen settled work.
-        assert!(!unresolved(TaskState::Done, &none, missing, true));
-        assert!(unresolved(TaskState::Active, &none, missing, true));
-        assert!(unresolved(TaskState::Done, &review, missing, false));
+        assert!(!unresolved(TaskState::Done, none, missing, true));
+        assert!(unresolved(TaskState::Active, none, missing, true));
+        assert!(unresolved(TaskState::Done, review.as_ref(), missing, false));
         assert!(unresolved(
             TaskState::Done,
-            &none,
+            none,
             LocalProgressEvidenceState::Observed,
             true
         ));
@@ -3085,7 +3096,7 @@ mod tests {
             &next_move,
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(advisory.state, TaskConditionState::Clear);
@@ -3098,7 +3109,7 @@ mod tests {
             },
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(delegated.state, TaskConditionState::Waiting);
@@ -3112,7 +3123,7 @@ mod tests {
             },
             evidence(),
             None,
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
         assert_eq!(user_handoff.state, TaskConditionState::Waiting);
@@ -3161,7 +3172,7 @@ mod tests {
                     reason: None,
                 },
                 Some(&actions),
-                &TaskFlowRecord::None,
+                None,
                 OffsetDateTime::now_utc(),
             );
             assert_eq!(condition.state, expected);
@@ -3188,7 +3199,7 @@ mod tests {
                             status: runtime.status.work_status(),
                             ..actions
                         }),
-                        &TaskFlowRecord::None,
+                        None,
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
@@ -3230,7 +3241,7 @@ mod tests {
             },
             local_progress,
             Some(&action_evidence),
-            &TaskFlowRecord::None,
+            None,
             OffsetDateTime::now_utc(),
         );
 

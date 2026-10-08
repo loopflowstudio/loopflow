@@ -36,6 +36,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
     let child =
         support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
+    let worktree = child.worktree.as_ref().unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let mut parent_pr = parent.pr.clone();
     parent_pr.publication = Some(PrPublication {
@@ -68,13 +69,13 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         .unwrap()
     };
     checkout();
-    assert!(!child.worktree.as_ref().unwrap().join("scratch").exists());
+    assert!(!worktree.join("scratch").exists());
     assert_eq!(
-        loopflow::engine::git::rev_parse(child.worktree.as_ref().unwrap(), "HEAD^").unwrap(),
+        loopflow::engine::git::rev_parse(worktree, "HEAD^").unwrap(),
         parent_head
     );
     let subject = Command::new("git")
-        .current_dir(child.worktree.as_ref().unwrap())
+        .current_dir(worktree)
         .args(["log", "-1", "--format=%s"])
         .output()
         .unwrap();
@@ -83,21 +84,16 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         String::from_utf8_lossy(&subject.stdout).trim(),
         "Clear inherited scratch"
     );
-    let child_head =
-        loopflow::engine::git::rev_parse(child.worktree.as_ref().unwrap(), "HEAD").unwrap();
-    fs::create_dir(child.worktree.as_ref().unwrap().join("scratch")).unwrap();
-    fs::write(
-        child.worktree.as_ref().unwrap().join("scratch/design.md"),
-        "child design",
-    )
-    .unwrap();
+    let child_head = loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap();
+    fs::create_dir(worktree.join("scratch")).unwrap();
+    fs::write(worktree.join("scratch/design.md"), "child design").unwrap();
     checkout();
     assert_eq!(
-        loopflow::engine::git::rev_parse(child.worktree.as_ref().unwrap(), "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
         child_head
     );
     assert_eq!(
-        fs::read_to_string(child.worktree.as_ref().unwrap().join("scratch/design.md")).unwrap(),
+        fs::read_to_string(worktree.join("scratch/design.md")).unwrap(),
         "child design"
     );
     assert_eq!(repo.head_sha(), parent_head);
@@ -120,21 +116,13 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         &repo.head_sha(),
     );
     fixture.task.worktree = Some(target.path().join("checkout"));
+    let worktree = fixture.task.worktree.as_ref().unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
             "UPDATE tasks SET worktree=?2 WHERE id=?1",
-            rusqlite::params![
-                fixture.task.id.as_str(),
-                fixture
-                    .task
-                    .worktree
-                    .as_ref()
-                    .unwrap()
-                    .display()
-                    .to_string()
-            ],
+            rusqlite::params![fixture.task.id.as_str(), worktree.display().to_string()],
         )
         .unwrap();
     fixture.pr = runtime
@@ -161,29 +149,24 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&first.stderr)
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(fixture.task.worktree.as_ref().unwrap(), "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
         fixture.pr.base_commit
     );
-    fs::write(
-        fixture.task.worktree.as_ref().unwrap().join("work.txt"),
-        "committed Task work",
-    )
-    .unwrap();
+    fs::write(worktree.join("work.txt"), "committed Task work").unwrap();
     for args in [
         vec!["add", "work.txt"],
         vec!["commit", "-m", "Preserve Task work"],
     ] {
         assert!(Command::new("git")
-            .current_dir(fixture.task.worktree.as_ref().unwrap())
+            .current_dir(worktree)
             .args(args)
             .output()
             .unwrap()
             .status
             .success());
     }
-    let head =
-        loopflow::engine::git::rev_parse(fixture.task.worktree.as_ref().unwrap(), "HEAD").unwrap();
-    fs::remove_dir_all(fixture.task.worktree.as_ref().unwrap()).unwrap();
+    let head = loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap();
+    fs::remove_dir_all(worktree).unwrap();
     let restored = checkout();
     assert!(
         restored.status.success(),
@@ -191,11 +174,11 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
         String::from_utf8_lossy(&restored.stderr)
     );
     assert_eq!(
-        loopflow::engine::git::rev_parse(fixture.task.worktree.as_ref().unwrap(), "HEAD").unwrap(),
+        loopflow::engine::git::rev_parse(worktree, "HEAD").unwrap(),
         head
     );
     assert_eq!(
-        fs::read_to_string(fixture.task.worktree.as_ref().unwrap().join("work.txt")).unwrap(),
+        fs::read_to_string(worktree.join("work.txt")).unwrap(),
         "committed Task work"
     );
     let persisted = runtime
@@ -220,18 +203,14 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
             .count(),
         1
     );
-    fs::remove_dir_all(fixture.task.worktree.as_ref().unwrap()).unwrap();
-    fs::create_dir(fixture.task.worktree.as_ref().unwrap()).unwrap();
-    fs::write(
-        fixture.task.worktree.as_ref().unwrap().join("notes"),
-        "unregistered work",
-    )
-    .unwrap();
+    fs::remove_dir_all(worktree).unwrap();
+    fs::create_dir(worktree).unwrap();
+    fs::write(worktree.join("notes"), "unregistered work").unwrap();
     let occupied = checkout();
     assert!(!occupied.status.success());
     assert!(String::from_utf8_lossy(&occupied.stderr).contains("occupied"));
     assert_eq!(
-        fs::read_to_string(fixture.task.worktree.as_ref().unwrap().join("notes")).unwrap(),
+        fs::read_to_string(worktree.join("notes")).unwrap(),
         "unregistered work"
     );
     assert_eq!(

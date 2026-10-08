@@ -1401,10 +1401,7 @@ mod durable_store_tests {
 
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, successor);
-        assert_eq!(
-            retained.worktree.as_ref().unwrap(),
-            task.worktree.as_ref().unwrap()
-        );
+        assert_eq!(retained.worktree, task.worktree);
         let after = store.task_work(&task_id).unwrap();
         assert_eq!(after.sessions, before.sessions);
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
@@ -1505,10 +1502,7 @@ mod durable_store_tests {
         assert!(store.task_started(&task_id).unwrap());
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, task.project_id);
-        assert_eq!(
-            retained.worktree.as_ref().unwrap(),
-            task.worktree.as_ref().unwrap()
-        );
+        assert_eq!(retained.worktree, task.worktree);
         assert_eq!(
             store
                 .bind_session(&session.id, session.captured, &task_id)

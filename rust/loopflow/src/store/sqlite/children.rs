@@ -9,7 +9,7 @@ use std::path::PathBuf;
 // two upgraders. Beginning IMMEDIATE takes the write lock up front, where
 // `busy_timeout` does apply, so a second `lf` process queues instead of dying
 // with `database is locked`.
-use rusqlite::{params, Connection, OptionalExtension, ToSql, TransactionBehavior};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::child::AbandonIntent;
@@ -88,8 +88,14 @@ impl SqliteStore {
         validate_task(&task)?;
         insert_task_row(&tx, &task)?;
         tx.execute(
-            "INSERT INTO task_creation_intents(task_id,project_id,title,description) VALUES(?1,?2,?3,?4)",
-            params![input.id.as_str(),input.project_id.as_str(),input.title,input.description],
+            "INSERT INTO task_creation_intents(task_id, project_id, title, description)
+             VALUES(?1, ?2, ?3, ?4)",
+            params![
+                input.id.as_str(),
+                input.project_id.as_str(),
+                input.title,
+                input.description
+            ],
         )?;
         let task = task_on(&tx, &input.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -123,8 +129,11 @@ impl SqliteStore {
             return Err(StoreError::InvalidData("Task title cannot be empty".into()));
         }
         tx.execute(
-            "UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),planning_revision=planning_revision+1,updated_at=?4 WHERE id=?1",
-            params![id.as_str(),patch.title,patch.description,now_unix()],
+            "UPDATE tasks SET issue_title=COALESCE(?2, issue_title),
+                issue_description=COALESCE(?3, issue_description),
+                planning_revision=planning_revision+1, updated_at=?4
+             WHERE id=?1",
+            params![id.as_str(), patch.title, patch.description, now_unix()],
         )?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
@@ -278,16 +287,16 @@ impl SqliteStore {
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
+        let local_prefix = issue.strip_prefix("lf-");
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1 OR (substr(?1,1,3)='lf-' AND length(?1)>=15 AND substr(t.id,6,length(?1)-3)=substr(?1,4))"
+            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+                OR (length(?2)>=12 AND substr(t.id, 6, length(?2))=?2)"
         );
         let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![issue], map_task_row)?;
-        let mut tasks = Vec::new();
-        for row in rows {
-            tasks.push(row?);
-        }
+        let tasks = statement
+            .query_map(params![issue, local_prefix], map_task_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         resolve_current_task(issue, tasks)
     }
 
@@ -310,37 +319,24 @@ impl SqliteStore {
             )"
         );
         let mut statement = conn.prepare(&query)?;
-        let rows = statement.query_map(params![branch], map_task_row)?;
-        let mut tasks = Vec::new();
-        for row in rows {
-            tasks.push(row?);
-        }
+        let tasks = statement
+            .query_map(params![branch], map_task_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         resolve_current_task(branch, tasks)
     }
 
     pub fn list_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (query, parameter): (String, Option<&dyn ToSql>) = match wave_id {
-            Some(wave_id) => (
-                format!("{TASK_COLUMNS} WHERE p.wave_id=?1 AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"),
-                Some(wave_id as &dyn ToSql),
-            ),
-            None => (format!("{TASK_COLUMNS} WHERE {TASK_VISIBLE} ORDER BY t.updated_at DESC"), None),
+        let filter = match wave_id {
+            Some(_) => "p.wave_id=?1 AND ",
+            None => "",
         };
+        let query =
+            format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
         let mut statement = conn.prepare(&query)?;
-        let mut tasks = Vec::new();
-        if let Some(parameter) = parameter {
-            let rows = statement.query_map([parameter], map_task_row)?;
-            for row in rows {
-                tasks.push(row?);
-            }
-        } else {
-            let rows = statement.query_map([], map_task_row)?;
-            for row in rows {
-                tasks.push(row?);
-            }
-        }
-        Ok(tasks)
+        let rows = statement.query_map(params_from_iter(wave_id), map_task_row)?;
+        rows.collect::<rusqlite::Result<_>>()
+            .map_err(StoreError::from)
     }
 
     /// Select a dependency without claiming that Git or GitHub has moved.
@@ -2001,6 +1997,8 @@ mod local_planning_tests {
             .unwrap();
         assert_ne!(second.id, task.id);
         assert_eq!(store.list_tasks(None).unwrap().len(), 2);
+        assert_eq!(store.list_tasks(Some(&task.wave_id)).unwrap().len(), 2);
+        assert!(store.list_tasks(Some(&WaveId::new())).unwrap().is_empty());
         assert!(store
             .create_local_task(&NewTask {
                 title: "Different request".into(),
@@ -2075,6 +2073,7 @@ mod local_planning_tests {
             description: String::new(),
         };
         let first = store.create_local_task(&input).unwrap();
+        assert!(store.task_by_issue("lf-0123456789a").unwrap().is_none());
         assert_eq!(
             store.task_by_issue("lf-0123456789ab").unwrap().unwrap().id,
             first.id

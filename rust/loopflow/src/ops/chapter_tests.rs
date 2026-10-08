@@ -710,10 +710,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             let retained = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);
-            assert_eq!(
-                retained.worktree.as_ref().unwrap(),
-                task.worktree.as_ref().unwrap()
-            );
+            assert_eq!(retained.worktree, task.worktree);
             assert_eq!(retained.plan.linear_id, task.plan.linear_id);
             assert_eq!(retained.plan.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);

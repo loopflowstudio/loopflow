@@ -15,15 +15,18 @@ retains execution on X and routes Linear through the online host; disconnect/dir
 fallback remain open. No resident or automatic work retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-The storage foundation now permits optional provider mapping and placement in
-existing Task/Project rows, with transactional create/edit and retained creation
-identity across edits/restarts. One draft preserves linked history and orphan
-`task_issue_identities`; that table remains deletion recovery only. Disposable
-migration/readback and the existing lost-response recovery fixture pass. Public
-CLI, personal definitions, comments, workflow/delivery and Desktop cutover remain
-unfinished. Store tests prove no public lifecycle or installation. Reuse import
-mappings or persist UUID v4 once; no deterministic mapper exists. Release's strict
-entry-point/CLI recovery and headless view lessons still apply.
+Storage checkpoint `3615ac424` permits optional provider mapping and placement,
+transactional create/edit and creation identity retained across edits/restarts.
+One draft preserves linked rows and orphan `task_issue_identities` for deletion
+recovery only. Disposable migration/readback and lost-response fixtures pass;
+historical serialized payloads and the public lifecycle remain unproved. Reuse
+import mappings or persist UUID v4 once; no deterministic mapper exists.
+Public creation still hashes content for retry identity; copying that into local
+creation would conflate independent identical requests. Status still requires
+provider IDs and placement. Personal definitions, comments, execution/delivery
+and CLI/Desktop cutover remain unfinished. Release's inspected child memory
+reinforces public-entry recovery, strict CLI stubs and headless view proofs;
+storage success establishes none of those or installation.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

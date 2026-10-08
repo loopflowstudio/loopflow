@@ -1690,14 +1690,15 @@ fn task_reference(
 }
 
 fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
-    if !task.worktree.as_ref()?.exists() {
+    let worktree = task.worktree.as_ref()?;
+    if !worktree.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(task.worktree.as_ref()?).ok()?;
+    let clean = crate::engine::git::is_clean(worktree).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(task.worktree.as_ref()?, "HEAD").ok()?;
+    let head = crate::engine::git::rev_parse(worktree, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 

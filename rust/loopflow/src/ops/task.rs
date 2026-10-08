@@ -894,19 +894,19 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
         .ok_or_else(|| task_error("Task has no active PR from which to restore its checkout"))?;
     let wave = owning_wave(store, task).await?;
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
-    let _lease =
-        crate::engine::git::acquire_worktree_lease(&repo, task.worktree()?, "Task checkout")?;
-    if task.worktree()?.join(".git").exists() {
+    let worktree = task.worktree()?;
+    let _lease = crate::engine::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
+    if worktree.join(".git").exists() {
         return finish_task_checkout(store, task, &pr).await;
     }
-    if task.worktree()?.symlink_metadata().is_ok() {
+    if worktree.symlink_metadata().is_ok() {
         return Err(task_error(format!(
             "Task checkout path {} is occupied; its contents were preserved",
-            task.worktree()?.display()
+            worktree.display()
         )));
     }
     let checkouts = crate::engine::worktrees::list_worktrees(&repo)?;
-    let destination = crate::store::canonicalize_with_missing_tail(task.worktree()?)?;
+    let destination = crate::store::canonicalize_with_missing_tail(worktree)?;
     for other in checkouts
         .iter()
         .filter(|entry| entry.branch.as_deref() == Some(&pr.branch))
@@ -916,7 +916,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
                 "Task branch {} is registered at {}; preserve that checkout before restoring {}",
                 pr.branch,
                 other.path.display(),
-                task.worktree()?.display()
+                worktree.display()
             )));
         }
     }
@@ -946,11 +946,11 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             "--no-track".into(),
             "-b".into(),
             pr.branch.clone(),
-            task.worktree()?.display().to_string(),
+            worktree.display().to_string(),
             base,
         ]);
     } else {
-        args.extend([task.worktree()?.display().to_string(), pr.branch.clone()]);
+        args.extend([worktree.display().to_string(), pr.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     finish_task_checkout(store, task, &pr).await
@@ -3338,33 +3338,34 @@ async fn rotate_task_pr(
             )));
         }
     }
-    let committed_carry = committed_follow_up_range(task.worktree()?, &settled)?;
+    let worktree = task.worktree()?;
+    let committed_carry = committed_follow_up_range(worktree, &settled)?;
     // Reaching this operation is explicit next-PR intent, either `pr next`
     // or the merged request's named successor. No worker infers a rotation.
     let sequence = settled.sequence + 1;
     let slug = next_pr_slug(&settled, rotate.slug_override.as_deref());
     let branch = deterministic_next_branch(task, &settled, rotate.slug_override.as_deref())?;
-    let default_branch = get_default_branch(task.worktree()?)
+    let default_branch = get_default_branch(worktree)
         .map_err(|error| task_error(format!("failed to resolve default branch: {error}")))?;
     // `base_ref` positions the branch below; the recorded `base_commit` is read
     // from the branch itself once it is positioned, never from a parallel read of
     // the upstream — see `fork_point`.
-    let (base_ref, _) = resolve_upstream_base(task.worktree()?, &default_branch)?;
+    let (base_ref, _) = resolve_upstream_base(worktree, &default_branch)?;
     if !rotate.carry_dirty
-        && !is_clean(task.worktree()?)
+        && !is_clean(worktree)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
     {
         return Err(task_error(format!(
             "Task {} cannot rotate PRs while {} has uncommitted changes",
             task.plan.identifier,
-            task.worktree()?.display()
+            worktree.display()
         )));
     }
     // The merged branch tip GitHub recorded (`head_sha`) is the cut between
     // already-merged work and the follow-up the worker committed on top after the
     // merge. Rotation carries that committed range forward — plus any dirty edits
     // — so no work is dropped when moving onto the next serial branch.
-    let current = current_branch(task.worktree()?)
+    let current = current_branch(worktree)
         .map_err(|error| task_error(format!("failed to inspect Task branch: {error}")))?
         .ok_or_else(|| task_error("Task worktree is detached"))?;
     if current != branch {
@@ -3374,15 +3375,15 @@ async fn rotate_task_pr(
                 task.plan.identifier,
                 settled.branch,
                 branch,
-                task.worktree()?.display(),
+                worktree.display(),
                 current
             )));
         }
         let local_ref = format!("refs/heads/{branch}");
         let remote_ref = format!("refs/remotes/origin/{branch}");
-        let collision = ref_exists(task.worktree()?, &local_ref)
+        let collision = ref_exists(worktree, &local_ref)
             .map_err(|error| task_error(format!("failed to inspect branch collision: {error}")))?
-            || ref_exists(task.worktree()?, &remote_ref).map_err(|error| {
+            || ref_exists(worktree, &remote_ref).map_err(|error| {
                 task_error(format!("failed to inspect branch collision: {error}"))
             })?;
         if collision {
@@ -3393,10 +3394,10 @@ async fn rotate_task_pr(
         // Stash dirty edits so the new branch starts clean: `checkout -b` then
         // carries nothing, the committed range cherry-picks onto a clean index,
         // and the stash pop reapplies the dirty edits on top.
-        let stashed = stash_including_untracked(task.worktree()?)
+        let stashed = stash_including_untracked(worktree)
             .map_err(|error| task_error(format!("failed to stash follow-up edits: {error}")))?;
-        if let Err(error) = checkout_new_branch_from(task.worktree()?, &branch, &base_ref) {
-            let recovered = current_branch(task.worktree()?)
+        if let Err(error) = checkout_new_branch_from(worktree, &branch, &base_ref) {
+            let recovered = current_branch(worktree)
                 .map_err(|read_error| {
                     task_error(format!("failed to inspect recovery branch: {read_error}"))
                 })?
@@ -3404,7 +3405,7 @@ async fn rotate_task_pr(
                 == Some(branch.as_str());
             if !recovered {
                 if stashed {
-                    stash_pop(task.worktree()?).map_err(|recovery_error| {
+                    stash_pop(worktree).map_err(|recovery_error| {
                         task_error(format!(
                             "failed to rotate Task worktree: {error}; restoring follow-up edits \
                              also failed: {recovery_error}"
@@ -3417,15 +3418,16 @@ async fn rotate_task_pr(
             }
         }
         if let CommittedFollowUp::Range { from, to } = &committed_carry {
-            if let Err(error) = cherry_pick_range(task.worktree()?, from, to) {
-                roll_back_failed_rotation(task.worktree()?, &settled.branch, &branch, stashed)
-                    .map_err(|recovery_error| {
+            if let Err(error) = cherry_pick_range(worktree, from, to) {
+                roll_back_failed_rotation(worktree, &settled.branch, &branch, stashed).map_err(
+                    |recovery_error| {
                         task_error(format!(
                         "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
                          automatic recovery also failed: {recovery_error}",
                         settled.branch
                     ))
-                    })?;
+                    },
+                )?;
                 return Err(task_error(format!(
                     "failed to carry committed follow-up from {:?} onto {branch}: {error}; \
                      restored {:?} with its follow-up edits so the rotation can be retried",
@@ -3434,7 +3436,6 @@ async fn rotate_task_pr(
             }
         }
         if stashed {
-            let worktree = task.worktree()?;
             stash_pop(worktree).map_err(|error| {
                 task_error(format!(
                     "carried the committed follow-up but could not reapply dirty edits: {error}; \
@@ -3449,10 +3450,10 @@ async fn rotate_task_pr(
     // the pair agrees by construction whichever of those two it was. Reading the
     // upstream tip here instead is what paired a fresh base with a stale branch
     // and left completion unable to prove the successor empty (W2-300).
-    let base_commit = fork_point(task.worktree()?, &base_ref, &branch)?;
+    let base_commit = fork_point(worktree, &base_ref, &branch)?;
 
-    let _mutation = lock_task_pr_mutation(task.worktree()?)?;
-    push_with_upstream(task.worktree()?, "origin", &branch, &|_| {})
+    let _mutation = lock_task_pr_mutation(worktree)?;
+    push_with_upstream(worktree, "origin", &branch, &|_| {})
         .map_err(|error| task_error(format!("failed to push next PR branch: {error}")))?;
 
     let now = time::OffsetDateTime::now_utc();
@@ -4348,12 +4349,12 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         let local_machine = store.local_machine().await.map_err(task_error)?;
         let task_worktree = task.worktree()?;
         let worktree = if machine_id.as_ref() == Some(&local_machine.id) {
-            crate::engine::git::worktree_root(task.worktree()?)
+            crate::engine::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
                 .unwrap_or_else(|| task_worktree.clone())
         } else {
-            task.worktree()?.clone()
+            task_worktree.clone()
         };
         let planning_conflict = planning_conflict(&store, &task).await?;
         Ok(TaskSnapshot {
@@ -6636,10 +6637,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(
-            retained.worktree.as_ref().unwrap(),
-            fixture.task.worktree.as_ref().unwrap()
-        );
+        assert_eq!(retained.worktree, fixture.task.worktree);
         assert_eq!(fixture.store.list_tasks(None).await.unwrap().len(), 1);
         assert_eq!(
             fixture

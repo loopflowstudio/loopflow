@@ -8,15 +8,38 @@ CREATE TABLE projects_migration (
     id TEXT PRIMARY KEY,
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     external_project_id TEXT UNIQUE,
-    created_at INTEGER NOT NULL
-, project_slug TEXT, project_name TEXT, project_prompt_context TEXT, pm_snapshot_synced_at INTEGER, abandon_requested_at INTEGER, abandon_reason TEXT, updated_at INTEGER, work_state TEXT NOT NULL DEFAULT 'ready'
-    CHECK (work_state IN ('ready', 'done', 'abandoned')), work_terminal_at INTEGER, iteration INTEGER NOT NULL DEFAULT 0
-    CHECK (iteration >= 0), status TEXT NOT NULL DEFAULT 'started'
-    CHECK (status IN ('backlog','planned','started','paused','completed','canceled')), workflow TEXT NOT NULL DEFAULT '', legacy_current INTEGER
-    CHECK (legacy_current IN (-1, 0, 1)));
+    created_at INTEGER NOT NULL,
+    project_slug TEXT,
+    project_name TEXT,
+    project_prompt_context TEXT,
+    pm_snapshot_synced_at INTEGER,
+    abandon_requested_at INTEGER,
+    abandon_reason TEXT,
+    updated_at INTEGER,
+    work_state TEXT NOT NULL DEFAULT 'ready'
+        CHECK (work_state IN ('ready', 'done', 'abandoned')),
+    work_terminal_at INTEGER,
+    iteration INTEGER NOT NULL DEFAULT 0 CHECK (iteration >= 0),
+    status TEXT NOT NULL DEFAULT 'started'
+        CHECK (status IN ('backlog','planned','started','paused','completed','canceled')),
+    workflow TEXT NOT NULL DEFAULT '',
+    legacy_current INTEGER CHECK (legacy_current IN (-1, 0, 1))
+);
 
-INSERT INTO projects_migration (id, wave_id, external_project_id, created_at, project_slug, project_name, project_prompt_context, pm_snapshot_synced_at, abandon_requested_at, abandon_reason, updated_at, work_state, work_terminal_at, iteration, status, workflow, legacy_current)
-SELECT id, wave_id, external_project_id, created_at, project_slug, project_name, project_prompt_context, pm_snapshot_synced_at, abandon_requested_at, abandon_reason, updated_at, work_state, work_terminal_at, iteration, status, workflow, legacy_current FROM projects;
+INSERT INTO projects_migration (
+    id, wave_id, external_project_id, created_at,
+    project_slug, project_name, project_prompt_context, pm_snapshot_synced_at,
+    abandon_requested_at, abandon_reason, updated_at, work_state,
+    work_terminal_at, iteration, status, workflow,
+    legacy_current
+)
+SELECT
+    id, wave_id, external_project_id, created_at,
+    project_slug, project_name, project_prompt_context, pm_snapshot_synced_at,
+    abandon_requested_at, abandon_reason, updated_at, work_state,
+    work_terminal_at, iteration, status, workflow,
+    legacy_current
+FROM projects;
 
 DROP TABLE projects;
 
@@ -55,12 +78,38 @@ CREATE TABLE tasks_migration (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     external_issue_id TEXT UNIQUE,
     issue_identifier TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-, issue_title TEXT, issue_description TEXT, pm_snapshot_synced_at INTEGER, pm_writeback_json TEXT, worktree TEXT, workspace_slug TEXT, abandon_requested_at INTEGER, abandon_reason TEXT, updated_at INTEGER, agent TEXT, started_at INTEGER, automation_enabled INTEGER CHECK (automation_enabled IN (0,1)), abandoned_at INTEGER, primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL, planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0)
+    created_at INTEGER NOT NULL,
+    issue_title TEXT,
+    issue_description TEXT,
+    pm_snapshot_synced_at INTEGER,
+    pm_writeback_json TEXT,
+    worktree TEXT,
+    workspace_slug TEXT,
+    abandon_requested_at INTEGER,
+    abandon_reason TEXT,
+    updated_at INTEGER,
+    agent TEXT,
+    started_at INTEGER,
+    automation_enabled INTEGER CHECK (automation_enabled IN (0,1)),
+    abandoned_at INTEGER,
+    primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
+    planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0)
 );
 
-INSERT INTO tasks_migration (id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, pm_writeback_json, worktree, workspace_slug, abandon_requested_at, abandon_reason, updated_at, agent, started_at, automation_enabled, abandoned_at, primary_session_id)
-SELECT id, project_id, external_issue_id, issue_identifier, created_at, issue_title, issue_description, pm_snapshot_synced_at, pm_writeback_json, worktree, workspace_slug, abandon_requested_at, abandon_reason, updated_at, agent, started_at, automation_enabled, abandoned_at, primary_session_id FROM tasks;
+INSERT INTO tasks_migration (
+    id, project_id, external_issue_id, issue_identifier,
+    created_at, issue_title, issue_description, pm_snapshot_synced_at,
+    pm_writeback_json, worktree, workspace_slug, abandon_requested_at,
+    abandon_reason, updated_at, agent, started_at,
+    automation_enabled, abandoned_at, primary_session_id
+)
+SELECT
+    id, project_id, external_issue_id, issue_identifier,
+    created_at, issue_title, issue_description, pm_snapshot_synced_at,
+    pm_writeback_json, worktree, workspace_slug, abandon_requested_at,
+    abandon_reason, updated_at, agent, started_at,
+    automation_enabled, abandoned_at, primary_session_id
+FROM tasks;
 
 DROP TABLE tasks;
 

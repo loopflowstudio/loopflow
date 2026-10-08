@@ -31,21 +31,19 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let result = async {
         let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
-        if task.worktree.as_ref().is_some_and(|path| path.exists())
-            && std::fs::canonicalize(task.worktree()?)? == std::fs::canonicalize(&repo)?
+        let _mutation = if let Some(worktree) = task.worktree.as_ref().filter(|path| path.exists())
         {
-            eprintln!(
-                "Task {} is complete; retained the primary checkout and branch.",
-                task.plan.identifier
-            );
-            return Ok(());
-        }
-        let _mutation = task
-            .worktree
-            .as_ref()
-            .is_some_and(|path| path.exists())
-            .then(|| super::lock_task_pr_mutation(task.worktree()?))
-            .transpose()?;
+            if std::fs::canonicalize(worktree)? == std::fs::canonicalize(&repo)? {
+                eprintln!(
+                    "Task {} is complete; retained the primary checkout and branch.",
+                    task.plan.identifier
+                );
+                return Ok(());
+            }
+            Some(super::lock_task_pr_mutation(worktree)?)
+        } else {
+            None
+        };
         let mut deletions = Vec::new();
         for pr in store.task_prs(&task.id).await.map_err(task_error)? {
             let deletion = match pr.phase() {

@@ -121,8 +121,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
     public let status: TaskState
-    /// Linear calls the Task complete while it is active here.
-    public let planningConflict: String?
+    /// A durable completion request awaiting settlement.
+    public let completionPending: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -132,7 +132,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, started
         case workId = "work_id"
-        case planningConflict = "planning_conflict"
+        case completionPending = "completion_pending"
         case updatedAt = "updated_at"
     }
 }
@@ -475,11 +475,12 @@ public struct TaskFollowThrough: Decodable, Sendable, Hashable {
     }
 
     public func deliveryLabel(merged: Bool, done: Bool) -> String? {
-        if done {
-            return links.isEmpty ? nil : "Done · Follow-up " + links.map(\.identifier).joined(separator: ", ")
-        }
         if needsConversion {
             return (merged ? "Merged · " : "") + "Follow-through scope needs conversion"
+        }
+        if done {
+            if merged && !resolved { return "Done · Follow-through pending" }
+            return links.isEmpty ? nil : "Done · Follow-up " + links.map(\.identifier).joined(separator: ", ")
         }
         guard merged else { return nil }
         return resolved ? "Merged · Ready to complete" : "Merged · Follow-through pending"

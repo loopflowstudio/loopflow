@@ -880,21 +880,15 @@ pub enum TaskCommand {
         /// Direction for this run, published to the Task
         #[arg(long)]
         reason: Option<String>,
-        /// Reach `end` although Linear already calls the active Task complete
-        #[arg(long)]
-        force: bool,
     },
-    /// Complete a Task: the same transition and checks as `task move ISSUE end`
+    /// Complete a Task without moving its Workflow
     Complete {
         issue: String,
-        /// Why, kept in the Task's workflow history
+        /// Why, kept in the Task's completion request
         #[arg(long)]
         reason: Option<String>,
-        /// Reach `end` although Linear already calls the active Task complete
-        #[arg(long)]
-        force: bool,
     },
-    /// Put a Task at a node of its workflow without running anything; `end` completes it
+    /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
         /// `start`, `end` or one of the workflow's nodes
@@ -902,9 +896,6 @@ pub enum TaskCommand {
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
-        /// Reach `end` although Linear already calls the active Task complete
-        #[arg(long)]
-        force: bool,
     },
     /// File a Task in the current chapter
     Create {
@@ -2327,7 +2318,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_and_move_end_name_the_same_transition() {
+    fn complete_and_move_are_distinct_commands() {
         let cli = Cli::try_parse_from([
             "lf",
             "task",
@@ -2336,24 +2327,16 @@ mod tests {
             "end",
             "--reason",
             "Delivered",
-            "--force",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason } })
                 if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "complete",
-            "LOO-42",
-            "--reason",
-            "Delivered",
-            "--force",
-        ])
-        .unwrap();
+        let cli =
+            Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
+                .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason, force: true } })
+            Some(Commands::Task { cmd: TaskCommand::Complete { issue, reason } })
                 if issue == "LOO-42" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",

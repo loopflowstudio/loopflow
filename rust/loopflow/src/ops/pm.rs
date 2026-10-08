@@ -97,7 +97,10 @@ pub struct PmUpdateOptions {
 #[derive(Debug, Clone)]
 pub enum PmTaskUpdate {
     Edit(PmItemUpdate),
-    Complete { pr: Option<String> },
+    Complete {
+        pr: Option<String>,
+        request: Option<(crate::work::task::TaskId, i64)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1376,6 +1379,27 @@ pub(crate) async fn pm_update_async(
     if matches!(options.update, PmTaskUpdate::Complete { .. }) {
         validate_completion_outcome(&item)?;
     }
+    if let PmTaskUpdate::Complete {
+        request: Some((task, request)),
+        ..
+    } = &options.update
+    {
+        let store = pm_store().await?;
+        if store
+            .sqlite
+            .task_completion_pending(task)
+            .map_err(|error| OpsError::Message(error.to_string()))?
+            .map(|(id, _)| id)
+            != Some(*request)
+        {
+            if item.is_complete() {
+                return Ok(PmUpdateResult { wave, id: item.id });
+            }
+            return Err(OpsError::Message(
+                "Completion request superseded by newer Task status".into(),
+            ));
+        }
+    }
     if !matches!(options.update, PmTaskUpdate::Complete { .. }) || !item.completed {
         apply_update(&ctx, &options, progress).await?;
     }
@@ -1418,13 +1442,13 @@ pub(crate) async fn complete_planning_task(
         &PmUpdateOptions {
             wave: None,
             id: issue.to_string(),
-            update: PmTaskUpdate::Complete { pr: None },
+            update: PmTaskUpdate::Complete { pr: None, request: None },
         },
         &super::NullProgress,
     )
     .await
     .map_err(|cause| OpsError::Message(format!(
-        "Task {issue} completion was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
+        "Task {issue} completion was not confirmed: {cause}. Retry `lf task complete {issue} --reason <original-reason>`."
     )))?;
     let publish_summary = async {
         let client = issue_client(repo).await?;
@@ -1448,7 +1472,7 @@ pub(crate) async fn complete_planning_task(
         Ok::<(), OpsError>(())
     };
     publish_summary.await.map_err(|cause| OpsError::Message(format!(
-        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
+        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task complete {issue} --reason <original-reason>`."
     )))
 }
 
@@ -1479,7 +1503,7 @@ async fn apply_update(
                 .await
                 .map_err(pm_to_ops)?;
         }
-        PmTaskUpdate::Complete { pr } => {
+        PmTaskUpdate::Complete { pr, .. } => {
             // A rejected completion must never leave a "Shipped" comment.
             ctx.client.complete_item(id).await.map_err(pm_to_ops)?;
             if let Some(pr) = pr.as_deref().map(str::trim).filter(|pr| !pr.is_empty()) {
@@ -4092,6 +4116,7 @@ mod tests {
             wave: None,
             id: "task-9".to_string(),
             update: PmTaskUpdate::Complete {
+                request: None,
                 pr: Some("https://github.com/acme/repo/pull/42".to_string()),
             },
         };

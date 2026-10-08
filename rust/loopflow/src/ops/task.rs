@@ -65,14 +65,6 @@ pub struct TaskProcessOptions {
     pub flow: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
-    pub end: EndOptions,
-}
-
-/// What reaching `end` may set aside.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EndOptions {
-    /// Reach `end` although Linear already calls the active Task complete.
-    pub force: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -109,10 +101,10 @@ pub struct TaskSnapshot {
     pub pm_writeback: crate::work::task::PmWritebackState,
     pub wave: String,
     pub project_id: String,
-    /// Read from the Task's Workflow position; abandoned is its own mark.
+    /// Completion and abandonment are independent of Workflow position.
     pub status: TaskState,
-    /// Linear calls the Task complete while it is active here.
-    pub planning_conflict: Option<String>,
+    /// A durable completion request awaiting settlement.
+    pub completion_pending: Option<String>,
     pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
     pub work: crate::task_work::TaskWork,
     pub worktree: String,
@@ -451,7 +443,6 @@ pub fn task_place(
         flow,
         agent,
         reason,
-        end,
         ..
     } = options.clone();
     let mut task = prepare_task(repo, issue, options)?;
@@ -489,7 +480,6 @@ pub fn task_place(
             flow.as_deref(),
             &project.plan.workflow,
             reason,
-            &end,
         )
         .await?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
@@ -515,7 +505,6 @@ async fn traverse_workflow(
     requested: Option<&str>,
     project_workflow: &str,
     note: Option<&str>,
-    end: &EndOptions,
 ) -> OpsResult<Option<String>> {
     let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
     // A name that leaves the current node is that edge, whatever else
@@ -613,19 +602,14 @@ async fn traverse_workflow(
             .map_err(task_error)?;
     }
     let edge = edge.clone();
-    // An edge that runs nothing enters `end`: choosing it completes the Task.
+    // Choosing an empty edge records arrival, then requests completion.
     let chose = if edge.flow.is_none() {
         let how = EndMove::Choose {
             workflow: workflow.clone(),
             edge: index,
         };
-        reach_end(store, &mut task.clone(), how, note, end).await?
+        reach_end(store, &mut task.clone(), how, note).await?
     } else {
-        if edge.to == END && !end.force {
-            if let Some(conflict) = planning_conflict(store, task).await? {
-                return Err(task_error(conflict));
-            }
-        }
         store
             .sqlite
             .choose_workflow_edge(&task.id, &workflow, index, &process, note)
@@ -644,8 +628,8 @@ async fn traverse_workflow(
 
 /// The edge this process carried the Task along succeeded: put the Task at
 /// its target. A Task moved elsewhere in the meantime stays where it was put.
-/// Arriving at `end` completes the Task; refused, the Task stays on its edge.
-pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
+/// Arrival is retained when the completion trigger fails.
+pub fn workflow_arrive(task: &Task) -> OpsResult<()> {
     let Some(process) = crate::journal::current_process_lfid() else {
         return Ok(());
     };
@@ -656,7 +640,7 @@ pub fn workflow_arrive(task: &Task, end: &EndOptions) -> OpsResult<()> {
             .workflow_edge_target(&task.id, &process)
             .map_err(task_error)?;
         if target.as_deref() == Some(END) {
-            reach_end(&store, &mut task.clone(), EndMove::Arrive, None, end).await?;
+            reach_end(&store, &mut task.clone(), EndMove::Arrive, None).await?;
             return Ok(());
         }
         store
@@ -681,23 +665,24 @@ pub fn workflow_show(issue: &str) -> OpsResult<Option<crate::ops::workflow::Work
 /// Put the Task at `node` of its Workflow without running anything: go back,
 /// skip ahead, or record work that finished elsewhere. A Flow still running
 /// on an edge is left alone and no longer moves the Task when it ends.
-/// `end` completes the Task, with or without a Workflow; for a Task `lf` holds
-/// no record of, it completes the planning item.
+/// `end` records a durable completion request after moving.
 pub fn workflow_set(
-    repo: &Path,
+    _repo: &Path,
     issue: &str,
     node: &str,
     note: Option<&str>,
-    end: &EndOptions,
 ) -> OpsResult<String> {
     if node == END {
-        return Ok(match task_end(repo, issue, note, end)? {
-            Some(task) => format!("Task {} is at end: done", task.plan.identifier),
-            None => format!("{issue}: completed"),
+        return block_on_task(async {
+            let store = task_store().await?;
+            let mut task = store
+                .get_task_by_issue(issue)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+            reach_end(&store, &mut task, EndMove::Set, note).await?;
+            Ok(format!("Task {} is at end", task.plan.identifier))
         });
-    }
-    if end.force {
-        return Err(task_error("--force applies only to reaching `end`"));
     }
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
@@ -777,7 +762,6 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         flow: requested_flow,
         agent: requested_agent,
         reason,
-        end,
     } = options;
     let directive = directive
         .map(|directive| {
@@ -810,8 +794,8 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             match status {
                 WorkStatus::Done => {
                     return Err(task_error(format!(
-                        "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
-                        task.plan.identifier, task.plan.identifier
+                        "Task {} is done; reopen its planning status before starting new work",
+                        task.plan.identifier
                     )))
                 }
                 WorkStatus::Abandoned => {
@@ -890,7 +874,6 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             directive,
             flow: requested_flow,
             agent: requested_agent,
-            end,
         },
     ))?;
     create_prepared_task(main_repo, resolved, prepared)
@@ -1517,16 +1500,7 @@ pub(crate) async fn require_task_flow_launch(
         crate::ops::pm::PmRefresh::Never,
     )
     .await?;
-    // Linear completing an active Task is shown on the Task; its work goes on.
-    if planning_conflict_of(
-        store.task_state(&task.id).await.map_err(task_error)?,
-        &resolved.item,
-        "",
-    )
-    .is_none()
-    {
-        require_startable_issue(&resolved.item)?;
-    }
+    require_startable_issue(&resolved.item)?;
     let project = store
         .get_project(&task.project_id)
         .await
@@ -3079,7 +3053,7 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
                 .map_err(|error| task_error(format!("failed to read task status: {error}")))?,
             None => task_for_checkout(&store, repo).await?,
         };
-        let Some(mut task) = task else {
+        let Some(task) = task else {
             return Ok(None);
         };
         if store
@@ -3093,151 +3067,126 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
                 None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
             };
         }
-        let launch_refusal = task_process_refusal(&store, &task)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task blocker: {error}")))?;
-        if launch_refusal.is_none() && task_worktree_blocker(&store, &task).await?.is_none() {
-            reconcile_task_pr(&store, &mut task).await?;
+        Ok(Some(task))
+    })
+}
+/// Complete the Task without changing its Workflow or Processes.
+pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<Option<Task>> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let Some(mut task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+            super::pm::complete_planning_task(repo, issue, note.unwrap_or("Completed")).await?;
+            return Ok(None);
+        };
+        if let Some(request) = store
+            .sqlite
+            .request_task_completion(&task.id, note)
+            .map_err(task_error)?
+        {
+            settle_completion(&store, &mut task, request).await?;
+        } else {
+            reconcile_task_completion(&store, &mut task).await?;
         }
         Ok(Some(task))
     })
 }
 
-/// Linear calls the Task complete while it is active on its Workflow. The
-/// Task keeps working; reaching `end` takes `--force`.
-pub(crate) fn planning_conflict_of(
-    state: TaskState,
-    item: &crate::pm::PmItem,
-    issue: &str,
-) -> Option<String> {
-    (state == TaskState::Active && item.is_complete()).then(|| {
-        format!(
-            "Linear calls Task {issue} complete while it is active on its workflow; `lf task move {issue} end --force` completes it here"
-        )
-    })
-}
-
-/// The conflict as last read from Linear; unread planning shows none.
-pub(crate) async fn planning_conflict(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Option<String>> {
-    let state = store.task_state(&task.id).await.map_err(task_error)?;
-    if state != TaskState::Active {
-        return Ok(None);
-    }
-    let wave = owning_wave(store, task).await?;
-    let record = crate::ops::pm::read_task_planning_async(
-        Path::new(wave.repo()),
-        task.plan.id.as_str(),
-        crate::ops::pm::PmRefresh::Never,
-    )
-    .await;
-    Ok(record
-        .ok()
-        .and_then(|record| planning_conflict_of(state, &record.item, &task.plan.identifier)))
-}
-
-/// Put the Task at `end`, completing it. A Task with no Workflow ends on one
-/// with nothing between. `None` is a Task `lf` holds no record of: its
-/// planning item is completed without a checkout.
-pub fn task_end(
-    repo: &Path,
-    issue: &str,
-    note: Option<&str>,
-    end: &EndOptions,
-) -> OpsResult<Option<Task>> {
-    let note = note.map(str::trim).filter(|note| !note.is_empty());
-    block_on_task(async {
-        let store = task_store().await?;
-        let Some(mut task) = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read Task: {error}")))?
-        else {
-            super::pm::complete_planning_task(repo, issue, note.unwrap_or("Completed")).await?;
-            return Ok(None);
-        };
-        reach_end(&store, &mut task, EndMove::Set, note, end).await?;
-        Ok(Some(task))
-    })
-}
-
-/// Put the Task at `end` of its Workflow by `how`. Reaching `end` is
-/// completion: refused while delivery is unsettled, it writes
-/// Linear and retires the checkout, unless the edge taken ran nothing.
-/// Returns false when `how` no longer applied to where the Task stood.
+/// Commit arrival before attempting completion. A failed request is retried alone.
 async fn reach_end(
     store: &SharedStore,
     task: &mut Task,
     how: EndMove,
     note: Option<&str>,
-    options: &EndOptions,
 ) -> OpsResult<bool> {
-    match task_work_status(store, task).await? {
-        WorkStatus::Done => {
-            reconcile_task_completion(store, task).await?;
-            cleanup_completed_task(store, task).await?;
-            return Ok(true);
+    let moved = store
+        .sqlite
+        .reach_workflow_end(&task.id, &how, note)
+        .map_err(task_error)?;
+    let reached = moved
+        || matches!(how, EndMove::Set)
+            && store
+                .sqlite
+                .workflow(&task.id)
+                .map_err(task_error)?
+                .is_some_and(|wf| wf.node() == END);
+    if reached {
+        if let Some((request, _)) = store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .map_err(task_error)?
+        {
+            settle_completion(store, task, request).await?;
         }
-        WorkStatus::Abandoned => {
-            return Err(task_error(format!(
-                "Task {} is abandoned and cannot be completed",
+    }
+    Ok(reached)
+}
+
+pub(crate) fn completion_pending(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+    Ok(store
+        .sqlite
+        .task_completion_pending(&task.id)
+        .map_err(task_error)?
+        .map(|(_, reason)| {
+            format!(
+                "Completion pending: {reason}. Retry: lf task complete {}",
                 task.plan.identifier
-            )))
+            )
+        }))
+}
+
+async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {
+    let result = async {
+        if task_work_status(store, task).await? == WorkStatus::Abandoned {
+            return Err(task_error("An abandoned Task cannot be completed"));
         }
-        WorkStatus::Ready => {}
-    }
-    let conflict = planning_conflict(store, task).await?;
-    if let Some(conflict) = conflict.as_ref().filter(|_| !options.force) {
-        return Err(task_error(conflict));
-    }
-    reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;
-    let keeps_checkout = matches!(how, EndMove::Choose { .. })
-        || store
-            .active_task_pr(&task.id)
+        reconcile_task_pr_observation(store, task, crate::ops::pr::PrReadFreshness::Cached).await?;
+        if let Some(refusal) = task_completion_gate(store, task)
+            .await?
+            .refusal(&task.plan.identifier)
+        {
+            return Err(task_error(refusal));
+        }
+        // Recheck after observation: a newer authored status may have superseded the request.
+        if store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .map_err(task_error)?
+            .map(|(id, _)| id)
+            != Some(request)
+        {
+            return if task_work_status(store, task).await? == WorkStatus::Done {
+                Ok(())
+            } else {
+                Err(task_error(
+                    "Completion request was superseded by newer Task status",
+                ))
+            };
+        }
+        reconcile_pm_writeback(store, task, None).await?;
+        if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
+            return Err(task_error(error));
+        }
+        if !store
+            .complete_task(task, request)
             .await
             .map_err(task_error)?
-            .is_none();
-    // The completion gate requires merge and follow-through for a PR. Do not
-    // bypass that fact or infer merge from a green head.
-    let gate = task_completion_gate(store, task).await?;
-    if let Some(refusal) = gate.refusal(&task.plan.identifier) {
-        return Err(task_error(refusal));
+        {
+            return Err(task_error(
+                "Completion request was superseded by newer Task status",
+            ));
+        }
+        // Cleanup retains live work and unpublished artifacts independently of status.
+        cleanup_completed_task(store, task).await?;
+        Ok(())
     }
-    reconcile_pm_writeback(store, task, None).await?;
-    if let Some(summary) = note {
+    .await;
+    if let Err(error) = &result {
         store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )
-            .await
+            .sqlite
+            .fail_task_completion(&task.id, request, &error.to_string())
             .map_err(task_error)?;
     }
-    let forced = conflict.map(|_| match note {
-        Some(note) => format!("{note} (forced: Linear already called it complete)"),
-        None => "forced: Linear already called it complete".to_string(),
-    });
-    // Position and the durable disposition are checked again in the transaction.
-    if !store
-        .complete_task(task, how, forced.as_deref().or(note))
-        .await
-        .map_err(|error| task_error(format!("failed to complete Task: {error}")))?
-    {
-        return Ok(false);
-    }
-    if keeps_checkout {
-        eprintln!(
-            "Task {} is complete; retained its checkout.",
-            task.plan.identifier
-        );
-        return Ok(true);
-    }
-    cleanup_completed_task(store, task).await?;
-    Ok(true)
+    result
 }
 
 /// The concise publication-state label carried by a PR's Linear linkage. Derived
@@ -3318,6 +3267,11 @@ async fn reconcile_pm_writeback(
             wave.slug(),
             task.plan.id.as_str(),
             pr_url,
+            store
+                .sqlite
+                .task_completion_pending(&task.id)
+                .map_err(task_error)?
+                .map(|(id, _)| (task.id.clone(), id)),
         )
         .await
     }
@@ -3397,9 +3351,6 @@ pub(crate) async fn task_completion_gate(
     let mut gate = CompletionGate {
         blockers: Vec::new(),
     };
-    if task_work_status(store, task).await? == WorkStatus::Done {
-        return Ok(gate);
-    }
     let follow_through = store
         .sqlite
         .task_follow_through(&task.id)
@@ -3468,27 +3419,14 @@ pub(crate) async fn reconcile_task_completion(
         WorkStatus::Abandoned => return Ok(()),
         WorkStatus::Ready => {}
     }
-    let Some(pr) = store
-        .active_task_pr(&task.id)
-        .await
+    if let Some((request, _)) = store
+        .sqlite
+        .task_completion_pending(&task.id)
         .map_err(task_error)?
-        .filter(|pr| pr.phase() == PrPhase::Merged)
-    else {
-        return Ok(());
-    };
-    let gate = task_completion_gate(store, task).await?;
-    if !gate.satisfied() {
-        return Ok(());
+    {
+        settle_completion(store, task, request).await?;
     }
-    let url = pr.github().map(|github| github.url.as_str());
-    reconcile_pm_writeback(store, task, url).await?;
-    // PR reconciliation already persisted the merge. Completion writes only
-    // the Task's position and writeback facts, never a stale copy of the
-    // settled PR.
-    store
-        .complete_task(task, EndMove::Set, Some("Merged; follow-through recorded"))
-        .await
-        .map_err(task_error)?;
+
     Ok(())
 }
 
@@ -3590,7 +3528,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         } else {
             task.worktree.clone()
         };
-        let planning_conflict = planning_conflict(&store, &task).await?;
+        let completion_pending = completion_pending(&store, &task)?;
         Ok(TaskSnapshot {
             machine_id,
             issue_id: task.plan.id.as_str().to_string(),
@@ -3603,7 +3541,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             wave: wave.slug().to_string(),
             project_id: task.project_id.to_string(),
             status: store.task_state(&task.id).await.map_err(task_error)?,
-            planning_conflict,
+            completion_pending,
             execution,
             work: work_set,
             worktree: worktree.display().to_string(),
@@ -4243,7 +4181,6 @@ mod tests {
     use crate::child::ChildRef;
     use crate::durable::{TaskState, WorkRef, WorkStatus};
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-    use crate::store::sqlite::EndMove;
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
@@ -4403,9 +4340,15 @@ mod tests {
         for _ in 0..2 {
             runtime
                 .block_on(
-                    fixture
-                        .store
-                        .complete_task(&fixture.task, EndMove::Set, None),
+                    fixture.store.complete_task(
+                        &fixture.task,
+                        fixture
+                            .store
+                            .sqlite
+                            .request_task_completion(&fixture.task.id, None)
+                            .unwrap()
+                            .unwrap_or(0),
+                    ),
                 )
                 .unwrap();
             runtime
@@ -5441,7 +5384,7 @@ mod tests {
         // This is a reader proof, not a provider-deletion fixture.
         connection
             .execute(
-                "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,'{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',123)",
+                "UPDATE tasks SET completed_at=123 WHERE id=?1",
                 [fixture.task.id.as_str()],
             )
             .unwrap();
@@ -5489,7 +5432,7 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
+                    "SELECT completed_at FROM tasks WHERE id=?1",
                     [fixture.task.id.as_str()],
                     |row| row.get::<_, i64>(0)
                 )

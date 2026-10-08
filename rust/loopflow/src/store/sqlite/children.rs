@@ -104,20 +104,59 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Put the Task at `end` of its Workflow by `how`, with what completion
-    /// settles beside it. Returns false, writing nothing, when the move no
-    /// longer applies to where the Task stands.
-    pub(crate) fn complete_task(
+    pub(crate) fn request_task_completion(
         &self,
-        task: &Task,
-        how: &super::task_work::EndMove,
-        by: Option<&crate::id::ProcessLfid>,
+        task: &TaskId,
         note: Option<&str>,
-    ) -> StoreResult<bool> {
+    ) -> StoreResult<Option<i64>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let request = request_completion_in(&tx, task, note)?;
+        tx.commit()?;
+        Ok(request)
+    }
+
+    pub(crate) fn task_completion_pending(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<(i64, String)>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT completion_request,COALESCE(completion_error,'Completion requested') FROM tasks WHERE id=?1 AND completion_request IS NOT NULL",
+            [task.as_str()], |row| Ok((row.get(0)?,row.get(1)?))).optional()?)
+    }
+
+    pub(crate) fn fail_task_completion(
+        &self,
+        task: &TaskId,
+        request: i64,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE tasks SET completion_error=?3 WHERE id=?1 AND completion_request=?2",
+            params![task.as_str(), request, error],
+        )?;
+        Ok(())
+    }
+
+    /// Settle one completion request without changing execution.
+    pub(crate) fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
         validate_task(task)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         validate_task_project(&transaction, task)?;
+        if super::durable::task_state_in(&transaction, &task.id)? == TaskState::Done {
+            return Ok(true);
+        }
+        let current_request: Option<i64> = transaction.query_row(
+            "SELECT completion_request FROM tasks WHERE id=?1",
+            [task.id.as_str()],
+            |row| row.get(0),
+        )?;
+        if current_request != Some(request) {
+            return Ok(false);
+        }
         let current = active_task_pr_on(&transaction, &task.id)?;
         if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
             let disposition = crate::work::task::follow_through::FollowThrough::from_events(
@@ -144,17 +183,16 @@ impl SqliteStore {
                 task.id
             )));
         }
-        if super::task_work::reach_end_in(&transaction, &task.id, how, by, note)? {
-            insert_task_event_in(
-                &transaction,
-                &task.id,
-                &TaskEventKind::Completed {
-                    summary: "Task completed".to_string(),
-                },
-            )?;
-        } else if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
-            return Ok(false);
-        }
+        transaction.execute(
+            "UPDATE tasks SET completed_at=?2,completion_request=NULL,completion_error=NULL WHERE id=?1",
+            params![task.id.as_str(),now_unix()])?;
+        insert_task_event_in(
+            &transaction,
+            &task.id,
+            &TaskEventKind::Completed {
+                summary: "Task completed".into(),
+            },
+        )?;
         update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         transaction.commit()?;
         Ok(true)
@@ -800,7 +838,10 @@ fn update_task_pm_writeback_in(
     updated_at: OffsetDateTime,
 ) -> StoreResult<()> {
     let changed = conn.execute(
-        "UPDATE tasks SET pm_writeback_json=?2, updated_at=?3 WHERE id=?1",
+        "UPDATE tasks SET pm_writeback_json=?2, updated_at=?3,
+         completion_request=CASE WHEN completed_at IS NOT NULL AND json_extract(?2,'$.state')='current' THEN NULL ELSE completion_request END,
+         completion_error=CASE WHEN completed_at IS NOT NULL AND json_extract(?2,'$.state')='current' THEN NULL ELSE completion_error END
+         WHERE id=?1",
         params![
             task_id.as_str(),
             serde_json::to_string(state).expect("Task PM writeback state must serialize"),
@@ -1644,4 +1685,35 @@ pub(super) fn insert_project_event_in(
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
+}
+
+pub(super) fn request_completion_in(
+    conn: &Connection,
+    task: &TaskId,
+    note: Option<&str>,
+) -> StoreResult<Option<i64>> {
+    let (completed, pending): (Option<i64>, Option<i64>) = conn.query_row(
+        "SELECT completed_at,completion_request FROM tasks WHERE id=?1",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    if completed.is_some() {
+        return Ok(None);
+    }
+    if pending.is_some() {
+        return Ok(pending);
+    }
+    insert_task_event_in(
+        conn,
+        task,
+        &TaskEventKind::CompletionRequested {
+            reason: note.map(str::to_string),
+        },
+    )?;
+    let request = conn.last_insert_rowid();
+    conn.execute(
+        "UPDATE tasks SET completion_request=?2,completion_error=NULL WHERE id=?1",
+        params![task.as_str(), request],
+    )?;
+    Ok(Some(request))
 }

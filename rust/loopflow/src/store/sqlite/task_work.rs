@@ -368,7 +368,11 @@ pub(super) fn reach_end_in(
             }
         }
     }
-    stands_at_end(tx, task)
+    let arrived = stands_at_end(tx, task)?;
+    if arrived {
+        super::children::request_completion_in(tx, task, note)?;
+    }
+    Ok(arrived)
 }
 
 /// Every unfinished Process paired with each Task it belongs to: the same
@@ -430,6 +434,20 @@ fn members(
 }
 
 impl SqliteStore {
+    pub(crate) fn reach_workflow_end(
+        &self,
+        task: &TaskId,
+        how: &EndMove,
+        note: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let by = crate::journal::current_process_lfid();
+        let moved = reach_end_in(&tx, task, how, by.as_ref(), note)?;
+        tx.commit()?;
+        Ok(moved)
+    }
+
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -683,6 +701,59 @@ mod tests {
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
+
+    #[test]
+    fn end_request_is_atomic_and_survives_reopening_the_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let task = TaskId::new();
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        {
+            let mut conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
+                [&wave],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json) VALUES(?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1,json_object('state','current'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute_batch("CREATE TRIGGER refuse_request BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='completion_requested' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
+            {
+                let tx = conn.transaction().unwrap();
+                assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).is_err());
+            }
+            assert!(!super::stands_at_end(&conn, &task).unwrap());
+            conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
+            let tx = conn.transaction().unwrap();
+            assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).unwrap());
+            tx.commit().unwrap();
+        }
+        let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
+        store
+            .fail_task_completion(&task, request, "provider unavailable")
+            .unwrap();
+        let workflow = store.workflow(&task).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        assert_eq!(
+            store.task_completion_pending(&task).unwrap(),
+            Some((request, "provider unavailable".into()))
+        );
+        let retained = store.task(&task).unwrap().unwrap();
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            super::super::durable::task_state_in(&conn, &task).unwrap(),
+            crate::durable::TaskState::Done
+        );
+        let completed: i64 = conn.query_row("SELECT count(*) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='completed'",[task.as_str()],|row| row.get(0)).unwrap();
+        assert_eq!(completed, 1);
+    }
 
     #[test]
     fn pending_turn_preserves_boot_completion_and_retirement_evidence() {

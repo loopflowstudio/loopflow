@@ -234,7 +234,7 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery(
             start: { args, _ in await started.add(args) },
             run: { args, _ in
-                if args.prefix(2) == ["task", "move"] { await started.add(args) }
+                if args.prefix(2) == ["task", "move"] || args.prefix(2) == ["task", "complete"] { await started.add(args) }
                 return "{}"
             }))
         func view(position: [String: Any]? = nil, outgoing: [Int] = []) throws -> TaskWorkflowHeader {
@@ -288,9 +288,9 @@ struct DesktopHeadlessTests {
         await model.moveTask(to: "design", task: task, wave: wave.wave)
         #expect(await started.calls.last == ["task", "move", task.task.identifier, "design"])
 
-        // Completing over Linear's own completion is the forced move.
-        await model.moveTask(to: "end", force: true, task: task, wave: wave.wave)
-        #expect(await started.calls.last == ["task", "move", task.task.identifier, "end", "--force"])
+        // Completion has its own operation and does not move the Workflow.
+        await model.completeTask(task, wave: wave.wave)
+        #expect(await started.calls.last == ["task", "complete", task.task.identifier])
     }
 
     @Test("A workflow is drawn as a graph: circles, described nodes, a loop arc and an arrow per edge")

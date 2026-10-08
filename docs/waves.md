@@ -437,8 +437,10 @@ lf task follow-up INF-124 --none 'No accepted obligations remain'
 lf task complete INF-124
 ```
 
-A Task's state is its Workflow position: ready at `start`, active between, done
-at `end`. `task complete` is an alias for `task move end`. A Task with a PR needs
+Task completion is independent of Workflow position. `task complete` changes
+status; `task move end` records the move and requests completion. If completion
+fails, retry it alone without replaying the Flow. Linear completion and reopening
+leave execution intact; reopening supersedes old requests. A Task with a PR needs
 authoritative merge and a durable disposition: linked follow-ups filed, or none
 needed with a reason. A PR-less Task may finish with research files and commits;
 unsafe or occupied checkouts are retained. Completion does not settle Session

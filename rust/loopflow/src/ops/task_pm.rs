@@ -120,6 +120,7 @@ pub async fn complete_task(
     wave: &str,
     item_id: &str,
     pr: Option<&str>,
+    request: Option<(crate::work::task::TaskId, i64)>,
 ) -> OpsResult<()> {
     crate::ops::pm::pm_update_async(
         repo,
@@ -127,6 +128,7 @@ pub async fn complete_task(
             wave: Some(wave.to_string()),
             id: item_id.to_string(),
             update: PmTaskUpdate::Complete {
+                request,
                 pr: pr.map(str::to_string),
             },
         },

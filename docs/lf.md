@@ -260,8 +260,13 @@ A due date is not an alarm or proof of success. Only a concrete check already
 authorized in the brief can start unattended. Filing installs no schedule;
 without an installed Wave schedule, there is no automatic check between passes.
 
-`lf task complete EXP-12` is an alias for `lf task move EXP-12 end`. Both require
-merge and a durable none/filed disposition when the Task has a PR. A PR-less
+`lf task complete EXP-12` completes without moving the Workflow. Moving or
+arriving at `end` records the movement, then requests completion. A failed
+request shows **Completion pending**; retry `lf task complete EXP-12`, without
+replaying the Flow. Completion requires merge and a durable none/filed
+disposition when the Task has a PR. Linear completion and reopening change
+status without moving the Workflow or stopping Processes; reopening supersedes
+an older completion request. A PR-less
 Task can finish with research files or commits; they do not create a PR
 requirement. Old Session turns and unknown process exits cannot veto completion.
 Live controls and execution history remain intact; unsafe or occupied checkouts

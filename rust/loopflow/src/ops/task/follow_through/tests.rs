@@ -10,7 +10,6 @@ use crate::id::WaveId;
 use crate::ops::pm::{PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::task::task_completion_gate;
 use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
-use crate::store::sqlite::EndMove;
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
 use crate::work::project::{Project, ProjectId};
 use crate::work::task::{
@@ -290,7 +289,7 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
                     .unwrap()
                     .satisfied());
                 assert!(runtime
-                    .block_on(store.complete_task(&task, EndMove::Set, None))
+                    .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
                     .is_err());
                 assert_ne!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
                 receipt
@@ -391,14 +390,14 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
                 .unwrap()
                 .satisfied());
             assert!(runtime
-                .block_on(store.complete_task(&task, EndMove::Set, None))
+                .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
                 .unwrap());
             assert_eq!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
             let events = runtime
                 .block_on(store.task_events_after(&task.id, 0))
                 .unwrap();
             assert!(runtime
-                .block_on(store.complete_task(&task, EndMove::Set, None))
+                .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
                 .unwrap());
             assert_eq!(
                 runtime

@@ -319,7 +319,11 @@ Confirm the issue and related link before recording the filed disposition.
 Existing unresolved keep-open records require scope conversion, never silent
 completion or remote issue creation during migration.
 
-`lf task complete` shares `task move end` checks. A Task with a PR needs merge
+`lf task complete` settles status without moving the Workflow. Movement to
+`end` persists a completion request in the same transaction as arrival, then
+tries completion. Failure retains both arrival and the reason; operators retry
+completion alone. Accepted provider status changes clear superseded requests
+without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs merge
 and a durable none/filed disposition; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing
 ceremony. Completion is idempotent, including when the enclosing Flow later

@@ -50,11 +50,12 @@ Finish delivered work by giving each accepted remaining obligation its own Task.
    ceremony. Newly imagined improvements remain suggestions.
 
 4. **Complete and verify.** Run `lf task complete <source>` and reread status.
-   It shares the checks of `lf task move <source> end`; neither `--force` nor an
-   agent's successful turn bypasses merge or required filing. Retry a recorded
-   disposition and pending planning writeback without filing again. Report done
-   only when status confirms end/completion, with the follow-up links or recorded
-   none reason. A failed completion remains pending with its concrete cause.
+   Completion changes status without moving the Workflow or stopping Processes.
+   Merge and required filing remain prerequisites. Report done only when status
+   confirms completion, with the links or recorded none reason. Arrival at end
+   triggers the same operation. If completion fails, retain the arrival and retry
+   `lf task complete <source>` alone; never replay gate or a successful Flow.
+   A newer reopening supersedes old completion intent.
 
 A dated follow-up returns on its owning Wave's next operation. Filing installs
 no timer and authorizes no arbitrary future execution. Run an unattended check

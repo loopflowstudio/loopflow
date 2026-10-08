@@ -263,15 +263,16 @@ Task on its edge. `lf task move ISSUE NODE` sets. An edge is not chosen
 while another runs. A move's author is its Process's calling conversation, else
 a person; an arrival is the edge's own.
 
-A Task's state is read from that position and stored nowhere else: not ready
-with no Workflow, ready at `start`, active at a node or on an edge, done at
-`end`. Abandoned is the Task's own mark. Any move that reaches `end` is
-completion: one transaction writes the position, the Completed event and the
-retirement of an empty unpublished PR, after the settled-PR and
-unresolved-execution checks and the Linear write. A Task with no Workflow
-reaches `end` on `unplanned`, which has nothing between. Linear calling an
-active Task complete is read as `planning_conflict`; `end` then takes `--force`,
-kept in the move's note.
+Task completion, Workflow position and Process liveness are independent.
+`task complete` changes status without moving or creating a Workflow. Moving or
+arriving at end atomically records the move and a completion request, then
+attempts settlement. Failed settlement retains end and its reason; retry only
+`task complete`, never the successful edge. PR delivery requires verified merge
+and confirmed follow-through; PR-less completion retains useful artifacts.
+Accepted Linear completion or reopening updates status without moving Workflow
+or terminating Processes. Reopening supersedes old requests. Ordinary reads do
+not execute completion. Unfinished readiness remains not ready with no Workflow,
+ready at start, and active otherwise; abandonment is its own mark.
 
 ## Read each step's result
 

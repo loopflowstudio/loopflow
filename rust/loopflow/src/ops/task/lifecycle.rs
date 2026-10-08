@@ -80,8 +80,8 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     .await;
     result.map_err(|error| {
         task_error(format!(
-            "Task {} is complete, but cleanup is incomplete: {error}. Retry `lf task move {} end`.",
-            task.plan.identifier, task.plan.identifier,
+            "Task {} is complete, but cleanup is incomplete: {error}. Inspect the retained checkout with `lf wt list`.",
+            task.plan.identifier,
         ))
     })
 }

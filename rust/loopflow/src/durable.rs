@@ -218,8 +218,7 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
-/// A Task's state, read from where it stands on its Workflow. Abandoned is
-/// the Task's own mark and outranks its position.
+/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
@@ -227,9 +226,9 @@ pub enum TaskState {
     NotReady,
     /// At `start`.
     Ready,
-    /// At a node or on an edge between `start` and `end`.
+    /// Past start, including end with completion pending.
     Active,
-    /// At `end`.
+    /// Completed independently of Workflow position.
     Done,
     Abandoned,
 }

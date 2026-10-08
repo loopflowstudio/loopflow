@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · completion-trigger revision accepted; implementation remains · reconciled 2026-10-08
+LOO-418 · completion trigger implemented locally; shared planning integration remains · reconciled 2026-10-08
 
 ## Decision and intended experience
 
@@ -32,7 +32,8 @@ Jack Heart requested avoiding duplicate data types and making repair explicit in
 `--wait-and-fix`. The landing flag replaces `--wait`; ship and all callers use
 that spelling. Bare landing still returns after requesting merge.
 
-LOO-406 now implements the complete local planning lifecycle. Its October 8
+LOO-406's earlier published local lifecycle is superseded by its ongoing
+common-ownership revision. Its October 8
 brief and checkout use the existing Task, TaskPlan and TaskSnapshot, with optional
 Linear mapping and checkout. TaskSnapshot is the assembled read, not another
 stored Task or planning authority. Preserve one model and one read path when the
@@ -44,11 +45,19 @@ computed status, work and actions belong in the read projection.
 Integration remains: reconcile overlapping Task/TaskSnapshot and Rust/Swift wire
 changes, make branch/base placement absent until checkout, and route follow-up
 creation, links and completion through LOO-406's shared local planning APIs.
-The current follow-through implementation still calls Linear directly; merging
-the DTOs alone will not make that path work without Linear. Verify unplaced,
+The current follow-through and completion implementations still call Linear
+directly; merging DTOs alone will not make either path work without Linear. Verify unplaced,
 PR-less and merged-with-follow-up Tasks through both CLI and Desktop, including
 local filing/completion without provider calls. No second filing or completion
-implementation should survive. LOO-406's active checkout was inspected read-only.
+implementation should survive. LOO-406 was rechecked read-only on October 8: status is active, PR #1503, code
+at `bd8d0191a`, with uncommitted design updates. Its current plan says completion
+and reopening save locally before provider I/O, while the coherent common-writer
+cut remains unavailable. It explicitly deletes `complete_planning_task`,
+`task_pm::complete_task`, `reconcile_pm_writeback`, the completion arm of
+`PmTaskUpdate`, and direct writeback updates. These are integration deletion
+targets here; do not ship the current provider-first completion path beside them.
+No changes were made in that checkout. The ongoing plan is evidence of unfinished
+work, not a stable integration commit or new authorization.
 
 ## Demo
 
@@ -69,10 +78,10 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The four lifecycle slices and landing corrections are implemented locally under
-the superseded completion alias. The October 8 trigger revision is not yet built. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
+The four lifecycle slices, landing corrections and independent completion trigger
+are implemented locally. The shared local planning integration is not built. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
 repeated landing preserves finishing notes for pending and completed Tasks.
-The trigger revision, complete lifecycle proof and Jack's demo review remain.
+Shared local planning integration, complete lifecycle proof and Jack's demo review remain.
 
 ## Inventory and findings
 
@@ -484,13 +493,15 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. The original four slices and superseded completion alias are implemented locally.
-The trigger revision below, combined proof and complete demo remain; these are
+its own Task and child-specific design. The original four slices and the independent completion trigger are implemented locally.
+Shared planning integration, combined proof and complete demo remain; these are
 internal slices of the same delivery boundary.
 
-**Remaining work:** implement independent completion and the end trigger, then
-the unified lifecycle acceptance population below, LOO-406
-integration once its active work is ready, then Jack's complete demo. The affected
+**Remaining work:** integrate LOO-406's common local planning writer once its
+coherent boundary is ready, then finish the unified lifecycle acceptance population
+below and Jack's complete demo. The current completion writer still contacts
+Linear before settling local status; this must be replaced by the common local-save
+and optional-sync owner before delivery, never retained as a second implementation. The affected
 gate ran against the earlier model; its failures have passing focused repairs.
 Those results do not verify the newly accepted completion contract.
 No-PR research now retains dirty files and committed findings; merged Tasks need
@@ -521,11 +532,12 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
    parent changes and squash integration. The complete stacked demo remains.
 
-5. **Independent completion and end trigger — remaining.** Separate status from
-   position at its shared owner, accept provider completion without rewriting
-   execution, and make end request completion durably. Retry failed completion
-   without rerunning successful work; preserve newer reopen decisions. Update
-   migration, CLI/monitor/Desktop, instructions and the affected behavior tests.
+5. **Independent completion and end trigger — locally implemented.** Status has
+   a durable completion mark independent of position. End stores its request with
+   arrival; failed completion retains both. Fresh provider completion/reopening
+   preserves execution and supersedes old requests. CLI, shared projections,
+   Desktop, instructions and the one migration draft use the new contract.
+   Integration must move settlement onto LOO-406's common local writer.
 
 Gate runs the changed-aware headless plan once:
 
@@ -607,8 +619,8 @@ incorrect `--ignored` selection exposed and passed the actual test.
 Jack's zero-or-one PR and normal post-merge follow-through contract remain
 accepted. October 8 supersedes the alias: end triggers independent completion,
 and Linear completion preserves Workflow and Process state. The current code
-still implements the old equivalence; the revision needs implementation before
-the complete demo on the existing PR.
+separates completion and position, but still needs the shared local planning
+writer and composed lifecycle proof before the complete demo on the existing PR.
 
 The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
@@ -683,4 +695,24 @@ placement writers and command inventories, and expecting confirmed presentation
 from a failed publication. The populated-upgrade test now starts before the Task's
 draft instead of applying the draft twice. No production invariant was relaxed.
 
-Check (2026-10-08, before the completion-trigger revision; inherited execution variables cleared): `scripts/test.py --reuse-passing` initially reported 2,229/2,295 Rust and 401/402 Swift passing; all 66 Rust failures recovered in focused materialized reruns (the upgrade case moved to the migration suite), the Swift regression passed, and 49 affected Flow/Task-launch tests passed. Architecture, website, Swift CLI build and multiplatform checks passed; Docker installation ran all seven named proofs plus planning upgrade after correcting one zero-test invocation. Final two landing regressions, `cargo fmt`, all-target Clippy and diff checks passed. Unified lifecycle population, LOO-406 integration and configured demo remain; no live migration or landing.
+The prior gate's exact results and repaired failures remain at
+`37441026a:scratch/make-a-task-up-to.md`; they cover the predecessor model.
+
+Implementation review (2026-10-08): status reads previously reconciled completion,
+so merely inspecting a Task could settle its pending request. They now read
+without executing that trigger. Desktop's Done label also hid unresolved
+follow-through; it now retains that obligation, and history filtering keeps
+unresolved delivery visible even with no live Process. A running Flow keeps its edge
+after accepted provider completion and records its real arrival. Newer reopening
+clears superseded intent; PM delivery checks the request after fresh acquisition.
+Migration seeds historical completion and retains pending provider writebacks.
+No new Task type, watcher or worker was introduced.
+
+The current public offline fixture deliberately cannot write Linear: it verifies
+pending completion, then ingests accepted provider status through the normal
+store writer. Stateful provider fixtures independently prove successful completion,
+lost responses and reopening. Together with the live held Process and atomic
+arrival/store-reopen cases, these prove the trigger contract; they do not yet
+compose post-merge filing, local-only planning, monitor and Desktop in one population.
+
+Check (2026-10-08): Task/Flow public suite 23 passed; Swift DTO/headless delivery and action checks 26 passed; focused atomic store, released-frontier migration, provider (6), Rust wire and Flow graph (10) checks passed; formatting and all-target Clippy passed. Review repaired execution-condition and historical-reader expectations plus the stale-arrival retry boundary; focused reruns pass. Full affected gate, LOO-406 integration, unified lifecycle proof and configured demo remain.

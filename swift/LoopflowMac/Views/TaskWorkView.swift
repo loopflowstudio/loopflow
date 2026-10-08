@@ -37,6 +37,12 @@ struct TaskWorkflowHeader: View {
                     .disabled(acting)
                     .help("lf task move \(task.task.identifier) <node>")
                     .accessibilityIdentifier("task-workflow-move")
+                    if task.runtime?.status != .done {
+                        Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
+                            .disabled(acting)
+                            .help("lf task complete \(task.task.identifier)")
+                            .accessibilityIdentifier("task-complete")
+                    }
                 } else if work.value != nil {
                     // A Task takes up its Project's workflow on its first run.
                     Text("No workflow yet").foregroundStyle(palette.textSecondary)
@@ -45,7 +51,7 @@ struct TaskWorkflowHeader: View {
                         .disabled(unavailable != nil)
                         .help(unavailable ?? "lf task run \(task.task.identifier)")
                         .accessibilityIdentifier("task-workflow-start")
-                    Button("Complete") { Task { await model.moveTask(to: "end", task: task, wave: wave) } }
+                    Button("Complete") { Task { await model.completeTask(task, wave: wave) } }
                         .disabled(acting)
                         .accessibilityIdentifier("task-workflow-end")
                     Spacer()
@@ -58,20 +64,20 @@ struct TaskWorkflowHeader: View {
                 if acting { ProgressView().controlSize(.small) }
             }
             TaskDeliveryView(task: task)
-            // Linear called the Task complete while it is active here.
-            if let conflict = task.runtime?.planningConflict {
+            // Completion may fail after the Workflow has already arrived.
+            if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
                     Text(conflict)
                         .foregroundStyle(WorkTone.blocked.ink)
                         .textSelection(.enabled)
-                        .accessibilityIdentifier("task-workflow-conflict")
-                    Button("Complete anyway") {
-                        Task { await model.moveTask(to: "end", force: true, task: task, wave: wave) }
+                        .accessibilityIdentifier("task-completion-pending")
+                    Button("Retry completion") {
+                        Task { await model.completeTask(task, wave: wave) }
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
                     .disabled(acting)
-                    .help("lf task move \(task.task.identifier) end --force")
-                    .accessibilityIdentifier("task-workflow-force-end")
+                    .help("lf task complete \(task.task.identifier)")
+                    .accessibilityIdentifier("task-completion-retry")
                 }
             }
             if let error = draft?.error ?? model.navigation.taskSessionErrors[task.id] {

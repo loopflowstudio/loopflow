@@ -10,8 +10,7 @@ use serde_json::json;
 
 use super::test_fixture::{now, Fixture};
 use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
-use crate::child::ChildRef;
-use crate::durable::WorkStatus;
+use crate::durable::{WorkRef, WorkStatus};
 use crate::ops::NullProgress;
 use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
@@ -892,7 +891,7 @@ fn task_completion_preserves_planning_identity_and_summary_on_retry() {
 }
 
 #[test]
-fn task_completion_retries_pending_writeback_after_local_done() {
+fn task_completion_retries_without_creating_a_workflow() {
     assert_task_completion_retry(true, false, None);
 }
 
@@ -948,7 +947,7 @@ fi
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
-)
+        )
         .unwrap();
         let task = registered.then(|| {
             for args in [
@@ -1042,250 +1041,129 @@ fi
                 runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
                 // Observe the merge before recording the accepted disposition.
                 // Provider completion itself is the operation exercised below.
-                runtime.block_on(crate::ops::task::reconcile_delivered_task(
-                    &fixture.store, &mut task,
-                )).unwrap();
-                fixture.store.sqlite.finish_follow_through(
-                    &task.id, "Accepted checks complete; no later obligation", true,
-                ).unwrap();
+                runtime
+                    .block_on(crate::ops::task::reconcile_delivered_task(
+                        &fixture.store,
+                        &mut task,
+                    ))
+                    .unwrap();
+                fixture
+                    .store
+                    .sqlite
+                    .finish_follow_through(
+                        &task.id,
+                        "Accepted checks complete; no later obligation",
+                        true,
+                    )
+                    .unwrap();
             }
             task
         });
         let selector = task
             .as_ref()
             .map_or(item.identifier.as_str(), |task| task.id.as_str());
-        let complete = |summary: &str| match merge {
-            None | Some(PrMergeMode::User) => crate::ops::task::task_end(&repo, selector, Some(summary), &Default::default()),
-            Some(PrMergeMode::Auto) => runtime.block_on(async {
-                let task = task.as_ref().unwrap();
-                let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
-                let landing = crate::pr_landing::PrLanding::new(
-                    crate::pr_landing::NewPrLanding {
-                        repo: "loopflowstudio/fixture".into(),
-                        pr_number: 42,
-                        worktree: repo.clone(),
-                        branch: pr.branch,
-                        task_id: Some(task.id.clone()),
-                        requested_head_sha: pr.base_commit,
-                    },
-                    time::OffsetDateTime::now_utc(),
-                )
-                .unwrap();
-                let settlement = crate::ops::task::settle_task_landing(&fixture.store, &landing).await;
-                let retained = fixture.store.get_task(&task.id).await.unwrap().unwrap();
-                settlement?;
-                Ok(Some(retained))
-            }),
-        };
-        if let Some(task) = &task {
-            let original_prs = runtime.block_on(fixture.store.task_prs(&task.id)).unwrap();
-            for terminal in ["canceled", "duplicate"] {
-                runtime.block_on(async {
-                    state.lock().await.issues[0]["state"] = json!({"type":terminal});
-                    mark_issue_updated(&mut state.lock().await.issues[0]);
-                });
-                let error = complete("Cannot change the outcome").unwrap_err();
-                assert!(
-                    matches!(
-                        error,
-                        crate::ops::error::OpsError::TaskCompletionConflict { .. }
-                    ),
-                    "{error}"
-                );
-                runtime.block_on(async {
-                    let work = fixture
-                        .store
-                        .work_for_child(&ChildRef::Task(task.id.clone()))
-                        .await
-                        .unwrap();
-                    assert_eq!(
-                        fixture.store.work_status(&work).await.unwrap(),
-                        WorkStatus::Ready
-                    );
-                    let events = fixture.store.task_events_after(&task.id, 0).await.unwrap();
-                    assert!(!events.iter().any(|event| matches!(
-                        event.kind,
-                        TaskEventKind::Completed { .. } | TaskEventKind::Progress { .. }
-                    )));
-                    assert_eq!(state.lock().await.completion_writes, 0);
-                    let prs = fixture.store.task_prs(&task.id).await.unwrap();
-                    if merge.is_some() {
-                        assert_eq!(prs[0].phase(), PrPhase::Merged);
-                        assert_eq!(prs[0].merge_commit.as_deref(), Some("merge-42"));
-                        assert_eq!(
-                            events
-                                .iter()
-                                .filter(|event| matches!(
-                                    event.kind,
-                                    TaskEventKind::PrMerged { .. }
-                                ))
-                                .count(),
-                            1
-                        );
-                    } else {
-                        assert_eq!(prs, original_prs);
-                    }
-                });
-            }
-            if merge.is_some() {
-                // The merge is now durable. Provider completion must remain
-                // retryable even when GitHub can no longer be reached.
-                std::fs::write(
-                    fixture.directory.path().join("bin/gh"),
-                    "#!/bin/sh\necho 'GitHub unavailable after recorded merge' >&2\nexit 1\n",
-                )
-                .unwrap();
-            }
-            // Linear can change between the eligibility read and snapshot
-            // confirmation. Known conflicts at either boundary refuse success.
-            for terminal in ["canceled", "duplicate"] {
-                runtime.block_on(async {
-                    let mut provider = state.lock().await;
-                    provider.issues[0]["state"] = json!({"type":"unstarted"});
-                    mark_issue_updated(&mut provider.issues[0]);
-                    provider.completion_state = Some(terminal.into());
-                });
-                assert!(matches!(
-                    complete("Outcome changed during completion").unwrap_err(),
-                    crate::ops::error::OpsError::TaskCompletionConflict { .. }
-                ));
-                runtime.block_on(async {
-                    let work = fixture.store.work_for_child(&ChildRef::Task(task.id.clone())).await.unwrap();
-                    assert_eq!(fixture.store.work_status(&work).await.unwrap(), WorkStatus::Ready);
-                    let events = fixture.store.task_events_after(&task.id, 0).await.unwrap();
-                    assert!(!events.iter().any(|event| matches!(event.kind, TaskEventKind::Completed { .. } | TaskEventKind::Progress { .. })));
-                });
-            }
+        let complete =
+            |summary: &str| crate::ops::task::task_complete(&repo, selector, Some(summary));
+        for terminal in ["canceled", "duplicate"] {
             runtime.block_on(async {
-                state.lock().await.issues[0]["state"] = json!({"type":"unstarted"});
-                mark_issue_updated(&mut state.lock().await.issues[0]);
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type":terminal});
+                mark_issue_updated(&mut provider.issues[0]);
             });
+            assert!(complete("Must preserve authored outcome")
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be completed"));
         }
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["state"] = json!({"type":"unstarted"});
+            mark_issue_updated(&mut provider.issues[0]);
+        });
+        crate::ops::task_pm::resolve_task(&repo, &item.id, PmRefresh::Force).unwrap();
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.fail_completion = !lose_response;
             provider.lose_completion = lose_response;
         });
-        let first = complete("Delivered the requested outcome");
-        let mut before = None;
+        assert!(complete("Delivered the requested outcome").is_err());
         if let Some(task) = &task {
-            let first = first.unwrap().unwrap();
-            assert_eq!(first.observation, Observation::NotRequired);
-            assert!(matches!(
-                first.pm_writeback,
-                PmWritebackState::Pending { .. }
-            ));
-            let events = runtime
+            assert!(fixture
+                .store
+                .sqlite
+                .task_completion_pending(&task.id)
+                .unwrap()
+                .is_some());
+            assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+            let work = WorkRef::Task(task.id.clone());
+            assert_eq!(
+                runtime.block_on(fixture.store.work_status(&work)).unwrap(),
+                WorkStatus::Ready
+            );
+        }
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.fail_completion = false;
+        });
+        complete("Delivered the requested outcome").unwrap();
+        if let Some(task) = &task {
+            assert!(fixture
+                .store
+                .sqlite
+                .task_completion_pending(&task.id)
+                .unwrap()
+                .is_none());
+            assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+            let work = WorkRef::Task(task.id.clone());
+            assert_eq!(
+                runtime.block_on(fixture.store.work_status(&work)).unwrap(),
+                WorkStatus::Done
+            );
+            let before = runtime
                 .block_on(fixture.store.task_events_after(&task.id, 0))
                 .unwrap();
             assert_eq!(
-                events
+                before
                     .iter()
                     .filter(|event| matches!(event.kind, TaskEventKind::Completed { .. }))
                     .count(),
                 1
             );
-            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
-            let terminal: i64 = conn
-                .query_row(
-                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
-                    [task.id.as_str()],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            before = Some((events, terminal));
-        } else {
-            assert!(first.unwrap_err().to_string().contains(if lose_response {
-                "lost completion response"
-            } else {
-                "completion unavailable"
-            }));
-            runtime.block_on(async {
-                let mut provider = state.lock().await;
-                provider.fail_issue_read_after = Some(2);
-                provider.lose_comment = true;
-            });
-            assert!(complete("Delivered the requested outcome")
-                .unwrap_err()
-                .to_string()
-                .contains("local refresh failed"));
-        }
-        if registered {
-            runtime.block_on(async {
-                let mut provider = state.lock().await;
-                provider.fail_issue_read_after = Some(2);
-                provider.issues[0]["title"] = json!("Updated before completion retry");
-                provider.issues[0]["description"] = json!("Retain the provider's latest notes");
-                mark_issue_updated(&mut provider.issues[0]);
-            });
-            let retry = complete("Delivered the requested outcome")
-                .unwrap()
-                .unwrap();
-            assert!(matches!(
-                retry.pm_writeback,
-                PmWritebackState::Pending { ref error, .. }
-                    if error.contains("local refresh failed")
-            ));
-        }
-        let result = complete("Delivered the requested outcome").unwrap();
-        if let Some(task) = &task {
-            let result = result.unwrap();
-            assert_eq!(result.pm_writeback, PmWritebackState::Current);
-            assert_eq!(result.plan.title, "Updated before completion retry");
-            assert_eq!(
-                result.plan.description,
-                "Retain the provider's latest notes"
-            );
-            let retained = runtime
-                .block_on(fixture.store.get_task(&task.id))
-                .unwrap()
-                .unwrap();
-            assert_eq!(retained.plan.title, "Updated before completion retry");
-            assert_eq!(
-                retained.plan.description,
-                "Retain the provider's latest notes"
-            );
-            complete("Must not replace the first completion").unwrap();
-            for terminal in ["canceled", "duplicate"] {
-                runtime.block_on(async {
-                    state.lock().await.issues[0]["state"] = json!({"type":terminal});
-                    mark_issue_updated(&mut state.lock().await.issues[0]);
-                    fixture.store.update_task_pm_writeback(
-                        &task.id,
-                        &PmWritebackState::Pending {
-                            operation: crate::work::task::PmWritebackOperation::CompleteTask,
-                            error: "retry after provider interruption".into(),
-                        },
-                        retained.updated_at,
-                    ).await.unwrap();
-                });
-                let historical = complete("Must preserve recorded success").unwrap().unwrap();
-                assert!(matches!(historical.pm_writeback, PmWritebackState::Pending { ref error, .. } if error.contains("cannot be completed")));
-                runtime.block_on(async {
-                    let work = fixture.store.work_for_child(&ChildRef::Task(task.id.clone())).await.unwrap();
-                    assert_eq!(fixture.store.work_status(&work).await.unwrap(), WorkStatus::Done);
-                });
-            }
-            let (events, terminal) = before.unwrap();
+            complete("Repeated completion").unwrap();
             assert_eq!(
                 runtime
                     .block_on(fixture.store.task_events_after(&task.id, 0))
                     .unwrap(),
-                events
+                before
             );
-            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type":"started"});
+                mark_issue_updated(&mut provider.issues[0]);
+            });
+            crate::ops::task_pm::resolve_task(&repo, &item.id, PmRefresh::Force).unwrap();
+            let mut reopened = runtime
+                .block_on(fixture.store.get_task(&task.id))
+                .unwrap()
+                .unwrap();
+            runtime
+                .block_on(crate::ops::task::reconcile_task_completion(
+                    &fixture.store,
+                    &mut reopened,
+                ))
+                .unwrap();
             assert_eq!(
-                conn.query_row(
-                    "SELECT updated_at FROM task_workflows WHERE task_id=?1",
-                    [task.id.as_str()],
-                    |row| row.get::<_, i64>(0)
-                )
-                .unwrap(),
-                terminal
+                runtime.block_on(fixture.store.work_status(&work)).unwrap(),
+                WorkStatus::Ready
             );
+            assert!(fixture
+                .store
+                .sqlite
+                .task_completion_pending(&task.id)
+                .unwrap()
+                .is_none());
         } else {
-            assert!(result.is_none());
-            complete("Must not replace the first completion").unwrap();
+            complete("Must preserve the first summary").unwrap();
             assert!(runtime
                 .block_on(fixture.store.list_tasks(None))
                 .unwrap()
@@ -1296,24 +1174,10 @@ fi
                 .as_str()
                 .unwrap()
                 .contains("Delivered the requested outcome"));
-            assert!(!crate::ops::linear_observe::is_direction_comment(
-                comments[0]["body"].as_str().unwrap(),
-                Some("person-1"),
-            ));
-            for terminal in ["canceled", "duplicate"] {
-                runtime.block_on(async {
-                    state.lock().await.issues[0]["state"] = json!({"type":terminal});
-                    mark_issue_updated(&mut state.lock().await.issues[0]);
-                });
-                assert!(complete("Cannot change the outcome")
-                    .unwrap_err()
-                    .to_string()
-                    .contains("cannot be completed"));
-            }
         }
         assert_eq!(
             runtime.block_on(async { state.lock().await.completion_writes }),
-            if registered { 3 } else { 1 }
+            1
         );
         assert_eq!(
             crate::engine::worktrees::list_worktrees(&repo)

@@ -5,9 +5,8 @@ demo on October 7. The launch/alias-only milestone was the agent's scope reducti
 
 Jack Heart revised completion on October 8: end triggers `task complete`; it does
 not define Task status. Linear completion changes status without moving Workflow
-or stopping Processes. This supersedes the earlier alias. Implementation must
-preserve durable failed-trigger retries, newer reopen decisions, and unresolved
-delivery facts. The prior gate verifies the earlier model, not this revision.
+or stopping Processes. This supersedes the earlier alias. Local implementation preserves durable failed-trigger retries, newer reopen
+decisions, and unresolved delivery facts. Shared local planning integration remains. The prior gate verifies the earlier model, not this revision.
 
 Implemented defaults below remain unreviewed by Jack:
 
@@ -22,8 +21,9 @@ Implemented defaults below remain unreviewed by Jack:
 - LOO-385 overlaps. Recheck before any parallel implementation or external
   disposition; no closure or transfer is authorized by this work.
 
-The original four slices and landing corrections are present; the independent
-completion/trigger revision remains to build. Earlier checks pass after repairs. Unified lifecycle proof, LOO-406 integration and
+The original four slices, landing corrections and independent completion trigger
+are present. Earlier checks cover the predecessor; current focused evidence is
+in the design. Unified lifecycle proof, LOO-406 integration and
 the complete demo remain. No landing or installed-Home
 migration is authorized.
 
@@ -59,3 +59,10 @@ Jack Heart (October 8) requested no duplicate Task data types and explicit
 `--wait-and-fix` naming. The design records the LOO-406 integration gap: shared
 optional placement/identity and local follow-up filing/completion, not DTO merging
 alone. Existing LOO-406 types are reused; its active checkout is unchanged.
+
+October 8 integration recheck: LOO-406 is active on PR #1503, code `bd8d0191a`,
+with an uncommitted revised design. Its common planning writer remains unfinished.
+That design saves completion locally before optional Linear sync and deletes the
+provider-first completion/writeback APIs still used here. Finish the coherent
+integration before delivery; do not preserve parallel completion owners. The
+checkout was inspected read-only. Current focused proofs do not settle this gap.

@@ -69,6 +69,10 @@ and due follow-ups have been checked for selection or authorized execution.
   last edge reached waits on a person there; rerun an edge that stopped or
   failed with `lf task run <issue> <flow>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
+- **Retry completion alone.** A durable completion request at end retries with
+  `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
+  position and Process liveness are independent. A newer reopening supersedes
+  old intent; end alone cannot re-complete it.
 - **Finish merged delivery.** A verified merge is not Task completion. Inspect
   all associated Flows and unfinished Processes first; leave a live ship Flow
   to finish. With no live driver, a durable none/filed disposition needs

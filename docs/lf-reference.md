@@ -1415,30 +1415,27 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
-| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task complete
 
-Complete a Task: the same transition and checks as `task move ISSUE end`
+Complete a Task without moving its Workflow
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--reason` | Why, kept in the Task's workflow history |
-| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
+| `--reason` | Why, kept in the Task's completion request |
 | `--help / -h` | Print help |
 
 ## lf task move
 
-Put a Task at a node of its workflow without running anything; `end` completes it
+Move Workflow position without running anything; `end` requests completion
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
 | `<node>` | `start`, `end` or one of the workflow's nodes |
 | `--reason` | Why, kept in the Task's workflow history |
-| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
 | `--help / -h` | Print help |
 
 ## lf task create

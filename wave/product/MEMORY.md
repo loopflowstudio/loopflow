@@ -12,12 +12,14 @@ October 8 supersedes the end alias: end triggers completion; Task status,
 Workflow position and Process liveness are independent. Linear completion updates
 status without moving Workflow or stopping work. Failed completion after end is
 retried without replaying the Flow; reopening must supersede old completion intent.
-The design is accepted; the trigger revision is not implemented at `5876a8692`.
+The local trigger awaits LOO-406's unfinished common local writer; its
+October 8 revision supersedes provider-first completion.
 
 Task owns placement and one optional PR. Preserve history and unresolved scope.
 LOO-385 overlaps; no closure is authorized. Jack accepted finishing through ship
 or the next Task/Wave operation, without a new watcher; no schedule means no wake.
-The full lifecycle on #1499 precedes demo. Landing remains unauthorized.
+The full lifecycle on #1499 precedes demo; focused trigger/DTO proofs do not
+replace that population. Landing remains unauthorized.
 
 Retries pin UUIDs and destination/payload before mutation. Confirmed links use
 Linear's observed due date, including removal; the retry payload stays immutable.
@@ -857,10 +859,8 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 
 ### Earlier runtime findings (July–August evidence)
 
-Resident-era incidents remain at `b908182f5:wave/product/MEMORY.md`.
-October 4 retires automatic recovery. Keep unknown liveness explicit; missing
-Flows must not silently retry. Durable Steers survive provider/app exit;
-mid-turn delivery is provider-dependent.
+Resident-era incidents and Steer-delivery limits: `b908182f5:wave/product/MEMORY.md`.
+October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ## Model (design invariants)
 

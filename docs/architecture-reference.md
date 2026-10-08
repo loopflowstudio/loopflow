@@ -813,7 +813,10 @@ Task row ----> managed worktree ----> commits
    The next Task/Wave operation recovers stopped finishing work with
    `finish-delivery`, after checking live drivers. Reconciliation records facts
    and settles an existing disposition; it never invents the agent's verdict.
-7. `task complete` and `task move end` share the same checks. A PR-less Task
+7. `task complete` changes status without moving the Workflow. Arrival at end
+   atomically requests completion; a failure retains arrival and retries only
+   completion. Accepted Linear completion/reopening leaves execution intact and
+   supersedes old completion intent. Ordinary reads execute no trigger. A PR-less Task
    may finish with retained artifacts; a Task with a PR needs authoritative
    merge and durable follow-through. Dependent PRs belong to stacked Tasks.
 

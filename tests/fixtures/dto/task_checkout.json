@@ -12,7 +12,7 @@
   "wave": "product",
   "project_id": "ps_11111111111111111111111111111111",
   "status": "ready",
-  "planning_conflict": null,
+  "completion_pending": null,
   "execution": {
     "state": "idle",
     "reason": "Checkout prepared",

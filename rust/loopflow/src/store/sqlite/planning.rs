@@ -748,6 +748,7 @@ fn put_item(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
+    let mut status_changed = previous.is_none();
     if let Some((previous, acquired)) = previous {
         let previous_json: serde_json::Value = serde_json::from_str(&previous)?;
         let has_completed_at = previous_json.get("completed_at").is_some();
@@ -780,6 +781,8 @@ fn put_item(
                 )));
             }
         }
+        status_changed = revision > previous_revision
+            && (item.state != previous.state || item.completed != previous.completed);
         // For equal revisions, keep the later acquisition's list rank and freshness.
         if revision == previous_revision && observed_at < acquired {
             return Ok(false);
@@ -791,6 +794,24 @@ fn put_item(
          project_id=excluded.project_id,observed_at=excluded.observed_at,body=excluded.body",
         params![repo,provider,item.id,item.identifier,item.project_id,observed_at,serde_json::to_string(item)?],
     )?;
+    if status_changed {
+        // A newer authored status supersedes an old end trigger or writeback.
+        // Execution and delivery evidence are deliberately untouched.
+        if item.is_complete() {
+            conn.execute(
+                "INSERT INTO task_events(task_id,kind_json,created_at)
+                 SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
+                 FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.completed_at IS NULL",
+                params![item.id,repo,observed_at])?;
+        }
+        conn.execute(
+            "UPDATE tasks SET completed_at=CASE WHEN ?3 THEN COALESCE(completed_at,?4) ELSE NULL END,
+             completion_request=NULL,completion_error=NULL,pm_writeback_json=json_object('state','current')
+             WHERE external_issue_id=?1 AND project_id IN
+             (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)",
+            params![item.id,repo,item.is_complete(),observed_at])?;
+    }
     Ok(true)
 }
 

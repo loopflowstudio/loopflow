@@ -90,7 +90,7 @@
     "runtime": {
       "work_id": "ts_completed",
       "status": "done",
-      "planning_conflict": null,
+      "completion_pending": null,
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
@@ -417,7 +417,7 @@
     "runtime": {
       "work_id": "ts_stale",
       "status": "active",
-      "planning_conflict": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
+      "completion_pending": "Linear calls Task LOO-1 complete while it is active on its workflow; `lf task move LOO-1 end --force` completes it here",
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
@@ -792,7 +792,7 @@
     "runtime": {
       "work_id": "ts_unavailable",
       "status": "not_ready",
-      "planning_conflict": null,
+      "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
@@ -870,7 +870,7 @@
     "runtime": {
       "work_id": "task-user",
       "status": "ready",
-      "planning_conflict": null,
+      "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
@@ -1246,7 +1246,7 @@
     "runtime": {
       "work_id": "ts_dirty",
       "status": "ready",
-      "planning_conflict": null,
+      "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
@@ -1324,7 +1324,7 @@
     "runtime": {
       "work_id": "ts_commits",
       "status": "ready",
-      "planning_conflict": null,
+      "completion_pending": null,
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",

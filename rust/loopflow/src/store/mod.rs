@@ -1384,15 +1384,17 @@ mod tests {
                 "CREATE TABLE tasks (
                     id TEXT PRIMARY KEY,
                     worktree TEXT NOT NULL,
-                    abandoned_at INTEGER
+                    abandoned_at INTEGER,
+                    completed_at INTEGER
                  );
                  CREATE TABLE task_workflows (task_id TEXT PRIMARY KEY, node TEXT NOT NULL, edge INTEGER);
-                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL);
-                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL);
-                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL);
-                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1);
+                 INSERT INTO tasks VALUES ('running', '/repo.running', NULL, NULL);
+                 INSERT INTO tasks VALUES ('waiting', '/repo.waiting', NULL, NULL);
+                 INSERT INTO tasks VALUES ('completed', '/repo.completed', NULL, 1);
+                 INSERT INTO tasks VALUES ('abandoned', '/repo.abandoned', 1, NULL);
                  INSERT INTO task_workflows VALUES ('running', 'review', 2);
-                 INSERT INTO task_workflows VALUES ('completed', 'end', NULL);",
+                 INSERT INTO task_workflows VALUES ('completed', 'review', 2);
+                 INSERT INTO task_workflows VALUES ('waiting', 'end', NULL);",
             )
             .expect("seed task ownership");
         drop(connection);
@@ -3317,7 +3319,14 @@ mod tests {
         snapshot.snapshot.items[0].description = refreshed_plan.description.clone();
         store.put_pm_snapshot(snapshot, None).await.unwrap();
         store
-            .complete_task(&task, crate::store::sqlite::EndMove::Set, None)
+            .complete_task(
+                &task,
+                store
+                    .sqlite
+                    .request_task_completion(&task.id, None)
+                    .unwrap()
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();

@@ -654,7 +654,7 @@ fn print_task_snapshot(
         if let Some(workflow) = &snapshot.work.workflow {
             println!("  {}", workflow.summary());
         }
-        if let Some(conflict) = &snapshot.planning_conflict {
+        if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
         }
         println!("  latest Flow: {}", snapshot.execution.reason);
@@ -965,7 +965,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         issue,
                         "start",
                         Some("Restart Workflow"),
-                        &loopflow::ops::task::EndOptions::default()
                     )?
                 );
                 Ok(())
@@ -974,29 +973,18 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,
+            node,
             reason,
-            force,
-            ..
-        }
-        | TaskCommand::Complete {
-            issue,
-            reason,
-            force,
         } => {
-            let node = match command {
-                TaskCommand::Move { node, .. } => node.as_str(),
-                _ => loopflow::engine::workflow::END,
-            };
             println!(
                 "{}",
-                loopflow::ops::task::workflow_set(
-                    repo,
-                    issue,
-                    node,
-                    reason.as_deref(),
-                    &loopflow::ops::task::EndOptions { force: *force },
-                )?
+                loopflow::ops::task::workflow_set(repo, issue, node, reason.as_deref())?
             );
+            Ok(())
+        }
+        TaskCommand::Complete { issue, reason } => {
+            loopflow::ops::task::task_complete(repo, issue, reason.as_deref())?;
+            println!("{issue}: completed");
             Ok(())
         }
         TaskCommand::Create {
@@ -1535,11 +1523,9 @@ fn dispatch(
                 stack_on,
                 directive,
                 reason,
-                force,
             },
     }) = &cli.command
     {
-        let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
         let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
@@ -1553,7 +1539,6 @@ fn dispatch(
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
-                end: end.clone(),
             },
         )?;
         let Some(flow) = flow else {
@@ -1573,7 +1558,7 @@ fn dispatch(
             &flow,
             &task.worktree,
         )?;
-        return Ok(loopflow::ops::task::workflow_arrive(&task, &end)?);
+        return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
     let explicit_wave = cli
         .wave

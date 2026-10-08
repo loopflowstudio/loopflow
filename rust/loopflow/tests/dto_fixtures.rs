@@ -581,6 +581,22 @@ fn task_delivery_preserves_pending_filings_links_and_due_unstarted_follow_ups() 
         ["Verify the installed release. Evidence: the command succeeds on the released version."]
     );
     assert!(!rows["pending"].follow_through.resolved());
+    assert!(rows["pending"]
+        .runtime
+        .as_ref()
+        .unwrap()
+        .completion_pending
+        .as_ref()
+        .unwrap()
+        .contains("lf task complete"));
+    assert_eq!(
+        rows["completed_running"].runtime.as_ref().unwrap().status,
+        loopflow::durable::TaskState::Done
+    );
+    assert_eq!(
+        rows["completed_running"].execution,
+        rows["pending"].execution
+    );
     assert_eq!(rows["pending"].follow_through.intents.len(), 1);
     assert!(rows["done"].follow_through.resolved());
     assert_eq!(rows["done"].follow_through.links[0].identifier, "W2-FOLLOW");

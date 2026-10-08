@@ -155,10 +155,10 @@ pub struct DirectionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
-    /// Read from the Task's Workflow position; abandoned is its own mark.
+    /// Completion and abandonment are independent of Workflow position.
     pub status: TaskState,
-    /// Linear calls the Task complete while it is active here.
-    pub planning_conflict: Option<String>,
+    /// A durable completion request awaiting settlement.
+    pub completion_pending: Option<String>,
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
@@ -1003,7 +1003,7 @@ fn snapshot_task_runtime(
     execution: &crate::ops::task_execution::TaskExecutionSnapshot,
     task: &Task,
     status: TaskState,
-    planning_conflict: Option<String>,
+    completion_pending: Option<String>,
     started: bool,
 ) -> TaskRuntimeSnapshot {
     let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
@@ -1016,7 +1016,7 @@ fn snapshot_task_runtime(
             execution.reason.clone()
         },
         status,
-        planning_conflict,
+        completion_pending,
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
         started,
@@ -1251,15 +1251,14 @@ async fn snapshot_task_detail(
             let (execution, flow_record) =
                 crate::ops::task_execution::task_execution_and_flow(store, &task.id).await?;
             let status = store.task_state(&task.id).await?;
-            let conflict =
-                crate::ops::task::planning_conflict_of(status, &item, &task.plan.identifier);
+            let pending = crate::ops::task::completion_pending(store, task)?;
             let started = store.task_started(&task.id).await?
                 || pr
                     .iter()
                     .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
                 Some(snapshot_task_runtime(
-                    &execution, task, status, conflict, started,
+                    &execution, task, status, pending, started,
                 )),
                 Some(execution),
                 flow_record,
@@ -1348,7 +1347,7 @@ async fn snapshot_task_detail(
         worktree_blocker.as_ref(),
     );
     let completion_refusal = match (task, runtime.as_ref()) {
-        (Some(task), Some(runtime)) if !runtime.status.is_terminal() => {
+        (Some(task), Some(runtime)) if runtime.status != TaskState::Abandoned => {
             crate::ops::task::task_completion_gate(store, task)
                 .await?
                 .refusal(&task.plan.identifier)
@@ -1575,6 +1574,7 @@ fn derive_task_condition(
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
         !runtime.status.is_terminal()
+            || action_evidence.is_some_and(|evidence| evidence.completion_refusal.is_some())
             || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))
@@ -1588,9 +1588,8 @@ fn derive_task_condition(
         && local_progress.authored_commits == Some(true)
         && matches!(active_pr_phase, Some(PrPhase::Open | PrPhase::Publishing));
     let execution = action_evidence.and_then(|evidence| evidence.execution);
-    let (state, reason) = if let Some(execution) = execution
-        .filter(|execution| execution.state != TaskExecutionState::Idle)
-        .filter(|_| runtime.is_none_or(|runtime| !runtime.status.is_terminal()))
+    let (state, reason) = if let Some(execution) =
+        execution.filter(|execution| execution.state != TaskExecutionState::Idle)
     {
         let state = match execution.state {
             TaskExecutionState::Starting | TaskExecutionState::Running => TaskConditionState::Clear,
@@ -3062,7 +3061,7 @@ mod tests {
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
                 provider: "codex".to_string(),
                 started: true,
-                planning_conflict: None,
+                completion_pending: None,
             };
             derive_task_condition(
                 Some(&runtime),
@@ -3113,7 +3112,7 @@ mod tests {
             updated_at: "2026-07-21T00:00:00Z".to_string(),
             provider: "codex".to_string(),
             started: true,
-            planning_conflict: None,
+            completion_pending: None,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -3222,7 +3221,7 @@ mod tests {
                         updated_at: "2026-07-21T00:00:00Z".into(),
                         provider: "codex".into(),
                         started: true,
-                        planning_conflict: None,
+                        completion_pending: None,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),
@@ -3239,7 +3238,28 @@ mod tests {
                         OffsetDateTime::now_utc(),
                     );
                     assert_eq!(terminal.state, TaskConditionState::Blocked);
-                    assert_eq!(terminal.reason, "Task is terminal");
+                    assert_eq!(terminal.reason, execution.reason);
+                    let pending_delivery = derive_task_condition(
+                        Some(&runtime),
+                        &NextMove {
+                            owner: NextMoveOwner::Wave,
+                            reason: "Task is terminal".into(),
+                        },
+                        LocalProgressEvidence {
+                            unsettled: Some(false),
+                            dirty: Some(false),
+                            ..condition.local_progress.clone()
+                        },
+                        Some(&TaskActionEvidence {
+                            status: runtime.status.work_status(),
+                            execution: None,
+                            completion_refusal: Some("Merged · Follow-through pending"),
+                            ..actions
+                        }),
+                        None,
+                        OffsetDateTime::now_utc(),
+                    );
+                    assert!(pending_delivery.unresolved_execution);
                 }
             }
         }

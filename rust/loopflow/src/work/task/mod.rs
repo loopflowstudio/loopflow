@@ -681,6 +681,9 @@ pub enum TaskEventKind {
         url: String,
         merge_commit: String,
     },
+    CompletionRequested {
+        reason: Option<String>,
+    },
     Completed {
         summary: String,
     },

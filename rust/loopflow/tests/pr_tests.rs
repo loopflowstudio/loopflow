@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{task_end, task_snapshot, task_status};
+use loopflow::ops::task::{task_complete, task_snapshot, task_status};
 use loopflow::ops::{
     commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
     NullProgress, OpsError, PrOptions,
@@ -1412,7 +1412,7 @@ fn end_is_refused_while_a_published_pr_is_unmerged() {
     });
     runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
 
-    let result = task_end(repo.path(), "INF-123", Some("done"), &Default::default());
+    let result = task_complete(repo.path(), "INF-123", Some("done"));
     let message = result
         .expect_err("an unmerged published PR must block completion")
         .to_string();

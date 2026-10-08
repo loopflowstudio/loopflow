@@ -89,7 +89,7 @@
             "runtime": {
               "work_id": "ts_now00000000000000000000000000000",
               "status": "ready",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
               "provider": "claude",
@@ -463,7 +463,7 @@
             "runtime": {
               "work_id": "ts_review00000000000000000000000000",
               "status": "ready",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
               "provider": "claude",
@@ -929,7 +929,7 @@
             "runtime": {
               "work_id": "ts_later000000000000000000000000000",
               "status": "done",
-              "planning_conflict": null,
+              "completion_pending": null,
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
               "provider": "claude",

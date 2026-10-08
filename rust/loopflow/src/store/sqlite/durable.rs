@@ -577,12 +577,12 @@ fn inherit_placement(
     write_placement(tx, work, &machine_id, placed_at)
 }
 
-/// SQL for the state of Task row `t`, read from its Workflow position.
+/// Completion and abandonment are durable; unfinished readiness follows the Workflow.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
-        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' ELSE COALESCE((
+        "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' WHEN {t}.completed_at IS NOT NULL THEN 'done' ELSE COALESCE((
             SELECT CASE WHEN wf.edge IS NOT NULL THEN 'active' WHEN wf.node='start' THEN 'ready'
-                WHEN wf.node='end' THEN 'done' ELSE 'active' END
+                ELSE 'active' END
             FROM task_workflows wf WHERE wf.task_id={t}.id),'not_ready') END"
     )
 }
@@ -1517,7 +1517,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,'{\"name\":\"unplanned\",\"nodes\":[],\"edges\":[{\"from\":\"start\",\"to\":\"end\",\"flow\":null}]}','end',1)",
+            "UPDATE tasks SET completed_at=1 WHERE id=?1",
             [bound_task.as_str()],
         )
         .unwrap();

@@ -102,7 +102,10 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    stays a concrete blocker in this conversation. The source does not wait for
    its follow-up Tasks to finish. A PR-less Task can reach end with retained files
    and commits; no placeholder PR or landing ceremony is required. Completion
-   shares `task move end` checks and is safe to repeat after driver arrival.
+   changes status without moving the Workflow and is safe to repeat after arrival.
+   When status shows completion pending at end, retry `lf task complete <issue>`
+   alone. Never run the successful edge again. A newer reopening supersedes the
+   old request; standing at end alone does not authorize another completion.
 
 6. **Report the outcome or blocker.** For completed work, state the
    observed outcome. For blocked work, name what prevents progress and the exact

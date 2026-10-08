@@ -570,6 +570,16 @@ impl WorkflowTask {
         );
     }
 
+    fn finish_after_provider_observation(&self, args: &[&str]) {
+        let error = refusal(self.run(args));
+        assert!(self.status()["completion_pending"].is_string(), "{error}");
+        let workflow = self.workflow();
+        self.complete_in_linear();
+        self.ok(&["task", "complete", "INF-123"]);
+        assert_eq!(self.workflow(), workflow);
+        assert_eq!(self.state(), "done");
+    }
+
     fn workflow(&self) -> serde_json::Value {
         self.status()["work"]["workflow"].clone()
     }
@@ -612,7 +622,7 @@ fn a_task_takes_up_its_projects_workflow_and_keeps_one_it_named() {
     // A Task that named its own keeps it when later runs name nothing.
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    task.ok(&["-b", "task", "run", "INF-123"]);
+    task.finish_after_provider_observation(&["-b", "task", "run", "INF-123"]);
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "findings");
     assert_eq!(workflow["position"], at("end"));
@@ -650,7 +660,7 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     task.repo.commit("Record research findings");
     task.repo
         .create_file("draft.md", "Retained working notes\n");
-    task.ok(&["task", "run", "INF-123"]);
+    task.finish_after_provider_observation(&["task", "run", "INF-123"]);
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("end"));
     assert_eq!(
@@ -708,7 +718,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     assert_eq!(workflow["position"]["running"], false);
     assert_eq!(moves(&workflow).last().unwrap().0, "chose");
     // The work finished elsewhere; a person says so.
-    task.ok(&[
+    task.finish_after_provider_observation(&[
         "task",
         "move",
         "INF-123",
@@ -733,7 +743,7 @@ fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
     // The Task is done; nothing runs until it is put back on its workflow.
     assert_eq!(task.state(), "done");
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "findings"]));
-    assert!(error.contains("lf task move INF-123"), "{error}");
+    assert!(error.contains("reopen its planning status"), "{error}");
 }
 
 #[test]
@@ -951,7 +961,7 @@ fn a_held_command_stops_the_task_run_without_repeating_the_flow() {
 }
 
 #[test]
-fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
+fn completion_is_independent_of_workflow_readiness() {
     let task = WorkflowTask::new();
     assert_eq!(task.state(), "not_ready");
     // A node, then a stopped edge: both between start and end.
@@ -966,14 +976,21 @@ fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
     assert_eq!(task.state(), "active");
     task.ok(&["task", "move", "INF-123", "start"]);
     assert_eq!(task.state(), "ready");
-    // Reaching `end` is completion, and leaving it reopens the Task.
-    task.ok(&["task", "move", "INF-123", "end", "--reason", "Delivered"]);
+    // Moving away from end does not reopen a completed Task.
+    task.finish_after_provider_observation(&[
+        "task",
+        "move",
+        "INF-123",
+        "end",
+        "--reason",
+        "Delivered",
+    ]);
     assert_eq!(task.state(), "done");
     let text =
         String::from_utf8_lossy(&task.run(&["task", "status", "INF-123"]).stdout).to_string();
     assert!(text.contains("\nINF-123  done\n"), "{text}");
     task.ok(&["task", "move", "INF-123", "review"]);
-    assert_eq!(task.state(), "active");
+    assert_eq!(task.state(), "done");
     // The retired completion flags do not return with the alias.
     assert!(!task
         .run(&["task", "complete", "INF-123", "--summary", "x"])
@@ -984,7 +1001,7 @@ fn a_tasks_state_is_read_from_where_it_stands_on_its_workflow() {
 #[test]
 fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
     let task = WorkflowTask::new();
-    task.ok(&["task", "move", "INF-123", "end"]);
+    task.finish_after_provider_observation(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
     let workflow = task.workflow();
     assert_eq!(workflow["name"], "unplanned");
@@ -993,11 +1010,11 @@ fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
 }
 
 #[test]
-fn end_is_refused_while_the_tasks_pr_is_unsettled() {
+fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
     task.publish(false);
-    // By its edge or by hand, the Task stays where it was.
+    // Arrival is retained while each completion retry still refuses unsettled delivery.
     for reach in [
         &["task", "run", "INF-123"][..],
         &["task", "move", "INF-123", "end"],
@@ -1005,59 +1022,63 @@ fn end_is_refused_while_the_tasks_pr_is_unsettled() {
     ] {
         let error = refusal(task.run(reach));
         assert!(error.to_lowercase().contains("pull request"), "{error}");
-        assert_eq!(task.workflow()["position"], at("findings"));
+        assert_eq!(task.workflow()["position"], at("end"));
         assert_eq!(task.state(), "active");
     }
 }
 
 #[test]
-fn linear_completing_an_active_task_is_shown_and_holds_it_from_end() {
+fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    task.complete_in_linear();
-    let conflict = task.status()["planning_conflict"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert!(
-        conflict.contains("lf task move INF-123 end --force"),
-        "{conflict}"
-    );
-    // Work goes on.
-    task.ok(&["-b", "task", "run", "INF-123", "proof"]);
-    assert_eq!(task.workflow()["position"], at("review"));
-    // `end` waits for a person to say so.
-    task.ok(&["task", "move", "INF-123", "accepted"]);
-    for reach in [
-        &["task", "run", "INF-123"][..],
-        &["task", "move", "INF-123", "end"],
-    ] {
-        let error = refusal(task.run(reach));
-        assert!(error.contains("--force"), "{error}");
-        assert_eq!(task.state(), "active");
-    }
-    task.ok(&[
-        "task", "complete", "INF-123", "--force", "--reason", "Agreed",
-    ]);
-    assert_eq!(task.state(), "done");
-    assert!(task.status()["planning_conflict"].is_null());
     let workflow = task.workflow();
-    let set = workflow["history"].as_array().unwrap().last().unwrap();
-    assert_eq!(
-        set["note"],
-        "Agreed (forced: Linear already called it complete)"
-    );
+    task.complete_in_linear();
+    assert_eq!(task.state(), "done");
+    assert_eq!(task.workflow(), workflow);
+    assert!(task.status()["completion_pending"].is_null());
+    task.ok(&["task", "move", "INF-123", "end"]);
+    let ended = task.workflow();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let scope = task
+        .repo
+        .path()
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string();
+    let store = &task.registered.store;
+    let mut record = rt
+        .block_on(store.pm_task_observation(&scope, "linear", "INF-123"))
+        .unwrap()
+        .record
+        .unwrap();
+    let stale = record.clone();
+    record.item.revision = Some("2026-10-07T12:00:00Z".into());
+    record.item.state = Some("started".into());
+    record.item.completed = false;
+    rt.block_on(store.put_pm_task(&scope, "linear", record, None, None))
+        .unwrap();
+    rt.block_on(store.put_pm_task(&scope, "linear", stale, None, None))
+        .unwrap();
+    assert_eq!(task.state(), "active");
+    assert_eq!(task.workflow(), ended);
+    assert!(task.status()["completion_pending"].is_null());
+    task.ok(&["task", "move", "INF-123", "end"]);
+    assert_eq!(task.state(), "active");
 }
 
 #[test]
 fn linear_completing_a_task_that_never_started_withdraws_it() {
     let task = WorkflowTask::new();
     task.complete_in_linear();
-    assert!(task.status()["planning_conflict"].is_null());
+    assert!(task.status()["completion_pending"].is_null());
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gated"]));
-    assert!(error.contains("terminal"), "{error}");
+    assert!(
+        error.contains("terminal") || error.contains("is done"),
+        "{error}"
+    );
     assert!(support::recorded_flows(task.home.path()).is_empty());
-    assert_eq!(task.state(), "not_ready");
+    assert_eq!(task.state(), "done");
 }
 
 #[test]
@@ -1110,6 +1131,8 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     )
     .unwrap();
     let sessions: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
+    task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
+    assert!(task.workflow().is_null());
     for args in [
         &["task", "complete", "INF-123"][..],
         &["task", "move", "INF-123", "end"][..],
@@ -1152,14 +1175,13 @@ fn merged_delivery_requires_a_disposition_and_follow_through_completion_is_idemp
             "move",
             "INF-123",
             "end",
-            "--force",
             "--reason",
             "Try bypassing",
         ],
     ] {
         let error = refusal(task.run(args));
         assert!(error.to_lowercase().contains("follow-through"), "{error}");
-        assert_eq!(task.workflow()["position"], at("findings"));
+        assert_eq!(task.workflow()["position"], at("end"));
         assert_eq!(task.state(), "active");
     }
     assert!(task.repo.path().exists());
@@ -1177,7 +1199,7 @@ fn merged_delivery_requires_a_disposition_and_follow_through_completion_is_idemp
         "--none",
         "Retry does not replace the reason",
     ]);
-    task.ok(&["task", "run", "INF-123"]);
+    task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     let workflow = task.workflow();
     task.ok(&["task", "complete", "INF-123"]);
     task.ok(&["task", "move", "INF-123", "end"]);
@@ -1192,7 +1214,7 @@ fn merged_delivery_requires_a_disposition_and_follow_through_completion_is_idemp
 }
 
 #[test]
-fn completion_inside_the_finishing_flow_and_driver_arrival_make_one_end_transition() {
+fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
     let task = WorkflowTask::new();
     fs::write(task.repo.path().join(".lf/flows/finish-proof.yaml"),
         "- cmd: task follow-up INF-123 --none Accepted-checks-complete\n- cmd: task complete INF-123\n").unwrap();
@@ -1202,7 +1224,11 @@ fn completion_inside_the_finishing_flow_and_driver_arrival_make_one_end_transiti
     )
     .unwrap();
     task.publish(true);
-    task.ok(&["-b", "task", "run", "INF-123", "delivery"]);
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "delivery"]));
+    assert!(task.status()["completion_pending"].is_string(), "{error}");
+    task.complete_in_linear();
+    task.ok(&["task", "complete", "INF-123"]);
+    task.ok(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("end"));
@@ -1216,6 +1242,104 @@ fn completion_inside_the_finishing_flow_and_driver_arrival_make_one_end_transiti
     task.ok(&["task", "complete", "INF-123"]);
     assert_eq!(task.workflow(), workflow);
     let flows = support::recorded_flows(task.home.path());
+    assert!(!flows.is_empty());
+    assert!(flows.iter().all(|flow| flow.0.as_deref() == Some("failed")));
+}
+
+#[test]
+fn provider_completion_preserves_a_live_edge_and_the_driver_records_its_real_arrival() {
+    let task = WorkflowTask::new();
+    task.repo.create_file(
+        ".lf/workflows/live.yaml",
+        "edges:\n  - {from: start, to: end, flow: live}\n",
+    );
+    task.repo.create_file(
+        ".lf/flows/live.yaml",
+        "- cmd: __telemetry-scorecard\n- cmd: task complete INF-123\n",
+    );
+    task.repo.create_file(
+        "scripts/lifecycle_scorecard.py",
+        r#"
+import json
+import os
+from pathlib import Path
+import time
+home = Path(os.environ['LF_HOME'])
+(home / 'ready').write_text('ready')
+while not (home / 'release').exists():
+    time.sleep(.02)
+print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
+"#,
+    );
+    let log_path = task.home.path().join("live.log");
+    let log = fs::File::create(&log_path).unwrap();
+    let mut held = HeldFlow {
+        child: command(
+            task.repo.path(),
+            task.home.path(),
+            &["-b", "task", "run", "INF-123", "live"],
+        )
+        .stdout(log.try_clone().unwrap())
+        .stderr(log)
+        .spawn()
+        .unwrap(),
+        release: task.home.path().join("release"),
+        caller: task.home.path().join("unused"),
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !task.home.path().join("ready").exists() {
+        assert!(
+            held.child.try_wait().unwrap().is_none() && Instant::now() < deadline,
+            "{}",
+            fs::read_to_string(&log_path).unwrap()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let before = task.workflow();
+    assert_eq!(before["position"]["running"], true);
+    task.complete_in_linear();
+    assert_eq!(task.state(), "done");
+    assert_eq!(task.workflow(), before);
+    assert!(held.child.try_wait().unwrap().is_none());
+    assert!(task.repo.path().exists());
+    fs::write(&held.release, "").unwrap();
+    assert!(
+        held.child.wait().unwrap().success(),
+        "{}",
+        fs::read_to_string(&log_path).unwrap()
+    );
+    let after = task.workflow();
+    assert_eq!(after["position"], at("end"));
+    assert_eq!(
+        after["history"].as_array().unwrap().last().unwrap()["kind"],
+        "arrived"
+    );
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
+    assert_eq!(
+        support::recorded_flows(task.home.path())[0].0.as_deref(),
+        Some("succeeded")
+    );
+}
+
+#[test]
+fn successful_final_flow_keeps_arrival_when_completion_fails_and_never_replays() {
+    let task = WorkflowTask::new();
+    task.repo.create_file(
+        ".lf/workflows/final.yaml",
+        "edges:\n  - {from: start, to: end, flow: proof}\n",
+    );
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "final"]));
+    assert!(task.status()["completion_pending"].is_string(), "{error}");
+    let arrived = task.workflow();
+    assert_eq!(arrived["position"], at("end"));
+    assert_eq!(
+        arrived["history"].as_array().unwrap().last().unwrap()["kind"],
+        "arrived"
+    );
+    let flows = support::recorded_flows(task.home.path());
     assert_eq!(flows.len(), 1);
     assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
+    task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
+    assert_eq!(task.workflow(), arrived);
+    assert_eq!(support::recorded_flows(task.home.path()), flows);
 }

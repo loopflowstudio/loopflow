@@ -1368,10 +1368,44 @@ mod tests {
             INSERT INTO task_events(task_id,kind_json,created_at) VALUES('chain',
               '{"kind":"follow_up","remaining":{"outcome":"Check release","evidence":"Installed command works","check_at":42},"reason":"Accepted release check"}',1);
         "#).unwrap();
+        conn.execute_batch(r#"INSERT INTO task_workflows(task_id,graph,node,updated_at)
+            VALUES('research','{"name":"research","nodes":[],"edges":[]}','end',4);
+            INSERT INTO task_events(task_id,kind_json,created_at) VALUES('research','{"kind":"completed","summary":"accepted findings"}',4);"#).unwrap();
         conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
         conn.execute_batch(&current_draft_sql("optional_task_pr"))
             .unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT completed_at FROM tasks WHERE id='research'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        conn.execute(
+            "UPDATE task_workflows SET node='start' WHERE task_id='research'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT completed_at FROM tasks WHERE id='research'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
+        assert!(conn
+            .query_row(
+                "SELECT completed_at FROM tasks WHERE id='single'",
+                [],
+                |row| row.get::<_, Option<i64>>(0)
+            )
+            .unwrap()
+            .is_none());
         let placement: (String, String) = conn
             .query_row(
                 "SELECT branch,base_commit FROM tasks WHERE id='research'",

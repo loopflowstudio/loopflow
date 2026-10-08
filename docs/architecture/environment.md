@@ -38,7 +38,7 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_GIT_OPERATION_ID` | `ops::git_operation` | Nested lf commands inside an owned git operation | Lets recovery continue its own operation; checked against the worktree's record. |
 | `LF_PROVIDER_ACCOUNT_ID` | Provider launch | provider callback | Records which account a provider child used. |
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
-| `LF_EXPECTED_MACHINE_ID` | `lf ssh` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
+| `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
 | `LF_USER_NAME` | lf launch paths | `engine::config::participant_name` | The participant's display name. Presentation only. |
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |

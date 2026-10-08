@@ -12,6 +12,8 @@ are internal process boundaries and are marked below.
 
 ## Selection and output
 
+`--machine <label-or-id>` runs the command in the saved remote repository.
+`--forward-agent` requires `--machine`.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
@@ -64,6 +66,8 @@ Open Loopflow or run its CLI
 | `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--max-turns` | Maximum agent turns for this invocation |
+| `--machine` | Run the command on this saved machine in its repository |
+| `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
 | `--steers-after` | Give the agent only Task direction newer than this steer |
@@ -965,20 +969,6 @@ Diagnose installation, storage, Process integrity and scheduled receipts
 |---|---|
 | `--planning` | Diagnose repository planning without changing it Default: false. |
 | `--json` | Emit the audit as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf machine ssh
-
-Run lf on an added machine, connecting missing selected accounts first
-
-| Argument | What it does |
-|---|---|
-| `--account` | Install and use this laptop login on the remote machine |
-| `--only-account` | Restrict remote provider launches to these laptop logins |
-| `<target>` | Saved machine label (or its stable MachineId) |
-| `--repo` | Override the saved repository path on the remote |
-| `--forward-agent` | Forward the ssh-agent (`ssh -A`), off by default Default: false. |
-| `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
 | `--help / -h` | Print help |
 
 ## lf machine connect

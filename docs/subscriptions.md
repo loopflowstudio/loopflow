@@ -374,7 +374,7 @@ lf machine connect mini github
 lf machine connect mini codex work@example.com
 lf machine connect mini claude personal@example.com --chrome-profile Personal
 lf machine connect mini linear
-lf ssh --account codex=work@ mini implement
+lf --machine mini --account codex=work@ implement
 ```
 
 Add the machine first with `lf machine add`. GitHub installs the laptop's selected
@@ -383,8 +383,8 @@ on the laptop; approve it in the laptop's browser. Claude and Codex stage the lo
 in a private temporary directory. The laptop's existing login is not replaced.
 The target retains its own refresh credential and existing accounts.
 
-An account-selected launch connects the requested account if missing. Both outer
-and remote invocation selectors resolve against the laptop's managed logins;
+An account-selected launch connects the requested account if missing. Invocation selectors resolve
+against the laptop's managed logins;
 full email identifies that login on the target. The remote invocation is restricted
 to the requested accounts, so it cannot fall back to a different login. A simple
 launch without selectors uses the laptop's configured provider route when available.
@@ -397,9 +397,8 @@ provider CLI. Credential bytes travel on SSH stdin, never in argv or an exported
 variable. `machine credentials inspect/receive` supplies the public receiving
 commands. No broker, forwarded socket or laptop process owns the installed login.
 
-`lf ssh` runs the target's `lf` in the saved repository. Every argument after the
-target belongs to that invocation; there is no extra `-- lf`. Remote process
-survival and reattachment belong to the separate detached-launch and relay work.
+`lf --machine` runs the target's `lf` in the saved repository. The target parses
+the command; there is no extra `-- lf`. Remote process survival and reattachment belong to the separate detached-launch and relay work.
 
 ## OpenCode Zen
 
@@ -410,7 +409,7 @@ lf account connect opencode
 lf account connect opencode --api-key
 ```
 
-Its stored credential applies to local OpenCode launches and foreground SSH.
+Its stored credential applies to local OpenCode launches.
 Subscription polling, repository account routes, and the 95% demotion threshold
 do not apply.
 

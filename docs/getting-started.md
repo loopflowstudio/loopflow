@@ -28,7 +28,7 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
 | Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
-| Run on another machine | `lf ssh <machine-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
+| Run on another machine | `lf --machine <machine-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -215,22 +215,22 @@ planning, process, journal, and conversation history; its SSH route can change.
 Bootstrap the remote identity once:
 
 ```bash
-lf ssh jack@mini.local machine id --json
-lf observe <machine-id> ssh://jack@mini.local
+lf machine add jack@mini.local --label mini
+lf machine list --json
 lf wave list --json
 lf wave place <wave-id> <machine-id>    # record origin-side planning state
-lf ssh <machine-id> --wave shipper wave/operate
+lf --machine mini --wave shipper wave/operate
 ```
 
 The target Machine proves its identity before running the command and keeps the
 resulting execution locally.
 
 Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf wave status`
-read the executing Machine. Prefix the command with `lf ssh <machine-id>` to read
+read the executing Machine. Prefix the command with `lf --machine <machine-id>` to read
 another Machine. Loopflow does not silently aggregate or replicate execution records.
 
 `lf machine connect <machine> <provider> [email]` installs a separate login on an
-added machine. Account-selected `lf ssh` launches connect a missing login in the
+added machine. Account-selected `lf --machine` launches connect a missing login in the
 foreground and then use its resident credential. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 

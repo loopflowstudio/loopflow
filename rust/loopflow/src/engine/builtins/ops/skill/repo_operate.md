@@ -294,7 +294,7 @@ Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.
 Use `lf id`, then `lf --wave <wave> wave/operate` locally or
-`lf ssh <machine-id> --wave <wave> wave/operate` at its placement. `lf ssh` runs the target's `lf`;
+`lf --machine <machine-id> --wave <wave> wave/operate` at its placement. `lf --machine` runs the target's `lf`;
 its SSH route may change without moving Work. Connect missing logins in the
 foreground with `lf machine connect`; work uses credentials resident on its Machine.
 

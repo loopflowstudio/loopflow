@@ -844,7 +844,7 @@ pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResu
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if placement.machine_id != local.id {
         return Err(OpsError::Message(format!(
-            "Wave {} is placed on {}; run this command with `lf machine ssh {}`",
+            "Wave {} is placed on {}; run this command with `lf --machine {}`",
             wave.slug(),
             placement.machine_id,
             placement.machine_id

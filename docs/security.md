@@ -14,10 +14,10 @@ lf implement
 Put unattended or untrusted work behind an OS boundary you control:
 
 ```bash
-lf ssh build-vm implement
+lf --machine build-vm implement
 ```
 
-`lf ssh` connects to an existing environment. It does not copy the repository
+`lf --machine` connects to an existing environment. It does not copy the repository
 or create a sandbox around the target. The remote OS user, container, or VM
 defines which files, processes, networks, and credentials the work can reach.
 
@@ -86,7 +86,7 @@ lf machine add mini --repo '~/src/project'
 lf machine connect mini github
 lf machine connect mini codex work@example.com
 lf machine connect mini linear
-lf ssh --account codex=work@ mini implement
+lf --machine mini --account codex=work@ implement
 ```
 
 Only explicitly added machines receive credentials. OpenSSH checks the known host
@@ -120,7 +120,7 @@ encrypted credentials. Unlock that Keychain once to retain its key. Subsequent
 SSH use reads the private file. A fresh credential-free machine can create its
 own file key without an unlocked Keychain.
 
-SSH agent forwarding remains opt-in with `lf ssh --forward-agent`. Arbitrary
+SSH agent forwarding remains opt-in with `lf --machine <machine> --forward-agent`. Arbitrary
 Doppler secret exports and automatic ambient-token forwarding are removed. Set up
 other services on the target explicitly. No Doppler master credential is sent.
 
@@ -136,14 +136,14 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Machine store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Machine. Reading another Machine with `lf ssh <machine-id> monitor list` executes the read on
+Machine. Reading another Machine with `lf --machine <machine-id> monitor list` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
 `lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
-or Machine HTTP service is required. Use `lf ssh` for remote operation.
+or Machine HTTP service is required. Use `lf --machine` for remote operation.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

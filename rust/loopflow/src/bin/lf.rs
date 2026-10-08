@@ -130,50 +130,6 @@ fn first_target_index(args: &[String]) -> Option<usize> {
     None
 }
 
-/// Insert clap's internal `--` at the public `lf machine ssh` target boundary.
-///
-/// The public syntax omits it, but making the boundary explicit before parsing
-/// prevents a remote `--account` from being consumed by the origin command.
-fn normalize_ssh_args(mut args: Vec<String>) -> Vec<String> {
-    if args.len() <= 1 {
-        return args;
-    }
-    let rest = &args[1..];
-    let Some(command_index) = first_target_index(rest) else {
-        return args;
-    };
-    let Some(home) = arg_tables().subcommands.get("machine") else {
-        return args;
-    };
-    if rest[command_index] != "machine" {
-        return args;
-    }
-    let path = selected_command_path(rest, command_index, home);
-    let Some(ssh) = path.get(1).filter(|selected| rest[selected.index] == "ssh") else {
-        return args;
-    };
-    let ssh_args = &ssh.args.direct;
-    let mut index = ssh.index + 2;
-    while index < args.len() {
-        let arg = &args[index];
-        if arg == "--" {
-            return args;
-        }
-        if arg.starts_with('-') {
-            let takes_value = ssh_args.takes_value(arg) || is_value_flag(arg);
-            if takes_value && !has_inline_value(arg) {
-                index += 1;
-            }
-            index += 1;
-            continue;
-        }
-
-        args.insert(index + 1, "--".to_string());
-        return args;
-    }
-    args
-}
-
 #[derive(Clone, Copy)]
 struct SelectedCommand<'a> {
     index: usize,
@@ -311,18 +267,6 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return args;
     };
     if let Some(command) = arg_tables().subcommands.get(rest[target_index].as_str()) {
-        // `lf machine ssh` has a deliberate positional boundary: origin options come
-        // before the target and every later token belongs to the remote lf.
-        // Moving global flags across that boundary changes which machine owns
-        // an account selection.
-        let path = selected_command_path(rest, target_index, command);
-        if rest[target_index] == "machine"
-            && path
-                .get(1)
-                .is_some_and(|selected| rest[selected.index] == "ssh")
-        {
-            return args;
-        }
         return reorder_command_args(program, rest, target_index, command);
     }
 
@@ -518,14 +462,11 @@ fn execute_target(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::selection::AccountSelection,
 ) -> anyhow::Result<()> {
     use loopflow::engine::target::Target;
 
     match target {
-        Target::Command(command) => {
-            execute_command(&command, cli, args, binding, account_selection)
-        }
+        Target::Command(command) => execute_command(&command, cli, args, binding),
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
@@ -1332,14 +1273,36 @@ fn run() -> anyhow::Result<()> {
         .without_time()
         .init();
 
-    // Reorder args so flags can appear after the skill name
-    let normalized =
-        loopflow::lf::navigation::normalize_args(std::env::args().collect()).map_err(|error| {
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some((remote, command)) = loopflow::lf::navigation::machine_invocation(&raw_args)
+        .map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
             loopflow::process::CommandExit(code)
-        })?;
-    let args = reorder_args(normalize_ssh_args(normalized));
+        })?
+    {
+        loopflow::installation::dispatch_default_cli()?;
+        ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        journal::admit_process(&std::env::current_dir()?, &raw_args);
+        loopflow::lf::commands::machine::validate_expected_machine_process()?;
+        return loopflow::lf::commands::ssh::run(
+            remote
+                .machine
+                .as_deref()
+                .expect("remote invocation has a machine"),
+            remote.forward_agent,
+            &command,
+        );
+    }
+
+    // Reorder args so flags can appear after the skill name
+    let normalized = loopflow::lf::navigation::normalize_args(raw_args).map_err(|error| {
+        let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
+        let _ = error.print();
+        loopflow::process::CommandExit(code)
+    })?;
+    let args = reorder_args(normalized);
 
     let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
@@ -1459,23 +1422,6 @@ fn run() -> anyhow::Result<()> {
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
     {
-        // Account flags before an SSH target shape the origin grant. Flags in the
-        // remote lf arguments become preferences over its merged local/forwarded
-        // catalog through LF_ACCOUNT_SELECTION.
-        let mut preferred_accounts = cli.account.clone();
-        let mut restricted_accounts = cli.only_account.clone();
-        if let Some(Commands::Machine {
-            cmd:
-                loopflow::lf::MachineCommand::Ssh {
-                    origin_account,
-                    origin_only_account,
-                    ..
-                },
-        }) = &cli.command
-        {
-            preferred_accounts.extend(origin_account.iter().cloned());
-            restricted_accounts.extend(origin_only_account.iter().cloned());
-        }
         let _account_isolation = cli
             .isolate
             .then_some(true)
@@ -1484,8 +1430,8 @@ fn run() -> anyhow::Result<()> {
             .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection =
             loopflow::provider_account::selection::AccountSelection::from_flags(
-                &preferred_accounts,
-                &restricted_accounts,
+                &cli.account,
+                &cli.only_account,
             )?;
         let _account_selection = if !account_selection.is_default() {
             Some(EnvGuard::set(
@@ -1498,18 +1444,12 @@ fn run() -> anyhow::Result<()> {
 
         debug!(?cli, "parsed CLI arguments");
 
-        dispatch(cli, &args, account_selection)
+        dispatch(cli, &args)
     }
 }
 
-fn dispatch(
-    mut cli: Cli,
-    args: &[String],
-    account_selection: loopflow::provider_account::selection::AccountSelection,
-) -> anyhow::Result<()> {
-    // Every MachineId-addressed SSH hop proves it reached the intended authority
-    // before reads or mutations dispatch. Raw-host bootstrap carries no
-    // expectation and falls through.
+fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+    // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
     let mut direct_binding = None;
@@ -1631,7 +1571,6 @@ fn dispatch(
             &cli,
             args,
             direct_binding.as_ref(),
-            &account_selection,
         ),
         None => match direct_binding.as_ref() {
             Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
@@ -1647,7 +1586,6 @@ fn execute_command(
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
-    account_selection: &loopflow::provider_account::selection::AccountSelection,
 ) -> anyhow::Result<()> {
     let parsed = Cli::try_parse_from(command.argv())?;
     match &parsed.command {
@@ -1865,23 +1803,6 @@ fn execute_command(
         ) => {
             unreachable!("screenshot dispatches before home routing")
         }
-        Some(Commands::Machine {
-            cmd:
-                loopflow::lf::MachineCommand::Ssh {
-                    target,
-                    repo,
-                    forward_agent,
-                    origin_account: _,
-                    origin_only_account: _,
-                    lf_args,
-                },
-        }) => loopflow::lf::commands::ssh::run(
-            target,
-            repo.as_deref(),
-            *forward_agent,
-            account_selection,
-            lf_args,
-        ),
         Some(Commands::Flow { cmd }) => match cmd {
             FlowCommand::List { json, inventory } if inventory.sessions => {
                 loopflow::lf::commands::flow_inventory::list(inventory, *json)
@@ -1927,7 +1848,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_task_pr_line, normalize_ssh_args, reorder_args, CwdGuard, EnvGuard};
+    use super::{format_task_pr_line, reorder_args, CwdGuard, EnvGuard};
 
     use clap::Parser;
     use loopflow::lf::{Cli, Commands, PrCommand, TaskCommand};
@@ -2103,20 +2024,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_help_prefers_machine_identity() {
-        let help = Cli::try_parse_from(["lf", "machine", "ssh", "--help"])
-            .expect_err("help exits through clap")
-            .to_string();
-
-        assert!(help.contains("<TARGET>"));
-        assert!(help.contains("MachineId (preferred), SSH alias, or user@host"));
-    }
-
-    /// `serve` is retired. The parser can't reject it outright — the
-    /// `external_subcommand` catch-all claims any unmatched verb — so the
-    /// property that actually holds is that it no longer names a built-in
-    /// command. The process door denies `External` on top of that.
-    #[test]
     fn old_serve_surface_is_no_longer_a_builtin_command() {
         let cli = Cli::try_parse_from(["lf", "serve", "goals"]).expect("falls through to external");
         assert!(
@@ -2241,68 +2148,6 @@ mod tests {
         let result = reorder_args(args);
         // `-m` is local to commit, so the local meaning wins.
         assert_eq!(result, vec!["lf", "commit", "-m", "msg"]);
-    }
-
-    #[test]
-    fn reorder_args_preserves_the_ssh_target_boundary() {
-        let args = vec![
-            "lf".to_string(),
-            "machine".to_string(),
-            "ssh".to_string(),
-            "build-vm".to_string(),
-            "--account".to_string(),
-            "remote@company".to_string(),
-            "task".to_string(),
-            "pursue".to_string(),
-        ];
-
-        assert_eq!(reorder_args(args.clone()), args);
-    }
-
-    #[test]
-    fn normalize_ssh_args_makes_the_target_a_hard_boundary() {
-        let args = [
-            "lf",
-            "machine",
-            "ssh",
-            "--account",
-            "origin@example.com",
-            "build-vm",
-            "--account",
-            "remote@example.com",
-            "task",
-            "pursue",
-        ]
-        .map(str::to_string)
-        .to_vec();
-
-        let normalized = normalize_ssh_args(args);
-        assert_eq!(
-            normalized,
-            [
-                "lf",
-                "machine",
-                "ssh",
-                "--account",
-                "origin@example.com",
-                "build-vm",
-                "--",
-                "--account",
-                "remote@example.com",
-                "task",
-                "pursue",
-            ]
-        );
-        let cli = Cli::try_parse_from(normalized).expect("parse normalized SSH command");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Machine { cmd: loopflow::lf::MachineCommand::Ssh {
-                origin_account,
-                lf_args,
-                ..
-            } }) if origin_account == ["origin@example.com"]
-                && lf_args == ["--account", "remote@example.com", "task", "pursue"]
-        ));
     }
 
     #[test]

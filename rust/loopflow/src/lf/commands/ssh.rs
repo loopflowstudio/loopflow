@@ -1,7 +1,7 @@
 //! Run a command on an added machine using credentials resident there.
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
-use crate::lf::{Cli, Commands, MachineCommand};
+use crate::lf::Cli;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
 use clap::Parser;
@@ -10,18 +10,15 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
-pub fn run(
-    target: &str,
-    repo: Option<&str>,
-    forward_agent: bool,
-    selection: &AccountSelection,
-    lf_args: &[String],
-) -> anyhow::Result<()> {
+pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Result<()> {
     let cli = parse_remote_command(lf_args)?;
+    let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
-        &target, selection, &cli,
+        &target,
+        &inherited_selection,
+        &cli,
     ))?;
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
     let selection = selection.env_value()?;
@@ -43,12 +40,10 @@ pub fn run(
         .collect::<Vec<_>>();
     let preamble = build_preamble(
         &target.route,
-        repo.unwrap_or(
-            target
-                .repo
-                .as_deref()
-                .expect("added machines have a repository"),
-        ),
+        target
+            .repo
+            .as_deref()
+            .expect("added machines have a repository"),
         &cmd,
         &extra_env,
     );
@@ -86,24 +81,25 @@ fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
 fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
-            "the remote `lf` is implicit; use `lf machine ssh <target> <args...>` without `-- lf`"
+            "the remote `lf` is implicit; use `lf --machine <target> <args...>` without `-- lf`"
         ));
     }
     let args = std::iter::once("lf".to_string())
         .chain(lf_args.iter().cloned())
         .collect::<Vec<_>>();
-    let cli = Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?)?;
-    if matches!(
-        cli.command,
-        Some(Commands::Machine {
-            cmd: MachineCommand::Ssh { .. }
-        })
-    ) {
-        return Err(anyhow!(
-            "nested `lf machine ssh` is not supported; connect directly from the origin machine"
-        ));
+    match Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?) {
+        Ok(cli) => Ok(cli),
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            // The target prints its own help/version without connecting a login.
+            Ok(Cli::try_parse_from(["lf", "help"])?)
+        }
+        Err(error) => Err(error.into()),
     }
-    Ok(cli)
 }
 
 pub(super) async fn resolve_target(
@@ -235,10 +231,6 @@ mod tests {
         assert!(!script.contains("LEASE"));
     }
 
-    #[test]
-    fn nested_ssh_is_rejected_before_transport() {
-        assert!(parse_remote_command(&["ssh".into(), "other".into(), "list".into()]).is_err());
-    }
     #[test]
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);

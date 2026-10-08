@@ -3,7 +3,7 @@ use crate::engine::{
     AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig, ProcessPromptInput,
     PromptComponents, StreamFormat, Surface,
 };
-use crate::lf::commands::util::launch_session_with_env;
+use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use crate::session_record::{
@@ -24,7 +24,7 @@ use tracing::{debug, info, instrument, trace};
 /// | Some    | Some    | Run skill with message as extra context |
 /// | None    | None    | Interactive chat                      |
 #[instrument(skip(cli), fields(skill = ?skill, has_message = message.is_some()))]
-pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
+pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.process_options();
         bound.wave = Some(binding.wave_name.clone());
@@ -33,7 +33,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
         }
         return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
     }
-    let mut built = build_prompt(skill, message, cli)?;
+    let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
     // `--wave` resolved its Wave once for this process.
     built.work = cli.wave.as_ref().and_then(|_| {
@@ -50,7 +50,7 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
 }
 
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
-/// run as its skill with `message` and the provider's own history.
+/// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -63,8 +63,22 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
             (provider, _) => provider.clone(),
         };
     }
-    turn.resume = Some(session.id);
-    run(session.skill.as_deref(), Some(message), &turn)
+    turn.resume = Some(session.id.clone());
+    turn.skill_input = None;
+    turn.resolved_invocation = None;
+    turn.task = session.task_id.as_ref().map(ToString::to_string);
+    turn.wave = session
+        .wave_id
+        .as_ref()
+        .map(|id| store.get_wave(id))
+        .transpose()?
+        .flatten()
+        .map(|wave| wave.slug().to_string());
+    // Continuation belongs to the saved conversation, even when invoked from
+    // another Task's checkout. Do not rediscover Work from the caller's cwd.
+    let built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    print_context_header(&built, &turn);
+    run_prompt(&built, &turn).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -116,6 +130,7 @@ fn run_bound_prompt(
         binding
     };
     let mut launch = cli.process_options();
+    let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
         launch.agent = binding.agent.clone().or(launch.agent);
@@ -124,7 +139,7 @@ fn run_bound_prompt(
         bound_message(binding, message)
     };
     let cli = &launch;
-    let mut built = build_bound_prompt_at(skill, &message, cli, &binding.cwd)?;
+    let mut built = build_bound_prompt_at(skill, &message, arguments, cli, &binding.cwd)?;
     built.agent_config.cwd = Some(binding.cwd.clone());
     built.agent_config.env.insert(
         crate::work::wave::context::WAVE_ID_ENV.to_string(),
@@ -194,9 +209,14 @@ struct PromptBuild {
     work: Option<crate::session::SessionWork>,
 }
 
-fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<PromptBuild> {
+fn build_prompt(
+    repo_root: &Path,
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+) -> Result<PromptBuild> {
     let start = Instant::now();
-    let repo_root = crate::repo::working_directory()?;
+    let repo_root = repo_root.to_path_buf();
     let repo_root = if skill == Some("repo/operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()
@@ -212,18 +232,27 @@ fn build_prompt(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result
         repo_root
     };
     debug!(elapsed_ms = start.elapsed().as_millis(), "found repo root");
-    build_prompt_at(skill, message, cli, repo_root, None)
+    build_prompt_at(
+        skill,
+        message,
+        message.unwrap_or_default(),
+        cli,
+        repo_root,
+        None,
+    )
 }
 
 fn build_bound_prompt_at(
     skill: Option<&str>,
     message: &str,
+    arguments: &str,
     cli: &Cli,
     repo_root: &Path,
 ) -> Result<PromptBuild> {
     build_prompt_at(
         skill,
         Some(message),
+        arguments,
         cli,
         repo_root.to_path_buf(),
         Some((
@@ -274,6 +303,7 @@ fn prepare_task_input(
 fn build_prompt_at(
     skill: Option<&str>,
     message: Option<&str>,
+    arguments: &str,
     cli: &Cli,
     repo_root: PathBuf,
     message_context: Option<(crate::trace::ContextAssetKind, crate::trace::ContextScope)>,
@@ -308,9 +338,14 @@ fn build_prompt_at(
     );
 
     let discover_start = Instant::now();
-    let discovered_skill = skill
-        .map(|name| crate::lf::discovery::discover_skill(&repo_root, name))
-        .transpose()?;
+    let invocation = cli.resolved_invocation.as_ref();
+    let discovered_skill = match invocation {
+        Some(invocation) => Some(invocation.skill.clone()),
+        None => skill
+            .map(|name| crate::engine::load_skill(name, &repo_root))
+            .transpose()?,
+    };
+    let arguments = invocation.map_or(arguments, |invocation| invocation.arguments.as_str());
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
         "discovered skill"
@@ -324,10 +359,23 @@ fn build_prompt_at(
         Surface::Headless
     };
 
-    let wave = cli
-        .wave
-        .clone()
-        .or_else(crate::work::wave::context::resolve_ambient_wave_name);
+    let wave = cli.wave.clone().or_else(|| {
+        cli.resume
+            .is_none()
+            .then(crate::work::wave::context::resolve_ambient_wave_name)
+            .flatten()
+    });
+    // Ordinary third-party skills need their own instructions, not the Work
+    // operating manual. Captured Flows and attributed Work retain that guidance.
+    let standalone_native = task_input.is_none()
+        && wave.is_none()
+        && cli.skill_input.is_none()
+        && message_context.is_none()
+        && discovered_skill.as_ref().is_some_and(|skill| {
+            skill.source.as_ref().is_some_and(|source| {
+                source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+            })
+        });
     let prepared = prepare_process_prompt(
         &config,
         ProcessPromptInput {
@@ -338,7 +386,8 @@ fn build_prompt_at(
             docs: cli.docs.clone(),
             wave,
             message: message.map(|value| value.to_string()),
-            no_loopflow: cli.no_loopflow,
+            skill_arguments: arguments.to_string(),
+            no_loopflow: cli.no_loopflow || standalone_native,
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
@@ -386,7 +435,6 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
-    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
     if confine {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
@@ -404,11 +452,6 @@ fn build_prompt_at(
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    crate::engine::context_budget::check_input(
-        &effective_system,
-        &agent_config.task_prompt,
-        &budgets,
-    )?;
     let context = attributed_context(
         &components,
         &effective_system,
@@ -498,25 +541,36 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
-        let context_file = if matches!(built.harness.as_str(), "claude" | "codex") {
-            crate::engine::agent::write_system_prompt_file(&built.agent_config, &built.log_name)?
-        } else {
-            None
-        };
-        let prompt = if context_file.is_some() {
-            &built.agent_config.task_prompt
-        } else {
-            &built.prompt
-        };
-        let result = launch_session_with_env(
-            &built.harness,
-            built.model.as_deref(),
-            &built.repo_root,
-            prompt,
-            &environment,
-            provider_session_id.as_deref(),
-            context_file.as_deref(),
-        );
+        let result = (|| {
+            let mut config = built.agent_config.clone();
+            config.env = environment.clone();
+            let (flags, prompt, context_file) = if let Some(skill) = &config.skill_invocation {
+                let (flags, prompt) = skill.terminal_input(&built.harness, &config)?;
+                (flags, prompt, None)
+            } else {
+                let context_file = if matches!(built.harness.as_str(), "claude" | "codex") {
+                    crate::engine::agent::write_system_prompt_file(&config, &built.log_name)?
+                } else {
+                    None
+                };
+                let prompt = if context_file.is_some() {
+                    config.task_prompt.clone()
+                } else {
+                    built.prompt.clone()
+                };
+                (Vec::new(), prompt, context_file)
+            };
+            launch_session(
+                &built.harness,
+                built.model.as_deref(),
+                &built.repo_root,
+                &prompt,
+                &environment,
+                provider_session_id.as_deref(),
+                &flags,
+                context_file.as_deref(),
+            )
+        })();
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
@@ -634,6 +688,7 @@ fn begin_capture(
     prepared_config: &AgentConfig,
     resume: Option<&str>,
 ) -> Result<CaptureHandle> {
+    let started = Instant::now();
     let cwd = built
         .agent_config
         .cwd
@@ -658,9 +713,12 @@ fn begin_capture(
         work: built.work.clone(),
     };
     let capture = if let Some(session) = resume {
-        // A headless resume is another turn of the same conversation.
-        let input = crate::ops::human_session::continue_conversation(session)?;
-        CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &input, spec, &built.context)
+        CaptureHandle::continue_with_context(
+            session,
+            spec,
+            &built.context,
+            AgentProcessRequest::from_prepared(prepared_config, &built.capabilities),
+        )
     } else if let Some(id) = crate::ops::human_session::prepared_artifact_key()? {
         CaptureHandle::start_prepared(&crate::store::lf_home_dir(), &id, spec, &built.context)
     } else {
@@ -674,6 +732,10 @@ fn begin_capture(
     })?;
     capture.claim_conversation_driver()?;
     capture.record_input("initial", &built.context.task.text);
+    debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "published Session capture"
+    );
     Ok(capture)
 }
 
@@ -846,16 +908,15 @@ pub(crate) fn attributed_context(
     }
     if let Some(skill) = &components.skill {
         if let Some(content) = &skill.content {
-            let source_path = crate::engine::find_skill_source_path(
-                &skill.name,
-                std::path::Path::new(&components.repo_root),
-            );
             push(
                 content,
                 Kind::SkillInstructions,
                 Scope::Step,
                 skill.name.clone(),
-                source_path.map(|path| path.to_string_lossy().to_string()),
+                skill
+                    .source
+                    .as_ref()
+                    .map(|source| source.path.to_string_lossy().to_string()),
                 "skill",
             );
         } else {
@@ -1010,6 +1071,7 @@ mod tests {
 
     use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
+    use crate::engine::skill_catalog::SkillCatalog;
     use crate::lf::Cli;
     use crate::test_ambient::EnvGuard;
     use crate::trace::{ContextAssetKind, ContextScope};
@@ -1053,7 +1115,8 @@ mod tests {
                     }
                     let cli = Cli::parse_from(args);
                     let built =
-                        build_bound_prompt_at(None, "inspect changes", &cli, repo.path()).unwrap();
+                        build_bound_prompt_at(None, "inspect changes", "", &cli, repo.path())
+                            .unwrap();
                     assert_eq!(
                         built
                             .components
@@ -1110,7 +1173,7 @@ mod tests {
             // Each assembly reloads personal config, including the correction.
             for _ in 0..2 {
                 let built =
-                    build_bound_prompt_at(None, "choose the prototype path", &cli, repo.path())
+                    build_bound_prompt_at(None, "choose the prototype path", "", &cli, repo.path())
                         .unwrap();
                 assert_eq!(
                     built.components.user_name.as_deref(),
@@ -1134,7 +1197,7 @@ mod tests {
             }
         }
         std::fs::remove_file(home.path().join("config.yaml")).unwrap();
-        let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
+        let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
         assert_eq!(built.components.user_name.as_deref(), Some("Git User"));
     }
 
@@ -1157,7 +1220,7 @@ mod tests {
         let cli = Cli::parse_from(["lf", "--batch"]);
         for (caller, expected) in [("Jack", "Jack"), ("", "Host Owner")] {
             std::env::set_var("LF_USER_NAME", caller);
-            let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
+            let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
             assert!(built.agent_config.system_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
@@ -1442,7 +1505,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             .unwrap()
             .success());
 
-        let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "reconcile", "", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
             .system_prompt
@@ -1467,7 +1531,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             wave: Some("ship".to_string()),
             ..Cli::default()
         };
-        let built = build_bound_prompt_at(Some("proof"), "continue", &cli, repo.path()).unwrap();
+        let built =
+            build_bound_prompt_at(Some("proof"), "continue", "", &cli, repo.path()).unwrap();
 
         let committed = built
             .agent_config
@@ -1505,6 +1570,67 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
+    fn retained_skill_context_keeps_its_source_after_catalog_selection_changes() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = EnvGuard::new();
+        let _home = EnvGuard::clear(&["LF_HOME", "HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        std::env::set_var("HOME", home.path());
+        let repo = tempfile::tempdir().unwrap();
+        let native = repo.path().join(".claude/skills/audit/SKILL.md");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::write(&native, "Original audit instructions").unwrap();
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog.resolve("audit").unwrap().load().unwrap();
+        std::fs::remove_file(&native).unwrap();
+        let replacement = repo.path().join(".lf/skills/audit.md");
+        std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
+        std::fs::write(replacement, "Replacement instructions").unwrap();
+
+        let invocation = crate::engine::skill_invocation::SkillInvocation {
+            skill,
+            arguments: "  exact \"arguments\"  ".into(),
+        };
+        let cli = Cli {
+            batch: true,
+            agent: Some("claude".into()),
+            // Target selection already consumed this now-absent transport file.
+            skill_input: Some(repo.path().join("removed-input.json")),
+            resolved_invocation: Some(invocation.clone()),
+            ..Cli::default()
+        };
+        let built = build_prompt_at(
+            Some("audit"),
+            Some("Retain this Work direction"),
+            "different caller arguments",
+            &cli,
+            repo.path().into(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(built.agent_config.skill_invocation, Some(invocation));
+        assert!(built
+            .agent_config
+            .task_prompt
+            .contains("Retain this Work direction"));
+        assert!(!built
+            .agent_config
+            .task_prompt
+            .contains("Replacement instructions"));
+        // Inline attribution uses the same retained components; native input
+        // records its source on the invocation instead of the context message.
+        let context = attributed_context(&built.components, "", "Original audit instructions", &[]);
+        let asset = context
+            .task
+            .assets
+            .iter()
+            .find(|asset| asset.kind == ContextAssetKind::SkillInstructions)
+            .unwrap();
+        assert_eq!(asset.source_path.as_deref(), native.to_str());
+    }
+
+    #[test]
     fn interactive_bound_skill_keeps_the_assembled_scratch_snapshot() {
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
@@ -1519,6 +1645,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_bound_prompt_at(
             Some("proof"),
             "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
+            "",
             &cli,
             repo.path(),
         )
@@ -1596,6 +1723,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_prompt_at(
             Some("proof"),
             Some("verify the result"),
+            "",
             &cli,
             repo.path().to_path_buf(),
             None,
@@ -1629,6 +1757,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_prompt_at(
             Some("design"),
             Some("plan the release"),
+            "",
             &cli,
             repo.path().to_path_buf(),
             None,
@@ -1810,9 +1939,9 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
     #[test]
     fn split_skill_args_preserves_namespaced_skill() {
-        let args = vec!["npx/explain-code".to_string()];
+        let args = vec!["team/explain-code".to_string()];
         let (skill, rest) = split_skill_args(&args).expect("split args");
-        assert_eq!(skill, "npx/explain-code");
+        assert_eq!(skill, "team/explain-code");
         assert!(rest.is_empty());
     }
 

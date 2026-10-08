@@ -162,7 +162,7 @@ fn execute(
     repo: &Path,
     binding: Option<&WorkBinding>,
 ) -> Result<()> {
-    let accounts = crate::provider_account::lease::AccountSelection::from_flags_or_env(
+    let accounts = crate::provider_account::selection::AccountSelection::from_flags_or_env(
         &cli.account,
         &cli.only_account,
     )?;
@@ -250,7 +250,7 @@ fn report_outcome(outcome: FlowOutcome) -> Result<()> {
 /// A driver that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
     driver: &Driver<'_>,
-    accounts: crate::provider_account::lease::AccountSelection,
+    accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<FlowOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
         flow: Some(driver.flow.to_owned()),
@@ -627,14 +627,17 @@ impl SkillExecutor for &Driver<'_> {
                 .insert(node, newest);
             step_cli.steers_after = seen.max(step_cli.steers_after);
         }
-        // The step looks its skill up by name. An agent the Flow names for
-        // this occurrence is the one option that travels, as `--agent`.
-        if step_cli.agent.is_none() {
-            let authored = crate::engine::flow::load_skill(name, self.cwd).ok();
-            if authored.and_then(|authored| authored.agent) != skill.skill.agent {
-                step_cli.agent = skill.skill.agent.clone();
-            }
-        }
+        // The child receives this occurrence's captured source, not a later
+        // catalog selection. Keep the file alive through every child/readback.
+        let mut input = tempfile::NamedTempFile::new()?;
+        serde_json::to_writer(
+            &mut input,
+            &crate::engine::skill_invocation::SkillInvocation {
+                skill: skill.skill.clone(),
+                arguments: self.message.unwrap_or_default().to_string(),
+            },
+        )?;
+        step_cli.skill_input = Some(input.path().to_path_buf());
         // Each ordinary skill keeps the caller's mode and inherited terminal.
         let mut args = step_cli.step_args();
         args.extend(["skill".to_owned(), name.clone()]);

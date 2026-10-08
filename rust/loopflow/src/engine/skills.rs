@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::engine::builtins;
 use crate::engine::flow::split_frontmatter;
+use crate::engine::skill_catalog::{is_generated, SkillCatalog, SkillDialect, SkillSource};
 use crate::engine::LoadError;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
@@ -36,15 +36,7 @@ enum Vendor {
     Codex,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SkillSource {
-    name: String,
-    content: String,
-}
-
-/// Compile loopflow skills (builtins + `~/.lf/`) into the user's personal home
-/// agent skill directories (`~/.claude/skills`, `~/.agents/skills`). Skills
-/// never land inside a working repo — the home dirs are the sole target.
+/// Export the personal catalog and builtins without replacing third-party files.
 pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadError> {
     let home = options
         .global_home
@@ -52,20 +44,17 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         .or_else(dirs::home_dir)
         .ok_or_else(|| LoadError::InvalidSkill("home directory not found".to_string()))?;
 
-    let global_skills = collect_global_skills(&home)?;
-    let mut resolved = collect_builtin_skills();
-    resolved.extend(global_skills);
-
+    let catalog = SkillCatalog::load(None, Some(&home), options.global_home.is_none())?;
     let mut report = SkillSyncReport::default();
     write_targets(
-        &resolved,
+        &catalog,
         &home.join(".claude/skills"),
         Vendor::Claude,
         options.prune,
         &mut report,
     )?;
     write_targets(
-        &resolved,
+        &catalog,
         &home.join(".agents/skills"),
         Vendor::Codex,
         options.prune,
@@ -77,100 +66,23 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     Ok(report)
 }
 
-fn collect_builtin_skills() -> BTreeMap<String, SkillSource> {
-    builtins::builtin_skill_names()
-        .into_iter()
-        .filter_map(|name| {
-            builtins::get_builtin_skill(name).map(|content| {
-                (
-                    name.to_string(),
-                    SkillSource {
-                        name: name.to_string(),
-                        content: content.to_string(),
-                    },
-                )
-            })
-        })
-        .collect()
-}
-
-fn collect_global_skills(home: &Path) -> Result<BTreeMap<String, SkillSource>, LoadError> {
-    let mut skills = BTreeMap::new();
-    collect_skill_dir(&home.join(".lf/skills"), &mut skills)?;
-    collect_skill_dir(&home.join(".claude/commands"), &mut skills)?;
-    Ok(skills)
-}
-
-fn collect_skill_dir(
-    dir: &Path,
-    skills: &mut BTreeMap<String, SkillSource>,
-) -> Result<(), LoadError> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-
-    for path in markdown_files(dir)? {
-        let Some(name) = skill_name_from_path(dir, &path) else {
-            continue;
-        };
-        let content = fs::read_to_string(&path)?;
-        skills.insert(name.clone(), SkillSource { name, content });
-    }
-    Ok(())
-}
-
-fn markdown_files(dir: &Path) -> Result<Vec<PathBuf>, LoadError> {
-    let mut files = Vec::new();
-    collect_markdown_files(dir, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_markdown_files(&path, files)?;
-        } else if path.extension().is_some_and(|ext| ext == "md") {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn skill_name_from_path(root: &Path, path: &Path) -> Option<String> {
-    let relative = path.strip_prefix(root).ok()?;
-    let mut without_extension = relative.to_path_buf();
-    without_extension.set_extension("");
-    Some(
-        without_extension
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/"),
-    )
-}
-
 fn write_targets(
-    skills: &BTreeMap<String, SkillSource>,
+    catalog: &SkillCatalog,
     target_root: &Path,
     vendor: Vendor,
     prune: bool,
     report: &mut SkillSyncReport,
 ) -> Result<(), LoadError> {
     fs::create_dir_all(target_root)?;
-    let desired: BTreeSet<String> = skills.keys().cloned().collect();
+    let desired: BTreeSet<_> = catalog.entries().map(|skill| skill.name.as_str()).collect();
 
-    for skill in skills.values() {
-        let path = skill_path(target_root, &skill.name);
-        let content = render_skill(skill, vendor);
+    for skill in catalog.entries() {
+        let path = target_root.join(&skill.name).join(SKILL_FILE_NAME);
+        // Third-party definitions own their paths, even on a name collision.
+        if path.exists() && !is_generated(&path) {
+            continue;
+        }
+        let content = render_skill(skill, vendor)?;
         if fs::read_to_string(&path).ok().as_deref() == Some(content.as_str()) {
             continue;
         }
@@ -178,6 +90,12 @@ fn write_targets(
             fs::create_dir_all(parent)?;
         }
         fs::write(&path, content)?;
+        if matches!(
+            (skill.dialect, vendor),
+            (SkillDialect::Claude, Vendor::Codex) | (SkillDialect::Codex, Vendor::Claude)
+        ) {
+            eprintln!("warning: exported {} across harnesses; native argument and control declarations are retained, not translated", skill.name);
+        }
         report.written.push(path);
     }
 
@@ -186,7 +104,7 @@ fn write_targets(
             let Some(name) = synced_skill_name_from_path(target_root, &path) else {
                 continue;
             };
-            if desired.contains(&name) {
+            if desired.contains(name.as_str()) {
                 continue;
             }
             fs::remove_file(&path)?;
@@ -198,41 +116,65 @@ fn write_targets(
     Ok(())
 }
 
-fn render_skill(skill: &SkillSource, vendor: Vendor) -> String {
-    let (original_frontmatter, body) =
-        split_frontmatter(&skill.content).unwrap_or_else(|| (String::new(), skill.content.clone()));
-    let description = skill_description(&original_frontmatter, &body, &skill.name);
-
+fn render_skill(skill: &SkillSource, vendor: Vendor) -> Result<String, LoadError> {
+    let content = skill.read()?;
+    let (original_frontmatter, body) = split_frontmatter(&content).unwrap_or(("", &content));
+    let description = skill_description(&content)
+        .unwrap_or_else(|| format!("Run the loopflow {} skill.", skill.name));
+    let source = skill.path.as_ref().map_or_else(String::new, |path| {
+        format!(
+            "Base directory for this skill: {}\n\n",
+            path.parent().expect("skill source has a parent").display()
+        )
+    });
     let mut frontmatter = Vec::new();
     frontmatter.push(format!("name: {}", yaml_string(&skill.name)));
     frontmatter.push(format!("description: {}", yaml_string(&description)));
     frontmatter.push(LOOPFLOW_MARKER.to_string());
     frontmatter.push(format!("loopflow-skill: {}", yaml_string(&skill.name)));
-    if vendor == Vendor::Claude {
+    if vendor == Vendor::Claude && skill.dialect == SkillDialect::Loopflow {
         frontmatter.push("disable-model-invocation: true".to_string());
     }
 
-    format!("---\n{}\n---\n{}", frontmatter.join("\n"), body)
-}
-
-fn skill_description(frontmatter: &str, body: &str, name: &str) -> String {
-    if let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(frontmatter) {
-        if let Some(description) = value
-            .as_mapping()
-            .and_then(|map| map.get(serde_yaml_ng::Value::String("description".to_string())))
-            .and_then(serde_yaml_ng::Value::as_str)
-            .map(first_line)
-            .filter(|line| !line.is_empty())
+    if skill.dialect != SkillDialect::Loopflow {
+        // Preserve authored declarations; the destination provider decides which it supports.
+        if let Ok(serde_yaml_ng::Value::Mapping(mut metadata)) =
+            serde_yaml_ng::from_str(original_frontmatter)
         {
-            return description;
+            for field in ["name", "description", "loopflow", "loopflow-skill"] {
+                metadata.remove(serde_yaml_ng::Value::String(field.into()));
+            }
+            if !metadata.is_empty() {
+                frontmatter.push(
+                    serde_yaml_ng::to_string(&metadata)
+                        .map_err(|error| LoadError::InvalidSkill(error.to_string()))?,
+                );
+            }
         }
     }
-
-    first_prose_line(body).unwrap_or_else(|| format!("Run the loopflow {name} skill."))
+    Ok(format!(
+        "---\n{}\n---\n{source}{body}",
+        frontmatter.join("\n")
+    ))
 }
 
-fn first_line(value: &str) -> String {
-    value.lines().next().unwrap_or("").trim().to_string()
+pub(crate) fn skill_description(content: &str) -> Option<String> {
+    let Some((frontmatter, body)) = split_frontmatter(content) else {
+        return first_prose_line(content);
+    };
+    serde_yaml_ng::from_str::<serde_yaml_ng::Value>(frontmatter)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("description")?
+                .as_str()?
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| first_prose_line(body))
 }
 
 pub(crate) fn first_prose_line(body: &str) -> Option<String> {
@@ -255,12 +197,6 @@ fn yaml_string(value: &str) -> String {
         .to_string()
 }
 
-fn skill_path(root: &Path, name: &str) -> PathBuf {
-    name.split('/')
-        .fold(root.to_path_buf(), |path, segment| path.join(segment))
-        .join(SKILL_FILE_NAME)
-}
-
 fn generated_skill_files(root: &Path) -> Result<Vec<PathBuf>, LoadError> {
     if !root.is_dir() {
         return Ok(Vec::new());
@@ -268,39 +204,24 @@ fn generated_skill_files(root: &Path) -> Result<Vec<PathBuf>, LoadError> {
 
     let mut files = Vec::new();
     collect_skill_files(root, &mut files)?;
-    files.retain(|path| is_loopflow_generated(path));
+    files.retain(|path| is_generated(path));
     Ok(files)
 }
 
 fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), LoadError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_skill_files(&path, files)?;
-        } else if path.file_name().is_some_and(|name| name == SKILL_FILE_NAME) {
-            files.push(path);
+    let skill = dir.join(SKILL_FILE_NAME);
+    if skill.is_file() {
+        // A bundle owns everything below it, including example skills.
+        files.push(skill);
+    } else {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.is_dir() && !path.is_symlink() {
+                collect_skill_files(&path, files)?;
+            }
         }
     }
     Ok(())
-}
-
-fn is_loopflow_generated(path: &Path) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    let Some((frontmatter, _body)) = split_frontmatter(&content) else {
-        return false;
-    };
-    frontmatter
-        .lines()
-        .any(|line| line.trim() == LOOPFLOW_MARKER)
 }
 
 fn synced_skill_name_from_path(root: &Path, skill_file: &Path) -> Option<String> {
@@ -339,7 +260,9 @@ fn prune_empty_skill_dir(skill_file: &Path, target_root: &Path) -> Result<(), Lo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{sync_skills, SkillSyncOptions, SKILL_FILE_NAME};
+    use crate::engine::{builtins, flow::split_frontmatter};
+    use std::fs;
     use tempfile::TempDir;
 
     fn options_for(home: &TempDir) -> SkillSyncOptions {
@@ -347,6 +270,42 @@ mod tests {
             prune: true,
             global_home: Some(home.path().to_path_buf()),
         }
+    }
+
+    #[test]
+    fn sync_skills_preserves_third_party_collisions_and_original_bundles() {
+        let home = TempDir::new().unwrap();
+        let original = home.path().join(".claude/skills/audit/SKILL.md");
+        fs::create_dir_all(original.parent().unwrap()).unwrap();
+        let content = "---\nname: audit\ndescription: Audit code\nallowed-tools: Read\n---\nRead [rules](rules.md).\n";
+        fs::write(&original, content).unwrap();
+        fs::write(original.parent().unwrap().join("rules.md"), "rules").unwrap();
+        let collision = home.path().join(".agents/skills/implement/SKILL.md");
+        fs::create_dir_all(collision.parent().unwrap()).unwrap();
+        fs::write(&collision, "Third-party implement").unwrap();
+        let example = collision.parent().unwrap().join("examples/old/SKILL.md");
+        fs::create_dir_all(example.parent().unwrap()).unwrap();
+        fs::write(&example, "---\nloopflow: true\n---\nBundled example").unwrap();
+        let report = sync_skills(&options_for(&home)).unwrap();
+        assert!(
+            example.exists(),
+            "pruning must not enter third-party bundles"
+        );
+        assert_eq!(fs::read_to_string(&original).unwrap(), content);
+        assert_eq!(
+            fs::read_to_string(&collision).unwrap(),
+            "Third-party implement"
+        );
+        assert!(!report.written.contains(&original));
+        assert!(!report.written.contains(&collision));
+        let export = fs::read_to_string(home.path().join(".agents/skills/audit/SKILL.md")).unwrap();
+        assert!(export.contains(&original.parent().unwrap().display().to_string()));
+        assert!(export.contains("allowed-tools: Read"));
+        assert!(!home
+            .path()
+            .join(".agents/skills/audit/rules/SKILL.md")
+            .exists());
+        assert!(sync_skills(&options_for(&home)).unwrap().written.is_empty());
     }
 
     #[test]
@@ -409,8 +368,7 @@ mod tests {
             for name in builtins::builtin_skill_names() {
                 let exported = fs::read_to_string(root.join(name).join("SKILL.md")).unwrap();
                 let source = builtins::get_builtin_skill(name).unwrap();
-                let body =
-                    split_frontmatter(source).map_or_else(|| source.to_string(), |(_, body)| body);
+                let body = split_frontmatter(source).map_or(source, |(_, body)| body);
                 assert!(
                     exported.contains(body.trim()),
                     "{vendor} omitted {name}'s method"

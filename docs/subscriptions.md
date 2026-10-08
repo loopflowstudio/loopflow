@@ -22,7 +22,7 @@ OpenCode Zen, GitHub, and Linear each use one effective credential instead of a
 routable subscription catalog.
 
 `lf account` refreshes managed identity and capacity, then reports next actions.
-Use `lf account --cached` for offline inspection with no provider or broker
+Use `lf account --cached` for offline inspection with no provider
 contact and no state writes. Unknown capacity stays unknown. JSON retains dated
 observations and reset times; expired observations do not prove current capacity.
 `lf account PROVIDER` limits the report to one provider.
@@ -137,9 +137,7 @@ nothing about a managed account. Missing local tokens leave ambient auth
 uninspected. Cached inspection reads account state without starting a provider,
 decrypting local tokens or creating an encryption key. The CLI records the
 command's Process in its Machine; this can initialize an empty store, but creates no
-account, route or conversation. An inherited account lease carries no cached identity catalog:
-`--cached` reports forwarded identities as uninspected without contacting the
-origin broker. Local token metadata is cached evidence, not server acceptance;
+account, route or conversation. Local token metadata is cached evidence, not server acceptance;
 live status reports local server verification unavailable.
 
 `auth status` persists recognized managed subscription windows before
@@ -148,14 +146,10 @@ age and source; omitted or unavailable windows retain older evidence. A passed
 reset displays usage as unknown until refreshed. Current windows say both
 `N% used` and `M% left`. JSON retains dated window observations; consumers must
 check `resets_at` before treating a recorded percentage as current. `lf usage`
-reports recorded provider token/cost usage separately. By default, status
-reads forwarded identity metadata from the origin broker, without acquiring a remote credential or
-verifying remote accounts. An unavailable broker leaves local evidence visible.
+reports recorded provider token/cost usage separately.
 
-JSON contains `accounts`, optional `forwarded_accounts_diagnostic`, and optional
-`browser` details. Unknown forwarded identities have no invented account rows.
-Each row has `scope`
-(`managed`, `local`, or `forwarded`), provider, account ID, login, cached
+JSON contains `accounts` and optional `browser` details. Each row has `scope`
+(`managed` or `local`), provider, account ID, login, cached
 credential state, verification, windows, diagnostic and recovery. Verification
 is `accepted`, `rejected`, `unavailable`, or `not_checked`. Window rows retain
 `observed_at`, `resets_at`, source and plan; `verified_windows` identifies only
@@ -289,7 +283,7 @@ A Flow carries these choices to its steps. `--account` keeps fallback routing;
 `--only-account` restricts the entire Flow. Run a fresh Flow to choose again.
 Steps have no account overrides. Native Session affinity remains authoritative within that selection.
 Local choices use the Machine's catalog directly and survive the initiating CLI's
-exit; a forwarded SSH credential still needs its origin broker.
+exit, including logins installed on a remote machine.
 
 ## Switch the shared account
 
@@ -376,45 +370,36 @@ owns these outcomes and retry semantics.
 ## Use subscriptions over SSH
 
 ```bash
-lf machine add my-company
-lf --machine my-company implement
-lf --machine my-company --account personal@ implement
+lf machine connect mini github
+lf machine connect mini codex work@example.com
+lf machine connect mini claude personal@example.com --chrome-profile Personal
+lf machine connect mini linear
+lf --machine mini --account codex=work@ implement
 ```
 
-`--machine <label-or-id>` runs the whole command on the saved machine in its
-repository. Account selectors have the same meaning wherever they appear: they
-travel with the command and resolve against the target's combined local and
-forwarded catalog. The origin offers its eligible managed identities and repository
-routes, subject to any inherited account restriction.
+Add the machine first with `lf machine add`. GitHub installs the laptop's selected
+token in the target's gh configuration. Claude, Codex and Linear mint a fresh login
+on the laptop; approve it in the laptop's browser. Claude and Codex stage the login
+in a private temporary directory. The laptop's existing login is not replaced.
+The target retains its own refresh credential and existing accounts.
 
-The target chooses in this order:
+An account-selected launch connects the requested account if missing. Invocation selectors resolve
+against the laptop's managed logins;
+full email identifies that login on the target. The remote invocation is restricted
+to the requested accounts, so it cannot fall back to a different login. A simple
+launch without selectors uses the laptop's configured provider route when available.
+Read commands without account selectors do not connect accounts.
 
-1. explicit `--account` preferences;
-2. the target repository route;
-3. the forwarded origin repository route; and
-4. the remaining eligible target and forwarded accounts.
+Transfers run in the foreground. `--batch` never starts a missing login, even
+with a terminal attached. A headless launch needing a missing login reports
+the connect command; it does not start browser authorization. SSH launches use
+isolated, file-backed account homes, including on macOS. The target needs its own
+provider CLI. Credential bytes travel on SSH stdin, never in argv or an exported
+variable. `machine credentials inspect/receive` supplies the public receiving
+commands. No broker, forwarded socket or laptop process owns the installed login.
 
-Target-local accounts precede equivalent forwarded accounts when no explicit
-preference distinguishes them. Health and usage rules apply across the merged
-catalog.
-
-`--only-account` restricts the target launch to the named identities. Account inspection shows `local` or `forwarded` provenance. Forwarded identities are
-read-only: connect, disconnect, and edit their routes on the machine that owns
-them.
-
-Launch selectors govern foreground work. A detached worker sheds forwarded state before detaching and selects from routes stored
-on its own machine. Configure the target repository route for durable account
-choice:
-
-```bash
-lf --machine my-company route set codex work@
-lf --machine my-company --wave shipper wave/operate
-```
-
-The origin does not copy account homes or refresh credentials. It advertises
-the catalog first and serves one access token only after the target selects a
-forwarded identity. See [Security](/docs/security#what-crosses-ssh-for-a-subscription-account)
-for the broker, process-lifetime, and remote trust boundary.
+`lf --machine` runs the target's `lf` in the saved repository. The target parses
+the command; there is no extra `-- lf`. Remote process survival and reattachment belong to the separate detached-launch and relay work.
 
 ## OpenCode Zen
 
@@ -425,7 +410,7 @@ lf account connect opencode
 lf account connect opencode --api-key
 ```
 
-Its stored credential applies to local OpenCode launches and foreground SSH.
+Its stored credential applies to local OpenCode launches.
 Subscription polling, repository account routes, and the 95% demotion threshold
 do not apply.
 
@@ -458,9 +443,11 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
   Pass the optional credential digest to `record_provider_account_identity`;
   an absent digest retains historical identity without asserting a Claude
   credential binding.
-- `AccountLeaseBroker` is internal to SSH forwarding; its `start_root` and
-  `local_env_value` entry points are removed. Launch local commands with
-  `--account` or `--only-account`; a Flow carries those choices to its steps.
+- Account selection lives in `provider_account::selection`; the SSH credential
+  broker and lent-account API are removed. Launch local commands with `--account`
+  or `--only-account`; a Flow carries those choices to its steps.
+- Route candidates belong to the executing machine. Their JSON and text omit
+  the former local/forwarded `source` field.
 
 The forward database migration preserves existing account/profile identities,
 ordered bindings and configured expected logins. Source API compatibility and

@@ -20,8 +20,7 @@ lf machine remove builder
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
-`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+repository. Task, worktree and Wave selectors resolve there. `--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
 
 Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
 Without `--repo`, add uses the local checkout's path relative to the local home.
@@ -40,14 +39,15 @@ sign-in, unknown or changed host keys, unreachable hosts, or missing `lf`, with 
 command to resolve each. Host-key repairs require verifying the fingerprint.
 Connections share a private OpenSSH control socket and expire after 60 idle
 seconds. Personal SSH control sockets are never reused or closed. Explicit
-agent forwarding uses a separate connection; account-forwarding routes are
-removed after each command. Add and status
+agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
-before forwarding the existing foreground credentials through stdin.
+before dispatch. `lf machine connect mini <provider> [email]` installs a separate
+login through SSH stdin; account-selected launches connect missing logins in the
+foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity, routes and Work placements remain in SQLite. Previously observed routes
-need an explicit add before they can receive forwarded credentials.
+need an explicit add before they can receive a login.
 
 ## Local by default
 

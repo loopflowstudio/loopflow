@@ -1,10 +1,12 @@
 //! Command ownership, shorthand, and read-only inspection share Clap metadata.
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
 use clap::{Command, CommandFactory, Parser};
 
-use crate::lf::discovery::{definition_source, resolve_local_definition, DefinitionKind, Target};
+use crate::engine::target::{resolve_definition, DefinitionKind, Target};
+use crate::engine::{Step, XorPath};
 use crate::lf::{Cli, Commands, FlowCommand};
 
 pub fn command_tree() -> Command {
@@ -133,7 +135,7 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         if value.starts_with('-') {
             let name = value.split('=').next().expect("split has a first item");
-            let is_transport = matches!(name, "--machine" | "--secret" | "--forward-agent");
+            let is_transport = matches!(name, "--machine" | "--forward-agent");
             let start = index;
             if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
@@ -356,7 +358,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --secret <name>, --forward-agent\n");
+        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --forward-agent\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }
@@ -420,53 +422,91 @@ pub(crate) fn definition_invocation(tree: &Command, name: &str, kind: Definition
     format!("lf {label} {}{name}", if escaped { "-- " } else { "" })
 }
 
+pub(crate) fn definition_source(repo: &Path, path: Option<&Path>) -> String {
+    path.map(|path| {
+        path.strip_prefix(repo)
+            .unwrap_or(path)
+            .display()
+            .to_string()
+    })
+    .unwrap_or_else(|| "builtin".to_string())
+}
+
+fn format_written_steps(steps: &[Step]) -> String {
+    if steps.is_empty() {
+        return "∅".to_string();
+    }
+    steps
+        .iter()
+        .map(format_written_step)
+        .collect::<Vec<_>>()
+        .join(" → ")
+}
+
+fn format_written_step(step: &Step) -> String {
+    match &step.target {
+        Target::Flow(flow) => flow.name.clone(),
+        target => format_target(target),
+    }
+}
+
+pub(crate) fn format_target(target: &Target) -> String {
+    match target {
+        Target::Skill(skill) => skill.name.clone(),
+        Target::Command(command) => command.to_string(),
+        Target::Flow(flow) => format_written_steps(&flow.items),
+        Target::Xor(xor) => format_xor(xor.router.as_deref(), &xor.paths),
+    }
+}
+
+fn format_xor(router: Option<&str>, paths: &HashMap<String, XorPath>) -> String {
+    let label = router.map_or_else(|| "xor".to_string(), |name| format!("xor[{name}]"));
+    let mut names: Vec<_> = paths.keys().collect();
+    names.sort();
+    let rendered = names
+        .into_iter()
+        .map(|name| format!("{name}: {}", format_written_steps(&paths[name].steps)))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    format!("{label}{{{rendered}}}")
+}
+
 fn definition_help(
     tree: &Command,
     repo: &Path,
     name: &str,
     kind: Option<DefinitionKind>,
 ) -> Result<String> {
-    let target = match resolve_local_definition(repo, name, kind) {
-        Ok(target) => target,
-        Err(error)
-            if name.starts_with("npx/")
-                && matches!(
-                    error.downcast_ref::<crate::engine::LoadError>(),
-                    Some(
-                        crate::engine::LoadError::SkillNotFound(_)
-                            | crate::engine::LoadError::TargetNotFound(_)
-                    )
-                ) =>
-        {
-            return Ok(format!(
-                "{name} — not cached locally\nRun `lf skill {name}` to fetch and execute it.\n"
-            ));
-        }
-        Err(error) => return Err(error),
-    };
-    let (name, kind, description) = match &target {
+    let target = resolve_definition(repo, name, kind)?;
+    let (name, kind, description, source) = match &target {
         Target::Command(_) | Target::Xor(_) => anyhow::bail!("{name} is not a named skill or flow"),
         Target::Skill(skill) => (
             skill.name.as_str(),
             DefinitionKind::Skill,
             skill.content.clone().unwrap_or_default(),
+            skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Flow(flow) => {
             let mut reviews = crate::engine::human_occurrence_ids(flow, repo)?;
             reviews.sort();
-            let mut description = crate::lf::discovery::format_written_steps(&flow.items);
+            let mut description = format_written_steps(&flow.items);
             if !reviews.is_empty() {
                 description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
             }
-            (flow.name.as_str(), DefinitionKind::Flow, description)
+            (
+                flow.name.as_str(),
+                DefinitionKind::Flow,
+                description,
+                crate::engine::flow::find_flow_source_path(&flow.name, repo),
+            )
         }
     };
     let label = kind.as_str();
-    let source = definition_source(repo, name, kind);
+    let source = definition_source(repo, source.as_deref());
     let invocation = definition_invocation(tree, name, kind);
     let mut output =
         format!("{name} — {label} ({source})\n{description}\n\n  {invocation} [message]\n");
-    match (kind, resolve_local_definition(repo, name, None)) {
+    match (kind, resolve_definition(repo, name, None)) {
         (_, Err(error)) => {
             output.push_str(&format!("\nUntyped lookup fails: {error}\n"));
         }
@@ -481,7 +521,7 @@ fn definition_help(
         }
     }
     if kind == DefinitionKind::Flow
-        && resolve_local_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
+        && resolve_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
     {
         output.push_str(&format!(
             "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",

@@ -43,6 +43,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),
         task_prompt: request.task_prompt.clone(),
+        skill_invocation: request.skill_invocation.clone(),
         agent: Some(request.agent.clone()),
         provider_account_id: request.account_id.clone(),
         provider_account_authority_home: request.account_id.as_ref().map(|_| home.to_path_buf()),
@@ -157,6 +158,7 @@ mod tests {
         let request = AgentProcessRequest {
             system_prompt: "recorded system".to_string(),
             task_prompt: "recorded task".to_string(),
+            skill_invocation: None,
             agent: "opencode:opencode/glm-5.2".to_string(),
             account_id: None,
             max_turns: Some(3),

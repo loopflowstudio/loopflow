@@ -323,8 +323,8 @@ lf account route set codex work@ personal@
 
 A preference permits fallback; a restriction limits spending. A Flow takes
 one selection per provider and carries it through its child steps. Remote
-launches check destination access with the inherited restrictions. A foreground
-credential lease cannot authorize a detached remote process after it expires.
+launches install missing selected logins in the foreground and use the same
+account on the target. Credentials remain resident there.
 Missing or expired capacity remains unknown, never zero or unlimited.
 
 ## Discover commands
@@ -430,14 +430,13 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 ```bash
 lf machine add mini --repo '~/src/project'
 lf machine status mini
+lf machine connect mini codex work@example.com
 lf --machine mini session list
-lf --machine mini --task LOO-123 implement
-lf --machine mini machine add builder
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine in its saved
-repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
-`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+repository. Task, worktree and Wave selectors resolve there.
+`--forward-agent` requires `--machine`; the saved repository is set by `machine add`.
 
 Save an SSH destination once, then use its label. List, rename and remove saved
 connections with `lf machine list`, `lf machine rename mini builder` and

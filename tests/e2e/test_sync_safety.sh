@@ -7,7 +7,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LF_BIN="$ROOT_DIR/target/debug/lf"
 TMP_ROOT=$(mktemp -d)
 export LF_HOME="$TMP_ROOT/lf-home"
-unset LF_RUN_ID LF_RUN_DIR LF_WORK_ADVANCE_CLAIM LF_ACCOUNT_LEASE LF_HUMAN_SESSION
+unset LF_RUN_ID LF_RUN_DIR LF_WORK_ADVANCE_CLAIM LF_HUMAN_SESSION
 
 cleanup() {
   find "$TMP_ROOT" -name sentinel.pid -type f -print0 2>/dev/null |

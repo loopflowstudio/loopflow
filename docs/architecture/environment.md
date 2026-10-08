@@ -44,15 +44,14 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_FLOW_NAME` | Flow driver | Skill prose | Names the running Flow for the agent. |
 
-## Forwarded authority
+## Account selection and credentials
 
-Credentials and account authority handed to exactly one process. Session
-shells unset them and tmux never receives them.
+Account selection names resident logins; SSH transfers credential bytes on stdin,
+never in environment variables. Detached Session shells scrub transient credentials.
 
 | Variable | Policy |
 |---|---|
-| `LF_ACCOUNT_LEASE`, `LF_ACCOUNT_SELECTION`, `LF_ACCOUNT_LEASE_SOCKET` | Account route for one provider launch or one `lf --machine` command. |
-| `LF_FORWARDED_PM_TOKEN`, `LF_FORWARDED_PM_PROVIDER`, `LF_FORWARDED_SECRET_NAMES` | Planning credential and named secrets carried over `lf --machine`. |
+| `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |
 | `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. |
@@ -64,7 +63,6 @@ shells unset them and tmux never receives them.
 |---|---|---|
 | `LF_INSTALL_DIR`, `LF_INSTALL_CLI_ONLY`, `LF_APPLICATIONS_DIR` | `release/install.sh`, `lf install` | Installer destinations. |
 | `LF_PROVIDER_TOKEN_KEY_PATH` | `store::token_crypto` | Location of the token encryption key. |
-| `LF_NPX_BIN` | Skill discovery | Substitute `npx`. |
 | `LF_PERF_OUTPUT` | `performance` | Existing directory for opt-in CLI process/SQLite volume receipts; no SQL or data values. |
 | `LF_TRACE` | `ops::trace` | Emit operation traces instead of executing. |
 | `LOOPFLOW_DEV_WAVE_REPO` | Metrics, Desktop portfolio discovery | Repository a development app opens. |

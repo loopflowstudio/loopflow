@@ -229,9 +229,9 @@ Reads follow the same rule: `lf mon list`, `lf usage`, `lf wave list`, and `lf w
 read the executing Machine. Prefix the command with `lf --machine <machine-id>` to read
 another Machine. Loopflow does not silently aggregate or replicate execution records.
 
-Foreground `lf --machine` commands can choose from subscription accounts installed on
-the origin and target. A detached process sheds forwarded credentials
-and uses authority installed on its own machine. See
+`lf machine connect <machine> <provider> [email]` installs a separate login on an
+added machine. Account-selected `lf --machine` launches connect a missing login in the
+foreground and then use its resident credential. See
 [Subscription Management](subscriptions.md#use-subscriptions-over-ssh).
 
 Auth connects your providers locally:

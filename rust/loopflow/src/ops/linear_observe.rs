@@ -215,26 +215,15 @@ async fn sync_repository_deliveries(store: &Store, task: &Task, state: bool) -> 
 
 pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()> {
     let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
-    // Multiple foreground readers may deliver the same decision. Serialize
-    // provider effects, independently of local saves and inbound acquisition.
-    let directory = store
+    let path = store
         .sqlite
         .home_dir()
         .map_err(|e| message(&e))?
-        .join("locks/task-state");
-    std::fs::create_dir_all(&directory).map_err(|e| message(&e))?;
-    let lock = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join(format!("{}.lock", task.id)))
-        .map_err(|e| message(&e))?;
-    match fs2::FileExt::try_lock_exclusive(&lock) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-        Err(error) => return Err(message(&error)),
-    }
+        .join("locks/task-state")
+        .join(format!("{}.lock", task.id));
+    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+        return Ok(());
+    };
     let Some(delivery) = store
         .sqlite
         .pending_task_state(&task.id)

@@ -1720,29 +1720,10 @@ fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<St
     parsed.validate()?;
     let (header, replacement) = match field {
         "workflow" => (None, format!("workflow: {}\n", parsed.workflow)),
-        "krs" => (
-            Some("## KRs"),
-            format!(
-                "## KRs\n\n{}\n",
-                parsed
-                    .krs
-                    .iter()
-                    .map(|kr| format!(
-                        "- [{}] {}",
-                        if kr.holds { "x" } else { " " },
-                        kr.text.trim()
-                    ))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            ),
-        ),
+        "krs" => (Some("## KRs"), format!("{}\n", super::render_krs(&parsed))),
         "metric_targets" => (
             Some("## Metric targets"),
-            format!(
-                "## Metric targets\n\n```json\n{}\n```\n",
-                serde_json::to_string_pretty(&parsed.metric_targets)
-                    .map_err(|e| PmError::Message(e.to_string()))?
-            ),
+            format!("{}\n", super::render_metric_targets(&parsed)),
         ),
         _ => {
             return Err(PmError::Message(format!(

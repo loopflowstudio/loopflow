@@ -912,7 +912,7 @@ async fn pm_init_async(
     let existing_initiative = read_initiative(repo, &wave);
     let existing_team = read_repository_team(repo)?;
 
-    let summary = wave_summary(repo, &wave)?;
+    let summary = crate::work::wave::config::read_wave_summary(repo, &wave)?;
     let title = title_case(&wave);
     let client = build_client(existing_team.clone()).await?;
 
@@ -2435,10 +2435,6 @@ fn default_team_key(repository: &str) -> String {
     }
 }
 
-fn wave_summary(repo: &Path, wave: &str) -> OpsResult<String> {
-    Ok(crate::work::wave::config::read_wave_summary(repo, wave)?)
-}
-
 fn matching_wave_id(waves: &[PmWave], title: &str) -> OpsResult<Option<String>> {
     let matches: Vec<_> = waves.iter().filter(|wave| wave.name == title).collect();
     match matches.as_slice() {
@@ -2754,10 +2750,8 @@ pub(crate) async fn require_outside_current_chapter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::id::WaveId;
     use crate::ops::NullProgress;
     use crate::pm::test_server::{self, json_response, QueuedResponse};
-    use crate::work::wave::Wave;
     use axum::http::StatusCode;
     use serde_json::{json, Value};
 
@@ -2889,6 +2883,15 @@ mod tests {
         )
     }
 
+    fn with_pm_home(test: impl FnOnce(&tempfile::TempDir, &tokio::runtime::Runtime)) {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = super::test_fixture::PlanningEnvironment::isolate();
+        let repo = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", repo.path());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        test(&repo, &runtime);
+    }
+
     fn write_repo_config(repo: &Path, content: &str) {
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         std::fs::write(repo.join(".lf/config.yaml"), content).unwrap();
@@ -2896,44 +2899,66 @@ mod tests {
 
     #[test]
     fn repository_team_config_is_the_only_normal_authority() {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "pm:\n  provider: linear\n  linear_team: team-loo\n",
-        );
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  linear_initiative: initiative-product\n",
-        );
+        with_pm_home(|repo, runtime| {
+            write_repo_config(
+                repo.path(),
+                "pm:\n  provider: linear\n  linear_team: team-loo\n",
+            );
+            write_goal(
+                repo.path(),
+                "product",
+                "pm:\n  linear_initiative: initiative-product\n",
+            );
 
-        assert_eq!(
-            read_repository_team(repo.path()).unwrap().as_deref(),
-            Some("team-loo")
-        );
-        assert_eq!(
-            read_initiative(repo.path(), "product").as_deref(),
-            Some("initiative-product")
-        );
-        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+            runtime.block_on(async {
+                let store = crate::store::open_ephemeral_store(
+                    &crate::store::StorageConfig::sqlite(repo.path().join("loopflow.db")),
+                )
+                .await
+                .unwrap();
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
+                    .await
+                    .unwrap();
+            });
+            assert_eq!(
+                read_repository_team(repo.path()).unwrap().as_deref(),
+                Some("team-loo")
+            );
+            assert_eq!(
+                read_initiative(repo.path(), "product").as_deref(),
+                Some("initiative-product")
+            );
+            assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+        });
     }
 
     #[test]
     fn legacy_wave_team_authority_blocks_mutations_with_prd_44_recovery() {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
-        );
-        write_goal(
-            repo.path(),
-            "product",
-            "pm:\n  provider: linear\n  linear_initiative: initiative-product\n  linear_team: team-old\n",
-        );
+        with_pm_home(|repo, runtime| {
+            write_repo_config(
+                repo.path(),
+                "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+            );
+            write_goal(
+                repo.path(),
+                "product",
+                "pm:\n  provider: linear\n  linear_initiative: initiative-product\n  linear_team: team-old\n",
+            );
 
-        let error = require_repository_pm_ready(repo.path()).unwrap_err();
-        assert!(error.to_string().contains("lf repo reteam --apply"));
-        assert!(error.to_string().contains("PRD-44"));
+            runtime.block_on(async {
+                let store = crate::store::open_ephemeral_store(
+                    &crate::store::StorageConfig::sqlite(repo.path().join("loopflow.db")),
+                )
+                .await
+                .unwrap();
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
+                    .await
+                    .unwrap();
+            });
+            let error = require_repository_pm_ready(repo.path()).unwrap_err();
+            assert!(error.to_string().contains("lf repo reteam --apply"));
+            assert!(error.to_string().contains("PRD-44"));
+        });
     }
 
     async fn run_reteam_fixture(
@@ -2962,457 +2987,459 @@ mod tests {
         json_response(StatusCode::OK, json!({"data": {"issue": issue}}))
     }
 
-    #[tokio::test]
-    async fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
-        );
-        write_goal(
-            repo.path(),
-            "survival",
-            "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
-        );
-        write_goal(
-            repo.path(),
-            "survival/infrastructure",
-            "pm:\n  provider: linear\n  linear_initiative: initiative-infrastructure\n  linear_team: team-old\n",
-        );
+    #[test]
+    fn repository_team_reteam_migrates_open_and_completed_issues_before_cleanup() {
+        with_pm_home(|repo, runtime| {
+            runtime.block_on(async {
+                write_repo_config(
+                    repo.path(),
+                    "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+                );
+                write_goal(
+                    repo.path(),
+                    "survival",
+                    "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+                );
+                write_goal(
+                    repo.path(),
+                    "survival/infrastructure",
+                    "pm:\n  provider: linear\n  linear_initiative: initiative-infrastructure\n  linear_team: team-old\n",
+                );
 
-        let database = repo.path().join("registry.db");
-        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-            database.clone(),
-        ))
-        .await
-        .unwrap();
-        crate::work::wave::ensure_wave_row(&store, repo.path(), "survival/infrastructure")
-            .await
-            .unwrap();
+                let database = repo.path().join("loopflow.db");
+                let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    database.clone(),
+                ))
+                .await
+                .unwrap();
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "survival/infrastructure")
+                    .await
+                    .unwrap();
 
-        let old_survival = migration_project_node(
-            "project-survival",
-            "Survival — A real task reaches done",
-            "initiative-survival",
-            &["team-old"],
-        );
-        let old_infrastructure = migration_project_node(
-            "project-infrastructure",
-            "Infrastructure — Gmail",
-            "initiative-infrastructure",
-            &["team-old"],
-        );
-        let new_survival = migration_project_node(
-            "project-survival",
-            "Survival — A real task reaches done",
-            "initiative-survival",
-            &["team-loo"],
-        );
-        let new_infrastructure = migration_project_node(
-            "project-infrastructure",
-            "Infrastructure — Gmail",
-            "initiative-infrastructure",
-            &["team-loo"],
-        );
-        let mut expanded_survival = old_survival.clone();
-        expanded_survival["teams"] = json!({"nodes": [{"id":"team-old"},{"id":"team-loo"}]});
-        let mut expanded_infrastructure = old_infrastructure.clone();
-        expanded_infrastructure["teams"] = expanded_survival["teams"].clone();
-        let responses = vec![
-            projects_response(json!([old_survival])),
-            issues_response(json!([migration_issue_node(
-                "issue-open",
-                "OLD-1",
-                "project-survival",
-                "Survival — A real task reaches done",
-                "team-old",
-                false,
-            )])),
-            projects_response(json!([old_infrastructure])),
-            issues_response(json!([migration_issue_node(
-                "issue-done",
-                "OLD-2",
-                "project-infrastructure",
-                "Infrastructure — Gmail",
-                "team-old",
-                true,
-            )])),
-            project_update_response("project-survival"),
-            project_readback(&expanded_survival),
-            project_update_response("project-infrastructure"),
-            project_readback(&expanded_infrastructure),
-            issue_comments_response(),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-open" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
-            ),
-            issue_readback(
-                migration_issue_node(
+                let old_survival = migration_project_node(
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "initiative-survival",
+                    &["team-old"],
+                );
+                let old_infrastructure = migration_project_node(
+                    "project-infrastructure",
+                    "Infrastructure — Gmail",
+                    "initiative-infrastructure",
+                    &["team-old"],
+                );
+                let new_survival = migration_project_node(
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "initiative-survival",
+                    &["team-loo"],
+                );
+                let new_infrastructure = migration_project_node(
+                    "project-infrastructure",
+                    "Infrastructure — Gmail",
+                    "initiative-infrastructure",
+                    &["team-loo"],
+                );
+                let mut expanded_survival = old_survival.clone();
+                expanded_survival["teams"] = json!({"nodes": [{"id":"team-old"},{"id":"team-loo"}]});
+                let mut expanded_infrastructure = old_infrastructure.clone();
+                expanded_infrastructure["teams"] = expanded_survival["teams"].clone();
+                let responses = vec![
+                    projects_response(json!([old_survival])),
+                    issues_response(json!([migration_issue_node(
+                        "issue-open",
+                        "OLD-1",
+                        "project-survival",
+                        "Survival — A real task reaches done",
+                        "team-old",
+                        false,
+                    )])),
+                    projects_response(json!([old_infrastructure])),
+                    issues_response(json!([migration_issue_node(
+                        "issue-done",
+                        "OLD-2",
+                        "project-infrastructure",
+                        "Infrastructure — Gmail",
+                        "team-old",
+                        true,
+                    )])),
+                    project_update_response("project-survival"),
+                    project_readback(&expanded_survival),
+                    project_update_response("project-infrastructure"),
+                    project_readback(&expanded_infrastructure),
+                    issue_comments_response(),
+                    json_response(
+                        StatusCode::OK,
+                        json!({ "data": { "commentCreate": { "comment": { "id": "comment-open" } } } }),
+                    ),
+                    json_response(
+                        StatusCode::OK,
+                        json!({ "data": { "issueUpdate": { "issue": { "id": "issue-open", "identifier": "LOO-1" } } } }),
+                    ),
+                    issue_readback(
+                        migration_issue_node(
+                            "issue-open",
+                            "LOO-1",
+                            "project-survival",
+                            "Survival — A real task reaches done",
+                            "team-loo",
+                            false,
+                        ),
+                        &expanded_survival,
+                    ),
+                    issue_comments_response(),
+                    json_response(
+                        StatusCode::OK,
+                        json!({ "data": { "commentCreate": { "comment": { "id": "comment-done" } } } }),
+                    ),
+                    json_response(
+                        StatusCode::OK,
+                        json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
+                    ),
+                    issue_readback(
+                        migration_issue_node(
+                            "issue-done",
+                            "LOO-2",
+                            "project-infrastructure",
+                            "Infrastructure — Gmail",
+                            "team-loo",
+                            true,
+                        ),
+                        &expanded_infrastructure,
+                    ),
+                    project_update_response("project-survival"),
+                    project_readback(&new_survival),
+                    project_update_response("project-infrastructure"),
+                    project_readback(&new_infrastructure),
+                    projects_response(json!([new_survival])),
+                    issues_response(json!([migration_issue_node(
+                        "issue-open",
+                        "LOO-1",
+                        "project-survival",
+                        "Survival — A real task reaches done",
+                        "team-loo",
+                        false,
+                    )])),
+                    projects_response(json!([new_infrastructure])),
+                    issues_response(json!([migration_issue_node(
+                        "issue-done",
+                        "LOO-2",
+                        "project-infrastructure",
+                        "Infrastructure — Gmail",
+                        "team-loo",
+                        true,
+                    )])),
+                ];
+                let (base_url, requests) = test_server::spawn(responses).await;
+                let client = crate::pm::linear::LinearClient::with_base_url(
+                    "linear-secret".to_string(),
+                    Some("team-loo".to_string()),
+                    base_url,
+                );
+                let resolved = ResolvedReteamContext {
+                    repository: RepositoryPmContext {
+                        client,
+                        repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
+                        team_id: "team-loo".to_string(),
+                    },
+                    team_key: "LOO".to_string(),
+                    store,
+                };
+
+                let result = run_reteam_fixture(&resolved, repo.path(), &database)
+                    .await
+                    .unwrap();
+
+                assert!(result.applied);
+                assert_eq!(result.moves.len(), 2);
+                let identifiers = result
+                    .moves
+                    .iter()
+                    .filter_map(|item| item.new_identifier.as_deref())
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(identifiers, BTreeSet::from(["LOO-1", "LOO-2"]));
+                assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+                assert_eq!(
+                    read_repository_team(repo.path()).unwrap().as_deref(),
+                    Some("team-loo")
+                );
+                for wave in ["survival", "survival/infrastructure"] {
+                    let pm = read_wave_pm_config(repo.path(), wave).unwrap();
+                    assert!(pm.provider.is_none());
+                    assert!(pm.linear_team.is_none());
+                    assert!(pm.linear_initiative.is_some());
+                    let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
+                    let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
+                    let planning = resolved
+                        .store
+                        .pm_snapshot(registered.id())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(planning.snapshot.projects.len(), 1);
+                    assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
+                }
+
+                let requests = requests.lock().await;
+                let first_move = requests
+                    .iter()
+                    .position(|request| request.body.contains("MoveIssueToTeam"))
+                    .unwrap();
+                let attached_before_move = requests[..first_move]
+                    .iter()
+                    .filter(|request| request.body.contains("SetProjectTeams"))
+                    .count();
+                assert_eq!(attached_before_move, 2);
+                assert_eq!(
+                    result
+                        .project_moves
+                        .iter()
+                        .map(|project| project.name.as_str())
+                        .collect::<Vec<_>>(),
+                    [
+                        "Survival — A real task reaches done",
+                        "Infrastructure — Gmail"
+                    ]
+                );
+                assert!(!requests
+                    .iter()
+                    .any(|request| request.body.contains("UpdateProject(")));
+            });
+        });
+    }
+
+    #[test]
+    fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
+        interrupted_reteam(false, "move");
+    }
+
+    #[test]
+    fn repository_team_reteam_resumes_with_cached_project_membership() {
+        interrupted_reteam(true, "move");
+    }
+
+    #[test]
+    fn repository_team_reteam_recovers_expansion_response_loss() {
+        interrupted_reteam(true, "expansion");
+    }
+
+    #[test]
+    fn repository_team_reteam_recovers_narrowing_response_loss() {
+        interrupted_reteam(true, "narrowing");
+    }
+
+    fn interrupted_reteam(cache_planning: bool, interruption: &str) {
+        with_pm_home(|repo, runtime| {
+            runtime.block_on(async {
+                write_repo_config(
+                    repo.path(),
+                    "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
+                );
+                write_goal(
+                    repo.path(),
+                    "survival",
+                    "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
+                );
+
+                let database = repo.path().join("loopflow.db");
+                let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    database.clone(),
+                ))
+                .await
+                .unwrap();
+                let wave = crate::work::wave::ensure_wave_row(&store, repo.path(), "survival")
+                    .await.unwrap();
+
+                let old_project = migration_project_node(
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "initiative-survival",
+                    &["team-old"],
+                );
+                let expanded_project = migration_project_node(
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "initiative-survival",
+                    &["team-old", "team-loo"],
+                );
+                let migrated_project = migration_project_node(
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "initiative-survival",
+                    &["team-loo"],
+                );
+                let old_issue = migration_issue_node(
+                    "issue-open",
+                    "OLD-1",
+                    "project-survival",
+                    "Survival — A real task reaches done",
+                    "team-old",
+                    false,
+                );
+                let migrated_issue = migration_issue_node(
                     "issue-open",
                     "LOO-1",
                     "project-survival",
                     "Survival — A real task reaches done",
                     "team-loo",
                     false,
-                ),
-                &expanded_survival,
-            ),
-            issue_comments_response(),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-done" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "issue-done", "identifier": "LOO-2" } } } }),
-            ),
-            issue_readback(
-                migration_issue_node(
-                    "issue-done",
-                    "LOO-2",
-                    "project-infrastructure",
-                    "Infrastructure — Gmail",
-                    "team-loo",
-                    true,
-                ),
-                &expanded_infrastructure,
-            ),
-            project_update_response("project-survival"),
-            project_readback(&new_survival),
-            project_update_response("project-infrastructure"),
-            project_readback(&new_infrastructure),
-            projects_response(json!([new_survival])),
-            issues_response(json!([migration_issue_node(
-                "issue-open",
-                "LOO-1",
-                "project-survival",
-                "Survival — A real task reaches done",
-                "team-loo",
-                false,
-            )])),
-            projects_response(json!([new_infrastructure])),
-            issues_response(json!([migration_issue_node(
-                "issue-done",
-                "LOO-2",
-                "project-infrastructure",
-                "Infrastructure — Gmail",
-                "team-loo",
-                true,
-            )])),
-        ];
-        let (base_url, requests) = test_server::spawn(responses).await;
-        let client = crate::pm::linear::LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-loo".to_string()),
-            base_url,
-        );
-        let resolved = ResolvedReteamContext {
-            repository: RepositoryPmContext {
-                client,
-                repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
-                team_id: "team-loo".to_string(),
-            },
-            team_key: "LOO".to_string(),
-            store,
-        };
-
-        let result = run_reteam_fixture(&resolved, repo.path(), &database)
-            .await
-            .unwrap();
-
-        assert!(result.applied);
-        assert_eq!(result.moves.len(), 2);
-        let identifiers = result
-            .moves
-            .iter()
-            .filter_map(|item| item.new_identifier.as_deref())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(identifiers, BTreeSet::from(["LOO-1", "LOO-2"]));
-        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
-        assert_eq!(
-            read_repository_team(repo.path()).unwrap().as_deref(),
-            Some("team-loo")
-        );
-        for wave in ["survival", "survival/infrastructure"] {
-            let pm = read_wave_pm_config(repo.path(), wave).unwrap();
-            assert!(pm.provider.is_none());
-            assert!(pm.linear_team.is_none());
-            assert!(pm.linear_initiative.is_some());
-            let locator = crate::work::wave::WaveLocator::discover(repo.path(), wave).unwrap();
-            let registered = resolved.store.get_wave_at(&locator).await.unwrap().unwrap();
-            let planning = resolved
-                .store
-                .pm_snapshot(registered.id())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(planning.snapshot.projects.len(), 1);
-            assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
-        }
-
-        let requests = requests.lock().await;
-        let first_move = requests
-            .iter()
-            .position(|request| request.body.contains("MoveIssueToTeam"))
-            .unwrap();
-        let attached_before_move = requests[..first_move]
-            .iter()
-            .filter(|request| request.body.contains("SetProjectTeams"))
-            .count();
-        assert_eq!(attached_before_move, 2);
-        assert_eq!(
-            result
-                .project_moves
-                .iter()
-                .map(|project| project.name.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "Survival — A real task reaches done",
-                "Infrastructure — Gmail"
-            ]
-        );
-        assert!(!requests
-            .iter()
-            .any(|request| request.body.contains("UpdateProject(")));
-    }
-
-    #[tokio::test]
-    async fn repository_team_reteam_resumes_after_an_interrupted_issue_move() {
-        interrupted_reteam(false, "move").await;
-    }
-
-    #[tokio::test]
-    async fn repository_team_reteam_resumes_with_cached_project_membership() {
-        interrupted_reteam(true, "move").await;
-    }
-
-    #[tokio::test]
-    async fn repository_team_reteam_recovers_expansion_response_loss() {
-        interrupted_reteam(true, "expansion").await;
-    }
-
-    #[tokio::test]
-    async fn repository_team_reteam_recovers_narrowing_response_loss() {
-        interrupted_reteam(true, "narrowing").await;
-    }
-
-    async fn interrupted_reteam(cache_planning: bool, interruption: &str) {
-        let repo = tempfile::tempdir().unwrap();
-        write_repo_config(
-            repo.path(),
-            "pm:\n  provider: linear\n  linear_team: team-loo\nlinear:\n  team: team-old\n",
-        );
-        write_goal(
-            repo.path(),
-            "survival",
-            "pm:\n  provider: linear\n  linear_initiative: initiative-survival\n  linear_team: team-old\n",
-        );
-
-        let database = repo.path().join("registry.db");
-        let store = crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-            database.clone(),
-        ))
-        .await
-        .unwrap();
-        let wave = Wave::new(
-            WaveId::new(),
-            "survival".to_string(),
-            repo.path().display().to_string(),
-        );
-        store.create_wave(&wave).await.unwrap();
-
-        let old_project = migration_project_node(
-            "project-survival",
-            "Survival — A real task reaches done",
-            "initiative-survival",
-            &["team-old"],
-        );
-        let expanded_project = migration_project_node(
-            "project-survival",
-            "Survival — A real task reaches done",
-            "initiative-survival",
-            &["team-old", "team-loo"],
-        );
-        let migrated_project = migration_project_node(
-            "project-survival",
-            "Survival — A real task reaches done",
-            "initiative-survival",
-            &["team-loo"],
-        );
-        let old_issue = migration_issue_node(
-            "issue-open",
-            "OLD-1",
-            "project-survival",
-            "Survival — A real task reaches done",
-            "team-old",
-            false,
-        );
-        let migrated_issue = migration_issue_node(
-            "issue-open",
-            "LOO-1",
-            "project-survival",
-            "Survival — A real task reaches done",
-            "team-loo",
-            false,
-        );
-        let marker = reteam_comment_body("OLD-1", "LOO");
-        let mut responses = Vec::new();
-        if cache_planning {
-            responses.push(projects_response(json!([old_project.clone()])));
-            responses.push(issues_response(json!([old_issue.clone()])));
-        }
-        let failure = || {
-            json_response(
-                StatusCode::OK,
-                json!({"errors":[{"message":format!("{interruption} interrupted")}]}),
-            )
-        };
-        let move_success = || {
-            json_response(
-                StatusCode::OK,
-                json!({"data":{"issueUpdate":{"issue":{"id":"issue-open","identifier":"LOO-1"}}}}),
-            )
-        };
-        let comment_success = || {
-            json_response(
-                StatusCode::OK,
-                json!({"data":{"commentCreate":{"comment":{"id":"comment-reteam"}}}}),
-            )
-        };
-        responses.extend([
-            projects_response(json!([old_project.clone()])),
-            issues_response(json!([old_issue.clone()])),
-        ]);
-        if interruption == "expansion" {
-            responses.extend([
-                failure(),
-                projects_response(json!([expanded_project.clone()])),
-                issues_response(json!([old_issue.clone()])),
-                project_readback(&expanded_project),
-                issue_comments_response(),
-                comment_success(),
-            ]);
-        } else {
-            responses.extend([
-                project_update_response("project-survival"),
-                project_readback(&expanded_project),
-                issue_comments_response(),
-                comment_success(),
-            ]);
-            if interruption == "move" {
+                );
+                let marker = reteam_comment_body("OLD-1", "LOO");
+                let mut responses = Vec::new();
+                if cache_planning {
+                    responses.push(projects_response(json!([old_project.clone()])));
+                    responses.push(issues_response(json!([old_issue.clone()])));
+                }
+                let failure = || {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"errors":[{"message":format!("{interruption} interrupted")}]}),
+                    )
+                };
+                let move_success = || {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data":{"issueUpdate":{"issue":{"id":"issue-open","identifier":"LOO-1"}}}}),
+                    )
+                };
+                let comment_success = || {
+                    json_response(
+                        StatusCode::OK,
+                        json!({"data":{"commentCreate":{"comment":{"id":"comment-reteam"}}}}),
+                    )
+                };
                 responses.extend([
-                    failure(),
-                    projects_response(json!([expanded_project.clone()])),
+                    projects_response(json!([old_project.clone()])),
                     issues_response(json!([old_issue.clone()])),
-                    project_readback(&expanded_project),
-                    issue_comments_response_with(Some(&marker)),
                 ]);
-            }
-        }
-        responses.extend([
-            move_success(),
-            issue_readback(migrated_issue.clone(), &expanded_project),
-        ]);
-        if interruption == "narrowing" {
-            responses.extend([
-                failure(),
-                projects_response(json!([migrated_project.clone()])),
-                issues_response(json!([migrated_issue.clone()])),
-                project_readback(&migrated_project),
-            ]);
-        } else {
-            responses.push(project_update_response("project-survival"));
-        }
-        responses.extend([
-            project_readback(&migrated_project),
-            projects_response(json!([migrated_project.clone()])),
-            issues_response(json!([migrated_issue.clone()])),
-        ]);
-        let (base_url, requests) = test_server::spawn(responses).await;
-        let resolved = ResolvedReteamContext {
-            repository: RepositoryPmContext {
-                client: crate::pm::linear::LinearClient::with_base_url(
-                    "linear-secret".to_string(),
-                    Some("team-loo".to_string()),
-                    base_url,
-                ),
-                repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
-                team_id: "team-loo".to_string(),
-            },
-            team_key: "LOO".to_string(),
-            store,
-        };
-
-        if cache_planning {
-            let projects = resolved
-                .repository
-                .client
-                .list_projects("initiative-survival")
-                .await
-                .unwrap();
-            let items = resolved
-                .repository
-                .client
-                .list_items("project-survival")
-                .await
-                .unwrap();
-            resolved
-                .store
-                .put_pm_snapshot(
-                    PmSnapshotRow {
-                        wave_id: wave.id().clone(),
-                        provider: "linear".into(),
-                        initiative: "initiative-survival".into(),
-                        synced_at: 1,
-                        snapshot: PmSnapshot { projects, items },
+                if interruption == "expansion" {
+                    responses.extend([
+                        failure(),
+                        projects_response(json!([expanded_project.clone()])),
+                        issues_response(json!([old_issue.clone()])),
+                        project_readback(&expanded_project),
+                        issue_comments_response(),
+                        comment_success(),
+                    ]);
+                } else {
+                    responses.extend([
+                        project_update_response("project-survival"),
+                        project_readback(&expanded_project),
+                        issue_comments_response(),
+                        comment_success(),
+                    ]);
+                    if interruption == "move" {
+                        responses.extend([
+                            failure(),
+                            projects_response(json!([expanded_project.clone()])),
+                            issues_response(json!([old_issue.clone()])),
+                            project_readback(&expanded_project),
+                            issue_comments_response_with(Some(&marker)),
+                        ]);
+                    }
+                }
+                responses.extend([
+                    move_success(),
+                    issue_readback(migrated_issue.clone(), &expanded_project),
+                ]);
+                if interruption == "narrowing" {
+                    responses.extend([
+                        failure(),
+                        projects_response(json!([migrated_project.clone()])),
+                        issues_response(json!([migrated_issue.clone()])),
+                        project_readback(&migrated_project),
+                    ]);
+                } else {
+                    responses.push(project_update_response("project-survival"));
+                }
+                responses.extend([
+                    project_readback(&migrated_project),
+                    projects_response(json!([migrated_project.clone()])),
+                    issues_response(json!([migrated_issue.clone()])),
+                ]);
+                let (base_url, requests) = test_server::spawn(responses).await;
+                let resolved = ResolvedReteamContext {
+                    repository: RepositoryPmContext {
+                        client: crate::pm::linear::LinearClient::with_base_url(
+                            "linear-secret".to_string(),
+                            Some("team-loo".to_string()),
+                            base_url,
+                        ),
+                        repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
+                        team_id: "team-loo".to_string(),
                     },
-                    None,
-                )
-                .await
-                .unwrap();
-        }
+                    team_key: "LOO".to_string(),
+                    store,
+                };
 
-        let first = run_reteam_fixture(&resolved, repo.path(), &database)
-            .await
-            .unwrap_err();
-        assert!(
-            first
-                .to_string()
-                .contains(&format!("{interruption} interrupted")),
-            "{first}"
-        );
-        assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+                if cache_planning {
+                    let projects = resolved
+                        .repository
+                        .client
+                        .list_projects("initiative-survival")
+                        .await
+                        .unwrap();
+                    let items = resolved
+                        .repository
+                        .client
+                        .list_items("project-survival")
+                        .await
+                        .unwrap();
+                    resolved
+                        .store
+                        .put_pm_snapshot(
+                            PmSnapshotRow {
+                                wave_id: wave.id().clone(),
+                                provider: "linear".into(),
+                                initiative: "initiative-survival".into(),
+                                synced_at: 1,
+                                snapshot: PmSnapshot { projects, items },
+                            },
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                }
 
-        let resumed = run_reteam_fixture(&resolved, repo.path(), &database)
-            .await
-            .unwrap();
-        if interruption == "narrowing" {
-            assert!(resumed.moves.is_empty());
-        } else {
-            assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
-        }
-        let planning = resolved
-            .store
-            .pm_snapshot(wave.id())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
-        assert_eq!(planning.snapshot.items[0].identifier, "LOO-1");
-        assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
-        let requests = requests.lock().await;
-        assert_eq!(
-            requests
-                .iter()
-                .filter(|request| request.body.contains("commentCreate"))
-                .count(),
-            1,
-            "the resumed migration reuses its first traceability comment"
-        );
+                let first = run_reteam_fixture(&resolved, repo.path(), &database)
+                    .await
+                    .unwrap_err();
+                assert!(
+                    first
+                        .to_string()
+                        .contains(&format!("{interruption} interrupted")),
+                    "{first}"
+                );
+                assert!(!legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+
+                let resumed = run_reteam_fixture(&resolved, repo.path(), &database)
+                    .await
+                    .unwrap();
+                if interruption == "narrowing" {
+                    assert!(resumed.moves.is_empty());
+                } else {
+                    assert_eq!(resumed.moves[0].new_identifier.as_deref(), Some("LOO-1"));
+                }
+                let planning = resolved
+                    .store
+                    .pm_snapshot(wave.id())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(planning.snapshot.projects[0].team_ids, ["team-loo"]);
+                assert_eq!(planning.snapshot.items[0].identifier, "LOO-1");
+                assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
+                let requests = requests.lock().await;
+                assert_eq!(
+                    requests
+                        .iter()
+                        .filter(|request| request.body.contains("commentCreate"))
+                        .count(),
+                    1,
+                    "the resumed migration reuses its first traceability comment"
+                );
+            });
+        });
     }
 
     #[test]
@@ -3436,23 +3463,6 @@ mod tests {
         let error = ensure_unique_project_slugs(&projects, "product")
             .expect_err("duplicate slug must fail");
         assert!(error.to_string().contains("both derive slug `wave-chat`"));
-    }
-
-    #[test]
-    fn wave_summary_reads_objective_first_paragraph() {
-        let repo = tempfile::tempdir().expect("temp dir");
-        let dir = repo.path().join("wave/product");
-        std::fs::create_dir_all(&dir).expect("create wave");
-        std::fs::write(
-            dir.join("GOAL.md"),
-            "---\ncrons: []\n---\n\n## Objective\n\nProduct work stays coherent\nacross surfaces.\n\nSecond paragraph.\n\n## Bounds\n\nNo drift.\n",
-        )
-        .expect("write goal");
-
-        assert_eq!(
-            wave_summary(repo.path(), "product").expect("read summary"),
-            "Product work stays coherent across surfaces."
-        );
     }
 
     #[tokio::test]

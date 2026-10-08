@@ -1,5 +1,6 @@
 //! Foreground delivery consumes the same receipts as local planning writers.
 
+use std::fs::File;
 use std::path::Path;
 use std::time::Duration;
 
@@ -55,68 +56,22 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         _ => return Err(message("field delivery requires a Task or Project")),
     };
     let (kind, id) = owner.owner();
-    // Other connections serialize effects only. Saves and inbound observations
-    // remain independent, including while a request is waiting for a reply.
-    let directory = store
+    let path = store
         .sqlite
         .home_dir()
         .map_err(message)?
-        .join("locks/planning-fields");
-    std::fs::create_dir_all(&directory)?;
-    let lock = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(directory.join(format!("{kind}-{id}.lock")))?;
-    match fs2::FileExt::try_lock_exclusive(&lock) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
-        Err(error) => return Err(error.into()),
-    }
+        .join("locks/planning-fields")
+        .join(format!("{kind}-{id}.lock"));
+    let Some(_lock) = lock_delivery(&path)? else {
+        return Ok(());
+    };
     let changes = pending(store, owner)?;
     let attempt = async {
         let client = super::pm::linear_client(repo).await?;
         // Also reconcile an older attempted receipt whose successor is no longer pending.
         observe(store, repo, owner, &client).await?;
         for change in changes.iter().filter(|change| change.field != "deleted") {
-            let attempt = async {
-                let (external, content, revision) = observe(store, repo, owner, &client).await?;
-                let Some(current) = pending(store, owner)?
-                    .into_iter()
-                    .find(|c| c.id == change.id)
-                else {
-                    return Ok(());
-                };
-                let input = match owner {
-                    PlanningChanges::Task(_) => task_input(store, &current)?,
-                    PlanningChanges::Project(_) => client
-                        .project_field_input(&current.field, &current.value, &content)
-                        .await
-                        .map_err(message)?,
-                };
-                if !store
-                    .sqlite
-                    .attempt_planning_field(owner, &current, revision.as_deref())
-                    .map_err(message)?
-                {
-                    return Ok(());
-                }
-                client
-                    .deliver_planning_field(
-                        &external,
-                        matches!(owner, PlanningChanges::Project(_)),
-                        input,
-                    )
-                    .await
-                    .map_err(message)?;
-                observe(store, repo, owner, &client).await?;
-                if pending(store, owner)?.iter().any(|c| c.id == change.id) {
-                    return Err(message("Field write remains uncertain; receipt retained"));
-                }
-                Ok(())
-            };
-            if let Err(error) = attempt.await {
+            if let Err(error) = sync_field(store, repo, owner, &client, change).await {
                 store
                     .sqlite
                     .planning_field_error(owner, change, &error.to_string())
@@ -138,6 +93,66 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         }
     }
     result
+}
+
+// Serialize provider effects only; saves and acquisition never take this lock.
+// Keep the file in place so another connection always locks the same inode.
+pub(super) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
+    std::fs::create_dir_all(path.parent().expect("delivery lock has a parent directory"))?;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    match fs2::FileExt::try_lock_exclusive(&lock) {
+        Ok(()) => Ok(Some(lock)),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+async fn sync_field(
+    store: &Store,
+    repo: &Path,
+    owner: PlanningChanges<'_>,
+    client: &LinearClient,
+    change: &PlanningChange,
+) -> OpsResult<()> {
+    let (external, content, revision) = observe(store, repo, owner, client).await?;
+    let Some(current) = pending(store, owner)?
+        .into_iter()
+        .find(|c| c.id == change.id)
+    else {
+        return Ok(());
+    };
+    let input = match owner {
+        PlanningChanges::Task(_) => task_input(store, &current)?,
+        PlanningChanges::Project(_) => client
+            .project_field_input(&current.field, &current.value, &content)
+            .await
+            .map_err(message)?,
+    };
+    if !store
+        .sqlite
+        .attempt_planning_field(owner, &current, revision.as_deref())
+        .map_err(message)?
+    {
+        return Ok(());
+    }
+    client
+        .deliver_planning_field(
+            &external,
+            matches!(owner, PlanningChanges::Project(_)),
+            input,
+        )
+        .await
+        .map_err(message)?;
+    observe(store, repo, owner, client).await?;
+    if pending(store, owner)?.iter().any(|c| c.id == change.id) {
+        return Err(message("Field write remains uncertain; receipt retained"));
+    }
+    Ok(())
 }
 
 fn pending(store: &Store, owner: PlanningChanges<'_>) -> OpsResult<Vec<PlanningChange>> {

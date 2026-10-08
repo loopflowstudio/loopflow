@@ -103,3 +103,37 @@ pub(super) fn token(access: &str, refresh: &str, expires_at: i64) -> ProviderTok
         credential_type: CredentialType::OAuth,
     }
 }
+
+// Callers hold the shared test environment lock for this guard's lifetime.
+pub(super) struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>);
+
+impl PlanningEnvironment {
+    pub(super) fn isolate() -> Self {
+        let mut saved = vec![("PATH".into(), std::env::var_os("PATH"))];
+        for (name, value) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            std::env::remove_var(&name);
+            saved.push((name, Some(value)));
+        }
+        // Status reconciliation checks launch authority, but never launches lf.
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        Self(saved)
+    }
+}
+
+impl Drop for PlanningEnvironment {
+    fn drop(&mut self) {
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            std::env::remove_var(name);
+        }
+        for (name, value) in &self.0 {
+            match value {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}

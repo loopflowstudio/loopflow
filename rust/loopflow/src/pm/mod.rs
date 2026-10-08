@@ -477,21 +477,31 @@ impl ProjectContent {
 }
 
 pub fn render_project_content(project: &ProjectContent) -> String {
-    let mut content = format!(
-        "## Metric targets\n\n```json\n{}\n```",
-        serde_json::to_string_pretty(&project.metric_targets)
-            .expect("validated metric targets serialize")
-    );
+    let mut content = render_metric_targets(project);
     let workflow = project.workflow.trim();
     if !workflow.is_empty() {
         content.push_str(&format!("\n\nworkflow: {workflow}"));
     }
-    content.push_str("\n\n## KRs");
+    content.push_str("\n\n");
+    content.push_str(&render_krs(project));
+    content.push('\n');
+    content
+}
+
+fn render_metric_targets(project: &ProjectContent) -> String {
+    format!(
+        "## Metric targets\n\n```json\n{}\n```",
+        serde_json::to_string_pretty(&project.metric_targets)
+            .expect("validated metric targets serialize")
+    )
+}
+
+fn render_krs(project: &ProjectContent) -> String {
+    let mut content = String::from("## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
         content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
     }
-    content.push('\n');
     content
 }
 

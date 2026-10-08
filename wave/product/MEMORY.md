@@ -57,16 +57,16 @@ per request. Current placements copy inheritance once; delegation is unimplement
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
-October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
-assignment; files/status and Session membership retain actual Machine evidence.
-Unknown stays unavailable. Jack
-accepted trying a designated planning Machine and flagged mixed `lf task run`.
-LOO-412's newer callback direction (`e9ef3396`) routes planning to the host,
-superseding adoption-only scope, but leaves Workflow position on the worker.
-LOO-427 proposes host-owned Workflow writes with worker-owned driver/Flow/results,
-retained mutation identity and pending arrival after host loss; this extension is
-not implemented or separately accepted. Reuse 412 transport and 406 host writers.
-Cold opens still overwrite one URL. No shared-source or native Desktop proof.
+October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates recorded checkout
+location from assignment; unknown stays unavailable. Jack selected local operations and custom Git-ref Task sync (LOO-412/406),
+superseding host callbacks.
+406 owns local writes/Linear; 412 owns Git exchange. `task run`, including
+Workflow position, stays local. Sync carries portable planning, never Workflow,
+Session, Process, checkout or control authority. Incoming completion must not move
+local Workflow or clean a checkout. Preserve pending changes, semi-live comments/
+completion, causal reopening and stable mutation IDs. No real plan publication is
+authorized. LOO-427 reuses these owners.
+Cold opens overwrite one URL; native/shared proof remains.
 
 ## Live Home reconciliation (2026-10-05)
 

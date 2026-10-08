@@ -210,6 +210,29 @@ fn same_value_concurrent_writes_keep_both_causes_until_resolution() {
 }
 
 #[test]
+fn conflicting_change_identity_survives_replay_until_explicit_resolution() {
+    let left = PlanningField::new(change("same-edit"), "First title");
+    let right = PlanningField::new(change("same-edit"), "Other title");
+    let conflict = left.merge(&right);
+    assert_eq!(
+        conflict.values(),
+        BTreeSet::from([&"First title", &"Other title"])
+    );
+    assert_eq!(conflict.resolved(), None);
+    assert_eq!(conflict, right.merge(&left));
+    assert_eq!(conflict, conflict.merge(&left).merge(&right));
+
+    let mut resolved = conflict.clone();
+    assert!(resolved.write(change("same-edit"), "First title").is_err());
+    assert_eq!(resolved, conflict);
+    resolved
+        .write(change("resolution"), "Chosen title")
+        .unwrap();
+    assert_eq!(resolved.merge(&conflict), resolved);
+    assert_eq!(resolved.resolved(), Some(&"Chosen title"));
+}
+
+#[test]
 fn membership_conflict_never_invents_a_wave_project_pair() {
     let mut left = task();
     let mut right = left.clone();

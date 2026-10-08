@@ -77,14 +77,16 @@ impl<T: Clone + Ord> PlanningField<T> {
 
     pub fn merge(&self, incoming: &Self) -> Self {
         let retired: BTreeSet<_> = self.retired.union(&incoming.retired).cloned().collect();
-        let mut current = self.current.clone();
-        for (change, values) in &incoming.current {
+        let mut current: BTreeMap<_, BTreeSet<T>> = BTreeMap::new();
+        for (change, values) in self.current.iter().chain(&incoming.current) {
+            if retired.contains(change) {
+                continue;
+            }
             current
                 .entry(change.clone())
                 .or_default()
                 .extend(values.iter().cloned());
         }
-        current.retain(|change, _| !retired.contains(change));
         Self { current, retired }
     }
 

@@ -1,187 +1,182 @@
-# Run remote work against the host's Task store — LOO-412
+# Share Task planning across machines — LOO-412
 
-Jack Heart selected the callback design during PR #1491 review on 2026-10-08 and
-requested a fresh `pursue`, followed by another review here. This supersedes the
-adoption-only scope of PR #1491 and the earlier decision to defer callbacks from
-LOO-406. Implement and republish this PR; do not land or start unrelated
-remote-work slices. Machine registration and global `--machine` come from LOO-411.
+## Accepted direction — Jack Heart, 2026-10-08
 
-## Experience
+Jack Heart selected local planning stores with bidirectional synchronization
+through one custom Git ref, publication of PR #1491, and review in the existing
+conversation. Steers `f883b34b-1195-4fc5-bfc7-1ac7d4c29be6` and
+`1d12770f-96b1-4bc3-ba5b-1f863f4b9472` supersede host callbacks. The earlier
+design is retained at `b040c7c8d:scratch/work-on-another-machine-name.md`; the
+adoption demo remains at `0cd8e7f14` and in `remote-task-demo.md`.
+
+LOO-412 owns Git transport and machine integration. LOO-406 owns the common
+local SQLite planning writer and optional repository-wide Linear synchronization.
+Only coherent committed APIs may be integrated, never its dirty implementation.
+Ordinary operations do not call back to another machine or use another planner.
+No real planning publication to the public code remote is selected. Prototype
+acceptance uses synthetic records and disposable remotes. No landing or installation.
+
+## Experience and preservation
 
 ```sh
 lf --machine mini task create --title "Fix the parser"
 lf --machine mini --task <task-selector> skill implement
 ```
 
-The command executes on mini, but planning reads and writes call back to the
-originating host. Creating the Task immediately makes it visible in the host's
-ordinary Task store. Creation alone allocates no host or worker checkout, Session
-or Flow. Selecting it for work prepares mini's checkout from the pushed branch;
-repeated launches reuse its local execution record and checkout.
+Each machine reads and writes its own local plan. Synchronization shares stable
+Task identity, briefs, comments and planning disposition in both directions.
+Creation needs no checkout, Session or Flow. A later execution placement uses
+the already pushed branch/commit; repeat launches reuse the worker's checkout.
+Comments and completion propagate during ongoing work, with visible pending or
+unconfirmed synchronization when disconnected.
 
-Task creation, editing, comments and planning reads use one host plan. The remote
-machine's unrelated plans remain unchanged. Checkouts, PR execution, Sessions,
-Processes, Workflow position, machine registration and account operations stay
-on mini. In particular, `lf --machine mini machine add builder` still edits mini's
-machine registry. The callback is a planning route, not a second execution driver.
+Execution stays local. Never replicate Workflow position, Sessions, Processes,
+claims, controls, checkout paths or PR execution state. Imported completion cannot
+move a local Workflow, settle execution, signal a process or claim an exit.
+Machine/account operations still act on the selected machine. No shared resident,
+terminal relay, automatic turn/Flow retry, hidden arguments or cross-version
+compatibility is included. No code, tests, help or config from herdr/cmux.
 
-## Accepted direction and related work
+Ordinary creation establishes identity once; replication preserves it. Retrying
+one creation retains identity while separate same-title creations remain distinct.
+Existing divergent IDs and their execution histories are never renumbered. Use
+provider mappings or the smallest explicit association where necessary; matching
+titles do not establish identity.
 
-Jack's original proposal in LOO-406, October 7 at 22:17 PDT: “we could explore
-something where if you do lf --machine X and then we also bring some sort of
-backwards connection so taht your task store is the host store”. At 22:22 he
-leaned toward routing through the online host even with Linear connected.
-His October 8 PR #1491 review selects that approach for LOO-412.
+Preserve fetch-before-decision and pushed-code checks. Report uncommitted source
+work, missing branches and unpushed commits by branch/commit without committing,
+pushing or resetting. Dirty/behind target checkouts retain files, HEAD, IDs,
+Workflow, Sessions and PR history. A behind target reports `lf sync` in its
+checkout. Creation without code has no fabricated commit or placement. The
+one-shot code requirement constrains initial placement, not later local commits.
 
-LOO-406's later October 8 review selects one on-disk model and code path in both
-modes, either repository-wide Linear synchronization or none, with local commits
-and visible pending sync if Linear is unavailable. That supersedes its earlier
-personal/shared authority split. This Task routes to the host's ordinary planning
-operations; it does not implement another local planner or another Linear writer.
-The host can save locally while Linear is unavailable; loss of the host connection
-is different and must not silently select mini's own store.
+## Reconciliation and transport
 
-LOO-406 / PR #1503 is actively being revised in its own checkout. Its settled
-planning API and retained creation identity are the integration boundary. Use a
-coherent committed dependency through `lf` if needed; do not copy its dirty work,
-edit that checkout, or freeze the superseded personal-plan implementation here.
-Callback transport and routing belong to this Task; local planning and Linear
-sync semantics remain with LOO-406. An unavailable dependency is reported with
-its exact required API after independent callback work, not replaced by a second
-implementation.
+`engine/planning_exchange.rs` retains current and superseded change identities
+per portable field. Observed reopening supersedes completion; concurrent values
+remain explicit conflicts. Equal concurrent values retain both causes. A resolution
+is a new write observing all alternatives, never a clock or Git merge-base choice.
+Wave/Project membership travels as a pair. Comment IDs suppress duplicate delivery;
+omission never deletes. Explicit deletion retains identity, content and evidence.
 
-## State and transport
+The common writer must persist causal context atomically with each ordinary
+mutation. Export reuses those IDs. Import commits causal state, projections and
+its checkpoint together, preserving conflicts while independent updates proceed.
+Fetched Git history is not an import acknowledgement. Crashes before SQLite commit
+leave import retryable. Pending effects distinguish local persistence, Git
+publication confirmation and optional Linear synchronization.
 
-- The originating invocation serves a Unix socket and carries it to the registered
-  target through OpenSSH remote Unix-socket forwarding. Reuse existing transport
-  mechanics where suitable, including explicit forwarding cleanup. There is no
-  shared resident service or inbound TCP listener on the laptop.
-- A small typed planning request carries operation, selected repository/plan scope,
-  established Task identity or selector, mutation input and expected revision as
-  needed. A mutation retains its operation/creation ID across lost replies. The
-  host resolves the scope and invokes the same public planning operation used
-  locally. No raw SQL, arbitrary shell callback or network-mounted SQLite.
-- Scope the connection to this invocation and selected planning owner. The target
-  retains its own `LF_HOME`; credentials and process authority never become
-  planning data. A callback grants no process signal, Workflow move, remote PR
-  settlement or Session control. Use the existing command parser, not a remote
-  command allowlist or parallel selector parser.
-- Route at the planning operation boundary so agent-issued nested commands and
-  Flow steps on mini use the same host plan. Descendants need the planning route
-  for the invocation's lifetime. The one-shot pushed-code requirement remains
-  consumed at initial placement; it must not constrain later local commits.
-- A nested dispatch keeps the original planning owner instead of making the
-  intermediate worker the new host. A missing or dead inherited route is an
-  explicit unavailable result, never permission to fall back to a worker plan.
-- Stop serving and cancel the exact forwarding on invocation exit, including
-  when a private SSH control master survives. Do not delete or reuse another
-  invocation's socket. No cross-version negotiation or compatibility layer.
+`engine/planning_git.rs` transports a `planning.json` tree through
+`refs/loopflow/planning`. Local retained/observed refs preserve unpublished and
+incoming history. Fetch isolates each invocation's temporary ref without changing
+source branch, index, checkout or `FETCH_HEAD`. Local saves compare the expected
+tip. Publication never forces or blindly retries; readback distinguishes confirmed,
+competing and unconfirmed outcomes. Concurrent history is reconciled before retry.
+The 16 MiB document bound and 30-second Git deadline are prototype engineering
+choices, not established production limits.
 
-`TaskSource` currently transfers `PmTaskRecord` into absent target planning and
-can seed the target's Project selection. Replace that ownership model in this
-same diff. The worker may retain the Task brief and necessary immutable/cached
-context for local execution; that is not a second mutable planning authority.
-Read projections identify their host and observation age. No whole-plan replica,
-second user-facing Task kind or alternative store resolver.
+Integration still needs explicit planning-remote selection and semi-live invocation
+synchronization. The public code remote is not implicitly an authorized planning
+destination. The owning invocation and common writer supply synchronization;
+no extra resident or execution driver. Local writes survive peer disconnection;
+reconnect reconciles retained mutations and uncertain publication without replaying
+turns. Losing a peer does not imply Task completion or provider exit.
 
-## Identity, placement and preserved work
+## Delete — do not maintain
 
-The host creates identity once using its normal creation API. New worker records
-retain that established Task identity instead of independently minting it. The
-previous Linear-derived UUID v5 rule no longer substitutes for carrying the host
-identity: locally born Tasks need no Linear issue. Prefer existing Task/issue
-mappings and a minimal explicit origin association where needed. If two machines
-already hold different IDs for the same issue, preserve both and route planning
-to the host's established record without renumbering local execution history.
-An operation ID identifies one attempted mutation, not a new Task/Run concept.
+The superseded adoption walkthrough, screenshot set and capture scripts were
+removed after verifying their bytes against `5960415b3`. The historical demo note
+links that evidence; no replacement acceptance is implied.
 
-Preserve fetch-before-decision and the original pushed-code behavior. The host
-names uncommitted/unpushed branch or commit errors without committing, pushing or
-resetting anything. The worker fetches before branch placement, including branches
-without PRs. Existing dirty target files, HEAD, Task/PR identity, Workflow and
-Sessions survive rejection. A retained target checkout behind the required
-commit reports the branch, commit and `lf sync` in that checkout.
+- Replace `TaskSource.planning`, `TaskSource::accept_planning` in
+  `ops/task/remote.rs`, and the `ops/task.rs` bootstrap call with common-writer
+  peer import. Delete the copied `PmTaskRecord` owner in the same integration cut;
+  preserve branch/commit requirements and observation evidence.
+- Replace `TaskId::from_issue` and its exclusive UUID-v5 dependency/tests with
+  ordinary creation's portable identity. Preserve stored IDs and provider aliases.
+- Move `task_source_args` and Task resolution to the integrated identity path;
+  remove issue-only rewriting as a substitute for local-born identity.
+- No planning callback implementation is present in this checkout. Do not restore
+  the superseded full-store socket route. Replace adoption-specific fixtures while
+  retaining their code-placement and preservation assertions on the surviving path.
+- Update `docs/lf.md` and `docs/architecture/environment.md` when consumers move.
+  They currently describe retained adoption, not completed custom-ref sync.
 
-A host-created Task with no code yet has no fabricated required commit or checkout.
-Its first remote placement follows the ordinary new-Task branch/base rules and
-records execution on the worker. Host planning is visible immediately regardless
-of whether placement later succeeds. Do not make planning creation require a
-local checkout or an agent. Existing worker Project selection/rotation and
-invalidation/removal evidence must not be overwritten to admit the host's plan.
+Changing dispatch before the replacement writer exists would leave an unusable
+path. The deletion and replacement remain one coherent cut in this PR, without a
+compatibility mode or another planner as an intermediate deliverable.
 
-## Failure and recovery
+## Missing dependency and remaining implementation
 
-For this slice, no direct worker-to-Linear fallback after host loss. The host owns
-its ordinary provider synchronization and reports saved-local/pending-sync
-separately from provider confirmation. This is an implementation choice under
-Jack's callback selection; it keeps the earlier unresolved fallback out of scope.
+LOO-406's committed head checked on October 8 is
+`4f9a8ea17020dfe3fe21c1d199e60d6602a57059`, newer than the previously inspected
+`a3324396b`. Placement and Flow entry now share `require_task_launch` /
+`require_task_planning`, consuming saved planning in SQLite without provider
+resolution. Missing inventory permits saved work; retained invalidation, removal
+and membership mismatch still apply. Terminal planning prevents new work while
+an active Workflow retains its position. Integration must reuse this admission
+path rather than restore provider lookup or copied-planning bootstrap.
 
-- Persist original mutation identity, input and outcome at the host's writer.
-  Repeating the same operation after an accepted write loses its reply returns
-  the committed result, never a second Task/comment. Serialize an in-flight repeat;
-  an absent receipt while the first write can still commit is not non-execution.
-- A disconnected planning write reports unavailable or unconfirmed and retains
-  authored input for deliberate retry. It cannot report success merely because
-  the worker retained text, and it cannot allocate a worker-local replacement Task.
-- Reconnect reads the original operation's outcome. Reconcile uncertain writes
-  before deliberately submitting anything new. Do not automatically replay old
-  edits or retry a turn/Flow. Cached reads keep their age and identify the owner.
-- Preserve existing execution outcomes and histories on mini. The callback adds
-  no disconnect-survival guarantee, detachment, terminal relay or automatic
-  continuation; LOO-414/415 own those mechanisms. Host loss is not Task completion
-  or evidence that a provider process exited. Losing a worker does not erase the
-  host plan; losing the host still needs backups or later Git publication.
+`planning.rs` still declares Local/Linear authority and
+`store/sqlite/local_planning.rs` branches on it. Its migration retains creation,
+comment and state-delivery records, but no causal peer import/export/checkpoint
+contract. This admission change is not the common-writer cut; no dependency merge
+has occurred. The dependency's committed memory also records a still-failing
+`task_completion_preserves_linear_reopening_during_delivery`: unconditional
+Linear delivery can overwrite a concurrent reopening and matching readback can
+falsely acknowledge it. LOO-406 owns that repair/investigation. Git ancestry
+confirmation establishes publication only; it supplies no SQLite import or
+optional Linear conflict-preservation proof.
 
-## Delete and integrate
+Required coherent committed API from LOO-406:
 
-Delete the copied-planning/bootstrap owner that the callback replaces, including
-Project selection mutation for remote adoption. Keep one Task resolver and normal
-planning operations; do not retain both snapshot-import and callback paths as
-competing modes for the same command. Retain code requirements only where they
-are still needed for placement. Reuse the host's creation receipts and mappings;
-remove remote ID minting that competes with them. If persisted routing needs a
-schema change, use one Task draft against the released frontier and preserve all
-existing history. No migration is required merely to describe a transport.
+1. Ordinary create/edit/comment/disposition writes save stable mutation IDs,
+   causal context and pending synchronization in the same SQLite transaction.
+2. Export reads those identities without reminting them; peer import atomically
+   merges facts, retains conflicts and records the import checkpoint.
+3. Planning disposition can be imported without changing local Workflow or
+   execution. Existing IDs, aliases, comments and history survive import.
 
-Existing account forwarding is transport precedent, not a planning owner.
-LOO-413 owns credential login/forwarding. No code, tests, help or config from
-herdr/cmux; no shared resident process, hidden CLI arguments, compatibility shim,
-automatic turn/Flow retry, Git-plan synchronization, installation or landing.
+After that boundary exists, LOO-412 still needs the deletion/integration cut,
+remote selection, semi-live synchronization, pending/error presentation and public
+machine dispatch. No dependency merge or ordinary sync activation has occurred.
+Fifteen pure/Git fixtures cover reconciliation and transport, not SQLite import
+or public dispatch. The independent transport work cannot substitute for this
+missing common writer.
 
-## Acceptance for the next review
+## Acceptance for review
 
-Use CLIs built from this worktree in isolated stores; the installed release is not
-a prerequisite. Apply Release's operation-entry lesson: public `--machine` dispatch
-must reach the actual recipient and host operation, not only an adoption helper.
+Use CLIs built from this worktree, isolated stores, synthetic plans and disposable
+remotes. Installed-release behavior remains separate. Release's child memory
+records a recovery path missed by lower-level fixtures; the same lesson requires
+public command coverage here, not only exchange and transport tests.
 
-1. A blank worker creates a Task through the host. Read it immediately on the
-   host with the same identity and content; no checkout, Session or Flow exists
-   from creation alone. Repeat the same creation operation after a lost response
-   and show one host Task. A separate same-title creation remains distinct.
-2. Remote edit/comment/read and an agent-issued nested planning command use the
-   host store. The worker's unrelated Task and Project selection stay unchanged.
-   Exercise both local-only host planning and a contained connected-Linear host;
-   show saved-local/pending-sync without claiming provider acceptance.
-3. A remote skill sees pushed implementation. Repeat by issue/local selector
-   and machine label/ID: one execution placement and the same checkout. Cover
-   host-born IDs and two pre-existing legacy IDs; preserve populated Workflow,
-   Session and PR history.
-4. Unpushed source and behind/dirty target counterexamples retain files, HEAD,
-   IDs and histories. Missing planning transport cannot create a worker plan.
-5. Lose a callback response after commit, reconnect, inspect the original outcome
-   and demonstrate no duplicate mutation. Disconnect before acceptance, retain
-   the authored input and report its real state; no automatic replay.
-6. Real loopback SSH proves forwarding and cleanup while a control master remains
-   alive, concurrent invocation isolation and nested dispatch to the original host.
-   Stubbed SSH is useful focused evidence but cannot replace this proof. Use an
-   isolated account/container where host permissions require it.
-7. Refresh the PR description and review walkthrough around the final callback
-   implementation. Publish #1491 for Jack Heart's next review and stop there.
+1. Create/edit/comment/read from either machine through public commands. Replicate
+   the same ID without placement from creation. Repeated deliveries create no
+   duplicate Task/comment; separate same-title creations remain distinct.
+2. Show semi-live comments/completion during remote work. Preserve populated
+   Workflow, Session, Process and PR history/controls on imported completion;
+   unrelated plans and progress remain usable.
+3. Disconnect, write locally, show pending state, reconnect and converge without
+   loss or turn replay. Lose a publication response and recover by readback. Crash
+   after fetch but before import, then prove atomic retry.
+4. Preserve conflicting edits/dispositions while independent updates propagate.
+   Resolve explicitly; delayed completion cannot undo observed reopening. Cover
+   equal-value concurrent writes, conflicting ID reuse, omission and deletion.
+5. Public `--machine` launches by issue/local selector and label/ID on a blank
+   worker see pushed code and reuse placement. Cover local-born identity,
+   divergent legacy IDs, unpushed source, missing branch and behind/dirty target.
+6. Exercise local-only planning and contained optional Linear pending sync through
+   the common writer. A local bare remote does not prove hosted custom-ref policy;
+   that requires an explicitly selected disposable hosting repository.
+7. Replace PR copy and create a walkthrough of final behavior and evidence;
+   publish #1491 for Jack Heart's review and stop without landing.
 
-The current source and five passing demo scenarios establish only the superseded
-adoption path. [Demo evidence](remote-task-demo.md), its capture, and
-[the old walkthrough](pr-review.html) remain dated evidence at `0cd8e7f14`.
-None proves callback behavior. No new source implementation or acceptance is
-claimed by this design update.
+Reconciled 2026-10-08: causal merge skips retired changes before copying values;
+its regression retains conflicting reuse of a change ID through replay and explicit
+resolution. Per-change value sets are necessary. Only tests consume exchange and
+transport; public dispatch still consumes adoption. The newer LOO-406 admission
+path changes the integration target, not the missing-writer boundary. Existing
+Rust checks below remain applicable because this reconciliation changes prose only.
 
-Check: `git diff --check` and `lf context --skill realign` — pass for this design update; callback build, focused tests and real transport acceptance belong to the new implementation and gate.
+Check (2026-10-08): retained `cargo test -p loopflow --test planning_exchange_tests --test planning_git_tests --no-run` build, both binaries via `uv run --no-sync python scripts/test_network.py` (15 passes), fmt and Clippy passes; prose reconciliation: `git diff --check` and `lf context --skill realign --json` pass within budget. Integration acceptance remains with gate after the common writer is available.

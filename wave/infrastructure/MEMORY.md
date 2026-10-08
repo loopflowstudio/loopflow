@@ -620,17 +620,17 @@ cannot move a local Workflow. LOO-412 owns transport/machine integration; LOO-40
 owns the common local writer and optional Linear sync. No real planning publication
 to the public code remote is selected. Publication remains for review, never landing.
 
-Portable fields retain mutation IDs and superseded IDs: observed reopening
-survives delayed completion; concurrent values remain conflicts. Equal concurrent
-values retain both causes. Membership moves as a Wave/Project pair; comment IDs
-deduplicate replay. Fourteen isolated fixtures prove reconciliation and transport,
-not SQLite import, semi-live arrival, hosted policy or public machine dispatch.
-LOO-406 `a3324396b` retains Local/Linear splitting; causal peer import/export and
-checkpoints remain absent. Persist causality atomically; export reuses IDs.
-Fetch never acknowledges import. Callback design survives in Git; replace adoption.
-Acceptance:
-`scratch/work-on-another-machine-name.md`; preserve IDs, history and pushed code.
-No automatic turn/Flow retry.
+Mutation IDs retain equal concurrent causes and conflicting reuse; observed reopening
+survives delayed completion. Membership moves as a pair; comment IDs deduplicate.
+Fifteen fixtures prove reconciliation/transport only.
+LOO-406 `4f9a8ea17` unifies saved-planning admission.
+Local/Linear splitting remains; causal import/export/checkpoints are absent.
+It reports failing Linear reopening preservation: matching readback cannot
+prove preservation of concurrent edits. Persist causality atomically; export reuses IDs.
+Fetch never acknowledges import. Replace adoption with the common writer.
+SQLite import, semi-live arrival, hosted policy and public dispatch remain unproved:
+`scratch/work-on-another-machine-name.md`. Preserve IDs, history and pushed code;
+no automatic turn/Flow retry.
 
 ## Synced planning integration (LOO-334)
 

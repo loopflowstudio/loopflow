@@ -360,7 +360,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         }
         assert!(started().is_some(), "{launch}");
         let status = task.status();
-        let flows = status["work"]["flows"].as_array().unwrap();
+        let flows = status["work"]["flow_processes"].as_array().unwrap();
         assert_eq!(flows.len(), 1, "{launch}: {status}");
         assert_eq!(flows[0]["state"], "current");
         assert_eq!(flows[0]["task_id"], task.registered.task.id.as_str());
@@ -396,7 +396,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         let inventory = task.run(&[
             "flow",
             "list",
-            "--sessions",
+            "--processes",
             "--for-task",
             "INF-123",
             "--json",
@@ -406,7 +406,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             "{}",
             String::from_utf8_lossy(&inventory.stderr)
         );
-        let inventory: loopflow::durable::FlowPage =
+        let inventory: loopflow::durable::FlowProcessPage =
             serde_json::from_slice(&inventory.stdout).unwrap();
         assert_eq!(inventory.entries.len(), 1);
         assert_eq!(inventory.entries[0].summary.id, driver);

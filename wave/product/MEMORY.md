@@ -769,44 +769,28 @@ caps, and keep missing ownership evidence explicit.
 
 ### Measurements and acceptance that survive scratch cleanup
 
-- Keep **hierarchy_interaction_ms** and **task_workspace_ready_ms** separate. Measure
-  accepted input to correct rendered/usable rows or destination content, with exact
-  identities, truthful active/empty/error state, retained focus/input and frame hitches.
-  Retained terminal switches are not provider startup. Capture read/decode/projection/
-  layout/presentation phases under one interaction ID without adding product widgets.
-- The opt-in `uv run python scripts/desktop_performance.py run --output <new-dir>`
-  uses 8 Tasks/4 Sessions and 256 Tasks/128 Sessions, two checkouts and three owned
-  cat PTYs. Its eleven scenarios use synthetic active-Run DTOs and forced native
-  bitmap capture/text verification plus PTY replies. This is an intrusive capture/input
-  endpoint, not compositor presentation or hitch proof. The concurrent writer
-  completed 462/462 source-stable observations; the hash-verified [baseline](../../scripts/benchmarks/desktop-performance/20260924-capture-input/README.md)
-  now survives scratch cleanup. Preserve begin/end records, failed and
-  unstarted attempts, host/build/population/endpoint compatibility, observer overhead,
-  and source drift. Twenty successful comparable samples are required for its p95.
-- The Monitor reader and pane this baseline exercised are deleted (#1452,
-  #1439); its two Monitor scenarios no longer compare. Capture/input receipts
-  never established compositor hitches or provider costs. Detail at
-  `e67cdc62f:wave/product/MEMORY.md` under this heading.
-- Jack's September 26 split assigns further performance work to existing LOO-300,
-  superseding the earlier proposal to file two optimization Tasks. Keep hierarchy
-  navigation and Task workspace interaction as separate measurements, consume the
-  stable runner and baseline, and preserve identities and retained terminals in
-  comparable before/after evidence. The split does not waive missing proof.
-- The human rejected the accumulated composition as confusing. Earlier provider,
-  editor Cancel/rejection, viewport, and empty-Monitor receipts are bounded evidence,
-  not approval of the simplified UI. Preserve configured positive Run appearance/exit,
-  combined-pane input and human composition confirmation as remaining acceptance.
-  AXWindow role, exact input focus, lock status, and permission are separate facts;
-  old failures do not diagnose a new runner. Never replay retired mutation probes.
+Historical populations/receipts: `64e1cd161:wave/product/MEMORY.md`, this heading.
+Synthetic capture/input proves neither compositor hitches nor provider costs;
+deleted Monitor scenarios no longer compare. Retain these obligations:
+
+- Jack's September 26 split assigns performance to LOO-300, not new Tasks.
+  Keep **hierarchy_interaction_ms** and **task_workspace_ready_ms** separate;
+  measure input through usable content, retaining identity, truthful state, focus,
+  drafts and phase timing. Terminal switching is not provider startup.
+- Preserve failures, unstarted attempts, provenance, observer overhead and source
+  drift; p95 needs twenty comparable successful samples. Use the retained runner
+  and baseline without replaying retired mutation probes.
+- Composition was rejected. Earlier receipts grant no simplified-UI approval:
+  configured Run appearance/exit, combined-pane input and reviewer confirmation
+  remain. AX role, focus, locks and permission are distinct; old failures do not
+  diagnose a new runner.
 - LOO-291 retains ten human-selected external-work trials, an authorized directive
   edit, and twenty long-lived-registry trials against published budgets. The external
   workflow/text remain unprovided. LOO-251’s promoted-Ask blocked-caller proof
   was superseded by Jack Heart’s 2026-10-01 Ask removal; retained Task reviews
   still require completion proof. D2’s fourteen-day/twenty-open readiness
   obligations remain. Local PTYs, one cached
-  population, or AX count timings do not satisfy these. Earlier fallback attempts
-  stopped at resource preflight; the September 25 supervised Xcode compile later
-  passed. Neither compile supplies the missing verdict or authorizes removing
+  population, or AX count timings do not satisfy these. Historical build receipts prove no acceptance and authorize no removal of
   another checkout's active build.
 - LOO-185 remains parked until human-selected Discord use is blocked by provisioning
   friction; canvas work supplies no new activation evidence.

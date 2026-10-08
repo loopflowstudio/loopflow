@@ -1057,6 +1057,8 @@ all assembled context goes in one system/instructions file, with a short user
 trigger, no split, relaunch fallback or lf-side refusal wording. PR #1498 owns
 transport and combined oversized-launch acceptance. Recorded Claude interactive
 readback proves neither plan mode, cmux tracking nor the combined candidate.
+Jack later authorized 429's landing after queued preparation despite these gaps;
+428's publication-only boundary remains.
 
 Jack approved setup-free Codex coexistence and publication only. Source uses a
 temporary native profile for lf's capture hook and a bounded incomplete-argument
@@ -1067,6 +1069,8 @@ one another, and config-based bypass is ignored. Native PTYs prove launch hooks,
 exact capture and reconnect. Fresh reconnect hooks are absent even without lf;
 previous assertions reread launch receipts. Actual cmux tracking and installation
 remain unproved; live Sessions stay untouched.
+Release's entry-point lesson applies per operation: launch receipts establish no
+fresh reconnect hooks, and native composition establishes no host tracking.
 
 Flow readability and transactional Started remain. Superseded argv diagnostics
 are removed; 429 owns oversized-context proof. Earlier limits and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.

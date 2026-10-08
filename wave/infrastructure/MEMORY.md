@@ -1044,8 +1044,9 @@ ordinary installed-skill invocation through `lf audit` / `lf audit -a codex`,
 matching help/list, native same-harness execution, translated ports, exact arguments,
 assets and declarations. Builtins stay inline; `--agent/-a` remains. Busy-terminal
 injection, competing writers, queues and generic engine recovery are not
-prerequisites. Jack requested radical compression through review, without landing
-or completing the Task.
+prerequisites. Jack requested radical compression through review. His October 8 comment
+`c4741d38-a84a-4cfc-b3a1-b72ea685ab59` then authorized gate and landing with
+completion after verified merge, superseding the review-only boundary.
 
 One engine catalog replaces external/npx/rams and Flow resolvers. Retain source,
 declarations and arguments together; export preserves third-party files. Claude
@@ -1053,23 +1054,15 @@ subagent names do not select lf's harness. Independent fixes preserve saved Sess
 placement, active captures on refused continuation and unpublished reservations on
 publication failure. Launcher success proves no provider exit.
 
-Queue/custody and PTY observations remain historical at `1e4ae02a5`; compression
-at `754efacb2` removed dispatch receipt recovery, queues, engine restart and
-provider-only probes (`31e0640eb`). Baseline native/sibling history and stale-client
-rejection remain. Exact arguments are checked in model requests; the unused
-replay parser and its exclusive tests are removed.
-Removing a path includes its exclusive probes; provider-only success proves no
-operation boundary. Deleted resource bundles are not preserved by links.
-
-The `dd2cdba82` compression removed unreachable ClaudeHarness plugin state;
-`48d145b78` preserves its source audit. Earlier launch and rejected-hook evidence
-is retained at `c6c75dc68` in this section. Current source prepares both harnesses
-and surfaces. Native Claude terminal uses a captured plugin with original
-declarations and exact arguments; gathered context is a lossless JSON literal
-in its user message. Native expansion must not interpret argument or shell syntax
-inside repository/Task context. Hooks put additional context in system messages;
-Claude 2.1.294 also rewrites shell preprocessing as a model tool instruction,
-which cannot provide first-request context. Both approaches were removed.
+Compression removed queue/custody, PTY/inbox, engine restart, dispatch recovery,
+provider-only probes and the replay parser; history: `1e4ae02a5`, `754efacb2`,
+`31e0640eb`. Native/sibling history and stale-client rejection remain required.
+`dd2cdba82` removed unreachable ClaudeHarness plugin state; source audit:
+`48d145b78`. Native terminal snapshots retain declarations and exact arguments;
+gathered context is a lossless JSON literal in the user message. Escape native
+argument/preprocessing syntax in that context. Rejected hooks put context in
+system messages; Claude shell preprocessing became a model tool instruction,
+missing first-request context. Exact counterexamples: `4624224bb`, this section.
 
 Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
 explicit Markdown skill reference selects the original path on both surfaces.
@@ -1085,14 +1078,18 @@ also retains an in-memory invocation. PATH discovery replaces availability's
 
 Ordinary lf fixtures prove native terminal model/argument/context fidelity,
 single-file collisions, out-of-catalog Codex expansion, custom-prompt translation,
-and provider asset reads against fake APIs. Serial plain baselines now use equal
-context and fresh provider homes, asserting source, arguments and asset contents.
-Request overhead remains 875 bytes Claude terminal, 122 Codex headless. Final
-budget enforcement reuses measured input, including arguments and structured
-replies; omitted notices need no intermediate count. Serial warm-Machine
-samples add 0.99/0.70 s, mostly before provider startup; no latency improvement
-is established. Prior/fresh costs: `d505007b1:scratch/run-any-claude-or-codex.md`.
-Residual cost leaves drop-in acceptance to gate/review. Local samples prove no
-production speedup, live compliance or terminal UI.
+and provider asset reads against fake APIs. Equal-context plain baselines and the
+PR-base startup comparison now live in
+[scripts/benchmarks/skill-invocation](../../scripts/benchmarks/skill-invocation/README.md).
+The PR-base sample shows no added startup second; base's post-provider Git failure
+limits it to startup boundaries. Plain-native comparisons still show overhead;
+no production speedup, live compliance or terminal UI is proved. Prior exact
+costs remain at `d505007b1:scratch/run-any-claude-or-codex.md`.
+
+October 8 gate found Codex terminal treating translated YAML's leading `---` as
+an option. A prompt separator fixes the ordinary launch; the real-provider fixture
+now proves source, exact arguments, user context and bundled asset read. Native
+Claude/Codex home continuity, reconnect and headless gate pass; hosted CI remains.
 Release was the only immediate child found; its goal and complete memory were read.
-Its operation-entry lesson applies. No landing or Task completion occurred.
+Its operation-entry lesson applies: provider success alone does not prove launch.
+No merge or Task completion is claimed.

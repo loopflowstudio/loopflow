@@ -1001,10 +1001,11 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let retry = open(&["session", "resume"]);
     assert!(retry.status.success(), "{retry:?}");
 
-    // --version succeeds, then the executable disappears before the actual spawn.
-    write_provider(
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then /bin/rm -- \"$0\"; exit 0; fi\nexit 93\n",
-    );
+    // Discovery finds an executable, but its absent interpreter prevents spawn.
+    write_provider(&format!(
+        "#!{}\n",
+        home.path().join("missing-interpreter").display()
+    ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
     assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
@@ -1104,10 +1105,8 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let provider = bin.join("codex");
     std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$CODEX_HOME/opened\"\n").unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    )))
-    .unwrap();
+    // An unavailable fixture must never fall through to a real provider.
+    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
     let resume = |args: &[&str]| {
         command(home.path(), args)
             .current_dir(repo.join("subdir"))
@@ -1141,7 +1140,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
         );
     }
     // An unavailable provider must not add another opening receipt.
-    std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
     let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
     assert!(!resume(&["resume", &b]).status.success());
     let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();

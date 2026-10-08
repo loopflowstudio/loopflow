@@ -90,6 +90,8 @@ pub(crate) fn build_session_command(
                 args.push(dir.to_string_lossy().to_string());
             }
             args.extend(codex_permission_args(Some(worktree), false, false));
+            // Ported skill frontmatter starts with `---`, which is prompt data.
+            args.push("--".to_string());
             args.push(prompt.to_string());
             args
         }

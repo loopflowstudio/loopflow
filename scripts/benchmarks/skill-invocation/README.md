@@ -71,3 +71,44 @@ provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640e
 Exact argument checks read the provider's model request directly.
 Baseline reconnect and plain-provider continuity remain in
 `tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.
+
+## Startup comparison (2026-10-08)
+
+Jack Heart requested comparison with regular LF before landing PR #1504.
+Three alternating pairs per harness compare PR base `35bb84ef1496` with
+candidate `510bf4abbc95`, using the same debug profile, initialized disposable
+Machines, pinned bundles and a local fake API with external egress denied.
+
+| Median seconds | Base | Candidate |
+| --- | ---: | ---: |
+| Claude terminal, before provider start | 0.772 | 0.628 |
+| Claude terminal, first model request | 0.995 | 0.866 |
+| Codex headless, before provider start | 0.717 | 0.672 |
+| Codex headless, first model request | 0.803 | 0.746 |
+
+All twelve launches delivered source, arguments, user context and a bundled
+asset read. Base cannot discover `.claude/skills`, so both revisions also received
+the unchanged Claude source in `.claude/commands`. Base failed its post-provider
+Git status check in the ordinary-folder fixture; candidate exited successfully.
+These are startup comparisons, not successful end-to-end baseline timings.
+The small sample shows no added startup second relative to regular LF; it proves
+neither production latency nor parity with a slash command in a running terminal.
+Raw samples, exact-source archive and binary hashes remain in
+`/tmp/loo420-base-comparison` on the measuring machine.
+
+Separate equal-context comparisons with plain native launches retained 875 extra
+request JSON bytes for Claude terminal and 122 for Codex headless. Warm-Machine
+samples added 0.988/0.702 seconds respectively, with 0.606/0.626 seconds before
+provider startup. Request bytes are not token counts. Removing the executable
+version probe reduced one Claude launch-preparation trace from 288 to 37 ms;
+removing repeated budget counts established no overall latency improvement.
+The remaining cost buys context, durable capture and launch ownership; it remains
+measured overhead, not evidence of a blanket performance improvement.
+
+Gate on October 8 exercised both pinned sources on both harnesses and surfaces,
+including actual asset reads, exact arguments and user-only gathered context.
+All eight cases pass after fixing Codex terminal's missing `--` prompt separator:
+translated YAML frontmatter had been parsed as an option. Captured-source removal,
+native model/declaration mapping, native-home continuity and Codex reconnect with
+stale-client rejection also pass. Print/exec substitutes still do not prove terminal
+rendering or live model compliance.

@@ -62,6 +62,18 @@ lf --agent claude:opus debug
 
 `--agent` / `-a` selects the harness and optional model as `harness[:model]`.
 
+## Run a Flow interactively
+
+```bash
+lf -i -a claude run my-flow
+lf -b -a claude run my-flow # run every step headlessly
+```
+
+Each skill opens in the native agent conversation. Exit the conversation
+successfully to advance to the next step; an interrupted or failed step stops
+the Flow. Without either flag, an attached terminal selects interactive mode,
+just like a standalone skill. Task Flow launches preserve the same choice.
+
 ## Select where work happens
 
 ```bash

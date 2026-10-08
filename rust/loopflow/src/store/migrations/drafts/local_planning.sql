@@ -116,7 +116,7 @@ CREATE TABLE task_state_deliveries (
     id TEXT NOT NULL UNIQUE,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
     move_seq INTEGER REFERENCES task_workflow_moves(seq),
-    target TEXT NOT NULL CHECK(target IN ('completed','unstarted')),
+    target TEXT NOT NULL CHECK(target IN ('completed','unstarted','canceled')),
     base_revision TEXT,
     base_state TEXT,
     attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),

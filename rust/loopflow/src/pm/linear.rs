@@ -1439,60 +1439,6 @@ impl LinearClient {
         Ok(())
     }
 
-    /// Preserve the issue and its history while recording a canceled outcome.
-    pub async fn cancel_item(&self, item_id: &str) -> PmResult<()> {
-        let (item, _) = self
-            .issue_ownership(item_id)
-            .await?
-            .ok_or_else(|| PmError::Message(format!("Linear issue {item_id} is unavailable")))?;
-        match item.state.as_deref() {
-            Some("canceled") => return Ok(()),
-            Some("completed" | "duplicate") => {
-                return Err(PmError::Message(format!(
-                    "{} is already terminal; cancellation would replace its outcome",
-                    item.identifier
-                )));
-            }
-            None => {
-                return Err(PmError::Message(format!(
-                    "{} has no observed workflow state",
-                    item.identifier
-                )))
-            }
-            Some(_) => {}
-        }
-        let response: WorkflowStatesData = self
-            .graphql(
-                r#"query CanceledWorkflowStates($teamId: ID!) {
-              workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
-                nodes { id position }
-              }
-            }"#,
-                json!({ "teamId": item.team_id }),
-            )
-            .await?;
-        let state = response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .ok_or_else(|| PmError::Message("no canceled Linear workflow state found".into()))?;
-        let result: PmResult<Value> = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({ "id": item.id, "stateId": state.id }),
-            )
-            .await;
-        // Read back even after an uncertain mutation response. HTTP success alone
-        // is not evidence that Linear accepted the state transition.
-        match self.issue_ownership(&item.id).await {
-            Ok(Some((confirmed, _))) if confirmed.state.as_deref() == Some("canceled") => Ok(()),
-            confirmation => Err(PmError::Message(format!("cancellation of {} is unconfirmed (mutation: {}; readback: {}); retry task abandon", item.identifier,
-                result.err().map_or_else(|| "acknowledged".into(), |error| error.to_string()),
-                confirmation.err().map_or_else(|| "issue is not canceled".into(), |error| error.to_string())))),
-        }
-    }
-
     /// Reopen a completed issue by moving it back to the team's default active
     /// (`unstarted`) workflow state. Mirrors [`complete_item`]; the repair path
     /// uses it when a Task was prematurely completed while its gates were open.

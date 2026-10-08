@@ -326,9 +326,11 @@ effect, so it cannot settle a newer decision. Explicit state resolution supersed
 the delivery identity without changing the Workflow. No local/provider clock
 comparison orders edits. The provider read and mutation remain separate requests;
 they do not prevent a concurrent Linear edit between them. The complete unified
-planning-owner cutover remains in progress; creation, edits, abandonment and rotation
-still use split paths. Connected abandonment requires provider access before the
-final local decision. Delivery and pending-state projection currently require an
+planning-owner cutover remains in progress; creation, edits and rotation still use
+split paths. Abandonment of an existing Task saves the decision and cancellation
+receipt together without provider access. Cleanup failures preserve the decision;
+unknown or live execution prevents cleanup before provider inspection. Cancellation
+remains pending until safe provider delivery is implemented. Delivery and pending-state projection currently require an
 existing mapping; pending export of unmapped connected Tasks remains unfinished.
 
 ## Read each step's result

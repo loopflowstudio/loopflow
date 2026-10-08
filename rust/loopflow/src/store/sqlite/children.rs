@@ -1331,7 +1331,7 @@ const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
     COALESCE((SELECT json_object('state','pending','operation',
-        CASE d.target WHEN 'completed' THEN 'complete_task' ELSE 'reopen_task' END,
+        CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
         'error',COALESCE(d.error,'Saved locally; pending Linear synchronization'))
         FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
             AND t.external_issue_id IS NOT NULL

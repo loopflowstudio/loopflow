@@ -36,27 +36,6 @@ impl SqliteStore {
         require_current_task_project(&conn, &work)
     }
 
-    pub fn begin_task_abandon(&self, task_id: &TaskId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        match work_status_in(&tx, &WorkRef::Task(task_id.clone()))? {
-            WorkStatus::Done => {
-                return Err(StoreError::InvalidAuthority(
-                    "completed Task cannot be abandoned".into(),
-                ))
-            }
-            WorkStatus::Abandoned => return Ok(()),
-            WorkStatus::Ready => {}
-        }
-        tx.execute(
-            "UPDATE tasks SET abandon_requested_at=COALESCE(abandon_requested_at,?2),
-             abandon_reason=COALESCE(abandon_reason,'explicit Task abandonment') WHERE id=?1",
-            params![task_id.as_str(), now_unix()],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn task_issue_identifier(
         &self,
         external_issue_id: &str,
@@ -193,6 +172,20 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_unix();
         let (table, id) = work_table(work);
+        if let WorkRef::Task(task_id) = work {
+            let retained: Option<(i64, Option<String>)> = tx.query_row(
+                "SELECT abandoned_at,abandon_reason FROM tasks WHERE id=?1 AND abandoned_at IS NOT NULL",
+                [task_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
+            ).optional()?;
+            if let Some((at, saved_reason)) = retained {
+                return Ok(AbandonReceipt {
+                    work: work.clone(),
+                    reason: saved_reason.unwrap_or_else(|| reason.to_string()),
+                    abandoned_at: OffsetDateTime::from_unix_timestamp(at)
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?,
+                });
+            }
+        }
         let abandon = match work {
             WorkRef::Task(_) => format!(
                 "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.id=?1 AND {}",
@@ -212,9 +205,10 @@ impl SqliteStore {
         }
         if let WorkRef::Task(task_id) = work {
             tx.execute(
-                "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=NULL WHERE id=?1",
-                [task_id.as_str()],
+                "UPDATE tasks SET abandon_requested_at=NULL,abandon_reason=?2 WHERE id=?1",
+                params![task_id.as_str(), reason],
             )?;
+            super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {

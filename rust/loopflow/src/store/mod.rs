@@ -3965,9 +3965,6 @@ mod tests {
         );
         let work = WorkRef::Task(task.id.clone());
         store.sqlite.require_task_launch(&task.id).unwrap();
-        store.begin_task_abandon(&task.id).await.unwrap();
-        assert!(store.sqlite.require_task_launch(&task.id).is_err());
-
         store.abandon(&work, "canceled").await.unwrap();
         assert!(store.sqlite.require_task_launch(&task.id).is_err());
         assert_eq!(store.sqlite.task_flows(&task.id).unwrap().len(), 1);

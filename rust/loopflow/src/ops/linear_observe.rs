@@ -260,6 +260,13 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
     if delivery.conflict.is_some() {
         return Ok(());
     }
+    // The existing update protocol cannot preserve concurrent provider edits.
+    // Do not extend it to cancellation while its write guarantee is unresolved.
+    if delivery.target == "canceled" {
+        return store.sqlite.settle_task_state(&delivery, Some(
+            "Cancellation saved locally; safe Linear cancellation delivery is not implemented",
+        )).map_err(|e| message(&e));
+    }
     let attempt = async {
         let task = store
             .get_task(&task.id)

@@ -57,12 +57,6 @@ class Handler(BaseHTTPRequestHandler):
             data = {"issue": {"trashed": issue["trashed"]}}
         elif "query IssueAttachments" in query:
             data = {"issue": {"attachments": {"nodes": [], "pageInfo": page}}}
-        elif "query CanceledWorkflowStates" in query:
-            data = {"workflowStates": {"nodes": [{"id": "canceled", "position": 0}]}}
-        elif "mutation SetIssueState" in query:
-            issue["state"]["type"] = variables["stateId"]
-            issue["updatedAt"] = _next_revision(issue["updatedAt"])
-            data = {"issueUpdate": {"success": True}}
         elif "mutation DeleteIssue" in query:
             assert variables["id"] == issue["id"]
             issue["trashed"] = True
@@ -134,6 +128,7 @@ def _abandon_retains_execution(
     processes = db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall()
     sessions = db.execute("SELECT * FROM agent_sessions WHERE id='retained-session'").fetchall()
     prs = db.execute("SELECT * FROM task_prs").fetchall()
+    delivery = None
     for _ in range(2):
         result = subprocess.run(
             [fixture["lf"], "task", "abandon", "INF-123"],
@@ -144,8 +139,16 @@ def _abandon_retains_execution(
             timeout=30,
         )
         assert result.returncode == 0, result.stderr
-        assert issue["state"]["type"] == "canceled"
+        assert issue["state"]["type"] == "unstarted"
         assert db.execute("SELECT abandoned_at IS NOT NULL FROM tasks").fetchone() == (1,)
+        pending = db.execute(
+            "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?",
+            (fixture["task"],),
+        ).fetchall()
+        assert len(pending) == 1 and pending[0][1:] == ("canceled", 0, 0)
+        if delivery is not None:
+            assert pending == delivery
+        delivery = pending
         assert (
             db.execute("SELECT * FROM processes WHERE lfid=?", (process,)).fetchall() == processes
         )

@@ -316,8 +316,10 @@ requests without a stated outcome surface for an explicit scope decision.
 `lf task move EXP-12 end` records an explicit completion. Old Session turns,
 reserved inputs and unknown process exits cannot veto it. Execution history and
 live process controls remain intact; uncertain or occupied checkouts are retained.
-Cancellation follows the same separation. Open PRs and additional committed work
-still need delivery or explicit abandonment.
+`lf task abandon EXP-12` saves cancellation locally, including while Linear is
+unavailable. Retry retains its decision and delivery identity. Safe Linear
+cancellation delivery remains unimplemented and shows pending sync. Open PRs and
+additional committed work still need delivery or explicit abandonment.
 
 Completing an uncached Linear issue first retains its Task locally, without a
 checkout. The completion reason stays in Task history; retries reuse that identity

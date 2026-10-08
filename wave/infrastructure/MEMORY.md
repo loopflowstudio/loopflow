@@ -18,8 +18,14 @@ manual refresh or unrelated outbound drain. The common writer retains pending
 changes, stable mutation identities, both conflict values and reconnect deduplication.
 Remote completion grants no Workflow movement, Process control or checkout cleanup;
 delayed completion cannot overwrite explicit reopening. Machine clocks prove no order.
-LOO-412's transport, scope and active-owner choices remain under review; no restart
-or replication here is authorized.
+Jack Heart selected LOO-412’s custom Git planning ref prototype on October 8
+(`8b45e82d-6765-490a-a3d6-44b44611cedd`) and accepted the cross-Task boundary
+(`b5402659-b825-4c12-b278-5d56ae1aa518`). LOO-406 owns common storage/writers and
+Linear sync; LOO-412 owns transport, excluding execution. Isolated transport fixtures
+can proceed now; integration consumes a coherent committed writer cut, never dirty
+code or duplicated planning. The ownership/deletion cut is independently reviewable
+from conditional-write research, which remains required. No competing Flow, machine
+replication here or real plan publication to the public code repo is authorized.
 
 Comments and completion/reopening save before provider I/O. Foreground connections
 independently acquire selected comments/inventory and deliver mapped Tasks' effects.
@@ -40,17 +46,16 @@ investigation authorized without further approval. Safe outbound updates remain
 unproved; weakening preservation or automatic propagation would need a product
 decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
 
-Comment resolution retains both full comments and its choice. Keeping the local
-body queues one new UUID; retry reuses it without repeating direction or overwriting
-the provider comment. Late echoes cannot erase conflicts. The uncommitted reduction
-after `fe07245a3` moves comments out of personal planning and reads thread, pending
-IDs and conflicts in one SQLite snapshot shared by CLI/Desktop. This retains the
-mapped-only projection; it does not implement unified ownership or unmapped export.
-Resolution's store/operation proofs leave public CLI/Desktop interaction unproved.
-Ownership deletion,
-fields, provider-first abandonment and unmapped export remain unfinished. Watcher
-reconnect proves local retention only; no composed native/Flow/Desktop or installed
-outcome is established. Release's operation-entry lesson applies.
+Comment resolution retains both values and the choice; local creates one stable
+replacement UUID without overwriting the provider comment or repeating direction.
+`b3cd894f3` moves comments out of personal planning, sharing the transactional
+thread/pending/conflict read. Public resolution and composed reconnect remain unproved.
+Abandonment now saves decision and cancellation UUID atomically in both modes;
+provider-first `apply_abandon` and `begin_task_abandon` are deleted. Cleanup checks
+execution before provider access and never reverses the decision. Cancellation
+stays pending because safe delivery is unimplemented; this waives no propagation
+requirement. The full ownership/deletion cut, definitions, fields and unmapped
+export remain unfinished. Fixtures establish no installed or composed sync outcome.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -62,10 +67,9 @@ superseded split, proving no unified path or live/installed continuity. Implemen
 deletion recovery, selection-race repair and ten mixed-rotation failure points remain at
 `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-Git refs and host callbacks remain follow-ups. The laptop authors; workers are
-disposable. Cover personal machines, shared Linear and independent developers.
-Namespaces prove no privacy, callbacks no laptop-loss recovery, and write-once
-mappings no concurrent-export uniqueness.
+LOO-412 owns the selected Git-ref prototype; host callbacks remain outside this PR.
+The laptop authors; workers are disposable. Namespaces prove no privacy, callbacks
+no laptop-loss recovery, and mappings no concurrent-export uniqueness.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
@@ -692,24 +696,18 @@ reconstruction from current normalized entities. Lost completion responses requi
 provider readback; archive acknowledgement never proves KRs or transferred Tasks done.
 Cached-Task outage admission belongs to LOO-326's current review, not these notes.
 
-The launch-hardening incident/design remains at
-[a5d76c576](https://github.com/loopflowstudio/loopflow/blob/a5d76c576609f6efc80a8ca2198480081066c63c/scratch/jack-heart/session-launch-hardening.md).
-Selected-store absence did not establish deletion. Preserve original launch
-failure, executable, data ownership, native identity and pending decision across
-retry; no timestamp-based private-store merging. The original offending binary
-and installation switch initiator remain unknown. Its retry test failed 6/7;
-prepared JSON/window/provider identity did not prove conversation access.
-Configured review continuity across installation and real Ghostty resume remained
-unproved there; later results must name the actual boundary they establish.
+The launch-hardening incident, unknown initiator, failed retry and unresolved
+configured continuity remain at `b3cd894f3:wave/infrastructure/MEMORY.md` under
+this heading, with its original design link. Selected-store absence proves no
+deletion. Preserve failure, executable/data ownership, native identity and pending
+decisions across retry; prohibit timestamp-based store merging. Prepared identity
+and window output prove no conversation access.
 
-LOO-321 / PR #1308's historical isolated-store design and local proofs remain in
-that archive. Source-only fixtures never established Jack's installed worker,
-app acceptance or remote app transport. Home placement is distinct from a data
-directory, and database isolation does not isolate provider or checkout effects.
-Restore saved Task/PR/checkout identity; explicit replacement owns new definitions.
-Authored command removals must cover runtime, app and DTO consumers. Current
-mechanics belong to docs/lf.md and docs/architecture/machines.md; superseded command
-names and store-selection policies are historical evidence, not instructions.
+LOO-321 / PR #1308’s superseded isolated-store design and unproved configured
+continuity remain at `b3cd894f3:wave/infrastructure/MEMORY.md` under this heading.
+Database isolation never isolates provider or checkout effects. Preserve saved
+Task/PR/checkout identity; explicit replacement owns new definitions. Current
+mechanics and ownership replace the archived store-routing and command names.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
 

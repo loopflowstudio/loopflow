@@ -240,8 +240,6 @@ async fn planning_graphql(
         json!({"issueDelete":{"success":true}})
     } else if query.contains("query IssueTeam") {
         json!({"issue":{"team":{"id":"team-1"}}})
-    } else if query.contains("query CanceledWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"canceled"}]}})
     } else if query.contains("query CompletedWorkflowStates") {
         if state.reopen_during_completion {
             state.reopen_during_completion = false;
@@ -1159,6 +1157,104 @@ fn with_completion_task(
 }
 
 #[test]
+fn task_abandonment_saves_offline_in_both_connection_modes() {
+    for connected in [false, true] {
+        with_completion_task(|runtime, fixture, repo, task, _provider| {
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            if !connected {
+                std::fs::write(repo.join(".lf/config.yaml"), "{}\n").unwrap();
+                conn.execute(
+                    "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+                    [task.id.as_str()],
+                )
+                .unwrap();
+                conn.execute(
+                    "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                    [task.project_id.as_str()],
+                )
+                .unwrap();
+            }
+            let original = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+            let history = runtime
+                .block_on(fixture.store.task_events_after(&task.id, 0))
+                .unwrap();
+            // Every provider operation would fail; the existing Task needs none.
+            PM_TEST_CONTEXT.sync_scope(fixture.context("http://127.0.0.1:1"), || {
+                assert_eq!(crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap(), task.plan.identifier);
+                let work = crate::durable::WorkRef::Task(task.id.clone());
+                assert_eq!(fixture.store.sqlite.work_status(&work).unwrap(), WorkStatus::Abandoned);
+                let receipt = || conn.query_row(
+                    "SELECT id,target,attempted,settled FROM task_state_deliveries WHERE task_id=?1",
+                    [task.id.as_str()], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, bool>(2)?, row.get::<_, bool>(3)?)),
+                ).unwrap();
+                let saved = receipt();
+                assert_eq!((&saved.1, saved.2, saved.3), (&"canceled".to_string(), false, false));
+                crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+                assert_eq!(receipt(), saved);
+                let retained = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+                assert_eq!(retained.id, original.id);
+                assert_eq!(retained.project_id, original.project_id);
+                assert_eq!(retained.plan, original.plan);
+                assert!(retained.worktree.is_none());
+                assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+                assert_eq!(runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap(), history);
+                if connected {
+                    assert!(matches!(retained.pm_writeback, PmWritebackState::Pending {
+                        operation: crate::work::task::PmWritebackOperation::CancelTask, ..
+                    }));
+                    runtime.block_on(crate::ops::linear_observe::sync_task_state(&fixture.store, &retained)).unwrap();
+                    // Cancellation must never fall into the old sender's reopen arm.
+                    assert_eq!(receipt(), saved);
+                }
+                let reopened = crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap();
+                assert_eq!(reopened.work_status(&work).unwrap(), WorkStatus::Abandoned);
+                assert_eq!(receipt(), saved);
+            });
+        });
+    }
+}
+
+#[test]
+fn task_abandonment_rolls_back_if_delivery_cannot_commit() {
+    with_completion_task(|_runtime, fixture, repo, task, _state| {
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER fail_delivery BEFORE INSERT ON task_state_deliveries
+            BEGIN SELECT RAISE(ABORT,'fixture delivery storage failed'); END;",
+        )
+        .unwrap();
+        let error =
+            crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("fixture delivery storage failed"));
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
+                .unwrap(),
+            WorkStatus::Ready
+        );
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            conn.query_row(
+                "SELECT abandon_reason FROM tasks WHERE id=?1",
+                [task.id.as_str()],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap(),
+            None
+        );
+    });
+}
+
+#[test]
 fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
     with_completion_task(|runtime, fixture, repo, task, state| {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
@@ -2023,22 +2119,6 @@ esac
                 Some("FIX-1") => fixture.directory.path(),
                 Some(_) => &repo,
             };
-            // A provider refusal cannot be mistaken for local cancellation.
-            runtime.block_on(async {
-                state.lock().await.fail_completion = true;
-            });
-            assert!(crate::ops::task::task_abandon(caller, selector, false).is_err());
-            assert_eq!(
-                runtime
-                    .block_on(
-                        fixture
-                            .store
-                            .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
-                    )
-                    .unwrap(),
-                WorkStatus::Ready
-            );
-            assert!(checkout.exists());
             if selector == Some("cancel-me") {
                 let progress = LifecycleMessages::default();
                 crate::ops::abandon_branch(
@@ -2120,8 +2200,21 @@ esac
                 assert_eq!(
                     runtime
                         .block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-                    json!("canceled")
+                    json!("unstarted")
                 );
+                assert!(matches!(
+                    fixture
+                        .store
+                        .sqlite
+                        .task(&task.id)
+                        .unwrap()
+                        .unwrap()
+                        .pm_writeback,
+                    PmWritebackState::Pending {
+                        operation: crate::work::task::PmWritebackOperation::CancelTask,
+                        ..
+                    }
+                ));
                 assert!(checkout.exists());
                 std::fs::remove_file(repo.join(".git/fail-close")).unwrap();
             }
@@ -2263,7 +2356,31 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
         assert_eq!(applied[1].outcome, "canceled");
         assert_eq!(
             runtime.block_on(async { state.lock().await.issues[0]["state"]["type"].clone() }),
-            json!("canceled")
+            json!("unstarted")
+        );
+        let saved = fixture
+            .store
+            .sqlite
+            .task_by_issue("FIX-1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .work_status(&crate::durable::WorkRef::Task(saved.id.clone()))
+                .unwrap(),
+            WorkStatus::Abandoned
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_task_state(&saved.id)
+                .unwrap()
+                .unwrap()
+                .target,
+            "canceled"
         );
         let repeated = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(repeated.len(), 1);

@@ -83,11 +83,22 @@ journal, not only in Git history. Task disposition and comment content are atomi
 field groups. A derived heads index is checked against the journal on export.
 
 Peer import unions the journal and projects into the existing Wave/Project/Task
-and comment tables with one import checkpoint. Projection suppresses capture echo,
-advances Task optimistic revisions only on changed planning, and never calls an
-execution writer. Repository paths are supplied locally, not transported. The
-single `planning_peers.sql` draft depends on the unchanged parent `local_planning`
-draft; it seeds existing IDs once. These are source changes, not passing Rust proof.
+and comment tables with one import checkpoint. Expected uniqueness, missing-parent
+and protected-ancestry failures now roll back only that object's projection. The
+journal and local conflict receipts retain unprojected identities, including their
+comments, for export and later projection. A repaired association can settle on
+another acquisition without new mutations. No partial placeholder Task remains.
+Wave selection follows Project projection; unresolved selection preserves the old
+selection. A bounded parent pass handles ordering, not turn or Flow retries.
+
+The checkpoint acknowledges retained mutations and explicit projection conflicts,
+not that every record projected. Active conflicts have a Store reader and publish
+planning revisions only when their state changes; historical reasons survive
+resolution. Invalid documents, reused IDs, cross-repository ownership and unexpected
+SQL failures still roll back the whole import. The common writer suppresses echo,
+advances Task optimistic revisions only on changed planning and calls no execution
+writer. Paths stay local. The single `planning_peers.sql` draft still depends on
+`local_planning`. These are source changes, not passing Rust proof.
 
 ## Delete — do not maintain
 
@@ -108,7 +119,9 @@ global change-ID comparison; validated field groups project without another sche
 list. Regression coverage retains literal `--task` prompt text and cross-repository
 ID conflicts. Review also found the source-commit rejection fixture pushing the
 retired root ref instead of the selected user ref; it now uses one selected-ref
-constant. These reductions do not complete automatic exchange or conflict isolation.
+constant. Per-object savepoints replace whole-document rollback for expected
+projection conflicts; immediate foreign keys replace blanket deferred checks.
+Automatic exchange remains unfinished.
 
 ## Remaining integration — October 8
 
@@ -120,10 +133,10 @@ constant. These reductions do not complete automatic exchange or conflict isolat
    with foreground invocation lifetimes. Add selected-plan and pending/unconfirmed
    presentation. The current library components do not exchange on ordinary commands.
 3. Resolve divergent legacy IDs through explicit provider associations without
-   renumbering stored Work. Review found that the current importer rejects a duplicate
-   provider mapping or a protected ancestry move for the whole transaction. Retain
-   failed projection/conflict evidence while letting unrelated objects progress;
-   do not weaken the preservation constraints or treat this as completed acceptance.
+   renumbering stored Work. Conflict isolation is implemented with new regressions
+   for duplicate mappings, dependent comments, retained Sessions, selection and
+   idempotent retry, but Rust execution remains unproved. Wire the conflict reader
+   into foreground status; a durable import checkpoint is not completed projection.
 4. Complete optional Linear composition: peer imports must preserve/settle the common
    pending receipts correctly, including unchanged observed baselines and late local
    saves. Verify every provider-projection entry point supplies Linear provenance;
@@ -181,4 +194,4 @@ public command coverage here, not only exchange and transport tests.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 compression): `cargo fmt --all -- --check` and `git diff --check` pass; `cargo clippy --all-targets -- -D warnings` expired after 150 s with its build-script sampled at `_dyld_start`; gate/CI own the build and focused `planning_peers`, `ssh::tests`, `planning_git_tests` and `task_remote_tests`. Prior SQL replay and unavailable Rust checks: `b6acfb9ee:scratch/work-on-another-machine-name.md`.
+Check (October 8): `cargo fmt --all` and `git diff --check` pass; populated released-schema/parent/peer SQL replay and savepoint preservation pass, not Rust importer execution. `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` expired during compilation at 180 s (build script sampled at `_dyld_start`); `cargo clippy --all-targets -- -D warnings` expired at 60 s. Gate/CI own Rust checks and public acceptance. Earlier compression and post-sync migration checks also expired during compilation at 150 s; prior details: `318881140:scratch/work-on-another-machine-name.md` and `b6acfb9ee`.

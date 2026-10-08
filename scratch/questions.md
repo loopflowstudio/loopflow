@@ -22,9 +22,12 @@ at `b040c7c8d:scratch/questions.md`.
 - `new_migration.py` identified the inherited LOO-406 draft as this Task's draft.
   Git's explicit stack boundary establishes that it belongs to the parent;
   LOO-412 therefore has one separate `planning_peers.sql` draft depending on it.
-- Review found unfinished legacy-provider association and protected membership
-  projection: the importer currently rolls back the entire document. Independent
-  progress through those conflicts remains required before public integration.
+- October 8 implementation choice: project each object under a savepoint; retain
+  expected constraint failures and their mutations while independent objects commit.
+  Wave selection follows Project projection to break their reference cycle. Invalid
+  documents, reused mutation IDs, foreign repository ownership and unexpected SQL
+  failures still roll back the import. Legacy-provider association remains unfinished;
+  conflicts preserve both IDs rather than guessing which execution history to use.
 
 The source/destination primitives remain unpublished. Current verification and
 remaining integration are in the existing design; previous adoption-only evidence

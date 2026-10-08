@@ -27,6 +27,8 @@ mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
+pub use planning_peers::PeerProjectionConflict;
+
 /// One Wave's planning view, assembled from shared entities and membership.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PmSnapshotRow {

@@ -37,6 +37,22 @@ CREATE TABLE planning_peer_imports (
     PRIMARY KEY(repo,destination)
 );
 
+-- Retain rejected projection evidence independently of the planning row: a
+-- duplicate provider mapping may prevent that row from existing at all.
+CREATE TABLE planning_peer_conflicts (
+    repo TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    PRIMARY KEY(kind,object_id,reason)
+);
+
+CREATE TRIGGER store_revision_peer_conflicts_insert AFTER INSERT ON planning_peer_conflicts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_peer_conflicts_update AFTER UPDATE ON planning_peer_conflicts
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 CREATE TRIGGER peer_wave_insert AFTER INSERT ON waves
 WHEN (SELECT importing FROM planning_peer_context)=0
 BEGIN

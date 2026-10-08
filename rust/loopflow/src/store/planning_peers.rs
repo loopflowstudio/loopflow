@@ -1,8 +1,25 @@
-use crate::engine::planning_exchange::PlanningSnapshot;
+use crate::engine::planning_exchange::{PlanningObject, PlanningSnapshot};
 
 use super::{run_sqlite, Store, StoreResult};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerProjectionConflict {
+    pub object: PlanningObject,
+    pub reason: String,
+}
+
 impl Store {
+    pub async fn peer_projection_conflicts(
+        &self,
+        repo: &str,
+    ) -> StoreResult<Vec<PeerProjectionConflict>> {
+        let repo = repo.to_string();
+        run_sqlite(&self.sqlite, move |sqlite| {
+            sqlite.peer_projection_conflicts(&repo)
+        })
+        .await
+    }
+
     pub async fn export_peer_planning(&self, repo: &str) -> StoreResult<PlanningSnapshot> {
         let repo = repo.to_string();
         run_sqlite(&self.sqlite, move |sqlite| {

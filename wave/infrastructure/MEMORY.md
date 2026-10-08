@@ -1072,9 +1072,10 @@ headless readback probes proved file delivery on that account, not interactive
 acceptance. Publish for review; do not land before Jack's real first-response
 check in cmux, including large memory, Claude plan mode, Codex and titles.
 
-File transport must cover terminal, batch and persistent harnesses. Preserve
-source attribution and retained context for native resume. IDE deep links have
-no file channel. LOO-428 owns duplicate Codex flags and Flow output.
+Terminal, batch and persistent harnesses share one context-file writer, preserving
+attribution and files for native resume. Stub-provider proofs establish transport
+and file retention, not native resume or acceptance. IDE deep links have no file
+channel. LOO-428 owns duplicate Codex flags and Flow output.
 `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpointing,
 common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
 remains unresolved. Claude success proves no repair.

@@ -1,28 +1,43 @@
 # lf in existing terminal hosts · 2026-10-07
 
-**Herdr built and the isolated pane trial ran.** A skill, conversational input/return
-and a two-step taskless Flow work with a synthetic provider in herdr and a plain
-PTY. Jack Heart's real cmux Task Flow completed six steps and published
-[PR #1496](https://github.com/loopflowstudio/loopflow/pull/1496); both reported
-interactive Task launches failed. No installed host or real account was changed.
+**Interactive Flows now preserve the native agent UI.** Jack Heart exercised the
+fixed binary in cmux and herdr. Separate account-free fixtures cover CLI transport
+and planning boundaries. His earlier cmux Task Flow published
+[PR #1496](https://github.com/loopflowstudio/loopflow/pull/1496); the original
+large-prompt Claude and duplicate-flag Codex failures remain with LOO-428/429.
 
-| Path | Plain Ghostty control¹ | herdr 0.9.3 — real pane, fixture provider | cmux — observed by Jack |
+| Path | Plain Ghostty control¹ | herdr 0.9.3 — fixture and Jack's native trial | cmux — observed by Jack |
 |---|---|---|---|
 | One skill | PTY fixture success | Fixture success; input/return | Unknown |
 | Interactive conversation | PTY fixture success | Fixture success; input/return after resize | Small taskless conversation reported working in concurrent review²; original Task-bound launches failed |
-| Two-skill taskless Flow | Fixture success, ordered output | Fixture success, ordered output and scrollback | Unknown |
+| Two-skill taskless Flow | Fixture success, ordered output | Fixed binary reached native step two; Jack confirmed shell return | Fixed binary reached native Claude step two²; final exit unverified |
 | Task checkout | Fresh blocked: no Linear team; seeded placement succeeds | Same boundaries; workspace opens lf's checkout | Unknown |
 | Task Flow | Fixture blocked: managed account required | Same; three failed first-step attempts | Six steps succeeded; no host status, noisy output |
 | PR publish | Default branch refused; checkout blocked at publisher substitute | Same; no GitHub publication attempted | Succeeded inside Flow; standalone unknown |
 
-¹ Ghostty rendering was **not run**. PTY success proves CLI transport only.
-² The concurrent [keyboard-review notes](../../scratch/terminal-host-keyboard.md)
+¹ The standalone Ghostty control remains PTY-only. Jack later used Ghostty to
+display herdr; that is a different path.
+² The concurrent [keyboard-review notes](terminal-host-trial/keyboard.md)
 record Jack's small Claude conversation succeeding, screenshot evidence of question
 attention and post-answer clearing, and his preference to prioritize interactive
-Sessions over headless Flows. They also report first-step Flow output with Running;
-the full Flow result remains unknown. These are separately authored review receipts,
-not new automated trials here. The different prompt/path does not resolve either
+Sessions over headless Flows. They preserve the failed Flow launch and later fixed-binary demonstrations.
+These are manual review receipts, separate from automated fixtures. The different prompt/path does not resolve either
 original Task launch failure. The review owns preserving its active screenshots.
+Jack subsequently reported that both `lf -m claude run ux-flow` and its `-i`
+variant streamed steps instead of opening the native conversation UI. Before
+the review Session's repair, checkout [`Cli::step_args`](../../rust/loopflow/src/lf/mod.rs) added
+`--batch`, which the [Flow skill launcher](../../rust/loopflow/src/lf/commands/flow.rs)
+retained. This identifies a Loopflow mode-forwarding bug; it does not identify the
+installed binary's revision or implicate cmux rendering. Jack subsequently
+required an interactive Flow fix in this branch and a fixed-binary cmux demo
+(October 7, LOO-421 comment `fa289cba-babc-4afa-a70a-b7c2c0a5ab6b`). The ongoing
+branch now forwards the caller's mode into Flow steps. All 28 Flow tests pass,
+including a PTY regression for input, step transitions and interruption; the
+fixed-binary cmux screenshot now shows native Claude on the second step with
+the step's title and question visible. Final exit remains pending Jack's check.
+Headless propagation stays lower priority. The earlier findings-only boundary
+is superseded for this repair, without publication or landing authorization.
+
 Evidence and outcome remain separate in the [receipts and repeat recipe](terminal-host-trial/README.md).
 The runner used copied **lf 0.13.9** (revision unknown), not a checkout build.
 LOO-428 also records Jack's lf as 0.13.9; his exact host/shim versions and timings
@@ -36,6 +51,20 @@ checkout, then returned; opening the lf-created Task checkout preserved that pat
 The TUI accepted resize and pane reads retained both Flow steps across scrollback.
 Color/visual quality, attention-list behavior, notifications and branch display
 remain unverified. No host worktree operation or status injection was used.
+
+**Later native herdr trial.** Jack manually started the fixed-binary Flow in
+herdr inside a separate Ghostty window. Its API recognized Claude and reported
+working on the second native step, with the correct cwd and Claude Code title.
+Jack reported sound when the agent responds and judged herdr to be working as
+designed; the precise sound source is unconfirmed. Jack subsequently confirmed
+final shell return and the background structured-question scenario: attention
+while another herdr workspace is selected, then clearing after answering. These
+are participant-reported passes; exact labels and timing were not captured.
+Jack also reported the resize/scrollback scenario working, with the unsent draft
+preserved and submitted once. Native resume remains untested.
+Jack raised a separate Flow UX gap: a deliberate Continue action rather than
+using Ctrl-C to advance. Its design is unresolved. Details and receipt paths
+are in the keyboard-review notes.
 
 **Time.** The first build failed after 26 s because Zig 0.15.2 was incompatible;
 the Zig 0.16.0 attempt timed out at 600 s. Reusing its cache completed the build
@@ -99,12 +128,11 @@ the preserved briefs. The original observations remain attributed to Jack's Octo
 [LOO-421 thread](https://linear.app/loopflow/issue/LOO-421), especially comment
 `592307f3-4f29-4233-93c6-26c298583abf`. Filing does not establish a fix or completion.
 
-**Keyboard checks:** in dedicated cmux/Ghostty workspaces, run a standalone skill,
-taskless conversation and two-step Flow; exercise fresh disposable Task checkout
+**Remaining keyboard checks:** native resume, standalone Ghostty control and
+cmux final Flow exit; exercise fresh disposable Task checkout
 and standalone publication. Record exact versions/shims, elapsed time, working,
 input-needed, return and exit; attention while unfocused and clearing on return;
 colors, resize, scrollback and retained input. Compare provider name, lf Session/Task,
 terminal title and host label for fresh/native-resumed/lf/Task-bound launches before
-and after rename. Real signed-in herdr needs the same state/attention checks and a
-successful Task Flow. LOO-425 already supplies cmux Task execution and in-Flow
+and after rename. Real signed-in herdr still needs a successful Task Flow. LOO-425 already supplies cmux Task execution and in-Flow
 publication; it need not be repeated just to populate this matrix.

@@ -6,26 +6,27 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart's LOO-421 direction: other tools use lf; Flow → Task → Wave, Desktop
-optional. Isolated automated trials/builds only; no live cmux, credentials,
-accounts or lifted code. Stop at findings; Jack required continuing past timeout.
+Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
+Jack starts real providers in dedicated windows. No host code is lifted.
 
-Herdr built; panes/PTYs passed synthetic skill, conversation and taskless Flow.
-Fresh Tasks stop at Linear configuration; seeded Tasks at managed accounts.
-Expected refusal is not adoption. Installed lf 0.13.9's revision is unknown;
-checkout fixes cannot rebut Jack's release observations.
+Herdr/PTY fixtures passed taskless paths. Fresh Tasks require Linear; seeded Tasks
+accounts: refusal is not adoption. Original lf
+0.13.9's revision is unknown; source fixes cannot rebut release reports.
+Owners: LOO-422 status/titles, LOO-428 launch/Flow noise, LOO-423 account/polish,
+LOO-406 no-Linear planning; LOO-429 prompt placement overlaps 428's transport.
 
-Herdr's direct/lf title probes follow OSC 2; workspace/tab stay repo/1.
-Claude-named fixtures gain recognition, input/return stays unknown. Fresh planning:
-LOO-422 status and Jack's explicit title assignment; LOO-428 launch failures/Flow
-output; LOO-423 polish plus account guidance/retry noise; LOO-406 no-Linear planning.
+Jack prioritizes native interaction. His trial exposed forced batch Flow steps
+(introduced #1283); this branch forwards mode through skills and Task launches.
+28 Flow tests pass. Jack saw native step two in cmux and confirmed herdr's Flow,
+background question/clearing and resize/input trials. Successful provider exit
+advances; a deliberate Continue/Stop action remains unresolved. Native resume
+and herdr Task publication remain unproven. No host integration was added.
 
-Native resume's **Loopflow operating guide** is one observation repeated three
-times; first-content naming remains Jack's hypothesis. Concurrent keyboard-review
-notes record Jack prioritizing interactive Sessions, a small cmux conversation
-working, and question/clearing screenshots. Those do not resolve the original
-Task launch failures or exact title source. [Findings](../../docs/reviews/terminal-host-trial.md)
-retain receipts, owners and remaining checks. No external-progress proof.
+Native resume's **Loopflow operating guide** is one repeated observation;
+first-content naming stays a hypothesis. Preserve native hooks/titles before
+adding outer Flow metadata that could obscure attention. Jack authorized landing
+the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../docs/reviews/terminal-host-trial.md)
+preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 

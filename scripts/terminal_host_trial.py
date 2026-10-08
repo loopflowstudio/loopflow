@@ -430,9 +430,8 @@ class _Trial:
         return receipt
 
     def _scenario(
-        self, host: str, name: str, args: list[str], *, cwd: Path | None = None, reply: bool = False
+        self, host: str, name: str, argv: list[str], *, cwd: Path | None = None, reply: bool = False
     ) -> dict:
-        argv = [str(self.bin / "lf"), *args]
         run = self._run_in_herdr if host == "herdr" else self._run
         try:
             receipt = run(name, argv, cwd=cwd, reply=reply)
@@ -572,9 +571,7 @@ class _Trial:
             ("title-claude", [str(self.bin / "claude")]),
             ("title-lf", [str(self.bin / "lf"), "-m", "claude", "trial-one"]),
         ):
-            receipt = self._run_in_herdr(name, argv, reply=True)
-            receipt["outcome"] = _outcome(receipt)
-            _json(self.output / f"{name}.json", receipt)
+            receipt = self._scenario("herdr", name, argv, reply=True)
             if receipt["outcome"] == "failure":
                 raise RuntimeError(f"{name}: title observation failed")
 
@@ -1049,7 +1046,9 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                 ):
                     if name == "skill":
                         summary["first_command_seconds"] = round(time.monotonic() - started, 3)
-                    receipt = trial._scenario(host, name, argv, reply=reply)
+                    receipt = trial._scenario(
+                        host, name, [str(trial.bin / "lf"), *argv], reply=reply
+                    )
                     if name == "skill" and receipt["first_useful_fixture_seconds"] is not None:
                         summary["first_useful_fixture_seconds"] = round(
                             summary["first_command_seconds"]
@@ -1069,7 +1068,9 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                     ("task-flow", ["-b", "-m", "claude", "task", "run", "TRIAL-1", "trial"]),
                     ("checkout-publish", ["pr", "publish", "--title", "Synthetic trial"]),
                 ):
-                    receipt = trial._scenario(host, name, argv, cwd=checkout)
+                    receipt = trial._scenario(
+                        host, name, [str(trial.bin / "lf"), *argv], cwd=checkout
+                    )
                     if receipt["outcome"] == "failure":
                         summary["errors"].append(name + ": unexpected CLI result")
                     trial._inspect(name)

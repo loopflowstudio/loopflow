@@ -99,7 +99,10 @@ The implementation review caught a missing Task binding on checkout publication,
 a cleanup field that ignored wait errors, and a missing-executable exception that
 could escape receipt capture; all were corrected. Negative verdict checks reject
 reordered/missing Flow steps, absent input return and unexpected CLI failures.
-Final-02 passes both hosts; final-01 additionally passes forced timeout/overflow
+The later compression routes title probes through the same scenario function,
+so a missing host socket also retains a failure receipt. The recorded post-change
+both-host/title run and 19 verdict checks passed. Final-02 passes both hosts;
+final-01 additionally passes forced timeout/overflow
 and separate-child cleanup. Formatting and static checks pass.
 
 Fixture process detection changed between samples: one early run had no detected
@@ -186,3 +189,85 @@ message generated “Loopflow operating guide.” Exact title-source and precede
 attribution on Jack's installation is blocked by the no-live-cmux/no-provider-history
 boundary; the findings page gives the permitted next keyboard checks. No host code
 or configuration was imported, and no integration was installed.
+
+## Native keyboard trials
+
+[Jack Heart's keyboard trial record](keyboard.md) preserves screenshots, fixed-binary
+identity, scenario feedback and the remaining proof. The fixed binary uses
+`-a claude`; the original installed-binary fixture receipts use `-m claude`.
+
+## Wrapper compatibility investigation · 2026-10-07
+
+
+Jack Heart requested studying what hosts require from an agent wrapper. Read-only
+inspection covered the installed cmux 0.65.0 wrapper resources, pinned herdr
+`4dc23bb15d4a2fd2c093abfb509f903c3015bf56`, and official public interfaces.
+The following are behavioral contracts and proposed lf requirements, not copied
+implementation, newly authorized integrations, or completed live acceptance:
+
+- Preserve the native provider terminal, executable discovery and per-pane host
+  environment. cmux's PATH wrappers attach lifecycle/attention hooks. Herdr can
+  recognize a provider within the foreground job and use its live terminal UI.
+  The restored interactive Flow path supports this; replacing the native UI with
+  rendered stream output changes the available evidence.
+- The installed cmux Claude wrapper supports attention for structured questions
+  and plan/permission decisions, plus clearing when work continues. Ordinary
+  prose questions carry no equivalent guaranteed signal. This explains the
+  different screenshot states without requiring text heuristics in lf.
+- Keep native agent attention and lf's Task/Flow context distinct. A separately
+  keyed cmux status can describe the Task and step without replacing provider
+  state. Herdr's explicit reports take precedence over screen detection, so a
+  coarse outer-Flow report could hide a provider's actual question.
+- Do not continually overwrite provider terminal titles: herdr can use activity
+  in a native title as state evidence. cmux also has optional automatic naming.
+  Prefer separately owned Task/step metadata; the exact title source in Jack's
+  earlier resume remains unproven.
+- Herdr's public self-reporting interface accepts state, Session/resume identity,
+  and release. Reports must address the owning pane and preserve ordering. A
+  future lf integration should resume the lf Session with its context, without
+  implying that a stopped Flow resumes. Publish changed Session identity at a
+  step handoff and clear only lf-owned metadata when its owner exits.
+- Hooked native launches, headless CLI invocations and app-server launches are
+  different integration paths. The installed cmux Codex wrapper excludes
+  app-server from session hook injection. Preserve large-prompt support and
+  composable flags/settings while keeping wrappers on PATH; bypassing wrappers
+  to avoid launch errors would lose the host integration under investigation.
+
+References: [cmux wrapper](https://github.com/manaflow-ai/cmux/blob/main/Resources/bin/cmux-claude-wrapper),
+[Codex wrapper](https://github.com/manaflow-ai/cmux/blob/main/Resources/bin/cmux-codex-wrapper),
+[cmux metadata API](https://cmux.com/docs/api#sidebar-metadata-commands),
+[herdr detection](https://herdr.dev/docs/agents/),
+[herdr reporting interface](https://herdr.dev/docs/add-herdr-support/).
+Upstream main/docs can differ from the inspected installed/pinned versions.
+No additional real-account trial or host mutation was performed for this research.
+
+### Relationship to LOO-428 and LOO-429
+
+Jack Heart requested this comparison. Supported Task status reads returned
+available planning without stale/error flags: LOO-428 revision
+`2026-10-08T04:51:53.084Z`, LOO-429 revision `2026-10-08T05:32:50.949Z`.
+
+- LOO-421 owns the host trial and the specifically authorized interactive Flow
+  mode regression fix. It has not repaired duplicate Codex flags, large native
+  prompts, default log noise, or implemented host state reporting.
+- LOO-428 owns compatible launches with wrappers retained, large prompt
+  transport, and readable Flow output. The small native Claude demo does not
+  establish either original failing Task launch's acceptance.
+- LOO-429 owns prompt placement: proposed curated instructions/goal/memory in
+  harness instruction files, uncontrolled context in the user message, plus a
+  single rejection fallback and real large-context cmux proof. It explicitly
+  excludes stdin for interactive input and investigates the resulting titles.
+- Their prompt work overlaps. Proposed coordination: LOO-429 defines assembly
+  placement; LOO-428 consumes it for transport and keeps duplicate-flag/log work.
+  Moving curated context alone cannot bound a large scratch/diff user argument.
+  Falling back to the old placement must not restore the same argument-limit
+  failure. These are design consequences to reconcile, not accepted scope edits.
+- Recognition, attention, titles, resume identity and outer Flow metadata from
+  the host-interface investigation mostly inform LOO-422. Preserve native host
+  integration while fixing launches; do not add a competing status source merely
+  because small interactive launches now work.
+
+Final delivery sanity: [PTY self-test summary](landing-smoke.json) records a fresh
+pass of the final runner against the pinned installed lf (zero errors). Python
+compilation passed. The unchanged Rust repair retains its 28 passing Flow tests
+and Clippy pass; CI owns the wider matrix.

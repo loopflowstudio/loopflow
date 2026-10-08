@@ -1305,14 +1305,14 @@ fn run() -> anyhow::Result<()> {
             .expect("failed to set Ctrl+C handler");
         journal::admit_process(&std::env::current_dir()?, &raw_args);
         loopflow::lf::commands::machine::validate_expected_machine_process()?;
+        let command = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
         return loopflow::lf::commands::ssh::run(
             remote
                 .machine
                 .as_deref()
                 .expect("remote invocation has a machine"),
-            &remote.secret,
             remote.forward_agent,
-            &command,
+            &command[1..],
         );
     }
 
@@ -1433,22 +1433,19 @@ fn run() -> anyhow::Result<()> {
             .or(cli.shared.then_some(false))
             .map(loopflow::provider_account::activation::isolation_env)
             .map(|(name, mode)| EnvGuard::set(name, mode));
-        let account_selection = loopflow::provider_account::lease::AccountSelection::from_flags(
-            &cli.account,
-            &cli.only_account,
-        )?;
+        let account_selection =
+            loopflow::provider_account::selection::AccountSelection::from_flags(
+                &cli.account,
+                &cli.only_account,
+            )?;
         let _account_selection = if !account_selection.is_default() {
             Some(EnvGuard::set(
-                loopflow::provider_account::lease::ACCOUNT_SELECTION_ENV,
+                loopflow::provider_account::selection::ACCOUNT_SELECTION_ENV,
                 account_selection.env_value()?,
             ))
         } else {
             None
         };
-        if cli.account_lease_probe {
-            return loopflow::provider_account::lease::probe_forwarded_authority()
-                .map_err(anyhow::Error::from);
-        }
         debug!(batch = cli.batch, "parsed CLI arguments");
 
         dispatch(cli, &args)

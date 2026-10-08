@@ -572,7 +572,7 @@ struct OAuthErrorResponse {
 /// Once Linear returns a refresh token, `refresh_pm_oauth_token` renews headlessly
 /// with the stored PKCE client ID.
 #[derive(Debug, Clone)]
-struct LinearOAuthBroker {
+pub(crate) struct LinearOAuthBroker {
     completed_token: Arc<Mutex<Option<ProviderToken>>>,
 }
 
@@ -591,7 +591,7 @@ struct LinearOAuthTokenResponse {
 }
 
 impl LinearOAuthBroker {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             completed_token: Arc::new(Mutex::new(None)),
         }
@@ -2865,10 +2865,6 @@ pub(crate) fn jwt_claims(token: &str) -> Option<serde_json::Value> {
 async fn refresh_codex_access_token(codex_home: &Path) -> Result<(), AuthError> {
     let broker = CodexAuthBroker::for_profile(codex_home.to_path_buf());
     broker.refresh_access_token().await
-}
-
-pub(crate) fn extract_codex_access_token(home_dir: &Path) -> Option<String> {
-    extract_codex_token(home_dir).map(|token| token.access_token)
 }
 
 /// Canonical key under which OpenCode stores credentials in auth.json.

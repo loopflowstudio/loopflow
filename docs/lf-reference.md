@@ -13,7 +13,7 @@ are internal process boundaries and are marked below.
 ## Selection and output
 
 `--machine <label-or-id>` runs the command in the saved remote repository.
-`--secret` and `--forward-agent` require `--machine`.
+`--forward-agent` requires `--machine`.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
@@ -56,7 +56,6 @@ Open Loopflow or run its CLI
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
 | `--shared` | Run in the provider's ordinary home despite an `isolate: true` default Default: false. |
-| `--__account-lease-probe` | Internal SSH compatibility and broker-connectivity probe Default: false. Internal. |
 | `--yolo` | Skip permission prompts Default: false. |
 | `--interactive / -i` | Run interactively Default: false. |
 | `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
@@ -67,7 +66,6 @@ Open Loopflow or run its CLI
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--max-turns` | Maximum agent turns for this invocation |
 | `--machine` | Run the command on this saved machine in its repository |
-| `--secret` | Resolve a named Doppler secret locally and forward its value (repeatable) |
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
@@ -605,7 +603,7 @@ Refresh account access and capacity, or manage logins and routing
 | Argument | What it does |
 |---|---|
 | `<provider>` | Limit observations to one provider |
-| `--cached` | Inspect cached evidence without contacting providers or the origin broker Default: false. |
+| `--cached` | Inspect cached evidence without contacting providers Default: false. |
 | `--details` | Include credential sources, browser choices, and timestamps Default: false. |
 | `--json` | Emit the account overview as one JSON document Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
@@ -1053,6 +1051,44 @@ Name and connect to machines
 | Argument | What it does |
 |---|---|
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine connect
+
+Install a separate login on an added machine using this laptop's browser
+
+| Argument | What it does |
+|---|---|
+| `<target>` | target |
+| `<provider>` | provider |
+| `<email>` | email |
+| `--chrome-profile` | chrome profile |
+| `--help / -h` | Print help |
+
+## lf machine credentials
+
+Inspect or receive a machine credential (credential bytes use stdin only)
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
+## lf machine credentials inspect
+
+Report whether this account is installed, without logging in
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
+| `<login>` | login |
+| `--help / -h` | Print help |
+
+## lf machine credentials receive
+
+Receive a fresh login as JSON on stdin; preserve existing accounts
+
+| Argument | What it does |
+|---|---|
 | `--help / -h` | Print help |
 
 ## lf machine id

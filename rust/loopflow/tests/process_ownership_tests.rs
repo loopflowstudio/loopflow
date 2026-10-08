@@ -250,7 +250,7 @@ fn parser_returns_exact_status_without_admitting_an_early_store() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
-        assert!(String::from_utf8_lossy(&output.stderr)
+        assert!(!String::from_utf8_lossy(&output.stderr)
             .contains("Process history unavailable: no compatible process ledger"));
         assert_eq!(
             std::fs::read(&database).unwrap(),
@@ -259,6 +259,7 @@ fn parser_returns_exact_status_without_admitting_an_early_store() {
         assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 1);
         if code == 0 {
             assert!(!output.stdout.is_empty(), "{output:?}");
+            assert!(output.stderr.is_empty(), "{output:?}");
         } else {
             assert!(String::from_utf8_lossy(&output.stderr).contains("unexpected argument"));
         }

@@ -93,15 +93,35 @@ available capture tool or states the limit. Desktop's
 [SnapshotService](../swift/LoopflowMac/Services/SnapshotService.swift) renders
 its NSView directly. No installation, schedule mutation or app launch ran.
 
-Observed rough edge: machine/self/open `--help` printed
+Initial observation, repaired below: machine/self/open `--help` printed
 `Process history unavailable: no compatible process ledger for this process`
 on stderr. Repeating with an absent LF_HOME reproduced it, with exit 0 and no
-runtime directory created. The command-layout outcome passes; warning-free
-help in a fresh directory does not. Cause and whether this predates the change
-remain uninvestigated; a focused help-dispatch follow-up is proposed, not agreed.
+runtime directory created. The command-layout outcome passed, but warning-free
+help in a fresh directory failed at that revision.
 
 Jack Heart's supplied decisions remain the accepted design. No new human
-observation, acceptance or design change was recorded during this demo.
-Recommended next action: include this evidence and the help diagnostic in PR
-review, retaining the existing publication-only boundary. Installation proofs
-remain with isolated gate/CI; this demonstration grants no landing approval.
+acceptance was recorded during the initial demo.
+
+### Help warning repair
+
+Jack Heart requested fixing the reported warning before PR review. Process
+cleanup warned whenever optional early observation found no compatible ledger.
+The diagnostic now belongs to ordinary process admission; optional observation
+still records help and parser exits when a compatible ledger exists and retains
+debug diagnostics when it cannot. No command-name exception list was added.
+
+Replayed help --all, machine/self/open/install/doctor/user --help and --version
+with an absent disposable LF_HOME: every command exited 0 with empty stderr,
+and no runtime directory was created. An ordinary config user command against
+an incompatible disposable store retained its specific ledger-failure warning
+and preserved the database bytes. The initial probe expected the generic warning;
+the actual existing diagnostic was `ledger unavailable — Processes are not being
+recorded`, and the corrected probe passed without another code change.
+
+Checks: `cargo test -p loopflow --test cli_discovery --test process_ownership_tests --no-run` built; compiled cli_discovery plus process_ownership_tests filters `parser_returns_exact_status_without_admitting_an_early_store` and `early_commands_record_exact_exits_without_initializing_or_migrating` through `scripts/test_network.py` — 22 passed; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` passed.
+
+Review confirmed the warning stays at admission, compatible-ledger history is
+unchanged, and successful discovery asserts empty stderr. Recommended next
+action: publish for PR review with this repaired evidence. Installation proofs
+remain with isolated gate/CI; app launch was not exercised, and landing remains
+unauthorized. No further human acceptance is inferred from this repair.

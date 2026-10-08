@@ -278,7 +278,6 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
             .expect("receipt cost mutex poisoned");
         Some(cost)
     } else {
-        eprintln!("Process history unavailable: no compatible process ledger for this process");
         None
     };
     crate::ops::wt_timing::finish(result.is_ok(), receipts);
@@ -361,6 +360,9 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
             ..LfEventFields::default()
         },
     );
+    if current_context().is_none() {
+        eprintln!("Process history unavailable: no compatible process ledger for this process");
+    }
 }
 
 fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {

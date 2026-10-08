@@ -83,6 +83,7 @@ struct PlanningState {
     fail_issue_read_after: Option<usize>,
     fail_completion: bool,
     lose_completion: bool,
+    reopen_during_completion: bool,
     lose_comment: bool,
     completion_writes: usize,
     trashed: bool,
@@ -242,6 +243,15 @@ async fn planning_graphql(
     } else if query.contains("query CanceledWorkflowStates") {
         json!({"workflowStates":{"nodes":[{"id":"canceled"}]}})
     } else if query.contains("query CompletedWorkflowStates") {
+        if state.reopen_during_completion {
+            state.reopen_during_completion = false;
+            // Another Linear client completes and explicitly reopens after our
+            // ownership read, before our unconditional issueUpdate arrives.
+            state.issues[0]["state"] = json!({"type":"completed"});
+            mark_issue_updated(&mut state.issues[0]);
+            state.issues[0]["state"] = json!({"type":"unstarted"});
+            mark_issue_updated(&mut state.issues[0]);
+        }
         json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
     } else if query.contains("mutation SetIssueState") {
         if state.fail_completion {
@@ -1361,6 +1371,33 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
             );
         });
         drop(sync);
+    });
+}
+
+#[test]
+fn task_completion_preserves_linear_reopening_during_delivery() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_end(
+            repo,
+            task.id.as_str(),
+            Some("Delivered locally"),
+            &Default::default(),
+        )
+        .unwrap();
+        runtime.block_on(async {
+            state.lock().await.reopen_during_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert!(!provider.reopen_during_completion);
+            let retained = fixture.store.sqlite.pending_task_state(&task.id).unwrap();
+            assert_eq!(
+                (&provider.issues[0]["state"]["type"], retained.is_some()),
+                (&json!("unstarted"), true),
+                "preserve Linear reopening and retain the concurrent local decision"
+            );
+        });
     });
 }
 

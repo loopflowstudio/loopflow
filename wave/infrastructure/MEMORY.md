@@ -21,22 +21,26 @@ delayed completion cannot overwrite explicit reopening. Machine clocks prove no 
 LOO-412's transport, scope and active-owner choices remain under review; no restart
 or replication here is authorized.
 
-Comments and completion/reopening save locally before provider I/O. Foreground
-connections independently acquire selected-Task comments and repository inventory,
-and deliver mapped Tasks' effects. Receipts now own writeback status; the compression
-diff removes its duplicate Task column and retains legacy pending decisions without
+Comments and completion/reopening save before provider I/O. Foreground connections
+independently acquire selected comments/inventory and deliver mapped Tasks' effects.
+Receipts replace the duplicate writeback column, preserving legacy decisions without
 inventing Workflow history. Effect locks exclude neither saves nor inbound reads.
-Acknowledgements settle only their captured decision; `lf task sync --resolve
-local|linear` supersedes its identity while retaining conflict evidence.
+Acknowledgements cannot settle newer decisions; `lf task sync --resolve local|linear`
+supersedes identity while retaining conflict evidence.
 
-Ownership deletion, field writes, offline abandonment, comment resolution and
-unmapped export/presentation remain unfinished. Connected abandonment still needs
-Linear before recording its final local outcome. Read-before-write does not fence
-concurrent provider changes. Fixtures cover rollback, lost replies and late replies;
-watch reconnect proves retained local data, not provider recovery. Direct inventory
-tests prove no composed native/Flow or Desktop completion presentation. Release's
-operation-entry lesson applies; pending display and helper passes prove no installed
-outcome. No webhook receiver was found.
+October 8's enabled regression `task_completion_preserves_linear_reopening_during_delivery`
+fails: between ownership read and unconditional mutation, Linear reopening is
+overwritten; matching readback falsely settles delivery. The published Linear schema
+at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
+Dependent writer expansion needs a verified provider fence or contract review;
+extra reads and post-write observation cannot prevent that overwrite. Acceptance
+is unchanged. The schema does accept UUIDs for issue/Project creation.
+
+Ownership deletion, fields, offline abandonment, comment resolution and unmapped
+export remain unfinished. Abandonment is provider-first. Rollback/lost/late-reply
+fixtures pass; watcher reconnect proves local retention only. Inventory helpers and
+pending display prove no composed native/Flow/Desktop or installed outcome; Release's
+operation-entry lesson applies. No webhook receiver was found.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -214,21 +218,13 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Project configuration and review direction (2026-10-05)
 
-Jack Heart resolved LOO-366's shared local Project binding and one-time cached-name
-cutover on October 5; the accepted constraints and evidence remain under
+Jack Heart's LOO-366 binding/name decisions and unfinished acceptance remain under
 [Optional chapters and Task workflows](#optional-chapters-and-task-workflows-2026-10-02).
-Both decisions were delivered to LOO-366, and its saved Flow resumed. Source
-implementation and configured acceptance remain unfinished; neither approval
-establishes readiness. Earlier detail remains at
-`c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`.
-
-The Infrastructure Project recommends `code`; KRs/targets and reviews remain.
-Accepted review and v0.13.3 installation: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-
-LOO-326 completed on October 6 through installed v0.13.5's exact historical-Exec
-acceptance; its unknown outcome and checkout remain intact. Exact evidence is
-retained under Transient recovery. LOO-370 also completed under the opaque-root
-decision, without a physical capture migration.
+Infrastructure recommends `code`; KRs/targets and reviews remain. Dated review,
+installation and LOO-326/370 completion receipts are preserved at
+`3d5f6c7ee:wave/infrastructure/MEMORY.md` under this heading and their current
+recovery/capture sections. Completion preserved unknown outcomes and checkout;
+it established no physical capture migration.
 LOO-367's installed retry recorded a recovery boot witness (Session event 819671)
 but stopped again on the same boot. A later authorized restart can establish
 old-provider death; no restart or successful Flow continuation is claimed.

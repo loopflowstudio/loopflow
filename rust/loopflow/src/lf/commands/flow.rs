@@ -103,9 +103,6 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// ended.
 pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
     let mut args = cli.step_args();
-    if !cli.batch {
-        args.retain(|arg| arg != "--batch");
-    }
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
@@ -631,14 +628,14 @@ impl SkillExecutor for &Driver<'_> {
             step_cli.steers_after = seen.max(step_cli.steers_after);
         }
         // The step looks its skill up by name. An agent the Flow names for
-        // this occurrence is the one option that travels, as `--model`.
-        if step_cli.model.is_none() {
+        // this occurrence is the one option that travels, as `--agent`.
+        if step_cli.agent.is_none() {
             let authored = crate::engine::flow::load_skill(name, self.cwd).ok();
             if authored.and_then(|authored| authored.agent) != skill.skill.agent {
-                step_cli.model = skill.skill.agent.clone();
+                step_cli.agent = skill.skill.agent.clone();
             }
         }
-        // The step is the command a person would type: `lf -b skill <name> [message]`.
+        // Each ordinary skill keeps the caller's mode and inherited terminal.
         let mut args = step_cli.step_args();
         args.extend(["skill".to_owned(), name.clone()]);
         if !message.trim().is_empty() {

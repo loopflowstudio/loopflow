@@ -560,9 +560,7 @@ fn run_headless_prompt(
     effective_system: &str,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
-    // Skill-launched skills clear the system prompt (the seed carries everything
-    // in the task prompt). Don't write or pass a context file in that case: codex
-    // treats an empty `model_instructions_file` as an error.
+    // Codex rejects an empty `model_instructions_file`.
     let context_file_start = Instant::now();
     let context_file = if effective_system.trim().is_empty() {
         None

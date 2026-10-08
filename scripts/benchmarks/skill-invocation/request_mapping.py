@@ -37,7 +37,7 @@ def _assess(requests: list[dict], skill: Path, marker: str, context: str, argume
         "checks": {
             "single_model_request": len(requests) == 1,
             "context_user_only": bool(locations)
-            and all(roles and set(roles) == {"user"} for roles in locations),
+            and all(set(roles) == {"user"} for roles in locations),
             "selected_source": bool(users)
             and all(
                 any(f"Base directory for this skill: {skill.parent}\n" in text for text in texts)
@@ -194,35 +194,36 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                 digest = hashlib.file_digest(executable, "sha256").hexdigest()
             print(json.dumps({"version": version, "executable_sha256": digest}), flush=True)
             base = _claude_command(claude) + ["--model", model]
-            for index, argument in enumerate(("alpha", "beta")):
-                command = base + ["--session-id" if index == 0 else "--resume", session]
-                messages = [_user_message([f"/lf-mapping {argument}"])]
-                if index == 0:
-                    if channel == "hook":
-                        command += ["--settings", _hook_settings("cat " + shlex.quote(str(hook)))]
-                    else:
-                        context_message = _user_message([context_marker])
-                        context_message["shouldQuery"] = False
-                        if channel == "staged":
-                            seeded = _run(command, workspace, env, [context_message])
-                            print(
-                                json.dumps(
-                                    {
-                                        "case": "seed",
-                                        "exit": seeded.returncode,
-                                        "requests": len(requests),
-                                    }
-                                ),
-                                flush=True,
-                            )
-                            passed &= seeded.returncode == 0 and not requests
-                            command = base + ["--resume", session]
-                        else:
-                            messages.insert(0, context_message)
+            initial = base + ["--session-id", session]
+            resume = base + ["--resume", session]
+            context_messages = []
+            if channel == "hook":
+                initial += ["--settings", _hook_settings("cat " + shlex.quote(str(hook)))]
+            else:
+                context_message = _user_message([context_marker])
+                context_message["shouldQuery"] = False
+                if channel == "staged":
+                    seeded = _run(initial, workspace, env, [context_message])
+                    print(
+                        json.dumps(
+                            {"case": "seed", "exit": seeded.returncode, "requests": len(requests)}
+                        ),
+                        flush=True,
+                    )
+                    passed &= seeded.returncode == 0 and not requests
+                    initial = resume
                 else:
-                    hook.unlink()
+                    context_messages.append(context_message)
+
+            for case, argument, command, messages in [
+                ("initial", "alpha", initial, context_messages),
+                ("resumed", "beta", resume, []),
+            ]:
                 start = len(requests)
-                result = _run(command, workspace, env, messages)
+                result = _run(
+                    command, workspace, env, [*messages, _user_message([f"/lf-mapping {argument}"])]
+                )
+                hook.unlink(missing_ok=True)
                 _, native_arguments = _read_output(_output_events(result.stdout))
                 observation = _assess(
                     requests[start:], skill, skill_marker, context_marker, argument
@@ -234,7 +235,7 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                 print(
                     json.dumps(
                         {
-                            "case": "initial" if index == 0 else "resumed",
+                            "case": case,
                             "model": model,
                             "channel": channel,
                             **observation,

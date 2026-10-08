@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ from codex_request_mapping import (
     _invocation_receipts,
     _last_user_texts,
     _skill_paths,
+    _wait_for_inputs,
 )
 
 
@@ -55,6 +57,40 @@ def test_interrupted_input_is_retained_without_becoming_success():
     message = {"type": "userMessage", "clientId": "capture", "content": []}
     turn = {"id": "turn", "status": "interrupted", "items": [message]}
     assert _invocation_receipts({"turns": [turn]}, "capture") == [(turn, message)]
+
+
+@pytest.mark.parametrize("status", ["completed", "interrupted"])
+def test_input_wait_requires_unique_receipts_and_each_expected_outcome(status: str) -> None:
+    first = {"type": "userMessage", "clientId": "first", "content": []}
+    second = {"type": "userMessage", "clientId": "second", "content": []}
+    finished = {
+        "turns": [
+            {"id": "first-turn", "status": status, "items": [first]},
+            {"id": "second-turn", "status": "completed", "items": [second]},
+        ]
+    }
+    histories = iter(
+        [
+            {"turns": []},
+            {"turns": [{"id": "duplicate", "status": status, "items": [first, first, second]}]},
+            {
+                "turns": [
+                    finished["turns"][0],
+                    {"id": "second-turn", "status": "inProgress", "items": [second]},
+                ]
+            },
+            finished,
+        ]
+    )
+
+    async def read_thread() -> dict:
+        return next(histories)
+
+    async def recover() -> dict:
+        async with asyncio.timeout(1):
+            return await _wait_for_inputs(read_thread, {"first": status, "second": "completed"})
+
+    assert asyncio.run(recover()) == finished
 
 
 def test_replayed_skill_history_is_not_another_expansion():

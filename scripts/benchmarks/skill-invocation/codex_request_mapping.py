@@ -13,6 +13,7 @@ import signal
 import tempfile
 import threading
 import uuid
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -279,29 +280,27 @@ async def _pending_queue_recovery(
         checks["pending_bytes_survive_engine_death"] = pending["data"] == before["data"]
         await _request(process, "thread/resume", {"threadId": thread_id})
         pending = await _request(process, "thread/queue/list", {"threadId": thread_id})
-        history = await _request(
-            process, "thread/read", {"threadId": thread_id, "includeTurns": True}
-        )
-        receipts = _invocation_receipts(history["thread"], capture)
-        second_receipts = _invocation_receipts(history["thread"], second_capture)
+        history = {"turns": []}
+
+        async def read_thread() -> dict:
+            nonlocal history
+            response = await _request(
+                process, "thread/read", {"threadId": thread_id, "includeTurns": True}
+            )
+            history = response["thread"]
+            return history
+
         # Native resume consumes pending input asynchronously. An empty queue
         # before its userMessage appears is not evidence that the input was lost.
         try:
             async with asyncio.timeout(15):
-                while (
-                    len(receipts) != 1
-                    or len(second_receipts) != 1
-                    or receipts[0][0]["status"] != "completed"
-                    or second_receipts[0][0]["status"] != "completed"
-                ):
-                    await asyncio.sleep(0.05)
-                    history = await _request(
-                        process, "thread/read", {"threadId": thread_id, "includeTurns": True}
-                    )
-                    receipts = _invocation_receipts(history["thread"], capture)
-                    second_receipts = _invocation_receipts(history["thread"], second_capture)
+                history = await _wait_for_inputs(
+                    read_thread, {capture: "completed", second_capture: "completed"}
+                )
         except TimeoutError:
             print(json.dumps({"pending_recovery": pending, "history": history}), flush=True)
+        receipts = _invocation_receipts(history, capture)
+        second_receipts = _invocation_receipts(history, second_capture)
         checks["accepted_input_recoverable_without_resubmission"] = len(receipts) == 1
         checks["recovered_input_completed_once"] = (
             len(receipts) == 1 and receipts[0][0]["status"] == "completed"
@@ -317,9 +316,9 @@ async def _pending_queue_recovery(
             and second_receipts[0][1]["content"] == before["data"][1]["input"]
         )
         checks["interrupted_turn_history_preserved"] = (
-            len(history["thread"]["turns"]) == 3
-            and history["thread"]["turns"][0]["id"] == active_before["turns"][0]["id"]
-            and history["thread"]["turns"][0]["items"][: len(active_before["turns"][0]["items"])]
+            len(history["turns"]) == 3
+            and history["turns"][0]["id"] == active_before["turns"][0]["id"]
+            and history["turns"][0]["items"][: len(active_before["turns"][0]["items"])]
             == active_before["turns"][0]["items"]
         )
         pending = await _request(process, "thread/queue/list", {"threadId": thread_id})
@@ -382,6 +381,25 @@ def _invocation_receipts(thread: dict, capture: str) -> list[tuple[dict, dict]]:
     ]
 
 
+async def _wait_for_inputs(
+    read_thread: Callable[[], Awaitable[dict]],
+    expected: dict[str, str],
+    terminal: _Terminal | None = None,
+) -> dict:
+    while True:
+        history = await read_thread()
+        for capture, status in expected.items():
+            receipts = _invocation_receipts(history, capture)
+            if len(receipts) != 1 or receipts[0][0]["status"] != status:
+                break
+        else:
+            return history
+        if terminal:
+            await asyncio.to_thread(terminal.pump, 0.1)
+        else:
+            await asyncio.sleep(0.05)
+
+
 async def _consume_queued_input(
     socket,
     thread_id: str,
@@ -420,15 +438,10 @@ async def _consume_queued_input(
     checks["busy_start_preserves_queue"] = retained["data"] == queue["data"]
     release.set()
     async with asyncio.timeout(30):
-        while True:
-            if terminal:
-                await asyncio.to_thread(terminal.pump, 0.1)
-            else:
-                await asyncio.sleep(0.1)
-            history = await _read_thread(socket, thread_id)
-            matches = _invocation_receipts(history, capture)
-            if len(matches) == 1 and matches[0][0]["status"] == "completed":
-                break
+        history = await _wait_for_inputs(
+            lambda: _read_thread(socket, thread_id), {capture: "completed"}, terminal
+        )
+    matches = _invocation_receipts(history, capture)
     retained = await _ws_request(socket, "thread/queue/list", {"threadId": thread_id})
     checks.update(
         queue_consumed=retained["data"] == [],
@@ -651,12 +664,9 @@ async def _boundary_delivery(
             release.set()
             expected_status = "interrupted" if interrupt else "completed"
             async with asyncio.timeout(15):
-                while True:
-                    history = await _read_thread(successor, thread_id)
-                    matches = _invocation_receipts(history, capture)
-                    if len(matches) == 1 and matches[0][0]["status"] == expected_status:
-                        break
-                    await asyncio.sleep(0.02)
+                history = await _wait_for_inputs(
+                    lambda: _read_thread(successor, thread_id), {capture: expected_status}
+                )
             checks["outcome_without_resubmission"] = True
             checks["expected_turns"] = len(history["turns"]) == (3 if queued else 2)
             if queued:
@@ -1112,48 +1122,20 @@ def main() -> int:
         choices=["original", "alias"],
         help="Probe a skill link while preserving sibling roots and plain invocation",
     )
-    mode.add_argument(
-        "--redelivery",
-        dest="mode",
-        action="store_const",
-        const="redelivery",
-        help="Check duplicate structured steering with an identical RPC id",
-    )
-    mode.add_argument(
-        "--boundary-race",
-        dest="mode",
-        action="store_const",
-        const="boundary-race",
-        help="Start another client's turn between idle observation and native skill delivery",
-    )
-    mode.add_argument(
-        "--queue-race",
-        dest="mode",
-        action="store_const",
-        const="queue-race",
-        help="Probe native queued submission against a competing client",
-    )
-    mode.add_argument(
-        "--queue-headless",
-        dest="mode",
-        action="store_const",
-        const="queue-headless",
-        help="Recover queued input without any attached terminal",
-    )
-    mode.add_argument(
-        "--queue-restart",
-        dest="mode",
-        action="store_const",
-        const="queue-restart",
-        help="Kill the engine with accepted input still queued, then recover without resubmission",
-    )
-    mode.add_argument(
-        "--boundary",
-        dest="mode",
-        action="store_const",
-        const="boundary",
-        help="Lose a native turn reply, cancel its waiter and recover on a new connection",
-    )
+    for name, help_text in [
+        ("redelivery", "Check duplicate structured steering with an identical RPC id"),
+        (
+            "boundary-race",
+            "Start another client's turn between idle observation and skill delivery",
+        ),
+        ("queue-race", "Probe native queued submission against a competing client"),
+        ("queue-headless", "Recover queued input without any attached terminal"),
+        ("queue-restart", "Kill the engine with accepted input still queued, then recover it"),
+        ("boundary", "Lose a native turn reply, cancel its waiter and recover on a new connection"),
+    ]:
+        mode.add_argument(
+            f"--{name}", dest="mode", action="store_const", const=name, help=help_text
+        )
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")

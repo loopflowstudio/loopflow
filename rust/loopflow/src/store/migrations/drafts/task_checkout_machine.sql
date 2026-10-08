@@ -1,4 +1,4 @@
--- depends_on: rename_home_to_machine
+-- depends_on: local_planning
 
 ALTER TABLE tasks ADD COLUMN checkout_machine_id TEXT REFERENCES machines(id);
 

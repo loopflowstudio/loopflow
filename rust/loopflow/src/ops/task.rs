@@ -5916,7 +5916,7 @@ mod tests {
             .find(|row| row.task_id == task.id)
             .unwrap();
         assert_eq!(checkout.machine_id, Some(preparing_machine));
-        assert_eq!(checkout.worktree, task.worktree().unwrap());
+        assert_eq!(&checkout.worktree, task.worktree().unwrap());
     }
 
     #[test]

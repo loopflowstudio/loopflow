@@ -46,7 +46,7 @@ failed on an unbound Initiative.
 command dispositions. Jack corrected scope: identity, repository-window control
 and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
-review. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
+review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
 Shared Work replaces repository pairing; never rewrite a Machine default per
 request. Started Tasks stay on their Machine; inheritance remains open. Placements
@@ -58,8 +58,9 @@ assignment; unknown stays unavailable. Jack selected local operations and Git-re
 Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions, Processes,
 checkouts and control stay local; imported completion cannot move or clean them.
 Preserve pending changes, semi-live comments/completion, causal reopening and
-stable mutation IDs. No real plan publication is authorized. 406/412 writer and
-exchange integration, repository identity and native proof remain unfinished.
+stable mutation IDs. No real plan publication is authorized. Jack authorized stacking
+on 406's committed common writer. Local identity/Desktop work can proceed;
+412 exchange integration still gates cross-machine proof.
 Jack's later decisions (`f027890ab:wave/infrastructure/MEMORY.md`): user-keyed Git
 plans by default, shared plans by explicit opt-in through the same records/APIs.
 A code remote implies neither shared planning nor permission to publish it.

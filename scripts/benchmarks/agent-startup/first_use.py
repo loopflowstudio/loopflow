@@ -1,15 +1,14 @@
 """Measure first launch in fresh dense fixtures, without evicting OS/provider caches."""
 
 import argparse
-import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from fixture import prepare, require_fixture
-from measure import _environment, measure
-from native import _sessions, prepare_session
+from fixture import prepare, read_session_ids, require_fixture
+from measure import build_environment, measure
+from native import prepare_session, record_readiness
 
 
 def main() -> None:
@@ -34,11 +33,7 @@ def main() -> None:
             "sample": sample,
             **result,
         }
-        with (args.output / "numbers.jsonl").open("a") as output:
-            output.write(json.dumps(row) + "\n")
-        print(json.dumps(row), flush=True)
-        if result["status"] != "ready" or result["returncode"] != 0:
-            raise RuntimeError("First-use launch did not reach readiness and exit cleanly")
+        record_readiness(args.output, row)
 
     for i in range(args.samples):
         record(
@@ -48,7 +43,7 @@ def main() -> None:
             measure(
                 [args.provider],
                 args.repo,
-                _environment(seed, None),
+                build_environment(seed, None),
                 args.output / f"direct-{i}",
                 args.provider,
                 trust_fixture=True,
@@ -67,16 +62,16 @@ def main() -> None:
             shutil.copyfile(seed / "startup-fixture.json", home / "startup-fixture.json")
             (home / "config.yaml").write_text(f"agent: {args.provider}\n")
             lf = variants[variant]
-            before = _sessions(home)
+            before = read_session_ids(home)
             result = measure(
                 [str(lf)],
                 args.repo,
-                _environment(home, lf),
+                build_environment(home, lf),
                 args.output / f"bare-{i}-{variant}",
                 args.provider,
             )
             record("bare", variant, i, result)
-            created = _sessions(home) - before
+            created = read_session_ids(home) - before
             if len(created) != 1:
                 raise RuntimeError("Bare launch must create exactly one benchmark Session")
             session = created.pop()
@@ -87,7 +82,7 @@ def main() -> None:
             result = measure(
                 [str(lf), "session", "connect", session],
                 args.repo,
-                _environment(home, lf),
+                build_environment(home, lf),
                 args.output / f"connect-{i}-{variant}",
                 args.provider,
             )

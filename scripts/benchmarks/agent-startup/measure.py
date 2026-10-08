@@ -18,7 +18,7 @@ import pyte
 from fixture import require_fixture
 
 
-def _environment(home: Path, lf: Path | None) -> dict[str, str]:
+def build_environment(home: Path, lf: Path | None) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("LF_", "LOOPFLOW_", "CMUX_"))}
     env.pop("CLAUDE_CODE_CHILD_SESSION", None)
     env.update(LF_HOME=str(home), TERM="xterm-256color", RUST_LOG="off")
@@ -27,6 +27,14 @@ def _environment(home: Path, lf: Path | None) -> dict[str, str]:
     if lf:
         env["LF_BIN"] = str(lf)
     return env
+
+
+def start_sampler(pid: int, output: Path) -> subprocess.Popen:
+    return subprocess.Popen(
+        ["/usr/bin/sample", str(pid), "5", "1", "-mayDie", "-file", str(output / "sample.txt")],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def _terminal() -> None:
@@ -52,21 +60,7 @@ def measure(
         command, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave, preexec_fn=_terminal
     )
     os.close(slave)
-    sampler = None
-    if profile:
-        sampler = subprocess.Popen(
-            [
-                "/usr/bin/sample",
-                str(child.pid),
-                "5",
-                "1",
-                "-mayDie",
-                "-file",
-                str(output / "sample.txt"),
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    sampler = start_sampler(child.pid, output) if profile else None
     transcript = bytearray()
     screen = pyte.Screen(160, 40)
     terminal = pyte.ByteStream(screen)
@@ -160,7 +154,6 @@ def measure(
             child.wait(timeout=5)
         if sampler:
             sampler.wait(timeout=15)
-        (output / "terminal.private").write_bytes(transcript)
     result = {
         "status": status,
         "ready_ms": None if ready is None else ready * 1000,
@@ -192,7 +185,7 @@ def main() -> None:
             measure(
                 command,
                 args.cwd,
-                _environment(args.home, args.lf),
+                build_environment(args.home, args.lf),
                 args.output,
                 args.provider,
                 args.timeout,

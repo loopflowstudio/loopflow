@@ -16,6 +16,11 @@ def require_fixture(home: Path) -> None:
         raise ValueError("Use fixture.py to create a private benchmark Home first")
 
 
+def read_session_ids(home: Path) -> set[str]:
+    with sqlite3.connect(f"file:{home / 'loopflow.db'}?mode=ro", uri=True) as db:
+        return {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
+
+
 def prepare(source: Path, home: Path, apply_drafts: bool) -> dict:
     home.mkdir(mode=0o700, parents=True, exist_ok=False)
     destination = home / "loopflow.db"

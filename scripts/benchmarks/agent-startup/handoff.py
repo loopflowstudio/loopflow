@@ -4,13 +4,12 @@ import argparse
 import json
 import os
 import select
-import sqlite3
 import subprocess
 import time
 from pathlib import Path
 
-from fixture import require_fixture
-from measure import _environment
+from fixture import read_session_ids, require_fixture
+from measure import build_environment, start_sampler
 
 STAND_IN = """#!/bin/sh
 if [ "$1" = --version ]; then exit 0; fi
@@ -30,7 +29,7 @@ def measure(
         stub = shim / provider
         stub.write_text(STAND_IN)
         stub.chmod(0o755)
-    env = _environment(home, shim / "lf")
+    env = build_environment(home, shim / "lf")
     env["PATH"] = str(shim) + os.pathsep + env["PATH"]
     env["LF_PERF_OUTPUT"] = str(output)
     env["GIT_TRACE2_EVENT"] = str(output / "git.private")
@@ -42,21 +41,7 @@ def measure(
         child = subprocess.Popen(
             command, cwd=repo, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=error
         )
-        sampler = None
-        if profile:
-            sampler = subprocess.Popen(
-                [
-                    "/usr/bin/sample",
-                    str(child.pid),
-                    "5",
-                    "1",
-                    "-mayDie",
-                    "-file",
-                    str(output / "sample.txt"),
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        sampler = start_sampler(child.pid, output) if profile else None
         data = bytearray()
         handoff = None
         try:
@@ -112,11 +97,9 @@ def main() -> None:
         variants["candidate"] = args.candidate.resolve()
     (args.home / "config.yaml").write_text("agent: claude\n")
     # Only a Session just created by this fixture may be connected.
-    with sqlite3.connect(args.home / "loopflow.db") as db:
-        before = {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
+    before = read_session_ids(args.home)
     measure(args.baseline.resolve(), args.home, args.repo, args.output / "prepare", None)
-    with sqlite3.connect(args.home / "loopflow.db") as db:
-        created = {row[0] for row in db.execute("SELECT id FROM agent_sessions")} - before
+    created = read_session_ids(args.home) - before
     if len(created) != 1:
         raise RuntimeError("Preparation must create exactly one new benchmark Session")
     session = created.pop()

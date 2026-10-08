@@ -2,21 +2,25 @@
 
 import argparse
 import json
-import sqlite3
 import subprocess
 from pathlib import Path
 
-from fixture import require_fixture
-from measure import _environment, measure
+from fixture import read_session_ids, require_fixture
+from measure import build_environment, measure
 
 
-def _sessions(home: Path) -> set[str]:
-    with sqlite3.connect(f"file:{home / 'loopflow.db'}?mode=ro", uri=True) as db:
-        return {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
+def record_readiness(output: Path, row: dict) -> None:
+    with (output / "numbers.jsonl").open("a") as numbers:
+        numbers.write(json.dumps(row) + "\n")
+    print(json.dumps(row), flush=True)
+    if row["status"] != "ready" or row["returncode"] != 0:
+        raise RuntimeError(
+            f"{row['path']}/{row['variant']} did not reach readiness and exit cleanly"
+        )
 
 
 def prepare_session(lf: Path, home: Path, repo: Path, output: Path, provider: str) -> str:
-    before = _sessions(home)
+    before = read_session_ids(home)
     output.mkdir(parents=True, exist_ok=True)
     if provider == "codex":
         # Codex needs one persisted turn before native reconnect is possible.
@@ -24,7 +28,7 @@ def prepare_session(lf: Path, home: Path, repo: Path, output: Path, provider: st
             seed = subprocess.run(
                 [str(lf), "-b", "-a", "codex", ":", "Reply only OK. Do not call tools."],
                 cwd=repo,
-                env=_environment(home, lf),
+                env=build_environment(home, lf),
                 stdout=log,
                 stderr=log,
                 timeout=90,
@@ -32,10 +36,10 @@ def prepare_session(lf: Path, home: Path, repo: Path, output: Path, provider: st
         ready = seed.returncode == 0
     else:
         result = measure(
-            [str(lf)], repo, _environment(home, lf), output, provider, trust_fixture=True
+            [str(lf)], repo, build_environment(home, lf), output, provider, trust_fixture=True
         )
         ready = result["status"] == "ready" and result["returncode"] == 0
-    created = _sessions(home) - before
+    created = read_session_ids(home) - before
     if not ready or len(created) != 1:
         raise RuntimeError("Preparation must create exactly one usable benchmark Session")
     return created.pop()
@@ -76,7 +80,7 @@ def main() -> None:
                 result = measure(
                     command,
                     args.repo,
-                    _environment(args.home, lf),
+                    build_environment(args.home, lf),
                     args.output / f"{path}-{i}-{variant}",
                     provider,
                     profile=args.profile,
@@ -89,11 +93,7 @@ def main() -> None:
                     "sample": i,
                     **result,
                 }
-                with (args.output / "numbers.jsonl").open("a") as output:
-                    output.write(json.dumps(row) + "\n")
-                print(json.dumps(row), flush=True)
-                if result["status"] != "ready" or result["returncode"] != 0:
-                    raise RuntimeError(f"{path}/{variant} did not reach readiness and exit cleanly")
+                record_readiness(args.output, row)
 
 
 if __name__ == "__main__":

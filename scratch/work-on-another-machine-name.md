@@ -18,7 +18,7 @@ restoration and waiting counts are separate Tasks. No stable old-peer interface,
 shared resident service or automatic turn/Flow retry belongs here. No herdr/cmux
 code, tests, configuration or copy is used.
 
-## Outcome and implementation
+## Implemented source behavior — reconciled 2026-10-07
 
 `lf machine connect mini codex person@example.com` mints one login in a private
 laptop directory using the saved browser choice, verifies identity, sends the
@@ -50,15 +50,15 @@ never be interpreted as absent and replaced. Once the file exists, later SSH rea
 avoid Keychain. New credential-free machines must be able to create their file
 without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 
-## Delete — do not maintain
+## Removed mechanisms
 
 - SSH's ambient provider/GitHub/Linear token exports and Doppler `--secret` export.
 - The detached-form string check and account broker/socket forwarding.
 - Lent-account routing, remote catalog merging and injected Codex token login.
-- The hidden account-lease probe and the obsolete bearer-forwarding PM reader.
+- The hidden account-lease probe, bearer-forwarding PM reader and optional SSH-only token resolver.
 - Keychain key writes (which passed key bytes in argv) and truncate-in-place key files.
 - Remaining lease-only selection wrappers, forwarding diagnostics and replay arguments.
-- Route candidates' local/forwarded `source` field and per-candidate usage-window copies.
+- Route candidates' local/forwarded `source` field, per-candidate usage-window copies and duplicate store handles.
 - Dynamic forwarded-secret environment expansion and broker-only fixture setup;
   retain ordinary Session credential and account-selection isolation.
 - The `lf ssh` command, through LOO-411's global `--machine` selector cutover.
@@ -68,10 +68,16 @@ refresh, historical captures, machine records and routes remain.
 
 ## Remaining work
 
+- Source reconciliation found no additional product decision. The compression
+  changes are checkpointed at `407bcde3eb54c079e9fd6cc2d2e7b97d411c6f5f`;
+  their recorded focused results below still apply. Publication remains pending.
 - Republish PR #1493 against main and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
-  token-key handling. Child/output-handle cleanup remains unresolved. No installed
+  token-key handling. Diagnose the retained output handle in
+  `linear_oauth_proactive_failure_tracing_is_secret_free`; passing assertions
+  do not establish child cleanup. Release's bounded-cleanup lesson applies,
+  but its earlier Swift cause does not explain this Rust fixture. No installed
   store or real credential was used.
 - Hand verification, first: a second login for the same account leaves the first
   signed in. Then independent Claude/Codex refresh chains; independent Linear
@@ -99,7 +105,11 @@ from one usage snapshot instead of copying every provider window into each
 candidate and rescanning during sorting. A healthy named account still displaces
 a strained active account. Route reports and their JSON fixture drop the constant
 local/forwarded provenance; credential readiness borrows the existing home and
-catalog directly. Replay still records no routing outcomes; local/shared behavior is retained.
+catalog directly. Candidate ordering borrows the machine store once; the health
+writer is private and records native stream evidence. Linear PM access now has one
+required-token path, deleting the SSH-only optional resolver and its conversion
+helper. Its fixtures exercise that same path, retaining refresh-race, deletion and
+rollback coverage. Replay still records no routing outcomes; local/shared behavior is retained.
 
 Earlier selector, shell isolation and login/key proofs remain at
 `d0134546fffbe68b2f8fe7d29c6e4c1f632617ca:scratch/work-on-another-machine-name.md`
@@ -107,4 +117,7 @@ and `7a3f263cb:scratch/work-on-another-machine-name.md`. The after-skill account
 case failed before the argument-reordering repair and passed afterward. These
 fixtures establish no real refresh-chain or installed acceptance.
 
-Checks after main sync: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test machine_commands --test machine_credentials --test global_commands -E 'binary(machine_commands) | binary(machine_credentials) | binary(global_commands) | test(lf::commands::machine_credentials::tests) | test(lf::commands::ssh::tests) | test(store::token_crypto::tests) | test(fresh_machine_login_does_not_replace_the_laptop_login)' --no-fail-fast` passed (40/40, one open-output-handle leak in the Linear fixture; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned). Gate/CI owns full affected verification and cleanup investigation. Prior 29-test routing and rendered-guide passes remain at `bd63ccb9d:scratch/work-on-another-machine-name.md`.
+Main-sync selector/login checks and earlier routing/rendered-guide evidence remain
+at `d442386dbdc8d49cc85a64a34644e64f6483a3f1:scratch/work-on-another-machine-name.md`.
+
+Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib -E 'test(ops::pm::oauth_tests::) | test(provider_account::account_first_tests::) | test(provider_account::inspection_tests::) | test(provider_account::tests::hard_rate_limit_cools_the_active_account)' --no-fail-fast` passed (40/40; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned). Nextest reported an open output handle in `linear_oauth_proactive_failure_tracing_is_secret_free`; gate/CI owns cleanup investigation and full affected verification.

@@ -1,0 +1,7 @@
+# LOO-420 merge-queue repair — October 8
+
+Jack Heart authorized landing, then asked why auto-merge disappeared. GitHub removed PR #1504 at 16:35:47 UTC for failed_checks on queue commit 104ab5024b8df0f39ad3d90043be54b7984df720 (run 37808661106); published head 9bc3254ea passed CI. Two Flow-context assertions failed. Current source writes same-name prompt files under second-resolution timestamps, then tests reread their paths after the Flow. Repeated steps may overwrite earlier context. Preserve each invocation's file with atomic unique creation; retain native-resume access and source/trace labeling. Existing Flow assertions stay intact. Reproduce with repeated prompt writes, verify prompt and Flow suites, then publish and arm -c under the existing completion intent. Do not start another Flow or watcher.
+
+Confirmed: queue commit and published head have identical tree 5ee44ce88f238fda24c7c7f1341fb3c06f4b29fd. Direct regression read invocation 15 through invocation 0's path before repair. Atomic unique file creation now preserves all paths and bytes, with trace/source labels retained and no change to Flow assertions.
+
+Check: prompt-log tests 6/6, materialized network-contained flow_tests 28/28, cargo fmt and Clippy --all-targets pass; hosted CI pending on repair. Logs: /tmp/loo420-context-collision-repro.log, /tmp/loo420-context-collision-checks.log, /tmp/loo420-queue-flow-repair.log.

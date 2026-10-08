@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -1720,7 +1721,7 @@ pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied c
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
+/// File format: `{timestamp}-{trace_id}-{unique}-{sources}.{skill}.md`, with the
 /// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
 /// to its command trace.
 ///
@@ -1748,13 +1749,17 @@ pub fn write_prompt_log(
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
-    let filename = match trace_part {
-        Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
-        None => format!("{}-{}.md", timestamp, name_part),
+    let prefix = match trace_part {
+        Some(trace_id) => format!("{timestamp}-{trace_id}-"),
+        None => format!("{timestamp}-"),
     };
-    let path = prompts_dir.join(&filename);
-
-    fs::write(&path, prompt)?;
+    // A later step must not overwrite context retained by an earlier invocation.
+    let mut file = tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(&format!("-{name_part}.md"))
+        .tempfile_in(&prompts_dir)?;
+    file.write_all(prompt.as_bytes())?;
+    let (_, path) = file.keep().map_err(|error| error.error)?;
 
     Ok(path)
 }
@@ -2811,6 +2816,22 @@ mod tests {
 
         let content = fs::read_to_string(&path).unwrap();
         assert_eq!(content, prompt);
+    }
+
+    #[test]
+    fn write_prompt_log_retains_each_invocations_context() {
+        let repo = init_repo();
+        let prompts: Vec<_> = (0..16)
+            .map(|turn| {
+                let text = format!("Context for invocation {turn}");
+                let path = write_prompt_log(repo.path(), &text, "work.context", None).unwrap();
+                (path, text)
+            })
+            .collect();
+
+        for (path, text) in prompts {
+            assert_eq!(fs::read_to_string(path).unwrap(), text);
+        }
     }
 
     #[test]

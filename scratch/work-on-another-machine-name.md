@@ -82,7 +82,11 @@ encrypted machines differ when Keychain cannot be read. The obsolete lease owner
 lent routes and injected Codex-token login are deleted. Receiving uses `receive`
 to preserve the established `lf install` shorthand. Release's operation-entry
 lesson applies: SSH helper and receive-command proofs do not establish the four
-required global-selector behaviors. No additional product decision is needed.
+required global-selector behaviors; the public-selector fixtures now cover them.
+Review also exposed account flags after a skill bypassing local account preparation.
+The remote dispatch reuses local argument reordering before selecting the resident
+login, while `--` preserves literal prompt flags. Command and placement resolution
+remain on the target. No additional product decision is needed.
 
 Compression reuses the verified fresh-login identity and parses the remote CLI
 once. Account selection no longer wraps each resolved provider/account pair;
@@ -97,4 +101,4 @@ test proves those values are absent in the child; local account reporting still
 checks cached/live evidence and successful/failed Process outcomes without a
 provider executable. No old-peer compatibility path is retained.
 
-Checks: network-isolated `cargo nextest run -p loopflow --test machine_commands --test cli_discovery -E 'binary(machine_commands) | test(remote_selection_preserves_command_arguments_and_literal_boundaries)' --no-fail-fast` passed 12/13; removing origin-side shorthand resolution repaired dispatch, then `cargo nextest run -p loopflow --test machine_commands -E 'test(machine_selector_dispatches_before_local_help_and_placement) | test(selected_machine_login_stays_restricted_and_missing_login_stops_headless)' --no-fail-fast` passed 2/2 with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout; `cargo fmt --all` and `git diff --check` passed. Global-selector fixtures cover selected-account restriction, literal prompt flags, headless missing-login recovery and retired-command rejection. Earlier focused evidence is retained in pre-sync history; gate/CI owns broader proof.
+Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; network-isolated `cargo nextest run -p loopflow --lib --test machine_commands --test machine_credentials --test cli_discovery -E 'binary(machine_commands) | binary(machine_credentials) | test(remote_selection_preserves_command_arguments_and_literal_boundaries) | test(engine::flow_graph::tests) | test(lf::commands::ssh::tests)' --no-fail-fast` passed 31/31 with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout; the strengthened retired-option proof also passed alone. The after-skill account case failed before the argument-reordering repair and passes afterward. Earlier login/key preservation evidence remains at `7a3f263cb:scratch/work-on-another-machine-name.md`; full affected verification belongs to gate/CI.

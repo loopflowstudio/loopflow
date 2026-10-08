@@ -416,20 +416,6 @@ Run an inline prompt
 | `<prompt>` | prompt |
 | `--help / -h` | Print help |
 
-## lf __screenshot-supervisor
-
-Internal owner-loss supervisor for one browser capture
-
-Internal command; invoked by the owning operation.
-
-| Argument | What it does |
-|---|---|
-| `<source>` | URL or local HTML file to capture |
-| `--output / -o` | PNG destination |
-| `--width` | Viewport width in pixels Default: 1440. |
-| `--height` | Viewport height in pixels Default: 900. |
-| `--help / -h` | Print help |
-
 ## lf __provider-session
 
 Internal provider callback that records one native interactive session
@@ -446,6 +432,17 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf session observe-status
+
+Observe validated Program Status snapshots from an active local terminal
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--terminal` | The terminal marker in the current provider client receipt |
+| `--generation` | Provider generation from the Session reading |
 | `--help / -h` | Print help |
 
 ## lf session resume
@@ -836,7 +833,7 @@ Reconcile linked Waves to the repository's Linear Team
 | `--apply` | apply Default: false. |
 | `--help / -h` | Print help |
 
-## lf installation
+## lf self
 
 Manage the installed Loopflow release and exported skills
 
@@ -844,7 +841,17 @@ Manage the installed Loopflow release and exported skills
 |---|---|
 | `--help / -h` | Print help |
 
-## lf installation install
+## lf self doctor
+
+Diagnose installation, storage, Process integrity and scheduled receipts
+
+| Argument | What it does |
+|---|---|
+| `--planning` | Diagnose repository planning without changing it Default: false. |
+| `--json` | Emit the audit as JSON Default: false. |
+| `--help / -h` | Print help |
+
+## lf self install
 
 Install the latest published Loopflow release from any directory
 
@@ -852,7 +859,7 @@ Install the latest published Loopflow release from any directory
 |---|---|
 | `--help / -h` | Print help |
 
-## lf installation install schedule
+## lf self install schedule
 
 Install the latest Loopflow at login and weekly by default (macOS launchd)
 
@@ -861,7 +868,7 @@ Install the latest Loopflow at login and weekly by default (macOS launchd)
 | `<frequency>` | Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time) Default: weekly. |
 | `--help / -h` | Print help |
 
-## lf installation install recover-switch
+## lf self install recover-switch
 
 Continue one interrupted installation switch from its pinned candidate
 
@@ -872,7 +879,7 @@ Internal command; invoked by the owning operation.
 | `--switch` | The fixed installation switch receipt to continue |
 | `--help / -h` | Print help |
 
-## lf installation install preflight
+## lf self install preflight
 
 Preview whether this build may replace the global lf (read-only). Reads the shared store's migration frontier and validates executable planning references against this binary without changing that frontier. Exits non-zero on refusal so a caller can gate on it
 
@@ -883,7 +890,7 @@ Internal command; invoked by the owning operation.
 | `--json` | Emit the structured PromotionPreview as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf installation install advance-switch
+## lf self install advance-switch
 
 Advance the receipt-selected store with this exact candidate's registry
 
@@ -894,7 +901,7 @@ Internal command; invoked by the owning operation.
 | `--switch` | switch |
 | `--help / -h` | Print help |
 
-## lf installation install promote
+## lf self install promote
 
 Promote this build to the global CLI: content-address it into ~/.lf/bin and atomically repoint the target symlink, under the exclusive promotion lock. Refuses — leaving every target unchanged — on incompatible schema or persisted executable evidence
 
@@ -910,7 +917,7 @@ Internal command; invoked by the owning operation.
 | `--preview` | Validate and print the preview but change nothing Default: false. |
 | `--help / -h` | Print help |
 
-## lf installation install rollback
+## lf self install rollback
 
 Repoint the global CLI at retained prior bytes only after that binary's own preflight proves it recognizes the current store frontier
 
@@ -922,7 +929,7 @@ Internal command; invoked by the owning operation.
 | `--candidate` | The immutable content-addressed prior executable to activate |
 | `--help / -h` | Print help |
 
-## lf installation sync-skills
+## lf self sync-skills
 
 Compile loopflow skills into your home vendor Skills directories
 
@@ -934,15 +941,24 @@ Internal command; invoked by the owning operation.
 | `--no-prune` | Keep stale loopflow-generated skills Default: false. |
 | `--help / -h` | Print help |
 
-## lf machine
+## lf config
 
-Name and connect to machines
+Read Loopflow configuration
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf machine desktop
+## lf config user
+
+Print the configured participant display name
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf open
 
 Open or focus Loopflow.app
 
@@ -950,35 +966,12 @@ Open or focus Loopflow.app
 |---|---|
 | `--help / -h` | Print help |
 
-## lf machine screenshot
+## lf machine
 
-Capture a URL or local HTML file without claiming the user's browser
-
-| Argument | What it does |
-|---|---|
-| `<source>` | URL or local HTML file to capture |
-| `--output / -o` | PNG destination |
-| `--width` | Viewport width in pixels Default: 1440. |
-| `--height` | Viewport height in pixels Default: 900. |
-| `--help / -h` | Print help |
-
-## lf machine doctor
-
-Diagnose installation, storage, Process integrity and scheduled receipts
+Name and connect to machines
 
 | Argument | What it does |
 |---|---|
-| `--planning` | Diagnose repository planning without changing it Default: false. |
-| `--json` | Emit the audit as JSON Default: false. |
-| `--help / -h` | Print help |
-
-## lf machine user
-
-Print the configured participant display name
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine id

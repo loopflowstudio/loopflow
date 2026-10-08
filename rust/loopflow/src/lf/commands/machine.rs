@@ -16,15 +16,6 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
-    if let MachineCommand::User { json } = cmd {
-        let name = crate::engine::config::load_user_name()?;
-        if *json {
-            println!("{}", serde_json::to_string(&name)?);
-        } else if let Some(name) = name {
-            println!("{name}");
-        }
-        return Ok(());
-    }
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
@@ -148,7 +139,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        _ => unreachable!("startup and operation commands dispatch separately"),
     }
     Ok(())
 }

@@ -680,7 +680,7 @@ fn hash_text(digest: &mut Sha256, value: &str) {
 /// Scan every stored row for a dangling reference. This reads the whole
 /// database, so opening a store never runs it: every connection enforces
 /// foreign keys and only a migration can violate them. Migrations check before
-/// they commit; `lf machine doctor` and installation preflight diagnose in full.
+/// they commit; `lf doctor` and installation preflight diagnose in full.
 fn validate_foreign_keys(conn: &rusqlite::Connection) -> StoreResult<()> {
     let mut statement = conn.prepare("PRAGMA foreign_key_check")?;
     if statement.query([])?.next()?.is_some() {
@@ -1073,7 +1073,7 @@ fn pending_migrations<'a>(
         }
         return match MigrationId::parse_version(version) {
             Some(_) => Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf machine doctor with that binary",
+                "database migration {version} is unknown to lf {} (latest known {}); this database needs a newer release or the matching divergent local build; run lf doctor with that binary",
                 env!("CARGO_PKG_VERSION"),
                 set.last()
                     .map(Migration::version)
@@ -4611,7 +4611,7 @@ mod tests {
             message.contains("latest known 0.10.001_initial"),
             "{message}"
         );
-        assert!(message.contains("run lf machine doctor"), "{message}");
+        assert!(message.contains("run lf doctor"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned

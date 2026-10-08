@@ -832,18 +832,23 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
             serde_json::json!({"cwd": home.path()}).to_string(),
         )
         .unwrap();
-        let inspect = |args: &[&str]| {
-            let output = command(home.path(), args)
+        let isolated_command = |args: &[&str]| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
                 .env_clear()
-                .env("PATH", "/usr/bin:/bin")
+                .args(args)
+                .current_dir(home.path())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
                 .env("LF_HOME", home.path())
                 .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
                 .env("RUST_LOG", "off")
                 .env("HOME", home.path())
                 .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
-                .env("CODEX_HOME", home.path().join("codex"))
-                .output()
-                .unwrap();
+                .env("CODEX_HOME", home.path().join("codex"));
+            command
+        };
+        let inspect = |args: &[&str]| {
+            let output = isolated_command(args).output().unwrap();
             assert!(output.status.success(), "{provider}/{host}: {output:?}");
             serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
         };
@@ -901,18 +906,8 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
             let mut master = unsafe { fs::File::from_raw_fd(master) };
             // SAFETY: the fresh slave descriptor is owned only by this File.
             let slave = unsafe { fs::File::from_raw_fd(slave) };
-            let mut launch = Command::new(env!("CARGO_BIN_EXE_lf"));
+            let mut launch = isolated_command(&["session", "connect", &id]);
             launch
-                .env_clear()
-                .args(["session", "connect", &id])
-                .current_dir(home.path())
-                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-                .env("HOME", home.path())
-                .env("LF_HOME", home.path())
-                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
-                .env("CODEX_HOME", home.path().join("codex"))
-                .env("RUST_LOG", "off")
                 .env("TITLE_HOST", host)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())

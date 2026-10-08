@@ -7,11 +7,12 @@ use std::io::{IsTerminal, Write};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::engine::process::wait_for_exit;
 use crate::process::SessionDriver;
 use crate::session::AgentSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};
 
-pub(crate) fn display_title(name: &str, task: Option<&str>) -> String {
+fn display_title(name: &str, task: Option<&str>) -> String {
     let clean: String = name.chars().filter(|ch| !ch.is_control()).collect();
     let Some(task) = task else { return clean };
     let purpose = clean
@@ -176,24 +177,16 @@ fn rename_cmux(args: &[&str]) -> std::io::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(1);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return if status.success() {
-                Ok(())
-            } else {
-                Err(std::io::Error::other(format!("cmux exited {status}")))
-            };
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "cmux title update timed out",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(10));
+    let (status, timed_out) = wait_for_exit(&mut child, Some(Duration::from_secs(1)), || {})?;
+    if timed_out {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "cmux title update timed out",
+        ))
+    } else if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("cmux exited {status}")))
     }
 }
 

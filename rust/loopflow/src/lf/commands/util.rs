@@ -780,13 +780,7 @@ fn session_command_status_with_env(
         std::thread::spawn(move || observe_opencode_session(&capture_dir, stderr))
     });
     let status = if let Some(title) = &mut title {
-        loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            title.refresh();
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        crate::engine::process::wait_for_exit(&mut child, None, || title.refresh())?.0
     } else {
         child.wait()?
     };

@@ -2,13 +2,13 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized work through demo, without provider accounts or driving his
-cmux windows; no landing. The cmux 0.65.0 CLI denied this non-cmux process access,
-so no workspace was created. LOO-429's system-file change is already on main.
-Cover native Session launch/reconnect and `run_agent`. Initialize OSC before output;
-cmux renames
-use its control channel. Plain-native naming and visible host agreement remain
-unproved; prompt guidance cannot guarantee them. Plan: `scratch/every-lf-session-in-cmux.md`.
+Jack Heart authorized demo, without provider accounts or driving his cmux windows;
+no landing. cmux denied workspace creation outside it. Native launch/reconnect
+and `run_agent` share pre-spawn OSC and cmux renames. Displaying stored names
+preserves bad names too; prompt suggestions cannot guarantee work-specific naming.
+LOO-429 is integrated, not native-naming proof. Taskless fake-host checks establish
+no Task/Flow, plain-native or visible host acceptance.
+Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

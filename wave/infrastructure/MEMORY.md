@@ -413,13 +413,11 @@ remain evidence of their own versions, not instructions to restore those owners.
 
 ## Installed worker recovery (curated 2026-10-07)
 
-October 2 recovery evidence remains at
+October 2 recovery evidence:
 `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-under this heading. Published v0.12.32 preserved the Home without migration and
-resumed LOO-367. LOO-295 and LOO-292's later acceptance above supersedes their
-then-open review obligations. LOO-373 owns the retained landing-placement defect;
-re-entry preserved records and checkouts. Manual releases prove no automatic settlements. The operator's batching proposal was not Jack Heart's
-approval of a new release policy; source, installation and acceptance stay distinct.
+under this heading. Later acceptance above closes LOO-295/292; LOO-373 retains
+the placement defect. Manual releases prove no automatic settlements. The
+operator's batching proposal was not Jack Heart's release-policy approval.
 
 ## Optional chapters and Task workflows (2026-10-02)
 
@@ -607,18 +605,13 @@ claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358, branch evidence 2026-09-30)
 
-Jack Heart selected the Task's checkout as its general work set: every
-AgentSession, FlowSession and Exec there, plus explicit binds. The shared Rust
-SQLite reader supplies Task status and Desktop membership; the app does not
-reconstruct ownership from paths. Membership is additive, includes descendants
-at component boundaries and closed history, and survives a missing checkout.
-It changes neither recorded usage attribution nor process/Flow authority.
-
-Every Flow naming the Task is equally its work; the earlier marked-worker model
-is superseded. Membership grants no process or settlement authority. LOO-408
-separates Task decisions from execution and retains conservative checkout cleanup.
-Earlier branch details remain at
-`6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`.
+Jack Heart selected checkout membership plus explicit binds, supplied by Rust
+for status and Desktop. Descendants, closed history and missing checkouts retain
+membership; usage and control authority do not change. Every Flow naming the
+Task is equally its work. LOO-408 separates Task decisions from execution and
+retains conservative cleanup. Earlier details:
+`6a60f87a692fe114985ee7f09c854d0d63cb2878:wave/infrastructure/MEMORY.md`
+under this heading; current contracts live in the architecture reference.
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
@@ -1074,8 +1067,15 @@ Codex `turn/start` remaining waiting is unresolved; Claude success proves no rep
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
 separate context and same-thread resume, not recall without resupply. Claude hook
-context survives deletion; rendering metadata cannot establish model authority.
-Exclude answer leakage. Installed 0.13.9 app launches recorded no native identity;
+context survives deletion; rendering metadata alone proves no request role.
+Credential-free 2.1.294 API capture now shows hook context in `system` for
+Sonnet/Opus. A `shouldQuery: false` user message followed by a native command
+preserves exact arguments and user context in one request, also after restart
+without resupply. A separate seed process saves context without a model call.
+These prove client mapping, not live-model or Loopflow behavior.
+Current resume replaces capture before claiming a driver; it cannot queue through
+a live native terminal. Live delivery versus inactive-only selection needs a
+design decision; no narrower outcome is approved. Installed 0.13.9 app launches recorded no native identity;
 both reconnects failed. Jack then directed removal of `--ide` and its app-launch
 path. Keep terminal/headless execution and historical records. Launcher success
 proves no engine exit. Native dispatch, ports and fidelity remain unproved.

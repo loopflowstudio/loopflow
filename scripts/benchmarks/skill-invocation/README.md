@@ -72,11 +72,44 @@ On 2026-10-07, Codex 0.160.1 and Claude 2.1.293 passed these transport checks.
 `renderedRole: "system"`. This rendering field does not establish the role sent
 to the model. [Claude's glossary](https://code.claude.com/docs/en/glossary#system-reminder)
 describes reminders inside user messages or, for some models, system-role messages.
-The earlier claim of a proven authority conflict is withdrawn; preserving
-user-level reference authority still needs request-mapping evidence. Cross-session hook
+The rendering-only probe did not prove an authority conflict; the request-mapping
+probe below now establishes it for the tested binary and model aliases. Cross-session hook
 isolation, active-turn steering, GUI handoff, third-party controls and Loopflow's
 own capture/dispatch remain unproved. The probe does not use Codex's experimental
 `additionalContext` field; its context is a separate user text block.
+
+## Claude request mapping
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/request_mapping.py --channel queued
+```
+
+Runs the real Claude client against a local fake Messages API with external
+egress denied, a disposable home/config and dummy authentication. No live model
+or real credentials are used. Output includes the binary version/digest,
+requested model, actual request roles, selected source, exact native arguments
+and request count. The fake response contains no fixture markers. Run its
+offline assertions with `uv run pytest scripts/benchmarks/skill-invocation/ -q`.
+
+`queued` sends a user context message with `shouldQuery: false`, then the exact
+slash command. `staged` saves that context and exits without an API request,
+then resumes the native Session to invoke the skill. Both then resume again
+with a new argument and no context resupply. Success requires one model request
+per invocation, user-only context and native source/argument agreement.
+
+On October 7, Claude 2.1.294 passed queued and staged delivery for Sonnet;
+queued delivery also passed for Opus and for 2.1.293's Sonnet. `--channel hook`
+is the counterexample: 2.1.294 sends the context in the API `system` field for
+both model aliases, initially and after resume. It correctly exits 1 because
+the user-role requirement fails. This settles client request mapping; it proves
+no live-model behavior, Loopflow capture, live-terminal admission, tool policy,
+cross-harness translation or startup-cost improvement.
+
+The production resume path replaces the captured input before claiming a new
+driver. It cannot deliver through a surviving native terminal's current driver.
+A saved native Session and a live input queue require different admission;
+the design keeps that boundary unresolved rather than starting a second writer.
 
 
 ## Decisions and remaining work
@@ -109,7 +142,7 @@ The remaining design has these constraints:
   attribution and enter through its current driver. Selecting another skill
   needs an explicit interface and admission proof; active-turn steering is
   unproved. Lost acknowledgements cannot justify duplicate execution.
-- Resolve Claude's hook request-role mapping, then prove Loopflow capture and
+- Use Claude's user-message channel, resolve live-Session admission, then prove Loopflow capture and
   unchanged third-party skills on both harnesses, including controls and bundled
   assets. Compare repeated matched plain-versus-lf startup and whole-turn context
   costs, including context read from disk and resumed conversations. Retention

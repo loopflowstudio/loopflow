@@ -454,7 +454,7 @@ fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legac
     repo.create_file("unfinished.txt", "source work");
     let args = ["--task", "INF-123", "context", "--json"].map(str::to_string);
     let invoke = || {
-        loopflow::lf::commands::ssh::run("unreachable.invalid", &[], false, &args)
+        loopflow::lf::commands::ssh::run("unreachable.invalid", false, &args)
             .unwrap_err()
             .to_string()
     };

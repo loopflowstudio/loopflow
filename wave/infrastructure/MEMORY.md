@@ -604,10 +604,10 @@ claim; it establishes no physical capture conversion.
 
 ## Task worktree membership (LOO-358)
 
-Jack Heart selected checkout membership plus explicit binds. Rust owns its shared
-reader; membership grants no process or Flow authority. Current architecture
+Jack Heart selected checkout membership plus explicit binds. Rust owns the
+reader; membership grants no process or Flow authority. Architecture
 supersedes the managed-Flow distinction; LOO-408 separates Task decisions from
-execution and retains conservative checkout cleanup. Prior proofs and unresolved Desktop
+execution and retains conservative cleanup. Proofs and unresolved Desktop
 acceptance remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:wave/infrastructure/MEMORY.md`.
 

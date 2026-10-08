@@ -90,6 +90,7 @@ async def _boundary_recovery(
     context: str,
     delivery: tuple[threading.Event, threading.Event],
     queued: bool = False,
+    terminal: bool = True,
 ) -> dict:
     endpoint = workspace.parent / "engine.sock"
     checks = {}
@@ -97,7 +98,8 @@ async def _boundary_recovery(
     async with _app_server(codex, workspace, env, endpoint):
         for interrupt in [False] if queued else [False, True]:
             case, thread_id, capture = await _boundary_delivery(
-                endpoint, workspace, source, context, delivery, interrupt, codex, env, queued
+                endpoint, workspace, source, context, delivery, interrupt, codex, env, queued,
+                terminal,
             )
             status = "interrupted" if interrupt else "completed"
             checks.update({f"{status}_{key}": value for key, value in case.items()})
@@ -198,6 +200,114 @@ async def _catalog_probe(
     return checks
 
 
+async def _pending_queue_recovery(
+    codex: str,
+    workspace: Path,
+    env: dict[str, str],
+    source: Path,
+    context: str,
+    delivery: tuple[threading.Event, threading.Event],
+) -> dict:
+    received, release = delivery
+    endpoint = workspace.parent / "pending.sock"
+    capture = uuid.uuid4().hex
+    second_capture = uuid.uuid4().hex
+    async with _app_server(codex, workspace, env, endpoint) as process:
+        async with _connection(endpoint) as owner:
+            thread = await _ws_request(
+                owner,
+                "thread/start",
+                {"cwd": str(workspace), "approvalPolicy": "never", "sandbox": "read-only"},
+            )
+            thread_id = thread["thread"]["id"]
+            await _ws_request(
+                owner,
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": "Start competing turn."}],
+                },
+            )
+            if not await asyncio.to_thread(received.wait, 15):
+                raise RuntimeError("fake API did not receive the competing turn")
+            await _ws_request(
+                owner,
+                "thread/queue/add",
+                {
+                    "threadId": thread_id,
+                    "clientUserMessageId": capture,
+                    "input": [
+                        {"type": "skill", "name": "audit", "path": str(source)},
+                        {"type": "text", "text": "$audit alpha"},
+                        {"type": "text", "text": context},
+                    ],
+                },
+            )
+            before = await _ws_request(owner, "thread/queue/list", {"threadId": thread_id})
+            await _ws_request(
+                owner,
+                "thread/queue/add",
+                {
+                    "threadId": thread_id,
+                    "clientUserMessageId": second_capture,
+                    "input": [{"type": "text", "text": "Preserve this second queued input."}],
+                },
+            )
+            before = await _ws_request(owner, "thread/queue/list", {"threadId": thread_id})
+            history = await _read_thread(owner, thread_id)
+            checks = {
+                "accepted_pending_once": [item["clientUserMessageId"] for item in before["data"]]
+                == [capture, second_capture],
+                "not_started_before_engine_death": not _invocation_receipts(history, capture),
+            }
+            os.killpg(process.pid, signal.SIGKILL)
+            await process.wait()
+    release.set()
+    # Read before and after native resume; never enqueue the input a second time.
+    async with _app_server(codex, workspace, env) as process:
+        pending = await _request(process, "thread/queue/list", {"threadId": thread_id})
+        checks["pending_bytes_survive_engine_death"] = pending["data"] == before["data"]
+        await _request(process, "thread/resume", {"threadId": thread_id})
+        pending = await _request(process, "thread/queue/list", {"threadId": thread_id})
+        history = await _request(
+            process, "thread/read", {"threadId": thread_id, "includeTurns": True}
+        )
+        receipts = _invocation_receipts(history["thread"], capture)
+        second_receipts = _invocation_receipts(history["thread"], second_capture)
+        if pending["data"] == before["data"]:
+            await _request(
+                process,
+                "thread/queue/start",
+                {"threadId": thread_id, "queuedSubmissionId": pending["data"][0]["id"]},
+            )
+        try:
+            async with asyncio.timeout(15):
+                while (
+                    len(receipts) != 1
+                    or len(second_receipts) != 1
+                    or receipts[0][0]["status"] != "completed"
+                    or second_receipts[0][0]["status"] != "completed"
+                ):
+                    await asyncio.sleep(0.05)
+                    history = await _request(
+                        process, "thread/read", {"threadId": thread_id, "includeTurns": True}
+                    )
+                    receipts = _invocation_receipts(history["thread"], capture)
+                    second_receipts = _invocation_receipts(history["thread"], second_capture)
+        except TimeoutError:
+            print(json.dumps({"pending_recovery": pending, "history": history}), flush=True)
+        checks["accepted_input_recoverable_without_resubmission"] = len(receipts) == 1
+        checks["recovered_input_completed_once"] = (
+            len(receipts) == 1 and receipts[0][0]["status"] == "completed"
+        )
+        checks["second_input_completed_separately"] = (
+            len(receipts) == len(second_receipts) == 1
+            and second_receipts[0][0]["status"] == "completed"
+            and receipts[0][0]["id"] != second_receipts[0][0]["id"]
+        )
+    return checks
+
+
 async def _ws_until(socket, matches) -> dict:
     async with asyncio.timeout(20):
         async for message in socket:
@@ -259,7 +369,7 @@ async def _consume_queued_input(
     capture: str,
     active_before: dict,
     release: threading.Event,
-    terminal: _Terminal,
+    terminal: _Terminal | None,
 ) -> tuple[dict, dict]:
     history = await _read_thread(socket, thread_id)
     matches = _invocation_receipts(history, capture)
@@ -292,7 +402,10 @@ async def _consume_queued_input(
     release.set()
     async with asyncio.timeout(30):
         while True:
-            await asyncio.to_thread(terminal.pump, 0.1)
+            if terminal:
+                await asyncio.to_thread(terminal.pump, 0.1)
+            else:
+                await asyncio.sleep(0.1)
             history = await _read_thread(socket, thread_id)
             matches = _invocation_receipts(history, capture)
             if len(matches) == 1 and matches[0][0]["status"] == "completed":
@@ -320,6 +433,7 @@ async def _boundary_delivery(
     codex: str,
     env: dict[str, str],
     queued: bool = False,
+    attach_terminal: bool = True,
 ) -> tuple[dict, str, str]:
     received, release = delivery
     received.clear()
@@ -398,7 +512,7 @@ async def _boundary_delivery(
             )
             await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
             before = await _read_thread(owner, thread_id)
-            if not interrupt:
+            if not interrupt and attach_terminal:
                 terminal = _Terminal(
                     [
                         codex,
@@ -526,6 +640,11 @@ async def _boundary_delivery(
                     await asyncio.sleep(0.02)
             checks["outcome_without_resubmission"] = True
             checks["expected_turns"] = len(history["turns"]) == (3 if queued else 2)
+            if queued:
+                checks["queue_consumed_without_client_start"] = queue_starts == 0
+                checks["sibling_unchanged_after_delivery"] = (
+                    await _read_thread(successor, sibling_id) == sibling_before
+                )
             if terminal:
                 await asyncio.to_thread(terminal.pump, 0.5)
                 terminal.write(b"\r")
@@ -544,11 +663,6 @@ async def _boundary_delivery(
                     and any(block.get("text") == draft for block in item["content"])
                     for item in turns[-1]["items"]
                 )
-                if queued:
-                    checks["queue_consumed_without_client_start"] = queue_starts == 0
-                    checks["sibling_unchanged_after_delivery"] = (
-                        await _read_thread(successor, sibling_id) == sibling_before
-                    )
             await cleanup.aclose()
             print(
                 json.dumps(
@@ -747,8 +861,8 @@ def _assess_requests(
             fresh_start_expanded=len(requests) == 4 and str(skill) in _skill_paths(requests[3]),
         )
         return observation
-    if mode in ("boundary", "queue-race"):
-        expected_expansions = 1 if mode == "queue-race" else 2
+    if mode in ("boundary", "queue-race", "queue-headless", "queue-restart"):
+        expected_expansions = 2 if mode == "boundary" else 1
         native_requests = [
             request
             for request in requests
@@ -764,7 +878,8 @@ def _assess_requests(
         ]
         observation["title_requests"] = len(title_requests)
         checks.update(
-            expected_conversation_requests=len(requests) - len(title_requests) == 5,
+            expected_conversation_requests=len(requests) - len(title_requests)
+            == {"queue-headless": 4, "queue-restart": 3}.get(mode, 5),
             native_expansion=len(native_requests) == expected_expansions
             and all(
                 _skill_paths(request) == [str(skill)]
@@ -834,7 +949,7 @@ def _probe(codex: str, mode: str) -> bool:
             try:
                 super().handle()
             except (BrokenPipeError, ConnectionResetError):
-                if mode != "boundary":
+                if mode not in ("boundary", "queue-restart"):
                     raise
                 # The interruption case deliberately closes its model stream.
 
@@ -847,7 +962,7 @@ def _probe(codex: str, mode: str) -> bool:
                 (mode == "redelivery" and len(requests) in (1, 3))
                 or (mode == "boundary" and native_turn)
                 or (
-                    mode == "queue-race"
+                    mode in ("queue-race", "queue-headless", "queue-restart")
                     and _last_user_texts(requests[-1]) == ["Start competing turn."]
                 )
                 or (mode == "boundary-race" and len(requests) == 2)
@@ -924,11 +1039,15 @@ def _probe(codex: str, mode: str) -> bool:
             snapshot.write_text(source)
 
             async def _native() -> dict:
+                if mode == "queue-restart":
+                    return await _pending_queue_recovery(
+                        codex, workspace, env, skill, context, (received, release)
+                    )
                 if mode == "boundary-race":
                     return await _boundary_race(
                         codex, workspace, env, skill, context, (received, release)
                     )
-                if mode in ("boundary", "queue-race"):
+                if mode in ("boundary", "queue-race", "queue-headless"):
                     return await _boundary_recovery(
                         codex,
                         workspace,
@@ -936,7 +1055,8 @@ def _probe(codex: str, mode: str) -> bool:
                         skill,
                         context,
                         (received, release),
-                        queued=mode == "queue-race",
+                        queued=mode != "boundary",
+                        terminal=mode != "queue-headless",
                     )
                 async with _app_server(codex, workspace, env) as process:
                     if mode == "redelivery":
@@ -990,6 +1110,20 @@ def main() -> int:
         action="store_const",
         const="queue-race",
         help="Probe native queued submission against a competing client",
+    )
+    mode.add_argument(
+        "--queue-headless",
+        dest="mode",
+        action="store_const",
+        const="queue-headless",
+        help="Recover queued input without any attached terminal",
+    )
+    mode.add_argument(
+        "--queue-restart",
+        dest="mode",
+        action="store_const",
+        const="queue-restart",
+        help="Kill the engine with accepted input still queued, then recover without resubmission",
     )
     mode.add_argument(
         "--boundary",

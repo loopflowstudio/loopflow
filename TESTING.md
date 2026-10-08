@@ -280,6 +280,10 @@ Browser and accessibility tests for `website/`. The dev helper syncs canonical
 `docs/` into `website/docs/`, installs the Chromium browser, starts the app, and
 runs the test suite.
 
+Homepage touch targets must retain their minimum size with fallback fonts, whose
+metrics differ across macOS and Linux. Run the website suite after the final CSS
+or capture edit, including the fallback-font touch-target case.
+
 ```bash
 cd website && uv run python dev.py test        # All website tests
 cd website && uv run python dev.py test -a     # Accessibility tests only
@@ -316,6 +320,10 @@ After integrating Session kind changes, run `scripts/test_desktop.sh --filter
 participation and navigation fixtures together.
 Window and terminal integration suites opt in with `LOOPFLOW_NATIVE_TESTS=1`;
 they are reported as skipped in headless runs, not counted as passing.
+
+After upgrading GhosttyKit or its bundled shell integration, run
+`scripts/test_desktop.sh --filter GhosttyShellBlockTests` to check the actual
+shell output for prompt headers, command boundaries and exit status.
 
 `scripts/prove_wave_surface_states.sh` is an optional demo capture: it launches
 windows and therefore needs a display session. It is not in gate or CI.
@@ -999,6 +1007,12 @@ fixture setup. CLI fixtures must select their own disposable Machine. Upgrade pr
 must use published migration authority against a temporary shared store; opening
 an existing experiment intentionally validates its schema without upgrading it.
 
+Machine command changes also require `cargo test -p loopflow --test global_commands`
+to preserve repository-independent commands and explicit Machine isolation.
+When changing remote account-selection docs, run `cd website && uv run python
+dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
+guide must retain the current invocation, target catalog, and provenance contract.
+
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
 runner. The materialization wrapper clears only its listed variables; it does not
@@ -1048,6 +1062,12 @@ Run the installation harness for migration changes; its released-source proof
 must retain Wave placement before projecting accepted Projects.
 
 ### Shared identity fixtures
+
+When changing Session activity or Waiting, run `session_cli_tests` and
+`work_watch` together. Direct SQL fixtures must carry both driver and provider
+generations, matching the production activity writer. Rebuild both SwiftPM and
+the Xcode test targets after shared model renames; Foundation types such as
+`Foundation.Process` need explicit qualification where names overlap.
 
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.
 `wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different

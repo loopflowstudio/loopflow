@@ -3,16 +3,16 @@ use std::num::NonZeroU32;
 use anyhow::{Context, Result};
 use clap::Args;
 
-use crate::durable::FlowFilter;
+use crate::durable::FlowProcessFilter;
 use crate::repository::CanonicalRepo;
-use crate::session::FlowSummaryState;
+use crate::session::FlowProcessSummaryState;
 use crate::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
-pub struct FlowInventoryArgs {
+pub struct FlowProcessInventoryArgs {
     /// List or show Flows that ran, from their Processes, instead of reusable templates
     #[arg(long)]
-    pub sessions: bool,
+    pub processes: bool,
     /// Include every repository and flows with unknown repository evidence
     #[arg(long)]
     pub all: bool,
@@ -37,9 +37,9 @@ pub struct FlowInventoryArgs {
     pub taskless: bool,
 }
 
-impl FlowInventoryArgs {
+impl FlowProcessInventoryArgs {
     pub fn is_empty(&self) -> bool {
-        !self.sessions
+        !self.processes
             && !self.all
             && self.limit.is_none()
             && self.after.is_none()
@@ -51,7 +51,7 @@ impl FlowInventoryArgs {
     }
 }
 
-pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
+pub fn list(args: &FlowProcessInventoryArgs, json: bool) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let repo = if args.all {
@@ -59,7 +59,7 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
         } else {
             CanonicalRepo::current()?.map(|repo| repo.to_string())
         };
-        let filter = FlowFilter {
+        let filter = FlowProcessFilter {
             task_id: args
                 .for_task
                 .as_deref()
@@ -83,9 +83,9 @@ pub fn list(args: &FlowInventoryArgs, json: bool) -> Result<()> {
                 })
                 .transpose()?,
             state: args.state.as_deref().map(|state| match state {
-                "completed" => FlowSummaryState::Completed,
-                "stopped" => FlowSummaryState::Stopped,
-                _ => FlowSummaryState::Current,
+                "completed" => FlowProcessSummaryState::Completed,
+                "stopped" => FlowProcessSummaryState::Stopped,
+                _ => FlowProcessSummaryState::Current,
             }),
             repo,
             taskless: args.taskless,

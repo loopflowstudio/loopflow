@@ -456,7 +456,7 @@ fn prepare_conversation(
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -502,8 +502,8 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
         db.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,driver_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
+             SELECT id,driver_generation,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();
@@ -1028,4 +1028,171 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
             .unwrap();
         assert_eq!(count, 1);
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn program_status_cli_observes_waiting_without_completing_work() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let home = tempfile::tempdir().unwrap();
+    let (id, _, dir) = prepare_conversation(home.path(), home.path(), "sleep", "Status fixture");
+    let mut provider = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
+    let now = time::OffsetDateTime::now_utc();
+    std::fs::create_dir_all(dir.join("provider-clients")).unwrap();
+    std::fs::write(
+        dir.join("provider-clients")
+            .join(format!("{}.json", provider.0.id())),
+        serde_json::json!({"schema_version":1,"pid":provider.0.id(),"terminal_id":"fixture-pane",
+            "started_at":now.format(&time::format_description::well_known::Rfc3339).unwrap()})
+        .to_string(),
+    )
+    .unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let process_lfid = loopflow::id::ProcessLfid::new();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    conn.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'00000000-0000-0000-0000-000000000001',1)",
+        [&process_lfid],
+    )
+    .unwrap();
+    // A native conversation needs no lf driver claim for passive display.
+    let generation = "0".to_string();
+    let mut observer = Child(
+        command(
+            home.path(),
+            &[
+                "session",
+                "observe-status",
+                &id,
+                "--terminal",
+                "fixture-pane",
+                "--generation",
+                &generation,
+            ],
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap(),
+    );
+    let mut input = observer.0.stdin.take().unwrap();
+    let records = |state: &str| {
+        serde_json::json!({"seen":true,"records":[{
+        "state":state,"id":"worker","kind":if state=="blocked" { Some("question") } else { None },
+        "progress":null,"app":"fixture","title":null,"msg":"Use **literal** text?"}]})
+    };
+    let wait_for = |state: &str| {
+        let until = Instant::now() + Duration::from_secs(10);
+        loop {
+            let output = run(home.path(), &["session", "list", "--json", "--all"]);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            if let Some(item) = items
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["id"] == id && s["program_status"]["records"][0]["state"] == state)
+            {
+                return item.clone();
+            }
+            assert!(
+                Instant::now() < until,
+                "observer did not publish {state}: {items}"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+    // The pipe also fragments a JSON frame across reads.
+    let blocked = records("blocked").to_string() + "\n";
+    input.write_all(&blocked.as_bytes()[..17]).unwrap();
+    input.write_all(&blocked.as_bytes()[17..]).unwrap();
+    let item = wait_for("blocked");
+    assert_eq!(item["attention"], "waiting");
+    assert_eq!(
+        item["program_status"]["records"][0]["msg"],
+        "Use **literal** text?"
+    );
+    let page = run(
+        home.path(),
+        &[
+            "session",
+            "list",
+            "--json",
+            "--all",
+            "--waiting",
+            "--page",
+            "--limit",
+            "1",
+        ],
+    );
+    let page: serde_json::Value = serde_json::from_slice(&page.stdout).unwrap();
+    assert_eq!(page["entries"][0]["id"], id);
+    for state in ["working", "done"] {
+        if state == "done" {
+            provider.0.kill().unwrap();
+            provider.0.wait().unwrap();
+        }
+        writeln!(input, "{}", records(state)).unwrap();
+        assert!(wait_for(state)["attention"].is_null());
+    }
+    assert!(store.session(&id).unwrap().unwrap().completed_at.is_none());
+    assert!(store
+        .process(&process_lfid)
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .is_none());
+    let mut invalid = records("blocked");
+    invalid["records"][0]["msg"] = serde_json::json!("bad\ncontrol");
+    writeln!(input, "{invalid}").unwrap();
+    drop(input);
+    assert!(!observer.0.wait().unwrap().success());
+    assert_eq!(
+        wait_for("done")["program_status"]["records"][0]["state"],
+        "done"
+    );
+    let driver = store.session_driver(&id).unwrap();
+    store
+        .claim_session_driver(&id, driver.as_ref(), &process_lfid, true)
+        .unwrap();
+    let stale = run(
+        home.path(),
+        &[
+            "session",
+            "observe-status",
+            &id,
+            "--terminal",
+            "fixture-pane",
+            "--generation",
+            &generation,
+        ],
+    );
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
+    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let item = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id)
+        .unwrap();
+    assert!(item["program_status"].is_null());
+    assert!(item["attention"].is_null());
 }

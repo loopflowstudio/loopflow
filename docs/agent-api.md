@@ -125,7 +125,7 @@ process to interrupt, resume, wait for, or attach to.
 
 Work survives its provider process. A Flow whose driver died leaves its Processes
 as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf flow show ID --sessions --json`, then launch
+`lf task status ISSUE` and `lf flow show ID --processes --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
@@ -191,7 +191,7 @@ and `lf roadmap` joins the current Linear plan to that runtime truth.
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.
 
-All of these reads are local to the executing Machine. Use `lf ssh <machine-id> ...`
+All of these reads are local to the executing Machine. Use `lf --machine <machine-id> ...`
 to execute the same read remotely. The historical `lf mon show` interface and `lf usage` read that Machine's evidence;
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.

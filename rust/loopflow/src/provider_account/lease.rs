@@ -1,4 +1,4 @@
-//! Account authority forwarded by `lf machine ssh` through a foreground broker.
+//! Account authority forwarded by `lf --machine` through a foreground broker.
 //!
 //! The origin offers an ordered account catalog without refreshing credentials.
 //! The target merges that catalog with its local accounts, then requests only
@@ -1322,7 +1322,7 @@ pub fn account_lease_active() -> bool {
 }
 
 /// Confirm that this process inherited a valid lease and can reach its broker.
-/// `lf machine ssh` runs this before the target command so an incompatible remote `lf`
+/// `lf --machine` runs this before the target command so an incompatible remote `lf`
 /// or a failed socket forward cannot fall through to ambient remote accounts.
 pub fn probe_forwarded_authority() -> Result<(), ProviderAccountError> {
     let client = AccountLeaseClient::from_env()?.ok_or_else(|| {

@@ -105,12 +105,12 @@ lf id                                      # this machine's MachineId
 lf wave place <wave-id> <machine-id>          # only while no execution is live
 lf --wave <wave> wave/operate                    # one finite pass here
 lf session ensure -w <wave>                      # its ongoing conversation; operates on every return
-lf ssh <machine-id> status <wave> --json           # inspect it on that Machine
-lf ssh <machine-id> --wave <wave> wave/operate       # one finite pass there
+lf --machine <machine-id> wave status <wave> --json           # inspect it on that Machine
+lf --machine <machine-id> --wave <wave> wave/operate       # one finite pass there
 ```
 
-`lf ssh` runs only the target machine's `lf`; the inner `lf` and `--` separator
-are implicit. Foreground commands can choose from origin-forwarded and
+`--machine <label-or-id>` runs the whole command in the saved remote repository.
+Task, worktree and Wave selectors resolve on that machine. Foreground commands can choose from origin-forwarded and
 target-local subscription accounts. Durable processes scrub forwarded provider,
 GitHub, PM, and secret authority before detaching and use credentials installed
 on their machine.

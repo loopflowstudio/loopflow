@@ -6,11 +6,11 @@ use std::num::NonZeroU32;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::durable::{FlowFilter, FlowInventoryEntry, FlowPage, TaskId};
+use crate::durable::{FlowProcessFilter, FlowProcessInventoryEntry, FlowProcessPage, TaskId};
 use crate::engine::flow_graph::FlowGraph;
 use crate::id::{ProcessLfid, WaveId};
-use crate::ops::flow_run::{FlowProcess, FlowProcessStep};
-use crate::session::{FlowSummary, FlowSummaryState};
+use crate::ops::flow_process::{FlowProcess, FlowProcessStep};
+use crate::session::{FlowProcessSummary, FlowProcessSummaryState};
 use crate::store::{StoreError, StoreResult};
 
 use super::processes::{read_process, PROCESS_SELECT};
@@ -78,9 +78,12 @@ pub(super) fn flows_in(
 }
 
 /// What the driver's Process says of the Flow, and the Work its checkout names.
-pub(super) fn entry_in(conn: &Connection, flow: &FlowProcess) -> StoreResult<FlowInventoryEntry> {
+pub(super) fn entry_in(
+    conn: &Connection,
+    flow: &FlowProcess,
+) -> StoreResult<FlowProcessInventoryEntry> {
     let driver = &flow.driver;
-    let state = FlowSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
+    let state = FlowProcessSummaryState::of_driver(driver.outcome.as_deref(), driver.completed_at);
     let task = super::task_work::task_of_process(conn, &driver.lfid)?;
     let wave: Option<String> = match &task {
         Some(task) => conn
@@ -100,8 +103,8 @@ pub(super) fn entry_in(conn: &Connection, flow: &FlowProcess) -> StoreResult<Flo
             )
             .optional()?,
     };
-    Ok(FlowInventoryEntry {
-        summary: FlowSummary {
+    Ok(FlowProcessInventoryEntry {
+        summary: FlowProcessSummary {
             id: driver.lfid.to_string(),
             name: flow.name.clone(),
             state,
@@ -127,10 +130,10 @@ impl SqliteStore {
     /// Flows in driver-id order after `after`, at most `limit`.
     pub fn flow_inventory(
         &self,
-        filter: &FlowFilter,
+        filter: &FlowProcessFilter,
         after: Option<&str>,
         limit: NonZeroU32,
-    ) -> StoreResult<FlowPage> {
+    ) -> StoreResult<FlowProcessPage> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let flows = match &filter.task_id {
             Some(task) => super::task_work::flows_of_task(&conn, task)?,
@@ -164,14 +167,14 @@ impl SqliteStore {
         let limit = limit.get() as usize;
         let next = (entries.len() > limit).then(|| entries[limit - 1].summary.id.clone());
         entries.truncate(limit);
-        Ok(FlowPage { entries, next })
+        Ok(FlowProcessPage { entries, next })
     }
 
     /// One Flow by its driver Process id or a unique prefix of it.
     pub(crate) fn flow_process(
         &self,
         selector: &str,
-    ) -> StoreResult<Option<(FlowProcess, FlowInventoryEntry)>> {
+    ) -> StoreResult<Option<(FlowProcess, FlowProcessInventoryEntry)>> {
         let Some(driver) = self.resolve_process(selector)? else {
             return Ok(None);
         };
@@ -266,7 +269,7 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub(crate) fn flow_entry(&self, flow: &FlowProcess) -> StoreResult<FlowInventoryEntry> {
+    pub(crate) fn flow_entry(&self, flow: &FlowProcess) -> StoreResult<FlowProcessInventoryEntry> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         entry_in(&conn, flow)
     }
@@ -358,8 +361,8 @@ impl SqliteStore {
 mod tests {
     use std::num::NonZeroU32;
 
-    use crate::durable::FlowFilter;
-    use crate::session::FlowSummaryState;
+    use crate::durable::FlowProcessFilter;
+    use crate::session::FlowProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
 
     #[test]
@@ -423,7 +426,7 @@ mod tests {
 
         let all = NonZeroU32::new(10).unwrap();
         let page = store
-            .flow_inventory(&FlowFilter::default(), None, all)
+            .flow_inventory(&FlowProcessFilter::default(), None, all)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
         let state = |id: &crate::id::ProcessLfid| {
@@ -434,9 +437,9 @@ mod tests {
                 .summary
                 .state
         };
-        assert_eq!(state(&running), FlowSummaryState::Current);
-        assert_eq!(state(&failed), FlowSummaryState::Stopped);
-        assert_eq!(state(&done), FlowSummaryState::Completed);
+        assert_eq!(state(&running), FlowProcessSummaryState::Current);
+        assert_eq!(state(&failed), FlowProcessSummaryState::Stopped);
+        assert_eq!(state(&done), FlowProcessSummaryState::Completed);
 
         let (flow, entry) = store.flow_process(running.as_str()).unwrap().unwrap();
         assert_eq!(entry.summary.name, "feature");
@@ -464,7 +467,7 @@ mod tests {
         drop(conn);
         let repo = store
             .flow_inventory(
-                &FlowFilter {
+                &FlowProcessFilter {
                     repo: Some("/other".into()),
                     ..Default::default()
                 },
@@ -475,10 +478,14 @@ mod tests {
         assert_eq!(repo.entries.len(), 1);
         assert_eq!(repo.entries[0].summary.id, done.as_str());
         let first = store
-            .flow_inventory(&FlowFilter::default(), None, NonZeroU32::new(2).unwrap())
+            .flow_inventory(
+                &FlowProcessFilter::default(),
+                None,
+                NonZeroU32::new(2).unwrap(),
+            )
             .unwrap();
         let rest = store
-            .flow_inventory(&FlowFilter::default(), first.next.as_deref(), all)
+            .flow_inventory(&FlowProcessFilter::default(), first.next.as_deref(), all)
             .unwrap();
         assert_eq!((first.entries.len(), rest.entries.len()), (2, 1));
     }

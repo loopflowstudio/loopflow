@@ -161,7 +161,7 @@ struct WorkSurfaceView: View {
                 if let project = roadmap.currentProject {
                     let name = project.workflow.trimmingCharacters(in: .whitespacesAndNewlines)
                     section { WaveWorkflowView(model: model, wave: roadmap.wave, name: name) }
-                        .task { await model.loadFlowCatalog() }
+                        .task { await model.loadWorkflowCatalog() }
                 }
 
                 switch roadmap.tasks {
@@ -492,8 +492,8 @@ struct WorkSurfaceView: View {
         if let label = task.task.historyLabel {
             return (label, task.task.isSuccessful ? .done : .neutral)
         }
-        if case .latest(let latest) = task.flow.record {
-            return latest.execution.presentation
+        if let execution = task.execution {
+            return execution.state.presentation
         }
         return (nil, .neutral)
     }
@@ -729,16 +729,15 @@ struct WaveWorkflowView: View {
     let name: String
     @Environment(\.palette) private var palette
 
-    private var catalog: [FlowCatalogEntry] { model.flowCatalog.value ?? [] }
-    private var choices: [FlowCatalogEntry] { catalog.filter { $0.kind == .workflow } }
-    private var entry: FlowCatalogEntry? { choices.first { $0.name == name } }
+    private var catalog: [WorkflowCatalogEntry] { model.workflowCatalog.value ?? [] }
+    private var entry: WorkflowCatalogEntry? { catalog.first { $0.name == name } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Workflow") {
                 // A Project may name no workflow; the menu is where one is chosen.
                 Menu(name.isEmpty ? "None" : name) {
-                    ForEach(choices) { choice in
+                    ForEach(catalog) { choice in
                         Button(choice.unavailable == nil ? choice.name : "\(choice.name) (invalid)") {
                             Task { await model.setWorkflow(choice.name, wave: wave) }
                         }
@@ -768,12 +767,16 @@ struct WaveWorkflowView: View {
                 WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
             } else if !name.isEmpty {
                 Text(entry?.unavailable.map { "\(name) is invalid: \($0)" }
-                     ?? model.flowCatalog.errorMessage
-                     ?? (model.flowCatalog.isLoading ? "Reading workflows…" : "\(name) names no workflow here"))
+                     ?? model.workflowCatalog.errorMessage
+                     ?? (model.workflowCatalog.isLoading ? "Reading workflows…" : "\(name) names no workflow here"))
                     .font(Typography.caption())
                     .foregroundStyle(Color.statusWarning)
                     .textSelection(.enabled)
                     .accessibilityIdentifier("wave-workflow-invalid")
+            }
+            if let error = model.workflowCatalog.errorMessage {
+                Text(error).foregroundStyle(Color.statusWarning)
+                Button("Retry") { Task { await model.loadWorkflowCatalog(force: true) } }
             }
             if let error = model.workflowErrors[wave.id] {
                 Text(error)

@@ -69,11 +69,21 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .unwrap()
             .record
             .unwrap();
+        record.project.as_mut().unwrap().workflow = "proof".into();
+        record.project.as_mut().unwrap().revision = Some("2026-10-07T12:00:00Z".into());
         record.item.revision = Some("2026-10-04T12:00:00Z".into());
         if condition == "terminal" {
             record.item.state = Some("canceled".into());
         }
         if condition == "moved" {
+            // The retained parent still selects feature; give that Workflow a proof edge
+            // so this fixture reaches the planning mismatch admission check.
+            fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+            fs::write(
+                repo.path().join(".lf/workflows/feature.yaml"),
+                "edges:\n  - {from: start, to: end, flow: proof}\n",
+            )
+            .unwrap();
             record.project.as_mut().unwrap().id = "another-project".into();
             record.item.project_id = Some("another-project".into());
         }
@@ -148,7 +158,10 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("which is not a workflow"), "{error}");
-        assert!(error.contains("lf wave update-plan --workflow"), "{error}");
+        assert!(
+            error.contains("lf project workflow set <project>"),
+            "{error}"
+        );
         assert_eq!(support::recorded_flows(home.path()).len(), 3);
         let status = run(&["task", "status", "INF-123", "--json"]);
         assert!(
@@ -158,13 +171,13 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         );
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
         assert_eq!(
-            status["execution"]["work"]["flows"]
+            status["execution"]["work"]["flow_processes"]
                 .as_array()
                 .unwrap()
                 .len(),
             3
         );
-        assert!(status["execution"]["work"]["flows"]
+        assert!(status["execution"]["work"]["flow_processes"]
             .as_array()
             .unwrap()
             .iter()
@@ -748,7 +761,7 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
 }
 
 #[test]
-fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
+fn a_plain_flow_process_in_the_worktree_does_not_move_the_task() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
     let before = task.workflow();
@@ -761,6 +774,26 @@ fn a_plain_flow_run_in_the_worktree_does_not_move_the_task() {
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
+}
+
+#[test]
+fn a_task_takes_up_the_workflow_when_an_autonomous_flow_has_the_same_name() {
+    let task = WorkflowTask::new();
+    fs::write(
+        task.repo.path().join(".lf/flows/feature.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    task.ok(&["-b", "task", "run", "INF-123", "feature"]);
+    let captured = task.workflow();
+    assert_eq!(captured["name"], "feature");
+    assert_eq!(
+        captured["position"],
+        serde_json::json!({"kind":"node","node":"review"})
+    );
+    task.ok(&["-b", "run", "feature"]);
+    assert_eq!(task.workflow(), captured);
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
 }
 
 /// The Flow processes started beneath `task_run`, by outcome, oldest first.
@@ -959,6 +992,38 @@ fn linear_completing_a_task_that_never_started_withdraws_it() {
     assert!(error.contains("terminal"), "{error}");
     assert!(support::recorded_flows(task.home.path()).is_empty());
     assert_eq!(task.state(), "not_ready");
+}
+
+#[test]
+fn workflow_restart_keeps_the_captured_graph_and_execution_history() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
+    let before = task.workflow();
+    let processes = support::recorded_flows(task.home.path());
+    fs::write(
+        task.repo.path().join(".lf/workflows/rounds.yaml"),
+        "invalid: source\n",
+    )
+    .unwrap();
+    task.ok(&["task", "workflow", "restart", "INF-123"]);
+    let after = task.workflow();
+    assert_eq!(
+        after["position"],
+        serde_json::json!({"kind":"node","node":"start"})
+    );
+    assert_eq!(after["nodes"], before["nodes"]);
+    assert_eq!(after["edges"], before["edges"]);
+    assert_eq!(
+        after["history"].as_array().unwrap().len(),
+        before["history"].as_array().unwrap().len() + 1
+    );
+    assert_eq!(support::recorded_flows(task.home.path()), processes);
+    let shown = task.run(&["task", "workflow", "show", "INF-123", "--json"]);
+    assert!(shown.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
+        after
+    );
 }
 
 #[test]

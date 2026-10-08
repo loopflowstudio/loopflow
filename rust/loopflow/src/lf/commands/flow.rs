@@ -1,15 +1,14 @@
 use crate::durable::WorkRef;
 use crate::engine::flow::return_target;
-use crate::engine::flow_graph::CatalogKind;
 use crate::engine::flow_output::FlowOutput;
 use crate::engine::{
     compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
-    Flow, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
+    FlowDefinition, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
 use crate::lf::Cli;
-use crate::ops::flow_run;
+use crate::ops::flow_process;
 use crate::ops::WorkBinding;
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
@@ -19,7 +18,7 @@ use std::sync::Mutex;
 
 /// Run a flow: print pipeline header, then execute each skill sequentially.
 pub fn run(
-    flow: &Flow,
+    flow: &FlowDefinition,
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
@@ -78,21 +77,17 @@ pub fn show(name: &str, repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `lf flow list [--json]` — Flows and workflows with the topology each would pin.
+/// `lf flow list [--json]` — Flow definitions with the topology each would capture.
 pub fn list(repo: &Path, json: bool) -> Result<()> {
-    let catalog = crate::engine::flow_graph::flow_catalog(repo);
+    let catalog = crate::engine::flow_graph::flow_catalog(repo)?;
     if json {
         println!("{}", serde_json::to_string(&catalog)?);
         return Ok(());
     }
     for entry in catalog {
-        let kind = match entry.kind {
-            CatalogKind::Flow => "",
-            CatalogKind::Workflow => "  (workflow)",
-        };
         match entry.unavailable {
-            Some(reason) => println!("{}{kind}  (unavailable: {reason})", entry.name),
-            None => println!("{}{kind}", entry.name),
+            Some(reason) => println!("{}  (unavailable: {reason})", entry.name),
+            None => println!("{}", entry.name),
         }
     }
     Ok(())
@@ -456,7 +451,7 @@ impl Driver<'_> {
         let mut command =
             tokio::process::Command::new(crate::engine::process::resolve_pinned_lf_binary()?);
         command.current_dir(self.cwd);
-        command.env(flow_run::FLOW_ID_ENV, self.process.as_str());
+        command.env(flow_process::FLOW_ID_ENV, self.process.as_str());
         if let Some((id, fd)) = self
             .launcher
             .cron_receipt

@@ -233,7 +233,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_id: None,
+        flow_process_lfid: None,
         work_source: None,
         bound_at: None,
         interactive: true,

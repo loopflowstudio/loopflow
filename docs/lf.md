@@ -86,9 +86,13 @@ you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
-lf flow list                   # Flows and workflows, with source and validity
-lf flow customize feature      # write the builtin to .lf/ and print its path
-lf update-plan --wave exports --workflow code   # change only the Project's workflow
+lf project workflow list                 # Workflow definitions and validity
+lf project workflow set PROJECT code     # selection for future Tasks
+lf project workflow customize feature    # print its local source path
+lf task workflow show EXP-12             # captured graph, position and history
+lf task workflow restart EXP-12          # move to start; retain graph and history
+lf flow list                             # autonomous Flow definitions
+lf flow customize pursue                 # print its local source path
 ```
 
 A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
@@ -96,7 +100,7 @@ A Flow whose driver died leaves its Processes as history. No command resumes it.
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --sessions --json    # one Flow's steps, by its Flow process ID
+lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -326,8 +330,8 @@ lf roadmap --task LOO-303 --all --json
 
 Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
-Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
-Task destinations open details; selecting a Flow opens its folded template.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
+Task destinations open details; selecting a Flow opens its folded graph.
 
 ### Inspect all work in a Task
 
@@ -337,11 +341,19 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you: one that
-asked a question, handed its turn back, or went quiet for two minutes with no
-tool call outstanding. A long silent step can show up there. Waiting is read
-from a provider stream `lf` drives: a conversation in a native `claude` or
-`opencode` terminal never shows it.
+`--waiting` narrows that selection to conversations waiting on you. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+as does idle for an interactive Session. Working, done, error and explicit clear
+suppress the quiet-time inference for that provider generation. A blocked child
+still counts when its parent reports working.
+
+Without reports, the existing provider stream supplies questions, hand-back and
+the two-minute quiet rule when no tool call remains open. A long silent step can
+still show up there. Plain shell panes show their own reports without creating a
+Session. The focused pane's report appears in the workspace breadcrumb header
+and pane strip; its message is literal text. Reports never complete work.
+Desktop must be observing the terminal; detached relay observation and lf's own
+terminal emission remain follow-up work.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 
@@ -388,3 +400,25 @@ Run `lf sync --plan` and `lf sync` at a deliberate maintenance boundary and afte
 merged document PR. Network failures leave local work usable; conflicts stay visible
 and use `lf sync --continue` or `lf sync --abort`. Persistent branches remain reusable
 and survive automatic pruning. Memory updates do not require PRs or a schedule.
+
+## Work on another machine
+
+```bash
+lf machine add mini --repo '~/src/project'
+lf machine status mini
+lf --machine mini session list
+lf --machine mini --task LOO-123 implement
+lf --machine mini machine add builder
+```
+
+`--machine <label-or-id>` runs the entire command on that machine in its saved
+repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
+`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+
+Save an SSH destination once, then use its label. List, rename and remove saved
+connections with `lf machine list`, `lf machine rename mini builder` and
+`lf machine remove builder`. Removing a connection leaves remote work running.
+Interactive add offers to install a missing `lf`; an existing installation stays
+untouched. Status reports connection failures and recovery commands without prompting.
+Connections are reused for 60 idle seconds through Loopflow's private SSH socket.
+See [machine connections](architecture/machines.md) for repository paths and version checks.

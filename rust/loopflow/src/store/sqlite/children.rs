@@ -25,7 +25,7 @@ use crate::work::task::{
     TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
 };
 
-use super::SqliteStore;
+use super::{SqliteStore, TaskCheckout};
 
 fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewTask>> {
     conn.query_row(
@@ -171,24 +171,21 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
+    pub(crate) fn task_checkout(&self, task: &TaskId) -> StoreResult<Option<TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT id, issue_identifier, worktree, checkout_machine_id
-             FROM tasks WHERE worktree IS NOT NULL",
-        )?;
-        let rows = statement.query_map([], |row| {
-            let home: Option<String> = row.get(3)?;
-            Ok(super::TaskCheckout {
-                task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-                issue_identifier: row.get(1)?,
-                worktree: PathBuf::from(row.get::<_, String>(2)?),
-                machine_id: home
-                    .map(|id| crate::durable::MachineId::parse(&id))
-                    .transpose()
-                    .map_err(|error| invalid_column(3, error))?,
-            })
-        })?;
+        conn.query_row(
+            &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
+            [task.as_str()],
+            map_task_checkout,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
+        let rows = statement.query_map([], map_task_checkout)?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
@@ -1184,6 +1181,22 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
     Ok(())
 }
 
+const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, issue_identifier, worktree, checkout_machine_id
+    FROM tasks WHERE worktree IS NOT NULL";
+
+fn map_task_checkout(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
+    let machine: Option<String> = row.get(3)?;
+    Ok(TaskCheckout {
+        task_id: TaskId::from_raw(row.get::<_, String>(0)?),
+        issue_identifier: row.get(1)?,
+        worktree: PathBuf::from(row.get::<_, String>(2)?),
+        machine_id: machine
+            .map(|id| crate::durable::MachineId::parse(&id))
+            .transpose()
+            .map_err(|error| invalid_column(3, error))?,
+    })
+}
+
 const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
     issue_description, pm_snapshot_synced_at,
@@ -1992,6 +2005,53 @@ mod local_planning_tests {
 
     fn local_project(store: &SqliteStore) -> ProjectId {
         store.ensure_wave_project("/local", "inbox").unwrap().id
+    }
+
+    #[test]
+    fn task_checkout_read_distinguishes_unplaced_and_unknown_machine() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("db")).unwrap();
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                project_id: local_project(&store),
+                title: "Locate files".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        assert!(store.task_checkout(&TaskId::new()).unwrap().is_none());
+        assert!(store.task_checkout(&task.id).unwrap().is_none());
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/retained/checkout' WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        let checkout = store.task_checkout(&task.id).unwrap().unwrap();
+        assert_eq!(checkout.task_id, task.id);
+        assert_eq!(checkout.issue_identifier, task.plan.identifier);
+        assert_eq!(
+            checkout.worktree,
+            std::path::Path::new("/retained/checkout")
+        );
+        assert!(checkout.machine_id.is_none());
+        let local = store.local_machine().unwrap().id;
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+                params![task.id.as_str(), local.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            store.task_checkout(&task.id).unwrap().unwrap().machine_id,
+            Some(local)
+        );
     }
 
     #[test]

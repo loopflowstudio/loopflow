@@ -19,5 +19,5 @@ CREATE TABLE repository_plans (
     id TEXT UNIQUE NOT NULL
 );
 INSERT INTO repository_plans(repo,id)
-    SELECT DISTINCT repo, 'repo_' || lower(hex(randomblob(16))) FROM
+    SELECT repo, 'repo_' || lower(hex(randomblob(16))) FROM
         (SELECT DISTINCT repo FROM waves);

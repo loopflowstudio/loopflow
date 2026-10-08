@@ -245,10 +245,8 @@ fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
     let checkout = store
-        .task_checkouts()
-        .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
-        .into_iter()
-        .find(|row| row.task_id == task_id)
+        .task_checkout(&task_id)
+        .map_err(|error| task_error(format!("cannot read Task checkout: {error}")))?
         .ok_or_else(|| task_error(format!("Task {issue:?} has no checkout")))?;
     let machine = checkout.machine_id.as_ref().ok_or_else(|| {
         task_error("Task checkout Machine is unknown; its files cannot be located")
@@ -4192,11 +4190,9 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
         );
         let (provider, _) = parse_agent(&agent);
         let machine_id = store
-            .task_checkouts()
+            .task_checkout(&task.id)
             .await
             .map_err(task_error)?
-            .into_iter()
-            .find(|row| row.task_id == task.id)
             .and_then(|row| row.machine_id);
         let local_machine = store.local_machine().await.map_err(task_error)?;
         let worktree = task.worktree.as_ref().map(|task_worktree| {

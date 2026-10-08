@@ -58,12 +58,8 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
-    super::ssh::run_in_repository(
-        route.machine_id.as_str(),
-        false,
-        &args[1..],
-        Some(&route.repository_id),
-    )?;
+    let machine = route.machine_id.clone();
+    super::ssh::run(machine.as_str(), false, &args[1..], Some(route))?;
     Ok(true)
 }
 
@@ -79,10 +75,10 @@ pub(super) async fn resolve(cli: &Cli) -> Result<Option<crate::durable::TaskExec
         return Ok(None);
     }
     let store = crate::store::open_store(&config).await?;
-    let Some(task) = store.get_task_by_issue(selector).await? else {
+    let Some(task) = store.sqlite.resolve_task_id(selector, None)? else {
         return Ok(None);
     };
-    let route = store.task_execution_route(&task.id).await?;
+    let route = store.task_execution_route(&task).await?;
     if cli
         .repository
         .as_ref()

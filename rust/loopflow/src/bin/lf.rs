@@ -1398,6 +1398,7 @@ fn run() -> anyhow::Result<()> {
                 .expect("remote invocation has a machine"),
             remote.forward_agent,
             &command[1..],
+            None,
         );
     }
 

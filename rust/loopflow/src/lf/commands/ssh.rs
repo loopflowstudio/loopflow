@@ -1,6 +1,7 @@
 //! Run a command on an added machine using credentials resident there.
 //! Login transfers are separate foreground commands; this script contains no secrets.
 
+use crate::durable::TaskExecutionRoute;
 use crate::lf::Cli;
 use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Context};
@@ -10,15 +11,11 @@ use std::process::{Command, Stdio};
 
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
-pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Result<()> {
-    run_in_repository(target, forward_agent, lf_args, None)
-}
-
-pub fn run_in_repository(
+pub fn run(
     target: &str,
     forward_agent: bool,
     lf_args: &[String],
-    repository: Option<&crate::durable::RepositoryId>,
+    task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
     let cli = parse_remote_command(lf_args)?;
     if matches!(cli.command, Some(crate::lf::Commands::Open)) {
@@ -27,7 +24,12 @@ pub fn run_in_repository(
     let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
-    let work_route = runtime.block_on(super::work_route::resolve(&cli))?;
+    // Automatic routing already chose both Machine and plan. Keep that reading
+    // together rather than combining its Machine with a second plan reading.
+    let work_route = match task_route {
+        Some(route) => Some(route),
+        None => runtime.block_on(super::work_route::resolve(&cli))?,
+    };
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
             return Err(anyhow!(
@@ -37,8 +39,9 @@ pub fn run_in_repository(
             ));
         }
     }
-    let repository = repository
-        .or(cli.repository.as_ref())
+    let repository = cli
+        .repository
+        .as_ref()
         .or(work_route.as_ref().map(|route| &route.repository_id));
     let selection = runtime.block_on(super::machine_credentials::prepare_launch(
         &target,

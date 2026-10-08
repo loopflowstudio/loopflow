@@ -104,7 +104,7 @@ async fn inspect_engine_threads(endpoint: &str, thread: &str) -> Result<()> {
         Err(error) => return Err(error.into()),
     };
     let (mut upstream, _) = client_async("ws://localhost", socket).await?;
-    read_rpc(
+    rpc_request(
         &mut upstream,
         "initialize",
         json!({"clientInfo": {"name":"loopflow_close", "version":env!("CARGO_PKG_VERSION")}}),
@@ -112,7 +112,7 @@ async fn inspect_engine_threads(endpoint: &str, thread: &str) -> Result<()> {
     .await?;
     let mut cursor = Value::Null;
     loop {
-        let loaded = read_rpc(
+        let loaded = rpc_request(
             &mut upstream,
             "thread/loaded/list",
             json!({"cursor":cursor,"limit":100}),
@@ -132,7 +132,7 @@ async fn inspect_engine_threads(endpoint: &str, thread: &str) -> Result<()> {
                     return Err(anyhow!("provider thread parent cycle"));
                 }
                 let detail =
-                    read_rpc(&mut upstream, "thread/read", json!({"threadId":current})).await?;
+                    rpc_request(&mut upstream, "thread/read", json!({"threadId":current})).await?;
                 // Codex's own subagents are part of this engine's work. A
                 // separately started conversation must survive this exit.
                 current = detail
@@ -173,7 +173,7 @@ impl CodexConnection {
     pub async fn recover_history(&self, engine: &Path) -> Result<()> {
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(engine).await?).await?;
-        read_rpc(
+        rpc_request(
             &mut upstream,
             "initialize",
             json!({
@@ -190,7 +190,7 @@ impl CodexConnection {
         let mut history = super::codex_history::History::default();
         let mut cursor = Value::Null;
         loop {
-            let result = read_rpc(
+            let result = rpc_request(
                 &mut upstream,
                 "thread/turns/list",
                 json!({
@@ -317,7 +317,7 @@ impl CodexConnection {
     }
 }
 
-pub(crate) async fn read_rpc(
+pub(crate) async fn rpc_request(
     upstream: &mut WebSocketStream<UnixStream>,
     method: &str,
     params: Value,
@@ -340,17 +340,17 @@ pub(crate) async fn read_rpc(
                 continue;
             }
             if let Some(error) = rpc.get("error") {
-                return Err(anyhow!("Native history {method} failed: {error}"));
+                return Err(anyhow!("Codex {method} failed: {error}"));
             }
             return rpc
                 .get("result")
                 .cloned()
-                .ok_or_else(|| anyhow!("Native history reply has no result"));
+                .ok_or_else(|| anyhow!("Codex {method} reply has no result"));
         }
-        Err(anyhow!("Native history connection ended"))
+        Err(anyhow!("Codex connection ended during {method}"))
     })
     .await
-    .map_err(|_| anyhow!("Native history {method} timed out"))?
+    .map_err(|_| anyhow!("Codex {method} timed out"))?
 }
 
 async fn reject(client: &mut WebSocketStream<UnixStream>, rpc: &Value, reason: &str) -> Result<()> {

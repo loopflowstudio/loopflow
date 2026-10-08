@@ -181,7 +181,14 @@ def _rpc(connection: object, method: str, params: dict) -> dict:
             return reply["result"]
 
 
-def _probe(lf: Path, executable: Path, provider: str, unnamed: bool, output: Path) -> None:
+def _probe(
+    lf: Path,
+    executable: Path,
+    provider: str,
+    unnamed: bool,
+    output: Path,
+    codex_title_defaults: bool,
+) -> None:
     # Short paths are required by AF_UNIX. Retain only synthetic evidence on failure.
     root = Path(tempfile.mkdtemp(prefix="lf-title-", dir="/tmp"))
     home, work = root / "home", root / "work"
@@ -232,6 +239,7 @@ def _probe(lf: Path, executable: Path, provider: str, unnamed: bool, output: Pat
         command = [str(executable), "--model", "sonnet"]
     else:
         env["CODEX_HOME"] = str(native)
+        title_config = "" if codex_title_defaults else '[tui]\nterminal_title=["thread-name"]\n'
         (native / "config.toml").write_text(f'''model="gpt-5.4"
 model_provider="fixture"
 cli_auth_credentials_store="file"
@@ -249,8 +257,7 @@ requires_openai_auth=false
 enabled=false
 [feedback]
 enabled=false
-[tui]
-terminal_title=["thread-name"]
+{title_config}
 [projects."{work}"]
 trust_level="trusted"
 ''')
@@ -319,6 +326,7 @@ trust_level="trusted"
                 {
                     "provider": provider,
                     "unnamed_resume": unnamed,
+                    "codex_title_defaults": codex_title_defaults,
                     "passed": True,
                     "evidence": str(output),
                 }
@@ -356,10 +364,22 @@ def main() -> None:
     )
     parser.add_argument("--provider", choices=["claude", "codex"], required=True)
     parser.add_argument("--unnamed-resume", action="store_true")
+    parser.add_argument(
+        "--codex-title-defaults",
+        action="store_true",
+        help="Check Codex's default terminal title without enabling thread-name",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.codex_title_defaults and args.provider != "codex":
+        parser.error("--codex-title-defaults requires --provider codex")
     _probe(
-        args.lf.resolve(), args.native.resolve(), args.provider, args.unnamed_resume, args.output
+        args.lf.resolve(),
+        args.native.resolve(),
+        args.provider,
+        args.unnamed_resume,
+        args.output,
+        args.codex_title_defaults,
     )
 
 

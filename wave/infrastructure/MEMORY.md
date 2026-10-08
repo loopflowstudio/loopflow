@@ -2,13 +2,14 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized demo without accounts or existing-window changes; no landing.
-lf request-derived names preserve human precedence. Native hooks share the excerpt; account-free TUIs prove first-request naming, manual names
-and named resume. Codex shared-server writes reach live OSC/footer, but embedded
-launches lack its socket and loaded unnamed reconnects skip SessionStart. Universal
-native naming remains unfinished. cmux denied separate workspace creation;
-workspace/tab/window agreement is unproved. No native settings were installed.
-Plan and counterexamples: `scratch/every-lf-session-in-cmux.md`.
+Jack Heart authorized account-free demo, preserving windows; no landing.
+Native TUIs prove first-request naming and named resume with Codex defaults.
+Inspected 0.161.0 interfaces lack embedded naming, per-attach hooks, title provenance
+and conditional name writes. Existing names survive; concurrent renames are unproved.
+Provider changes or Jack's scope decision remain unselected.
+Callbacks prove no attach or installation. cmux denied creation;
+settings/windows remain unchanged, host agreement unproved.
+Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

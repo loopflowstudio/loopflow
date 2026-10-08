@@ -2567,7 +2567,7 @@ fn promote_published_from_installation(
             );
         }
         if let Err(error) = crate::installation::account_home()
-            .and_then(|home| crate::engine::terminal_title::install_native_hooks(&home))
+            .and_then(|home| crate::harness::native_titles::install_native_hooks(&home))
         {
             eprintln!("warning: native title hook installation failed ({error:#})");
         }

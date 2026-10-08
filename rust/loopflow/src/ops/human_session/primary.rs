@@ -194,7 +194,7 @@ fn task_session(
         .sqlite
         .task(task)?
         .ok_or_else(|| anyhow!("Task {task} is unavailable"))?;
-    let title = crate::session_record::generated_session_title(
+    let title = crate::engine::naming::generated_session_title(
         None,
         None,
         Some(&plan.plan.title),

@@ -1071,24 +1071,23 @@ proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart authorized profiling and measured optimization through PR publication
-for review, without landing or Task completion, and requested a credential-free
-CI smoke. [The report](../../scripts/benchmarks/agent-startup/README.md) owns raw
-numbers, symbolized release wall-stack SVGs, comparisons and rejected attempts.
-Removing the interactive provider version probe and absent-Wave resolution has
-matched evidence; retaining a capture's SQLite handle did not and was removed.
-Claude reconnect has no demonstrated final gain and its median worsens.
+Jack Heart authorized measured optimization through publication for review,
+without landing or Task completion, plus a credential-free CI smoke. PR #1505
+was published; later benchmark cleanup remains local. [The report](../../scripts/benchmarks/agent-startup/README.md)
+owns numbers, release wall-stack SVGs and rejected attempts. Removing the provider
+version probe and absent-Wave resolution has matched evidence; capture-store
+reuse did not and was removed. Claude reconnect's final median worsens, with no
+demonstrated gain.
 
-Prompt readiness requires unsubmitted text echoed by the raw-mode application,
-not a footer or terminal echo. Codex reconnect needs a seed turn outside timing.
-Fresh fixture state is not a cold OS cache; main-thread startup/shutdown samples
-are not CPU accounting.
+Prompt readiness requires unsubmitted text echoed by the raw-mode application.
+Codex reconnect needs a seed turn outside timing. Fresh fixture state is not a
+cold OS cache: requested cold-cache evidence remains absent. SVG readability
+awaits visual review; neither gap is waived. Wall-stack samples include shutdown
+and are not CPU accounting.
 
-A copied database can retain absolute managed-provider home paths. Strip copied
-account routes before launching a benchmark; never connect copied real Sessions.
-Early excluded probes reached those paths without a filesystem-write audit, so
-complete isolation is unproved for them. Accepted runs use native accounts and
-benchmark-created Sessions; source proofs establish no installed gain or managed
-account continuity. The headless smoke preserves Session/native identity,
-context and retained history while bounding provider launches, Git and SQLite
-work. Hosted CI and publication remain separate evidence.
+A copied database retains absolute provider-home paths. Strip account routes
+before launch; connect only benchmark-created Sessions. Early excluded probes
+reached those paths without a write audit; their isolation remains unproved.
+Native-account fixtures establish no installed gain or managed-account continuity.
+The smoke preserves identity, context and history while bounding launch work;
+CI runs it with network isolation. Hosted success remains separate evidence.

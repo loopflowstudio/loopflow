@@ -95,6 +95,8 @@ No samples or outliers were dropped from these datasets.
 OS pages, authentication, provider installation and workspace trust remain warm.
 These samples distinguish fresh Loopflow storage/capture state from the repeated
 fixture above. Five samples describe spread; they do not establish tail latency.
+The requested cold-cache comparison remains unmeasured; first use of a fixture
+does not close that acceptance gap.
 
 | Provider / route | Baseline median [Q1–Q3]; range | Candidate median [Q1–Q3]; range | Candidate minus direct median |
 |---|---:|---:|---:|

@@ -1,23 +1,8 @@
 //! Inspect durable Machine identity and routes.
 
-use crate::lf::MachineCommand;
 use anyhow::anyhow;
 
-pub fn run(cmd: &MachineCommand) -> anyhow::Result<()> {
-    match cmd {
-        MachineCommand::Ssh { .. } => {
-            unreachable!("SSH dispatches separately")
-        }
-        MachineCommand::Id { json } => id_cmd(*json),
-        MachineCommand::Observe {
-            machine_id,
-            route,
-            json,
-        } => observe_cmd(machine_id, route, *json),
-    }
-}
-
-fn id_cmd(json: bool) -> anyhow::Result<()> {
+pub fn print_id(json: bool) -> anyhow::Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     let machine = runtime.block_on(async {
         crate::store::open_existing_store()
@@ -35,7 +20,7 @@ fn id_cmd(json: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn observe_cmd(
+pub fn observe(
     machine_id: &crate::durable::MachineId,
     route: &str,
     json: bool,

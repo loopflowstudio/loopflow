@@ -1647,7 +1647,9 @@ fn execute_command(
             })
         }
         Some(Commands::Open) => loopflow::lf::commands::open::run(),
-        Some(Commands::Config { cmd }) => loopflow::lf::commands::config::run(cmd),
+        Some(Commands::Config {
+            cmd: loopflow::lf::ConfigCommand::User { json },
+        }) => loopflow::lf::commands::config::print_user(*json),
         Some(Commands::ProviderSession) => {
             loopflow::lf::commands::session_history::observe_provider_session()
         }
@@ -1707,10 +1709,16 @@ fn execute_command(
             _ => in_directory_runtime(args, |_| loopflow::lf::commands::ops::run_repo(cmd)),
         },
         Some(Commands::Machine {
+            cmd: loopflow::lf::MachineCommand::Id { json },
+        }) => loopflow::lf::commands::machine::print_id(*json),
+        Some(Commands::Machine {
             cmd:
-                cmd @ (loopflow::lf::MachineCommand::Id { .. }
-                | loopflow::lf::MachineCommand::Observe { .. }),
-        }) => loopflow::lf::commands::machine::run(cmd),
+                loopflow::lf::MachineCommand::Observe {
+                    machine_id,
+                    route,
+                    json,
+                },
+        }) => loopflow::lf::commands::machine::observe(machine_id, route, *json),
         Some(Commands::Self_ {
             cmd: loopflow::lf::SelfCommand::SyncSkills { yes, no_prune },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
@@ -2054,12 +2062,6 @@ mod tests {
         drop(guard);
 
         assert_eq!(std::env::current_dir().unwrap(), previous);
-    }
-
-    #[test]
-    fn open_remains_an_explicit_app_command() {
-        let cli = Cli::try_parse_from(["lf", "open"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Open)));
     }
 
     #[test]

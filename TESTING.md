@@ -70,6 +70,12 @@ Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
 
+Changes to interactive/headless selection also run `default_conversation_tests`
+alongside `flow_tests`: bare `lf`, explicit `-b`, and a Flow invoking the `default`
+skill must preserve their distinct launch modes. Prompt fixtures read the harness's
+actual inputs, including context files and stdin, rather than assuming everything
+remains in argv.
+
 ## Quick Reference
 
 ```bash

@@ -1579,10 +1579,13 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             args,
             direct_binding.as_ref(),
         ),
-        None => match direct_binding.as_ref() {
-            Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
-            None => run_default_agent(&cli, args),
-        },
+        None => {
+            cli.interactive = !cli.batch;
+            match direct_binding.as_ref() {
+                Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
+                None => run_default_agent(&cli, args),
+            }
+        }
     });
 
     finish_command(result)

@@ -808,6 +808,7 @@ pub struct LinearObservationApply {
     pub content_steer: Option<String>,
     /// Participant comments observed this pass, oldest first.
     pub follow_ups: Vec<LinearFollowUp>,
+    pub comments: Vec<crate::pm::IssueComment>,
 }
 
 #[derive(Debug, Clone)]

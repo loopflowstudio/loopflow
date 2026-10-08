@@ -1210,6 +1210,14 @@ pub fn run_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
+    let _comments = process
+        .task_input
+        .as_ref()
+        .map(crate::ops::task_input::TaskInput::refresh)
+        .transpose()
+        .map_err(|error| {
+            CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))
+        })?;
     let result = _run_with_transient_retries(
         &launch,
         &process,
@@ -1662,7 +1670,6 @@ fn _run_harness_once(
         let can_failover = account_route.is_some()
             && launch.provider_account_authority_home.is_none();
 
-        let _comments = process.task_input.as_ref().map(crate::ops::task_input::TaskInput::refresh);
         let drive = async {
             harness
                 .send_input(&prompt)

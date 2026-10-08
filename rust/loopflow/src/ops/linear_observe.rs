@@ -45,72 +45,6 @@ pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
         && !body.starts_with("[GitHub PR #")
 }
 
-/// Publish first; local events are a recoverable projection of Linear comments.
-pub(crate) async fn publish_task_steer(
-    store: &SharedStore,
-    task: &Task,
-    text: &str,
-) -> OpsResult<String> {
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        == crate::planning::PlanningAuthority::Local
-    {
-        return super::task::append_local_comment(store, task, text, true);
-    }
-    let client = super::pm::issue_client(task.worktree()?).await?;
-    let comment_id = publish_direction(&client, task.plan.linear_id()?.as_str(), text).await?;
-    refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
-        "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
-    )))?;
-    Ok(comment_id)
-}
-
-pub(crate) async fn publish_issue_comment(
-    client: &LinearClient,
-    issue: &str,
-    text: &str,
-    steer: bool,
-) -> OpsResult<String> {
-    if steer {
-        return publish_direction(client, issue, text).await;
-    }
-    let capture = crate::session_record::inherited_capture_key()
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let provenance =
-        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id));
-    if let Some(provenance) = provenance {
-        let marker = format!(
-            "<!-- loopflow-progress:{provenance}:{} -->",
-            uuid::Uuid::new_v4()
-        );
-        return publish_comment(client, issue, text, &marker).await;
-    }
-    publish_direction(client, issue, text).await
-}
-
-async fn publish_direction(client: &LinearClient, issue: &str, text: &str) -> OpsResult<String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Err(OpsError::Message("Task direction cannot be empty".into()));
-    }
-    let marker = format!("<!-- loopflow-steer:{} -->", uuid::Uuid::new_v4());
-    let name = crate::engine::config::participant_name()
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let text = match name {
-        Some(name) => format!(
-            "{text}\n\n<!-- loopflow-requester:{} -->",
-            serde_json::to_string(&name)
-                .expect("name is serializable")
-                .replace('<', "\\u003c")
-                .replace('>', "\\u003e")
-        ),
-        None => text.to_string(),
-    };
-    publish_comment(client, issue, &text, &marker).await
-}
-
 pub(crate) async fn publish_comment(
     client: &LinearClient,
     issue_id: &str,
@@ -154,6 +88,120 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     reconcile_linear_observation(store, &task, observation, "", OffsetDateTime::now_utc())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(())
+}
+
+/// A foreground connection's independent inbound and outbound comment work.
+/// Dropping the connection cancels requests; durable identities survive cancellation.
+#[derive(Debug)]
+pub(crate) struct CommentSync {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl CommentSync {
+    pub(crate) fn start(store: SharedStore, task: Task) -> std::io::Result<Self> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        #[cfg(test)]
+        let context = super::pm::PM_TEST_CONTEXT.try_with(Clone::clone).ok();
+        let thread = std::thread::Builder::new()
+            .name("planning-comments".into())
+            .spawn(move || {
+                let drive = async {
+                    let inbound = async {
+                        loop {
+                            let result = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                refresh_task_comments(&store, &task),
+                            )
+                            .await;
+                            if let Ok(Err(error)) = result {
+                                tracing::debug!(%error, "comment acquisition pending");
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                        }
+                    };
+                    let outbound = async {
+                        loop {
+                            if let Err(error) = sync_task_comments(&store, &task).await {
+                                tracing::debug!(%error, "comment delivery pending");
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    };
+                    tokio::select! {
+                        _ = stopped => {},
+                        _ = inbound => {},
+                        _ = outbound => {},
+                    }
+                };
+                #[cfg(test)]
+                if let Some(context) = context {
+                    runtime.block_on(super::pm::PM_TEST_CONTEXT.scope(context, drive));
+                    return;
+                }
+                runtime.block_on(drive);
+            })?;
+        Ok(Self {
+            stop: Some(stop),
+            thread: Some(thread),
+        })
+    }
+}
+
+impl Drop for CommentSync {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<()> {
+    let message = |error: &dyn std::fmt::Display| OpsError::Message(error.to_string());
+    let task = store
+        .get_task(&task.id)
+        .await
+        .map_err(|error| message(&error))?
+        .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
+    let Some(issue) = &task.plan.linear_id else {
+        return Ok(());
+    };
+    let comments = store
+        .sqlite
+        .pending_task_comments(&task.id)
+        .map_err(|error| message(&error))?;
+    if comments.is_empty() {
+        return Ok(());
+    }
+    let wave = store
+        .get_wave(&task.wave_id)
+        .await
+        .map_err(|error| message(&error))?
+        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
+    for comment in comments {
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.sync_comment(&comment.id, issue.as_str(), &comment.body),
+        )
+        .await;
+        let error = match result {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some("Comment delivery timed out; its identity is retained".into()),
+        };
+        store
+            .sqlite
+            .record_comment_delivery(&comment.id, error.as_deref())
+            .map_err(|error| message(&error))?;
+    }
     Ok(())
 }
 
@@ -265,6 +313,7 @@ pub(crate) fn plan_apply(
         observed_at,
         content_steer,
         follow_ups,
+        comments: observation.comments,
     }
 }
 
@@ -276,7 +325,6 @@ pub(crate) mod tests {
     use crate::work::task::{Task, TaskId, TaskLinearObservation};
 
     use crate::pm::test_server::{self, json_response};
-    use crate::store::{CredentialType, ProviderToken};
     use axum::http::StatusCode;
     use serde_json::json;
 
@@ -305,94 +353,6 @@ pub(crate) mod tests {
                 .unwrap(),
             "posted-comment"
         );
-    }
-
-    #[tokio::test]
-    async fn steer_failure_preserves_confirmed_or_uncertain_publication() {
-        for confirmed in [true, false] {
-            let failure = || {
-                json_response(
-                    StatusCode::OK,
-                    json!({"errors": [{"message": "observation unavailable"}]}),
-                )
-            };
-            let write = if confirmed {
-                json_response(
-                    StatusCode::OK,
-                    json!({"data": {
-                        "commentCreate": {"comment": {"id": "posted-comment"}}
-                    }}),
-                )
-            } else {
-                failure()
-            };
-            let (url, _) = test_server::spawn(vec![write, failure()]).await;
-            let home = tempfile::tempdir().unwrap();
-            let store = std::sync::Arc::new(
-                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-                    home.path().join("store.db"),
-                ))
-                .await
-                .unwrap(),
-            );
-            store
-                .upsert_provider_token(&ProviderToken {
-                    provider: "linear".into(),
-                    access_token: "fixture-token".into(),
-                    refresh_token: None,
-                    oauth_client_id: None,
-                    expires_at: None,
-                    login: Some("fixture".into()),
-                    updated_at: 1,
-                    credential_type: CredentialType::OAuth,
-                })
-                .await
-                .unwrap();
-            let mut task = task();
-            task.worktree = Some(home.path().to_path_buf());
-            let conn = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'fixture',?2,1)",
-                rusqlite::params![task.wave_id, home.path().to_string_lossy()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",
-                rusqlite::params![task.project_id.as_str(), task.wave_id],
-            ).unwrap();
-            std::fs::create_dir_all(home.path().join(".lf")).unwrap();
-            std::fs::write(
-                home.path().join(".lf/config.yaml"),
-                "pm:\n  provider: linear\n",
-            )
-            .unwrap();
-            let error = crate::ops::pm::PM_TEST_CONTEXT
-                .scope(
-                    crate::ops::pm::PmTestContext {
-                        path: home.path().join("store.db"),
-                        store: store.clone(),
-                        graphql_url: url,
-                    },
-                    super::publish_task_steer(&store, &task, "preserve the working conversation"),
-                )
-                .await
-                .unwrap_err()
-                .to_string();
-            if confirmed {
-                assert!(
-                    error.contains("Posted Linear comment posted-comment"),
-                    "{error}"
-                );
-                assert!(error.contains("local delivery is pending"), "{error}");
-            } else {
-                assert!(
-                    error.contains("Linear did not confirm this comment"),
-                    "{error}"
-                );
-                assert!(error.contains("before resubmitting"), "{error}");
-            }
-            assert!(!error.contains("was not published"), "{error}");
-        }
     }
 
     const VIEWER: &str = "user-loopflow";

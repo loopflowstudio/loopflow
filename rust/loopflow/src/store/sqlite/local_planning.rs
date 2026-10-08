@@ -28,6 +28,86 @@ pub(super) fn project_authority_on(
     })
 }
 
+pub(super) fn ingest_task_comment(
+    conn: &Connection,
+    task: &crate::durable::TaskId,
+    comment: &crate::pm::IssueComment,
+) -> StoreResult<()> {
+    let existing: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT task_id,provider_revision FROM task_comments WHERE id=?1",
+            [&comment.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((owner, revision)) = existing {
+        if owner != task.as_str() {
+            return Err(StoreError::InvalidData(
+                "comment belongs to another Task".into(),
+            ));
+        }
+        if revision.as_deref().is_some_and(|revision| {
+            comment
+                .revision
+                .as_deref()
+                .is_none_or(|incoming| incoming <= revision)
+        }) {
+            return Ok(());
+        }
+    }
+    let delivery: Option<(String, bool, bool)> = conn
+        .query_row(
+            "SELECT body,acknowledged,conflicting_body IS NOT NULL FROM task_comment_deliveries WHERE comment_id=?1",
+            [&comment.id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    if let Some((body, acknowledged, conflict)) = delivery {
+        if body == comment.body {
+            conn.execute(
+                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL,conflicting_body=NULL WHERE comment_id=?1",
+                [&comment.id],
+            )?;
+            conn.execute(
+                "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
+                params![comment.id, comment.revision],
+            )?;
+            return Ok(());
+        }
+        if !acknowledged || conflict {
+            // Preserve both values; an ID collision is not an acknowledgement.
+            conn.execute(
+                "UPDATE task_comment_deliveries SET conflicting_body=?2 WHERE comment_id=?1",
+                params![comment.id, comment.body],
+            )?;
+            conn.execute(
+                "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
+                params![comment.id, comment.revision],
+            )?;
+            return Ok(());
+        }
+    }
+    let author =
+        if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+            crate::ops::pm::TaskCommentAuthor::Person {
+                name: crate::ops::linear_observe::comment_requester(
+                    &comment.body,
+                    comment.author_name.as_deref(),
+                ),
+            }
+        } else {
+            crate::ops::pm::TaskCommentAuthor::Integration
+        };
+    conn.execute(
+        "INSERT INTO task_comments(id,task_id,body,author,created_at,provider_revision)
+         VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(id) DO UPDATE SET body=excluded.body,
+         author=excluded.author,created_at=excluded.created_at,provider_revision=excluded.provider_revision",
+        params![comment.id, task.as_str(), comment.body, serde_json::to_string(&author)?,
+            comment.created_at, comment.revision],
+    )?;
+    Ok(())
+}
+
 impl SqliteStore {
     pub(crate) fn delete_local_task(&self, id: &crate::durable::TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -359,7 +439,7 @@ impl SqliteStore {
         )?)
     }
 
-    pub fn local_task_comments(
+    pub fn task_comments(
         &self,
         task: &crate::durable::TaskId,
     ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
@@ -373,7 +453,7 @@ impl SqliteStore {
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(3)?,
             ))
         })?;
         rows.map(|row| {
@@ -382,13 +462,13 @@ impl SqliteStore {
                 id,
                 body,
                 author: serde_json::from_str(&author)?,
-                created_at: Some(created_at),
+                created_at,
             })
         })
         .collect()
     }
 
-    pub fn append_local_task_comment(
+    pub fn append_task_comment(
         &self,
         task: &crate::durable::TaskId,
         comment: &crate::ops::pm::TaskComment,
@@ -397,11 +477,6 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
         super::children::require_task_not_deleted(&tx, &task)?;
-        if project_authority_on(&tx, &task.project_id)? != PlanningAuthority::Local {
-            return Err(StoreError::InvalidAuthority(
-                "this Task's planning is owned by Linear".into(),
-            ));
-        }
         let created_at = comment.created_at.as_deref().ok_or_else(|| {
             StoreError::InvalidData("local comments require a creation time".into())
         })?;
@@ -443,6 +518,10 @@ impl SqliteStore {
                 created_at
             ],
         )?;
+        tx.execute(
+            "INSERT INTO task_comment_deliveries(comment_id,body) VALUES(?1,?2)",
+            params![comment.id, comment.body],
+        )?;
         if let crate::ops::pm::TaskCommentAuthor::Person { name } = &comment.author {
             if crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
                 let text = match name {
@@ -456,6 +535,51 @@ impl SqliteStore {
             }
         }
         tx.commit()?;
+        Ok(())
+    }
+
+    pub fn pending_task_comments(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
+        let pending = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            let mut query = conn.prepare(
+                "SELECT c.id FROM task_comments c JOIN task_comment_deliveries d
+                 ON d.comment_id=c.id WHERE c.task_id=?1 AND d.acknowledged=0 AND d.conflicting_body IS NULL",
+            )?;
+            let rows = query.query_map([task.as_str()], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<std::collections::HashSet<_>, _>>()?
+        };
+        Ok(self
+            .task_comments(task)?
+            .into_iter()
+            .filter(|comment| pending.contains(&comment.id))
+            .collect())
+    }
+
+    pub fn task_comment_conflicts(
+        &self,
+        task: &crate::durable::TaskId,
+    ) -> StoreResult<std::collections::BTreeMap<String, String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT c.id,d.conflicting_body FROM task_comments c
+            JOIN task_comment_deliveries d ON d.comment_id=c.id
+            WHERE c.task_id=?1 AND d.conflicting_body IS NOT NULL",
+        )?;
+        let rows = query.query_map([task.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<_, _>>().map_err(StoreError::from)
+    }
+
+    pub fn record_comment_delivery(&self, id: &str, error: Option<&str>) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // A late failed attempt cannot undo an acknowledgement from another reader.
+        conn.execute(
+            "UPDATE task_comment_deliveries SET acknowledged=?2,error=?3
+             WHERE comment_id=?1 AND acknowledged=0",
+            params![id, error.is_none(), error],
+        )?;
         Ok(())
     }
 

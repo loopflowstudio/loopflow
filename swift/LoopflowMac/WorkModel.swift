@@ -75,6 +75,12 @@ struct TaskReadings<Value> {
         return generation
     }
 
+    fileprivate mutating func receive(_ value: Value, for taskId: String) {
+        generations[taskId] = (generations[taskId] ?? 0) &+ 1
+        inFlight.remove(taskId)
+        values[taskId] = .available(value)
+    }
+
     /// Whether `generation` is still the newest read for its Task.
     fileprivate mutating func finish(_ taskId: String, generation: Int) -> Bool {
         guard generations[taskId] == generation else { return false }
@@ -708,6 +714,7 @@ final class WorkModel {
                 break
             }
             guard body.task == task.task.identifier else { return }
+            comments.receive(body.comments, for: task.id)
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.flowProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }

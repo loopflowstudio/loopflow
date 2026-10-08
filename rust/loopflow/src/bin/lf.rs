@@ -1247,7 +1247,20 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         loopflow::ops::pm::TaskCommentAuthor::Integration => "integration",
                     };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
-                    println!("── {author} · {date}\n{}\n", comment.body.trim_end());
+                    let sync = if result.pending_sync.contains(&comment.id) {
+                        " · pending sync"
+                    } else {
+                        ""
+                    };
+                    println!("── {author} · {date}{sync}\n{}\n", comment.body.trim_end());
+                    if let Some(body) = result.conflicts.get(&comment.id) {
+                        println!("Conflicting Linear comment:\n{body}\n");
+                    }
+                }
+            }
+            if !*json {
+                if let Some(error) = &result.refresh_error {
+                    eprintln!("{error}; showing saved comments");
                 }
             }
             Ok(())

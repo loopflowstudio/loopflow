@@ -499,7 +499,7 @@ pub fn task_place(
         .await?;
         select_task_agent(&store, &mut task, agent.as_deref()).await?;
         if let Some(reason) = reason {
-            super::linear_observe::publish_task_steer(&store, &task, reason).await?;
+            append_task_comment(&store, &task, reason, true)?;
         }
         Ok((task, flow))
     })
@@ -1378,10 +1378,7 @@ fn create_prepared_task(
             Ok(accepted) => {
                 task = accepted;
                 if let Some(direction) = directive.as_deref() {
-                    let mut publication_task = task.clone();
-                    publication_task.worktree = Some(main_repo.clone());
-                    super::linear_observe::publish_task_steer(&store, &publication_task, direction)
-                        .await?;
+                    append_task_comment(&store, &task, direction, true)?;
                 }
             }
             Err(StoreError::Sqlite(_)) => {
@@ -5390,24 +5387,12 @@ pub fn task_comment(
     message: Option<&str>,
     steer: bool,
 ) -> OpsResult<super::pm::TaskComments> {
-    if let Some((store, task)) = block_on_task(resolve_local_task(repo, issue, wave))? {
-        if let Some(message) = message {
-            append_local_comment(&store, &task, message, steer)?;
-        }
-        return Ok(super::pm::TaskComments {
-            identifier: task.plan.identifier,
-            comments: store
-                .sqlite
-                .local_task_comments(&task.id)
-                .map_err(task_error)?,
-        });
-    }
     block_on_task(super::pm::task_comment_async(
         repo, wave, issue, message, steer,
     ))
 }
 
-pub(crate) fn append_local_comment(
+pub(crate) fn append_task_comment(
     store: &Store,
     task: &Task,
     message: &str,
@@ -5427,8 +5412,23 @@ pub(crate) fn append_local_comment(
         )
     } else {
         let name = crate::engine::config::participant_name().map_err(task_error)?;
+        let requester = name
+            .as_ref()
+            .map(|name| {
+                format!(
+                    "\n\n<!-- loopflow-requester:{} -->",
+                    serde_json::to_string(name)
+                        .expect("name is serializable")
+                        .replace('<', "\\u003c")
+                        .replace('>', "\\u003e")
+                )
+            })
+            .unwrap_or_default();
         (
-            format!("{}\n\n<!-- loopflow-steer:{id} -->", message.trim()),
+            format!(
+                "{}{requester}\n\n<!-- loopflow-steer:{id} -->",
+                message.trim()
+            ),
             super::pm::TaskCommentAuthor::Person { name },
         )
     };
@@ -5437,7 +5437,7 @@ pub(crate) fn append_local_comment(
     }
     store
         .sqlite
-        .append_local_task_comment(
+        .append_task_comment(
             &task.id,
             &super::pm::TaskComment {
                 id: id.clone(),
@@ -6825,20 +6825,6 @@ mod tests {
         std::env::set_var("GIT_CONFIG_COUNT", "1");
         std::env::set_var("GIT_CONFIG_KEY_0", "user.name");
         std::env::set_var("GIT_CONFIG_VALUE_0", "Git Person");
-        fixture
-            .store
-            .upsert_provider_token(&crate::store::ProviderToken {
-                provider: "linear".into(),
-                access_token: "fixture".into(),
-                refresh_token: None,
-                oauth_client_id: None,
-                expires_at: None,
-                login: None,
-                updated_at: 1,
-                credential_type: crate::store::CredentialType::ApiKey,
-            })
-            .await
-            .unwrap();
         for (configured, participant, expected) in [
             (Some("Configured Person"), "", "Configured Person"),
             (None, "  ", "Git Person"),
@@ -6849,40 +6835,18 @@ mod tests {
                 .map(|name| format!("user:\n  name: {name}\n"))
                 .unwrap_or_default();
             std::fs::write(fixture._database.path().join("config.yaml"), config).unwrap();
-            let (url, requests) = crate::pm::test_server::spawn(vec![
-                crate::pm::test_server::json_response(
-                    axum::http::StatusCode::OK,
-                    serde_json::json!({"data":{"commentCreate":{"comment":{"id":"posted"}}}}),
-                ),
-                crate::pm::test_server::json_response(
-                    axum::http::StatusCode::OK,
-                    serde_json::json!({"data":{"issue":{
-                        "updatedAt":"2026-09-26T00:00:00Z", "title":fixture.task.plan.title,
-                        "description":fixture.task.plan.description,
-                        "comments":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}
-                    }}}),
-                ),
-            ])
-            .await;
-            let posted = crate::ops::pm::PM_TEST_CONTEXT
-                .scope(
-                    crate::ops::pm::PmTestContext {
-                        path: fixture.database_path.clone(),
-                        store: fixture.store.clone(),
-                        graphql_url: url,
-                    },
-                    crate::ops::linear_observe::publish_task_steer(
-                        &fixture.store,
-                        &fixture.task,
-                        "Keep going",
-                    ),
-                )
-                .await
+            let id = super::append_task_comment(&fixture.store, &fixture.task, "Keep going", true)
                 .unwrap();
-            assert_eq!(posted, "posted");
-            let requests = requests.lock().await;
-            let publication: serde_json::Value = serde_json::from_str(&requests[0].body).unwrap();
-            let body = publication["variables"]["body"].as_str().unwrap();
+            let comments = fixture
+                .store
+                .sqlite
+                .task_comments(&fixture.task.id)
+                .unwrap();
+            let body = &comments
+                .iter()
+                .find(|comment| comment.id == id)
+                .unwrap()
+                .body;
             assert!(body.contains("Keep going"));
             assert!(body.contains("<!-- loopflow-steer:"));
             assert!(

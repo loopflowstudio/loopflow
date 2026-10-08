@@ -104,13 +104,15 @@ pub struct PmUpdateResult {
     pub id: String,
 }
 
-/// One planning Task's Linear comment thread, read on demand for display.
-/// `comments` is the complete thread in creation order; an incomplete read is
-/// an error, never a shorter list.
+/// The saved Task thread, its pending deliveries and any failed refresh.
+/// Partial provider reads never replace the retained thread.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskComments {
     pub identifier: String,
     pub comments: Vec<TaskComment>,
+    pub pending_sync: Vec<String>,
+    pub conflicts: std::collections::BTreeMap<String, String>,
+    pub refresh_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -631,6 +633,7 @@ async fn open_pm_store(config: &StorageConfig) -> OpsResult<Store> {
 }
 
 #[cfg(test)]
+#[derive(Clone)]
 pub(crate) struct PmTestContext {
     pub(crate) path: std::path::PathBuf,
     pub(crate) store: std::sync::Arc<Store>,
@@ -1177,7 +1180,7 @@ pub(crate) async fn pm_refile_async(
     })
 }
 
-/// Read a Task thread or publish a comment without allocating execution state.
+/// Read the saved Task thread or save a comment without allocating execution state.
 pub(crate) async fn task_comment_async(
     repo: &Path,
     wave: Option<&str>,
@@ -1185,93 +1188,105 @@ pub(crate) async fn task_comment_async(
     message: Option<&str>,
     steer: bool,
 ) -> OpsResult<TaskComments> {
-    if message.is_some_and(|text| text.trim().is_empty()) {
-        return Err(OpsError::Message("Task comment cannot be empty".into()));
-    }
-    let repository = resolve_repository_context(repo).await?;
-    let ResolvedTask {
-        wave: owning_wave,
-        item,
-        ..
-    } = resolve_owned_issue(repo, issue).await?;
-    if let Some(wave) = wave {
-        if owning_wave != wave {
-            return Err(OpsError::Message(format!(
-                "Linear task {issue} belongs to wave/{owning_wave}, not wave/{wave}"
-            )));
+    let store = Arc::new(pm_store().await?);
+    let task = store
+        .get_task_by_issue(issue)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let task = match task {
+        Some(task) => task,
+        None => {
+            // Cold acquisition imports the remote record once. The stored Task owns
+            // every subsequent read and write, including while Linear is unavailable.
+            let resolved = resolve_owned_issue(repo, issue).await?;
+            store
+                .get_task_by_issue(&resolved.item.id)
+                .await
+                .map_err(|error| OpsError::Message(error.to_string()))?
+                .ok_or_else(|| OpsError::Message(format!("Task {issue} is not stored")))?
         }
-    }
-    let posted = match message {
-        Some(message) => Some(
-            super::linear_observe::publish_issue_comment(
-                &repository.client,
-                &item.id,
-                message,
-                steer,
+    };
+    let owner = store
+        .get_wave(&task.wave_id)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let expected_wave = match wave {
+        Some(selector) => Some(
+            crate::work::wave::context::resolve_managed_wave(
+                Some(&store),
+                Some(repo),
+                Some(selector),
+                None,
             )
-            .await?,
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?,
         ),
         None => None,
     };
-    let observation = repository.client.observe_issue(&item.id).await.map_err(|error| {
-        match &posted {
-            Some(id) => OpsError::Message(format!("Posted Linear comment {id}, but thread refresh failed: {error}. Read `lf task comment {}` to confirm; do not post it again.", item.identifier)),
-            None => pm_to_ops(error),
-        }
-    })?;
-    if let Some(id) = posted {
-        let delivery = async {
-            let store = pm_store().await?;
-            if let Some(task) = store
-                .get_task_by_issue(&item.id)
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?
-            {
-                super::linear_observe::reconcile_linear_observation(
-                    &store,
-                    &task,
-                    observation.clone(),
-                    "",
-                    time::OffsetDateTime::now_utc(),
-                )
-                .await
-                .map_err(|error| OpsError::Message(error.to_string()))?;
-            }
-            Ok::<(), OpsError>(())
-        }
-        .await;
-        delivery.map_err(|error| OpsError::Message(format!("Posted Linear comment {id}, but local delivery is pending: {error}. The worker will reconcile it from Linear; do not post it again.")))?;
+    if owner.repo() != canonical.to_string()
+        || expected_wave
+            .as_ref()
+            .is_some_and(|expected| expected.id() != owner.id())
+    {
+        return Err(OpsError::Message(format!(
+            "Task {issue} belongs to {} in {}",
+            owner.slug(),
+            owner.repo()
+        )));
     }
-    let mut comments = observation
-        .comments
-        .into_iter()
-        .map(|comment| TaskComment {
-            // Explicit steering speaks for its requester even through an integration.
-            author: if comment.author_id.is_some() || super::linear_observe::is_steer(&comment.body)
-            {
-                TaskCommentAuthor::Person {
-                    name: super::linear_observe::comment_requester(
-                        &comment.body,
-                        comment.author_name.as_deref(),
-                    ),
-                }
-            } else {
-                TaskCommentAuthor::Integration
-            },
-            id: comment.id,
-            body: comment.body,
-            created_at: comment.created_at,
-        })
-        .collect::<Vec<_>>();
-    // Direction orders by revision; people read a thread in the order it was written.
-    comments.sort_by(|left, right| {
-        left.created_at
-            .cmp(&right.created_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
+    if let Some(message) = message {
+        super::task::append_task_comment(&store, &task, message, steer)?;
+    }
+    let mut thread = read_task_comments(&store, &task)?;
+    if message.is_none() && task.plan.linear_id.is_some() {
+        thread.refresh_error = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            super::linear_observe::refresh_task_comments(&store, &task),
+        )
+        .await
+        {
+            Ok(Ok(())) => None,
+            Ok(Err(error)) => Some(error.to_string()),
+            Err(_) => Some("Comment refresh timed out; showing saved comments".into()),
+        };
+        thread.comments = store
+            .sqlite
+            .task_comments(&task.id)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        let current = read_task_comments(&store, &task)?;
+        thread.pending_sync = current.pending_sync;
+        thread.conflicts = current.conflicts;
+    }
+    Ok(thread)
+}
+
+pub(crate) fn read_task_comments(
+    store: &Store,
+    task: &crate::work::task::Task,
+) -> OpsResult<TaskComments> {
+    let error = |error: crate::store::StoreError| OpsError::Message(error.to_string());
     Ok(TaskComments {
-        identifier: item.identifier,
-        comments,
+        identifier: task.plan.identifier.clone(),
+        comments: store.sqlite.task_comments(&task.id).map_err(error)?,
+        pending_sync: if task.plan.linear_id.is_some() {
+            store
+                .sqlite
+                .pending_task_comments(&task.id)
+                .map_err(error)?
+                .into_iter()
+                .map(|comment| comment.id)
+                .collect()
+        } else {
+            Vec::new()
+        },
+        conflicts: store
+            .sqlite
+            .task_comment_conflicts(&task.id)
+            .map_err(error)?,
+        refresh_error: None,
     })
 }
 

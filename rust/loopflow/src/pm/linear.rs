@@ -1542,6 +1542,45 @@ impl LinearClient {
         Ok(response.comment_create.comment.id)
     }
 
+    /// Deliver the caller's UUID. An uncertain reply is resolved by exact identity.
+    pub async fn sync_comment(&self, id: &str, issue: &str, body: &str) -> PmResult<()> {
+        uuid::Uuid::parse_str(id).map_err(|error| PmError::Message(error.to_string()))?;
+        let response: PmResult<CommentData> = self
+            .graphql(
+                r#"mutation SyncComment($id: String!, $issueId: String!, $body: String!) {
+                commentCreate(input: { id: $id, issueId: $issueId, body: $body }) {
+                    comment { id }
+                }
+            }"#,
+                json!({"id": id, "issueId": issue, "body": body}),
+            )
+            .await;
+        match response {
+            Ok(response) if response.comment_create.comment.id == id => Ok(()),
+            result => {
+                let read: Value = self
+                    .graphql(
+                        r#"query CommentDelivery($id: String!) {
+                        comment(id: $id) { id body issue { id } }
+                    }"#,
+                        json!({"id": id}),
+                    )
+                    .await?;
+                let comment = &read["comment"];
+                if comment["id"].as_str() == Some(id)
+                    && comment["body"].as_str() == Some(body)
+                    && comment["issue"]["id"].as_str() == Some(issue)
+                {
+                    return Ok(());
+                }
+                Err(PmError::Message(match result {
+                    Err(error) => format!("Comment {id} is pending sync: {error}"),
+                    Ok(_) => format!("Comment {id} was not confirmed with its saved identity"),
+                }))
+            }
+        }
+    }
+
     /// Find a previously-created comment by its stable body marker.
     ///
     /// Comment publication records an attempt before calling Linear. If that call

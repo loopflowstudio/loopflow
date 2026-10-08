@@ -3,8 +3,9 @@
 //! The store's change revisions say which parts a commit can have changed. A
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
-//! the one-shot `--json` reads print. The reader commits nothing, so it never
-//! wakes itself, and it records one Process for its whole lifetime.
+//! the one-shot `--json` reads print. Projections remain read-only. A separate
+//! foreground synchronization lifetime updates the selected Task's comments;
+//! those commits wake the reader just like edits from another connection.
 
 mod checkouts;
 
@@ -72,7 +73,7 @@ pub struct WorkFrame {
 pub enum WorkContent {
     Planning(Option<Box<PlanningPart>>),
     Sessions(Option<SessionsPart>),
-    Task(Option<TaskPart>),
+    Task(Option<Box<TaskPart>>),
     Wave(Option<Box<WavePart>>),
     WorkActivity(Option<WorkActivityPart>),
     Activity(Option<ActivitySnapshot>),
@@ -101,6 +102,7 @@ pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
     pub flow_processes: Vec<FlowProcessDetail>,
+    pub comments: crate::ops::pm::TaskComments,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,6 +368,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
+    comment_sync: Option<(String, crate::ops::linear_observe::CommentSync)>,
 }
 
 impl Reader {
@@ -390,6 +393,33 @@ impl Reader {
                 }
                 self.refused = Some(reason);
             }
+        }
+    }
+
+    fn sync_comments(&mut self) {
+        if self.comment_sync.as_ref().map(|(task, _)| task) == self.scope.task.as_ref() {
+            return;
+        }
+        self.comment_sync = None;
+        let Some(selector) = &self.scope.task else {
+            return;
+        };
+        if !self.database.exists() {
+            return;
+        }
+        let result = self.runtime.block_on(async {
+            let store = Arc::new(
+                crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
+            );
+            let task = store
+                .get_task_by_issue(selector)
+                .await?
+                .ok_or_else(|| anyhow!("Task {selector} is not stored"))?;
+            crate::ops::linear_observe::CommentSync::start(store, task).map_err(anyhow::Error::from)
+        });
+        match result {
+            Ok(sync) => self.comment_sync = Some((selector.clone(), sync)),
+            Err(error) => tracing::warn!(%error, "cannot start Task comment sync"),
         }
     }
 
@@ -580,11 +610,14 @@ impl Reader {
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
                         flow_processes.push(process.detail(entry));
                     }
-                    WorkContent::Task(Some(TaskPart {
+                    let record = store.get_task(&task).await?.context("Task is missing")?;
+                    let comments = crate::ops::pm::read_task_comments(store, &record)?;
+                    WorkContent::Task(Some(Box::new(TaskPart {
+                        comments,
                         task: selector,
                         work,
                         flow_processes,
-                    }))
+                    })))
                 }
                 Part::Wave => {
                     let id = self.scope.wave.clone().context("no Wave in scope")?;
@@ -748,6 +781,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
         watched_at: None,
         quiet: None,
         runtime: tokio::runtime::Runtime::new()?,
+        comment_sync: None,
     };
 
     // These threads belong to the foreground command and end with it. Closing
@@ -816,6 +850,7 @@ pub(super) fn run(watch: bool) -> Result<()> {
             }
             seen = revisions;
             if watch {
+                reader.sync_comments();
                 reader.observe_checkouts(revisions, &shared);
                 reader.observe_quiet(revisions);
             }

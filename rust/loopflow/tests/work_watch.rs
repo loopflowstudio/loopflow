@@ -181,7 +181,6 @@ impl Machine {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -195,7 +194,6 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// A new repository at `path` holding one commit.
-#[cfg(target_os = "macos")]
 fn repository(path: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(path).unwrap();
     let repo = path.canonicalize().unwrap();
@@ -799,4 +797,55 @@ fn selection_only_commit_reaches_two_open_work_readers() {
         .unwrap();
     await_state(&first, ProjectReadinessState::Unconfigured);
     await_state(&second, ProjectReadinessState::Unconfigured);
+}
+
+#[test]
+fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({
+        "action":"scope", "id":1, "repo":home.wave.repo(), "headless":false,
+        "task":"FIX-1", "wave":null, "activity":null,
+    });
+    watch.request(scope.clone());
+    let thread = |watch: &Watch, count: usize| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("comment thread did not reach Desktop");
+            if let WorkContent::Task(Some(part)) = frame.content {
+                if part.comments.comments.len() == count {
+                    return part.comments;
+                }
+            }
+        }
+    };
+    assert!(thread(&watch, 0).pending_sync.is_empty());
+    let output = lf(
+        home.path(),
+        &["task", "comment", "FIX-1", "Saved during outage", "--json"],
+    )
+    .current_dir(home.wave.repo())
+    .env("LF_USER_NAME", "Fixture Person")
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let saved: loopflow::ops::pm::TaskComments = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(saved.comments.len(), 1);
+    assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
+    assert_eq!(thread(&watch, 1), saved);
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    assert_eq!(thread(&reopened, 1), saved);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
 }

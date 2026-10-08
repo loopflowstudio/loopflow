@@ -123,7 +123,7 @@ struct DesktopHeadlessTests {
         #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
     }
 
-    @Test("A Task's work, a Workflow move and a new Flow process arrive from the stream, with no lf read")
+    @Test("A Task's work, comments and pending delivery arrive from the stream, with no lf read")
     func taskWorkFollowsTheStream() async throws {
         func object(_ name: String) throws -> [String: Any] {
             try #require(JSONSerialization.jsonObject(
@@ -143,9 +143,14 @@ struct DesktopHeadlessTests {
         let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
 
         let calls = Recorder()
+        let (oldReads, releaseOldReads) = AsyncStream<Void>.makeStream()
         let feed = Feed()
         let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             await calls.add(args)
+            if args.prefix(2) == ["task", "comment"] {
+                for await _ in oldReads { }
+                return #"{"identifier":"old","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
+            }
             return ""
         })
         let keeping = Task { await model.keepWorkCurrent() }
@@ -170,7 +175,7 @@ struct DesktopHeadlessTests {
         #expect(scope.task == task.task.identifier)
 
         feed.send(try frame("task", sequence: 2, answers: 2,
-                            body: ["task": task.task.identifier, "work": work, "flow_processes": [run]]))
+                            body: ["task": task.task.identifier, "work": work, "flow_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
         let view = TaskWorkView(model: model, task: task)
@@ -197,6 +202,9 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
+        let oldRead = Task { await model.loadComments(task: task, wave: wave) }
+        try await eventually { model.comments.inFlight.contains(task.id) }
+
         // Desktop's own write asks the reader again and shows what it answers.
         let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
         try await eventually { feed.requests.last == .refresh(id: 3) }
@@ -208,10 +216,14 @@ struct DesktopHeadlessTests {
         second["name"] = "pursue"
         var secondRun = run
         secondRun["entry"] = second
+        var incomingComments = try object("task_comments.json")
+        incomingComments["identifier"] = task.task.identifier
+        incomingComments["pending_sync"] = ["c-1"]
         let moved: [String: Any] = [
             "task": task.task.identifier,
             "work": work.merging(["flow_processes": [try #require((work["flow_processes"] as? [[String: Any]])?.first), second]]) { $1 },
             "flow_processes": [run, secondRun],
+            "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 3, answers: 2, body: moved))
@@ -222,9 +234,19 @@ struct DesktopHeadlessTests {
         await moving.value
         try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
+        releaseOldReads.finish()
+        await oldRead.value
+        #expect(model.comments[task.id].value?.comments.count == 3)
+        #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
+        model.navigation.expandedComments.insert(task.id)
+        let comments = TaskCommentsView(model: model, task: task, wave: wave)
+        _ = try comments.inspect().find(text: "Pending sync")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.flowProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
-        #expect(await calls.calls == [["task", "move", task.task.identifier, "demo"]])
+        #expect(await calls.calls == [
+            ["task", "comment", task.id, "--wave", wave.name, "--json"],
+            ["task", "move", task.task.identifier, "demo"],
+        ])
     }
 
     @Test("Same-name definitions keep separate destinations and a failed refresh retains visible stale data")

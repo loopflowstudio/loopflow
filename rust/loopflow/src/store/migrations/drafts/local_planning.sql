@@ -211,7 +211,15 @@ CREATE TABLE task_comments (
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
     body TEXT NOT NULL,
     author TEXT NOT NULL CHECK(json_valid(author)),
-    created_at TEXT NOT NULL
+    created_at TEXT,
+    provider_revision TEXT
+);
+CREATE TABLE task_comment_deliveries (
+    comment_id TEXT PRIMARY KEY REFERENCES task_comments(id) ON DELETE RESTRICT,
+    body TEXT NOT NULL,
+    acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)),
+    error TEXT,
+    conflicting_body TEXT
 );
 CREATE INDEX idx_task_comments_task ON task_comments(task_id,created_at,id);
 CREATE TRIGGER store_revision_task_comments_insert AFTER INSERT ON task_comments
@@ -269,4 +277,12 @@ CREATE TRIGGER store_revision_task_comments_update AFTER UPDATE ON task_comments
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_task_comments_delete AFTER DELETE ON task_comments
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_task_comment_deliveries_insert AFTER INSERT ON task_comment_deliveries
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_comment_deliveries_update AFTER UPDATE ON task_comment_deliveries
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_task_comment_deliveries_delete AFTER DELETE ON task_comment_deliveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

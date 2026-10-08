@@ -12,13 +12,15 @@ or automatic turn/Flow retry. This supersedes the branch's mixed-authority desig
 
 Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
 independent inbound completion, membership and comments during pending writes and
-after reconnect. At `73059ecd1`, launch refresh is shared, but only batch
-Codex/OpenCode start the 15-second comment refresher and 5-second steer polling.
-Native interactive and Claude subprocess paths do not. The query omits
-state/membership; Desktop only watches local commits. No current webhook receiver
-was found. Preserve triggers/cadence and cover each active connection lifetime.
-Merged #1500 preserves native Flow interaction; forced batch cannot fill this gap.
-Release's operation-entry lesson applies: helper success proves no caller drives it.
+after reconnect. Source now saves comments and UUID delivery receipts atomically.
+The common runner covers native and batch paths; Desktop synchronizes its selected
+Task and streams the saved thread. Isolated runner, public CLI/watch and headless
+view proofs cover comments, lost replies and echo rejection. They prove no installed
+or live-provider outcome. State/membership acquisition and the ownership cut remain
+unfinished. No webhook receiver was found; preserve merged native Flow interaction.
+Release's operation-entry lesson applies to each remaining caller. A late delivery
+acknowledgement must retain newer conflict evidence; streamed values must fence older
+in-flight reads. Both races were repaired in the comment path.
 
 Jack's comment `93690dc2-5526-4ecf-a203-5e248339b0c9` requires immediate local
 comment/completion saves and active CLI/Desktop propagation without another turn,

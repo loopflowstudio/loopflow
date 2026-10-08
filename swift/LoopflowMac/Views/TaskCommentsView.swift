@@ -68,7 +68,7 @@ struct TaskCommentsView: View {
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage {
+            if let reason = reading.errorMessage ?? thread.refreshError {
                 Text("Latest read failed: \(reason)")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
@@ -87,9 +87,19 @@ struct TaskCommentsView: View {
                         Text(Self.author(comment.author))
                             .font(Typography.strong(12.5))
                             .foregroundStyle(palette.text)
+                        if thread.pendingSync.contains(comment.id) {
+                            Text("Pending sync")
+                                .font(Typography.caption(12))
+                                .foregroundStyle(palette.textSecondary)
+                        }
                         Text(Self.date(comment.createdAt))
                             .font(Typography.caption(12))
                             .foregroundStyle(palette.textTertiary)
+                    }
+                    if let conflict = thread.conflicts[comment.id] {
+                        Text("Conflicting Linear comment")
+                            .font(Typography.strong(12.5))
+                        MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }
                     let body = Self.readableBody(comment.body)
                     if body.isEmpty {

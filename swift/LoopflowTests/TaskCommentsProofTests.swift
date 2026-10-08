@@ -228,6 +228,7 @@ private actor CommentSource {
             }
             let thread: [String: Any] = [
                 "identifier": issue,
+                "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull(),
                 "comments": comments.filter { ids.contains($0["id"] as? String ?? "") },
             ]
             return String(decoding: try JSONSerialization.data(withJSONObject: thread), as: UTF8.self)

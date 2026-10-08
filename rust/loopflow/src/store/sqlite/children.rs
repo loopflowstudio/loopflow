@@ -673,6 +673,10 @@ impl SqliteStore {
             )
             .optional()?;
 
+        for comment in &apply.comments {
+            super::local_planning::ingest_task_comment(&transaction, &apply.task_id, comment)?;
+        }
+
         let observed_at = apply.observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
         for follow_up in &apply.follow_ups {
@@ -1417,7 +1421,13 @@ fn ingest_linear_comment(
             (task_id, comment_id, ingested_at) VALUES (?1, ?2, ?3)",
         params![task_id, comment_id, observed_at],
     )?;
-    if inserted == 1 {
+    let id = comment_id.split_once('@').map_or(comment_id, |(id, _)| id);
+    let own_echo: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN task_comment_deliveries d
+         ON d.comment_id=c.id WHERE c.id=?1 AND c.task_id=?2 AND d.acknowledged=1 AND d.body=c.body)",
+        params![id, task_id], |row| row.get(0),
+    )?;
+    if inserted == 1 && !own_echo {
         let steer = SqliteStore::append_task_steer_in(
             conn,
             &TaskId::from_raw(task_id),

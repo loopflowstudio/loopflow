@@ -405,9 +405,13 @@ lf comment INF-124 "keep the public name"
 lf --wave product wave/operate "review the current priorities"
 ```
 
-The selected planning authority owns authored Task comments: SQLite for personal
-Waves and Linear for connected Waves. The shared skill path supplies Task context
-and live steers when the checkout or explicit attribution selects a Task.
+SQLite owns every Task comment. A save records the comment and its stable delivery
+UUID in one transaction, before contacting Linear. Mapped Tasks show pending sync;
+a foreground Task Session or Desktop Task connection delivers saved comments and
+acquires incoming comments independently. Lost replies are resolved by exact UUID,
+issue and body. Incoming comments enter the same thread without echoing locally
+saved direction. The shared skill path supplies Task context and live steers when
+the checkout or explicit attribution selects a Task.
 Idle steering starts no Flow. Prompt inclusion and provider acceptance do not
 prove the model followed a correction. Wave planning uses ordinary finite
 AgentSessions.

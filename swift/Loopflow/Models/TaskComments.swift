@@ -1,11 +1,28 @@
 import Foundation
 
-/// One planning Task's complete comment thread (`lf task comment ISSUE --json`).
-/// A partial provider read is an error, never a shorter thread, so the count is
-/// `comments.count`. Optional fields must be present as `null`.
+/// The saved Task thread, including pending deliveries and refresh failures.
+/// Optional fields must be present as `null`.
 public struct TaskComments: Decodable, Sendable, Hashable {
     public let identifier: String
     public let comments: [TaskComment]
+    public let conflicts: [String: String]
+    public let pendingSync: [String]
+    public let refreshError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case identifier, comments, conflicts
+        case pendingSync = "pending_sync"
+        case refreshError = "refresh_error"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        identifier = try container.decode(String.self, forKey: .identifier)
+        comments = try container.decode([TaskComment].self, forKey: .comments)
+        conflicts = try container.decode([String: String].self, forKey: .conflicts)
+        pendingSync = try container.decode([String].self, forKey: .pendingSync)
+        refreshError = try container.decode(String?.self, forKey: .refreshError)
+    }
 }
 
 public struct TaskComment: Decodable, Sendable, Hashable, Identifiable {

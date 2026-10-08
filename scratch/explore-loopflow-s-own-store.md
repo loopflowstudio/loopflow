@@ -8,10 +8,12 @@ Landing, installation, callbacks, Git synchronization and Linear export are outs
 this slice. Reconciled on 2026-10-08: the local lifecycle is implemented, with
 focused public CLI, migration and headless Desktop proofs in disposable stores.
 The affected acceptance matrix and publication remain with gate and delivery.
-The older feedback describing mandatory provider IDs and placement is superseded
-by storage checkpoint `3615ac424`, local lifecycle checkpoint `b094fc2d4`, and
-compression checkpoint `149f47c0e`. Retaining deletion-recovery evidence is an engineering correction
-within Jack's preservation constraint, not an additional product approval boundary.
+The earlier execution feedback is superseded by native launch/import checkpoint
+`817ec2634`, lifecycle/Desktop checkpoint `2d4115339`, and compression checkpoint
+`b8abd3c9a`. `require_provider_session_process` now uses the authority-aware
+deletion reader without requiring a Linear mapping. Retaining deletion-recovery
+evidence is an engineering correction within Jack's preservation constraint,
+not an additional product approval boundary.
 
 ## Direction
 
@@ -167,22 +169,20 @@ execution and synchronization metadata beside this planning shape.
   contract. Enforce uniqueness in storage; full-ID conflicts preserve both inputs
   and report the conflict rather than silently replacing a Task.
 
-Proposed ownership sketch (abbreviated fields, not a complete DTO specification;
-the supported Linear field inventory above must survive):
+Implemented ownership replaces the earlier `PlanBinding`/`TaskPlacement` sketch:
 
-```rust
-PlanBinding { id: PlanId, authority: Local | Linear(LinearScope) }
-TaskPlan { id: TaskId, project_id: ProjectId, title, description, rank,
-           assignee: Option<PersonId>, linear: Option<LinearIssueLink> }
-ProjectPlan { id: ProjectId, wave_id: WaveId, name, status, krs, targets,
-              workflow: Option<String>, linear: Option<LinearProjectLink> }
-TaskComment { id: CommentId, task_id: TaskId, author, body, kind, created_at }
-TaskPlacement { task_id: TaskId, worktree, workspace_slug }
-```
+| Owner | Retained facts |
+| --- | --- |
+| `personal_plans` and `waves.personal_plan_id` | Stable personal plan ID, canonical repository and explicit authority |
+| Existing `Task` and `Project` | Durable identity and relationships; nested plans hold authored/provider fields and optional Linear mappings |
+| `Task.worktree` and existing PR rows | Optional machine placement and delivery chain, allocated together before filesystem work |
+| `task_creation_intents` | Original creation identity, Project and input across edits and rotation |
+| Personal definition/workflow rows | Wave documents and private workflow source; no tracked definition files |
+| Provider evidence and deletion-recovery rows | Accepted observations, revisions, removals and unresolved effects; no competing local plan |
 
-`PlanId` scopes private/shared identities and repository bindings; it is not a
-fourth navigation level. Personal Wave objectives, memory, cadence/budget and
-instruments belong in the store. Existing explicitly shared repository Wave
+`PlanId` identifies the personal repository binding; there is no `PlanBinding`
+projection or fourth navigation level. Personal Wave objectives, memory,
+cadence/budget and instruments belong in the store. Existing explicitly shared repository Wave
 files remain Git-owned definitions: retain a reference to that owner, not an
 independently editable SQLite copy. Personal definitions resolve from the store;
 shared definitions resolve from Git. An explicit scope-qualified lookup resolves
@@ -191,25 +191,26 @@ rule. Never materialize personal definitions into tracked repository files.
 Schedules' *definitions* can travel later; their activation, receipts and execution
 ownership cannot. Fetching a cadence must not install a job on a worker.
 
-Move local placement out of mandatory planning creation, retaining existing bytes
-and Task foreign keys. One optional placement per Task per machine suffices.
-Preserve PR chains, histories, native Session IDs, usage and process authority.
+Planning creation now permits absent placement, retaining existing bytes and Task
+foreign keys. One optional placement per Task per machine suffices. PR chains,
+histories, native Session IDs, usage and process authority retain their owners.
 Existing `pm_*` data remains Linear acquisition evidence, never a second local
 planning owner. Import planning-only cached issues into Tasks; preserve accepted
 revisions, removal evidence and timestamps. Conflicting ownership stays unresolved.
 
-Proposed Rust entry points:
+Implemented operation boundaries:
 
-- `create_task(store, scope, NewTask) -> Result<TaskPlan>`: commit identity and
-  authored plan together, independent of placement.
-- `resolve_task(store, scope, selector) -> Result<Option<TaskPlan>>`: one resolver
-  for full ID, unique prefix, existing slug and Linear alias; ambiguity is explicit.
-- `edit_task(store, id, expected_revision, patch) -> Result<TaskPlan>` and
-  `append_comment(store, id, comment) -> Result<TaskComment>`: transactional writes;
-  comments retain named authors and steer/progress provenance.
-- `rotate_projects(store, expected_selection, rotation) -> Result<()>`: in Local
-  authority, select the successor and move eligible started work in one transaction;
-  preserve backlog and existing checkout exclusion. Linear keeps provider recovery.
+- `ops::task::task_create` requires the caller's retained `TaskId`; personal
+  creation selects its Project under the Wave lock and commits through
+  `Store::create_local_task`. Connected creation retains the provider marker path.
+- `SqliteStore::task_by_issue` resolves durable IDs, local prefixes and provider
+  aliases in the existing Task rows; ambiguity is explicit.
+- `edit_local_task` applies `PmItemUpdate` with an expected revision. Local
+  comments use a transactional writer with named or unresolved authors and
+  steer/progress provenance. Connected mutations retain their Linear writers.
+- `rotate_local_projects` commits all personal destinations, selections, started
+  membership and receipts together. The chapter operation retains the existing
+  connected recovery path; mixed-authority retry proof remains with gate.
 
 Use `lf-<12 UUID hex digits>` for the displayed local selector, extending it when
 ambiguous; the full ID always works. Store full IDs in automation. Existing
@@ -234,8 +235,8 @@ store. This draft interprets *host* as the originating machine. Explore this bef
 replicating entire plans onto workers. Jack called pending updates “sorta correct”
 but potentially tricky; disconnect policy remains open.
 
-`--machine X` parses and executes on X. Planning uses the origin's PlanBinding;
-checkouts, Sessions, Processes, workflows, machine registry and account operations
+`--machine X` parses and executes on X. The proposed callback selects the origin's
+planning scope and authority; checkouts, Sessions, Processes, workflows, machine registry and account operations
 stay on X. Remote `task create` can author on the laptop without allocating
 execution there; `machine add` still edits X. Never route `LF_HOME` to the laptop
 or expose SQLite over a network filesystem.
@@ -285,9 +286,10 @@ Real loopback SSH must prove socket cleanup with a surviving control master.
 
 ## Git follow-up: intended contract, separate design before implementation
 
-Extend `PlanBinding.authority` with a Git destination and exact ref
-`refs/loopflow/plans/<plan-uuid>`. Destination is independently configured from the
-code remote. A dedicated object store writes canonical JSON objects keyed by full
+The follow-up needs an explicit publication binding for a Git destination and exact
+ref `refs/loopflow/plans/<plan-uuid>`; no such binding exists in this slice.
+Destination is independently configured from the code remote. A dedicated object
+store writes canonical JSON objects keyed by full
 IDs plus a manifest: schema, plan/repository identity and current Wave selections.
 One commit updates one plan ref atomically. No SQLite database, WAL or working-tree
 snapshot is uploaded. Explicit refspecs fetch this ref; ordinary branch fetches
@@ -389,12 +391,22 @@ Also removed the unused `PlanBinding` projection/reader and duplicate
 `edit_personal_wave_definition` writer. Personal definitions now have one document
 writer, exercised by the preservation fixture; stable plan IDs remain in SQLite.
 
-Rewrite tests whose sole contract is “every Task needs a Team/Initiative/issue”
-in `ops/pm/task_planning_tests.rs` and `tests/task_initialization_tests.rs`; retain
-those ownership assertions for connected scopes. Keep provider observation,
-chapter recovery and deletion tests: those behaviors remain necessary for Linear.
-Do not wholesale delete `pm_items`/`pm_projects` acquisition evidence. The historical
-Asana/file/attachment paths above stay deleted. No new parallel resolver or Task type.
+Compression (2026-10-08): removed `task_was_deleted`; Task status and native
+launch now use the same authority-aware deletion reader. The duplicate treated
+retained Linear deletion evidence as personal authority and missed personal
+tombstones. Public fixtures cover both cases. Removed the identity-minting
+`task_create` wrapper used only by tests; the single creation API now requires
+the caller's retained identity. Workflow inspection and execution share source
+selection. Project summaries project retained Projects directly instead of
+building every Task's plan and discarding it. No further obsolete owner was
+found; provider acquisition and deletion-recovery evidence remain necessary.
+
+Personal fixtures no longer require a Team, Initiative or issue. Connected
+ownership assertions remain in `ops/pm/task_planning_tests.rs` and
+`tests/task_initialization_tests.rs`, alongside provider observation, chapter
+recovery and deletion tests. `pm_items`/`pm_projects` acquisition evidence remains
+necessary. The historical Asana/file/attachment paths stay deleted; there is no
+parallel Task type or resolver to finish removing.
 
 ### Preservation counterexample: deletion before Task registration
 
@@ -531,10 +543,21 @@ in stable order before choosing the current destination. Public fixtures scrub
 inherited Loopflow/Linear authority, and unknown provider/GitHub stub calls fail.
 Personal deletion uses a timestamp on its Task, never Linear's recovery table.
 
-Remaining before publication: run the affected gate below, including connected
-planning/rotation recovery and the full headless app/model matrix. Repair actual
-failures in this same PR. No product decision blocks it, and no installation,
-live-provider continuity, callback, synchronization or export is claimed.
+Remaining before publication: the affected gate below, including connected
+planning/rotation recovery and the full headless app/model matrix. Mixed rotation
+needs a dedicated failure/retry fixture: current code commits the personal batch
+before reserving and applying connected transitions. A provider failure can leave
+that local batch settled; retry of the same plan must preserve its receipt and
+started/backlog membership while recovering the connected effect. Existing pure
+personal rollback and connected recovery fixtures do not establish this composition.
+Any failure requires repair in this same PR; acceptance is unchanged.
+
+Desktop evidence has two boundaries: public CLI output is compared with the
+shared Task/comment fixture and decoded/rendered in Swift; workflow controls use
+a contained command transport, paired with separate public CLI storage fixtures.
+These establish source behavior, not a composed installed app/provider session.
+No product decision blocks gate or publication, and no installation, live-provider
+continuity, callback, synchronization or export is claimed.
 
 Select concrete authority at the planning operation boundary. Local lookups must
 not enter `resolve_owned_issue` or acquire a provider token. Linear ingestion keeps
@@ -542,7 +565,7 @@ revision/removal evidence before projecting the shared reader. Update Rust/Swift
 DTOs and fixtures together. The callback, Git and Linear follow-ups above require
 separate designs; no follow-up Tasks are filed and machine delivery does not wait.
 
-Proposed keystone gate: `uv run python scripts/test.py --rust --swift --loopflow --e2e`
+Remaining keystone gate: `uv run python scripts/test.py --rust --swift --loopflow --e2e`
 with new public-CLI `local_planning` fixtures and populated released-frontier
 migration cases. Tests use disposable stores with inherited LF authority cleared,
 stub providers/GitHub and no installation promotion. Unknown CLI calls must fail
@@ -581,4 +604,8 @@ nullable Linear IDs without planning-only Tasks; namespace separation mistaken f
 privacy; a write-once mapping mistaken for duplicate-safe export; remote completion
 mistaken for local workflow arrival. Remaining choices are in `questions.md`.
 
-Check (2026-10-08): isolated local CLI (8), native lifecycle/deletion (1), local store/migration (5), connected lifecycle/paired fields (18; 1 fixture ignored), DTO fixtures (21), headless Desktop (9), formatting and Clippy pass; the final field/scope rerun passes, and the affected gate remains.
+Earlier focused storage/migration, DTO and headless Desktop evidence remains at
+`2d4115339:scratch/explore-loopflow-s-own-store.md`; compression changed no schema
+or Swift code. Realignment changes prose only and reuses the focused results below.
+
+Check (2026-10-08): `git diff --check` passed; reused compression results: `cargo nextest run -p loopflow --test local_planning --test session_lifecycle_tests -E "binary(local_planning) | test(personal_task_launch_resume_and_skill_workflow_keep_native_identity)" --no-fail-fast` — 9 passed; `cargo nextest run -p loopflow --lib -E "test(task_creation_confirmation_failure_retries_without_starting_backlog) | test(changing_the_workflow_keeps_the_projects_krs) | test(connected_fields_match_personal_order_assignment_and_summary)" --no-fail-fast` — 3 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; broader matrix and mixed-authority recovery remain gate-owned.

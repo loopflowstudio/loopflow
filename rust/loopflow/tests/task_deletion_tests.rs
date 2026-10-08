@@ -11,6 +11,15 @@ use support::{register_unrun_task, EnvGuard};
 
 #[test]
 fn task_delete_binary_reconciles_provider_and_local_history() {
+    task_management_fixture(false);
+}
+
+#[test]
+fn task_abandon_binary_preserves_unresolved_execution() {
+    task_management_fixture(true);
+}
+
+fn task_management_fixture(abandon: bool) {
     let home = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
@@ -54,7 +63,7 @@ fn task_delete_binary_reconciles_provider_and_local_history() {
         .unwrap()
         .unwrap();
     let fixture = serde_json::json!({
-        "lf": env!("CARGO_BIN_EXE_lf"), "repo": repo.path(), "home": home.path(),
+        "lf": env!("CARGO_BIN_EXE_lf"), "repo": repo.path(), "home": home.path(), "abandon": abandon,
         "issue": registered.task.plan.id.as_str(), "task": registered.task.id.as_str(),
         "project": project.plan.id.as_str(), "wave": registered.task.wave_id.as_str(),
     });

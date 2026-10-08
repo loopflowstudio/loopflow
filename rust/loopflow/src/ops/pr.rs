@@ -3,7 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::{current_branch, get_default_branch, rev_parse};
 use crate::engine::load_skill;
@@ -286,9 +286,14 @@ pub(crate) fn normalize_task_pr_copy(
             "Merging PR {} leaves the Task open for another serial PR.",
             context.sequence
         ),
-        TaskPrCopyLifecycle::Completes => {
-            format!("Merging PR {} completes the Task.", context.sequence)
-        }
+        TaskPrCopyLifecycle::Completes => match &context.follow_up {
+            Some(work) => format!(
+                "Merging PR {} delivers source; {}",
+                context.sequence,
+                work.summary(time::OffsetDateTime::now_utc().unix_timestamp())
+            ),
+            None => format!("Merging PR {} completes the Task.", context.sequence),
+        },
     };
     let managed = format!(
         "{TASK_PR_CONTEXT_START}\n> [!NOTE]\n> **Task:** {task_link}\n> **PR lifecycle:** {pr_lifecycle}\n{TASK_PR_CONTEXT_END}"
@@ -567,7 +572,7 @@ pub fn generate_pr_copy(
         chrome: config.chrome,
     };
 
-    let result = exec_agent(&launch, &process, &capabilities)
+    let result = run_agent(&launch, &process, &capabilities)
         .map_err(|err| OpsError::Message(format!("failed to generate PR copy: {err}")))?;
     if result.exit_code != 0 {
         return Err(OpsError::Message(format!(
@@ -2516,6 +2521,7 @@ esac
 
     fn task_pr_context() -> TaskPrContext {
         TaskPrContext {
+            follow_up: None,
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
             url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),

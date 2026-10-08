@@ -9,7 +9,7 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
-use crate::engine::agent::{exec_agent, AgentCapabilities, AgentConfig, ProcessConfig};
+use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
 use crate::engine::config::load_config_or_default;
 use crate::engine::git::current_branch;
 use crate::engine::load_skill;
@@ -18,7 +18,7 @@ use crate::pr_landing::{
     SUPERVISOR_STALE_AFTER,
 };
 use crate::session_record::{
-    AgentExecRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
+    AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SessionFlowMembership,
 };
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 use crate::work::task::{CiCheck, CiIncident, CiObservation, CiState};
@@ -238,7 +238,7 @@ fn admit_ci_fix(
                 format!("repair completed at {finished}; waiting for changed evidence")
             })));
         }
-        if repair_live(&store, reservation.exec.as_ref()) {
+        if repair_live(&store, reservation.process.as_ref()) {
             return Ok(());
         }
         if let Some(session) = &reservation.session {
@@ -311,17 +311,19 @@ fn admit_ci_fix(
                     )));
                 }
             }
-            if let Some(exec) = live_checkout_exec(&store, &landing.worktree)? {
-                return Err(repair_error(format!("Exec {exec} is live or unresolved")));
+            if let Some(process) = live_checkout_process(&store, &landing.worktree)? {
+                return Err(repair_error(format!(
+                    "Process {process} is live or unresolved"
+                )));
             }
         }
         let config = load_config_or_default(Some(&landing.worktree));
-        let retry = reservation.exec.is_some();
+        let retry = reservation.process.is_some();
         if retry && reservation.retries >= config.automation.retries {
             return Err(repair_error("repair startup exhausted automatic retries"));
         }
-        let launcher = crate::journal::current_exec_id()
-            .ok_or_else(|| repair_error("repair admission requires a recorded Exec"))?;
+        let launcher = crate::journal::current_process_lfid()
+            .ok_or_else(|| repair_error("repair admission requires a recorded Process"))?;
         let session = if let Some(id) = &reservation.session {
             store
                 .sqlite
@@ -344,7 +346,7 @@ fn admit_ci_fix(
                 iterations: None,
                 task_id: landing.task_id.clone(),
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: landing
                     .task_id
                     .as_ref()
@@ -429,7 +431,7 @@ fn admit_ci_fix(
                 .sqlite
                 .repair_reservation(&incident.identity)
                 .map_err(repair_error)?;
-            if saved.exec.as_ref() != Some(&launcher) {
+            if saved.process.as_ref() != Some(&launcher) {
                 return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
@@ -444,10 +446,10 @@ fn admit_ci_fix(
 
 /// A reservation still held by the caller was never handed to a repair worker;
 /// a long-lived watcher must be able to retry its own unacknowledged launch.
-fn repair_live(store: &SharedStore, exec: Option<&crate::id::ExecId>) -> bool {
-    exec.is_some_and(|exec| {
-        Some(exec) != crate::journal::current_exec_id().as_ref()
-            && crate::journal::exec_process_evidence(&store.sqlite, exec)
+fn repair_live(store: &SharedStore, process: Option<&crate::id::ProcessLfid>) -> bool {
+    process.is_some_and(|process| {
+        Some(process) != crate::journal::current_process_lfid().as_ref()
+            && crate::journal::process_evidence(&store.sqlite, process)
                 != crate::journal::ProcessIdentityEvidence::Dead
     })
 }
@@ -473,24 +475,24 @@ fn ci_timeout_failure(head_sha: &str) -> LandingObservation {
     }
 }
 
-/// Another live or unresolved Exec in this checkout, besides the caller.
-fn live_checkout_exec(
+/// Another live or unresolved Process in this checkout, besides the caller.
+fn live_checkout_process(
     store: &SharedStore,
     worktree: &Path,
-) -> OpsResult<Option<crate::id::ExecId>> {
-    let caller = crate::journal::current_exec_id();
+) -> OpsResult<Option<crate::id::ProcessLfid>> {
+    let caller = crate::journal::current_process_lfid();
     Ok(store
         .sqlite
-        .execs_since(0)
+        .processes_since(0)
         .map_err(repair_error)?
         .into_iter()
-        .find(|exec| {
-            exec.cwd.as_deref() == worktree.to_str()
-                && Some(&exec.id) != caller.as_ref()
-                && crate::journal::exec_process_evidence(&store.sqlite, &exec.id)
+        .find(|process| {
+            process.cwd.as_deref() == worktree.to_str()
+                && Some(&process.lfid) != caller.as_ref()
+                && crate::journal::process_evidence(&store.sqlite, &process.lfid)
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
-        .map(|exec| exec.id))
+        .map(|process| process.lfid))
 }
 
 pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
@@ -515,14 +517,14 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
             .find(|row| row.incident.identity == identity)
             .ok_or_else(|| repair_error("repair incident disappeared"))?
             .incident;
-        let exec = crate::journal::current_exec_id()
-            .ok_or_else(|| repair_error("repair worker has no Exec"))?;
+        let process = crate::journal::current_process_lfid()
+            .ok_or_else(|| repair_error("repair worker has no Process"))?;
         if !store
             .sqlite
             .handoff_repair(
                 identity,
-                &crate::id::ExecId::parse(launcher).map_err(repair_error)?,
-                &exec,
+                &crate::id::ProcessLfid::parse(launcher).map_err(repair_error)?,
+                &process,
             )
             .map_err(repair_error)?
         {
@@ -576,7 +578,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
                 )
                 .map_err(repair_error)?;
         }
-        exec_ci_fix(&store, &landing, &incident)
+        process_ci_fix(&store, &landing, &incident)
     })();
     let (conclusion, failure) = match &result {
         Ok(RepairConclusion::Published(_)) => (Some("published"), None),
@@ -587,7 +589,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
         .sqlite
         .finish_repair(
             identity,
-            &crate::journal::current_exec_id().expect("repair has an Exec"),
+            &crate::journal::current_process_lfid().expect("repair has a process"),
             failure.as_deref(),
             conclusion,
             captured,
@@ -600,7 +602,7 @@ pub fn run_repair(identity: &str, launcher: &str) -> OpsResult<()> {
     }
 }
 
-fn exec_ci_fix(
+fn process_ci_fix(
     store: &SharedStore,
     landing: &PrLanding,
     incident: &CiIncident,
@@ -681,7 +683,7 @@ fn exec_ci_fix(
             if let Ok((_, manifest)) =
                 crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), artifact)
             {
-                if let Some(request) = manifest.exec {
+                if let Some(request) = manifest.process {
                     launch.agent = Some(request.agent);
                     launch.provider_account_id = request.account_id;
                     launch.system_prompt = request.system_prompt;
@@ -704,7 +706,7 @@ fn exec_ci_fix(
         .session(session_id)
         .map_err(repair_error)?
         .ok_or_else(|| repair_error("reserved Session disappeared"))?;
-    let request = AgentExecRequest::from_prepared(&launch, &capabilities);
+    let request = AgentProcessRequest::from_prepared(&launch, &capabilities);
     let context = crate::trace::PreparedTurnContext::from_prompts(
         &request.system_prompt,
         &request.task_prompt,
@@ -742,7 +744,7 @@ fn exec_ci_fix(
         capture: Some(capture.clone().into()),
         ..Default::default()
     };
-    let result = exec_agent(&launch, &process, &capabilities);
+    let result = run_agent(&launch, &process, &capabilities);
     let outcome = if matches!(&result, Ok(result) if result.exit_code == 0) {
         "completed"
     } else {
@@ -1286,7 +1288,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Use `lf task move {} end` when delivery is finished.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
@@ -1297,7 +1299,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .iter()
         .any(|flow| {
             flow.driver.completed_at.is_none()
-                && crate::journal::exec_process_evidence(&store.sqlite, flow.id())
+                && crate::journal::process_evidence(&store.sqlite, flow.id())
                     != crate::journal::ProcessIdentityEvidence::Dead
         })
     {
@@ -1331,7 +1333,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
     let has_conversation = sessions
         .iter()
         .any(|session| session.cwd == landing.worktree && session.completed_at.is_none());
-    let has_execution = live_checkout_exec(store, &landing.worktree)?.is_some();
+    let has_execution = live_checkout_process(store, &landing.worktree)?.is_some();
     if has_conversation || has_execution {
         eprintln!("PR merged; retained its checkout for associated work. Use lf wt delete after that work finishes.");
         return Ok(());
@@ -1482,10 +1484,10 @@ pub(crate) async fn repair_landing(store: SharedStore, landing: PrLanding) -> Op
 pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsResult<bool> {
     Ok(store
         .sqlite
-        .landing_repair_execs(&landing.id)
+        .landing_repair_processes(&landing.id)
         .map_err(repair_error)?
         .iter()
-        .any(|exec| repair_live(store, Some(exec))))
+        .any(|process| repair_live(store, Some(process))))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1567,6 +1569,28 @@ async fn reconcile_repository_async(
             }
             Err(_) => {
                 errors.push(format!("PR #{number}: observation deadline exceeded"));
+                break;
+            }
+        }
+    }
+    for mut task in super::task_automation::repository_tasks(store, &repo).await? {
+        if tokio::time::Instant::now() >= deadline {
+            errors.push("Task delivery coverage overdue: pass deadline exceeded".into());
+            break;
+        }
+        match tokio::time::timeout_at(
+            deadline,
+            super::task::reconcile_delivered_task(store, &mut task),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => errors.push(format!("{}: {error}", task.plan.identifier)),
+            Err(_) => {
+                errors.push(format!(
+                    "{}: delivery observation deadline exceeded",
+                    task.plan.identifier
+                ));
                 break;
             }
         }

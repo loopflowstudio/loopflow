@@ -72,10 +72,11 @@ def test_docs_subscriptions_page_owns_account_selection(
     page.goto(f"{base_url}/docs/subscriptions")
     content = page.locator(".docs-content")
     assert content.is_visible()
-    text = content.inner_text()
+    text = " ".join(content.inner_text().split())
     assert "--only-account" in text
     assert "repository account route" in text
-    assert "target-side --account" in text
+    assert "lf --machine my-company --account personal@ implement" in text
+    assert "resolve against the target's combined local and forwarded catalog" in text
     assert "local or forwarded provenance" in text
 
 

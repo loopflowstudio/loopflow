@@ -190,9 +190,9 @@ impl Machine {
             .unwrap();
     }
 
-    fn execs(&self) -> i64 {
+    fn processes(&self) -> i64 {
         self.raw()
-            .query_row("SELECT COUNT(*) FROM execs", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM processes", [], |row| row.get(0))
             .unwrap()
     }
 
@@ -464,9 +464,9 @@ fn transcript_lines_read_nothing_and_do_not_delay_a_task() {
         assert_eq!(before.get(part), after.get(part), "{part} was read again");
     }
 
-    // An Exec can change a planning condition, so planning is read; nothing
+    // An Process can change a planning condition, so planning is read; nothing
     // displayed changed, so nothing is sent.
-    conn.execute("INSERT INTO execs(id,trace_id,cwd,started_at,completed_at,outcome) VALUES('exec_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
+    conn.execute("INSERT INTO processes(lfid,trace_id,cwd,started_at,completed_at,outcome) VALUES('process_00000000000000000000000000000001','trace_00000000000000000000000000000001','/elsewhere',1,2,'succeeded')", []).unwrap();
     assert!(watch
         .parts(Duration::from_millis(1500))
         .iter()
@@ -536,8 +536,8 @@ fn every_displayed_session_fact_committed_elsewhere_is_shown() {
 
     // A question the stream reported is Waiting; its answer ends that.
     write(
-        "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
-         SELECT id,driver_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
+        "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
+         SELECT id,driver_generation,provider_generation,CAST(strftime('%s','now') AS INTEGER),0,1,0
          FROM agent_sessions WHERE id='conversation'",
     );
     watch.session(|record| record["attention"] == "waiting");
@@ -709,7 +709,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         );
     }
 
-    let execs = home.execs();
+    let processes = home.processes();
     // Process liveness is this machine's, observed on a clock; everything
     // read from the store stays silent.
     let idle: Vec<_> = watch
@@ -718,7 +718,7 @@ fn scope_selects_sessions_and_idle_sends_nothing() {
         .filter(|frame| !matches!(frame.content, WorkContent::Activity(_)))
         .collect();
     assert!(idle.is_empty(), "{idle:?}");
-    assert_eq!(home.execs(), execs);
+    assert_eq!(home.processes(), processes);
 
     watch.stdin = None;
     let deadline = Instant::now() + Duration::from_secs(5);

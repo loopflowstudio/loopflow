@@ -15,6 +15,7 @@ use crate::ops::pr::{
 };
 
 use crate::ops::progress::Progress;
+use crate::work::task::AfterMerge;
 
 #[derive(Debug, Clone)]
 pub struct LandOptions {
@@ -71,14 +72,19 @@ fn prepare_pr(
                 .to_string(),
         ));
     }
+    let after_merge = if options.next_slug.is_some() {
+        AfterMerge::ContinueTask
+    } else {
+        AfterMerge::CompleteTask
+    };
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     crate::ops::commit::prepare_persistent_publication(&repo_root)?;
-    if options.complete && (!options.strict || is_clean(&repo_root)?) {
+    if after_merge == AfterMerge::CompleteTask && (!options.strict || is_clean(&repo_root)?) {
         if let Some(issue) = crate::ops::task::find_discardable_task_successor(&repo_root)? {
             // Rotation left one unpublished branch at its recorded base after
-            // earlier Task work merged. The explicit `--complete` instruction
-            // settles the Task without manufacturing an empty GitHub PR.
+            // earlier Task work merged. Default completion settles the Task
+            // without manufacturing an empty GitHub PR.
             clear_scratch(&repo_root, progress)?;
             crate::ops::task::task_end(
                 &repo_root,
@@ -98,12 +104,11 @@ fn prepare_pr(
     } else {
         crate::ops::task::task_pr_context(&repo_root)?
     };
-    let copy_lifecycle = if options.complete {
-        TaskPrCopyLifecycle::Completes
-    } else {
-        TaskPrCopyLifecycle::Continues {
+    let copy_lifecycle = match after_merge {
+        AfterMerge::CompleteTask => TaskPrCopyLifecycle::Completes,
+        AfterMerge::ContinueTask => TaskPrCopyLifecycle::Continues {
             next_slug: options.next_slug.clone(),
-        }
+        },
     };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
@@ -113,11 +118,6 @@ fn prepare_pr(
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
-            let after_merge = if options.complete {
-                crate::work::task::AfterMerge::CompleteTask
-            } else {
-                crate::work::task::AfterMerge::ContinueTask
-            };
             if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
                 &repo_root,
                 crate::work::task::PrMergeMode::Auto,
@@ -257,11 +257,7 @@ fn prepare_pr(
             Finalize::UserMerge => crate::work::task::PrMergeMode::User,
         },
         pr.as_ref().and_then(|pr| pr.head_sha.as_deref()),
-        if options.complete {
-            crate::work::task::AfterMerge::CompleteTask
-        } else {
-            crate::work::task::AfterMerge::ContinueTask
-        },
+        after_merge,
         options.next_slug.as_deref(),
         inherit_pr,
     )?;

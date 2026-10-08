@@ -122,6 +122,18 @@ pub struct Cli {
     #[arg(long = "max-turns")]
     pub max_turns: Option<u32>,
 
+    /// Run the command on this saved machine in its repository
+    #[arg(long, value_name = "LABEL_OR_ID")]
+    pub machine: Option<String>,
+
+    /// Resolve a named Doppler secret locally and forward its value (repeatable)
+    #[arg(long = "secret", requires = "machine")]
+    pub secret: Vec<String>,
+
+    /// Forward the SSH agent to the selected machine
+    #[arg(long, requires = "machine")]
+    pub forward_agent: bool,
+
     /// Add Wave context and identity without changing the working directory
     #[arg(long, value_name = "WAVE")]
     pub wave: Option<String>,
@@ -226,7 +238,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn exec_options(&self) -> Self {
+    pub(crate) fn process_options(&self) -> Self {
         Self {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
@@ -247,6 +259,9 @@ impl Cli {
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
+            machine: self.machine.clone(),
+            secret: self.secret.clone(),
+            forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),
             steers_after: self.steers_after,
@@ -382,7 +397,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: InstallationCommand,
     },
-    /// Inspect this Machine and observe routes to other Machines
+    /// Name and connect to machines
     Machine {
         #[command(subcommand)]
         cmd: MachineCommand,
@@ -396,6 +411,11 @@ pub enum Commands {
     Wave {
         #[command(subcommand)]
         cmd: WaveCommand,
+    },
+    /// Project-owned planning configuration
+    Project {
+        #[command(subcommand)]
+        cmd: ProjectCommand,
     },
     /// Concrete work and Task lifecycle
     Task {
@@ -486,13 +506,53 @@ pub enum SkillCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Select and inspect reusable Workflows
+    Workflow {
+        #[command(subcommand)]
+        cmd: ProjectWorkflowCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectWorkflowCommand {
+    /// List Workflow definitions, including unavailable local files
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the Project's selected Workflow
+    Show {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
+    Set { project: String, name: String },
+    /// Copy a builtin Workflow when needed and print its local path
+    Customize { name: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TaskWorkflowCommand {
+    /// Show the Task's captured graph, position and history
+    Show {
+        issue: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move the captured Workflow to start without executing or reloading it
+    Restart { issue: String },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum FlowCommand {
     /// List authored flows, or Flows that ran
     List {
         #[arg(long)]
         json: bool,
         #[command(flatten)]
-        inventory: commands::flow_inventory::FlowInventoryArgs,
+        inventory: commands::flow_inventory::FlowProcessInventoryArgs,
     },
     /// Inspect an authored flow, or one that ran
     Show {
@@ -500,9 +560,9 @@ pub enum FlowCommand {
         #[arg(long)]
         json: bool,
         #[arg(long)]
-        sessions: bool,
+        processes: bool,
     },
-    /// Print the repository file that defines a Flow or workflow, creating
+    /// Print the repository file that defines a Flow, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
     #[command(external_subcommand)]
@@ -530,6 +590,16 @@ impl SessionMode {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Observe validated Program Status snapshots from an active local terminal
+    ObserveStatus {
+        id: String,
+        /// The terminal marker in the current provider client receipt
+        #[arg(long)]
+        terminal: String,
+        /// Provider generation from the Session reading
+        #[arg(long)]
+        generation: i64,
+    },
     /// Resume a conversation by ID, or the last interactive Session in this worktree
     Resume {
         /// Loopflow Session ID or Claude/Codex conversation ID
@@ -728,11 +798,8 @@ pub enum WaveCommand {
         #[arg(short = 'w', long)]
         wave: Option<String>,
         /// The complete plan as JSON
-        #[arg(long, required_unless_present = "workflow")]
-        plan: Option<std::path::PathBuf>,
-        /// Change only the workflow, keeping KRs and targets
-        #[arg(long, conflicts_with = "plan")]
-        workflow: Option<String>,
+        #[arg(long)]
+        plan: std::path::PathBuf,
     },
 }
 
@@ -759,6 +826,11 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Inspect or reset this Task's captured Workflow
+    Workflow {
+        #[command(subcommand)]
+        cmd: TaskWorkflowCommand,
+    },
     /// Inspect delivery scheduling and Task CI repair settings
     Automation {
         #[arg(long)]
@@ -768,6 +840,20 @@ pub enum TaskCommand {
     Reconcile {
         #[arg(long)]
         json: bool,
+    },
+    /// Record accepted work remaining after merge, or resolve it with evidence
+    FollowUp {
+        issue: String,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        outcome: Option<String>,
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        evidence: Option<String>,
+        /// Next observation or decision, as an RFC 3339 timestamp
+        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
+        check_at: Option<String>,
+        /// Evidence that the remaining work is satisfied or no longer needed
+        #[arg(long)]
+        clear: Option<String>,
     },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
@@ -822,9 +908,6 @@ pub enum TaskCommand {
         /// Reach `end` although Linear already calls the active Task complete
         #[arg(long)]
         force: bool,
-        /// Accept one historical Exec's unknown outcome when reaching `end`; retain its checkout
-        #[arg(long, value_name = "EXEC_ID")]
-        accept_unknown_exec: Vec<crate::id::ExecId>,
     },
     /// File a Task in the current chapter
     Create {
@@ -966,6 +1049,10 @@ impl TaskCommand {
             | Self::Reconcile { .. }
             | Self::Repair { .. }
             | Self::Automation { .. } => None,
+            Self::Workflow {
+                cmd:
+                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+            } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
@@ -980,7 +1067,8 @@ impl TaskCommand {
             | Self::Refile { issue, .. }
             | Self::Comment { issue, .. }
             | Self::Interrupt { issue, .. }
-            | Self::Wait { issue, .. } => Some(issue),
+            | Self::Wait { issue, .. }
+            | Self::FollowUp { issue, .. } => Some(issue),
         }
     }
 }
@@ -1109,6 +1197,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1128,6 +1217,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1147,6 +1237,7 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
+        /// Complete after verified merge (the default unless --next is supplied)
         #[arg(short = 'c', long)]
         complete: bool,
         #[arg(long = "next")]
@@ -1405,7 +1496,7 @@ pub enum MachineCommand {
         #[command(flatten)]
         screenshot: ScreenshotArgs,
     },
-    /// Diagnose installation, storage, Exec integrity and scheduled receipts
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long)]
@@ -1413,47 +1504,6 @@ pub enum MachineCommand {
         /// Emit the audit as JSON
         #[arg(long)]
         json: bool,
-    },
-    /// Run lf on a Machine or SSH host carrying your local credentials.
-    ///
-    /// Resolves local credentials and forwards a foreground account lease over
-    /// SSH; Loopflow writes no managed provider credential on the remote. The
-    /// Doppler token is never forwarded — name specific secrets with `--secret`
-    /// to resolve them locally. Example: `lf machine ssh <machine-id> pr open`.
-    Ssh {
-        /// Prefer this origin account when the remote lf chooses a provider.
-        #[arg(
-            id = "ssh_preferred_provider_account",
-            long = "account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_restricted_provider_account"
-        )]
-        origin_account: Vec<String>,
-        /// Restrict remote provider launches to these origin accounts.
-        #[arg(
-            id = "ssh_restricted_provider_account",
-            long = "only-account",
-            value_name = "SELECTOR",
-            conflicts_with = "ssh_preferred_provider_account"
-        )]
-        origin_only_account: Vec<String>,
-        /// MachineId (preferred), SSH alias, or user@host
-        target: String,
-        /// Repository path on the remote, relative to $HOME
-        #[arg(long = "repo")]
-        repo: Option<String>,
-        /// Doppler secret to resolve locally and forward as an env var
-        /// (repeatable). The Doppler token itself is never forwarded.
-        #[arg(long = "secret")]
-        secret: Vec<String>,
-        /// Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the
-        /// forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk.
-        #[arg(long = "forward-agent")]
-        forward_agent: bool,
-        /// Arguments for the remote lf. The target is the boundary: every
-        /// argument after it belongs to the remote invocation.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        lf_args: Vec<String>,
     },
     /// Print the configured participant display name.
     User {
@@ -1465,13 +1515,33 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record the current route for a known Machine identity.
-    Observe {
-        machine_id: crate::durable::MachineId,
-        route: String,
+    /// Discover a remote machine and save its SSH destination
+    Add {
+        target: String,
+        #[arg(long)]
+        label: Option<String>,
+        /// Remote repository path; defaults to this checkout's home-relative path
+        #[arg(long)]
+        repo: Option<String>,
         #[arg(long)]
         json: bool,
     },
+    /// List saved machines without connecting
+    List {
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check reachability and version without prompting
+    Status {
+        label: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Change a saved machine's label
+    Rename { label: String, name: String },
+    /// Forget a connection without touching remote work
+    Remove { label: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -2024,49 +2094,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_parser_respects_the_internal_target_boundary() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "ssh",
-            "--account",
-            "reserve",
-            "mini",
-            "--",
-            "task",
-            "pursue",
-        ])
-        .expect("parse origin SSH account preference");
-
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { origin_account, lf_args, .. } })
-                if origin_account == vec!["reserve"]
-                    && lf_args == vec!["task", "pursue"]
-        ));
-
-        let after_host = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "ssh",
-            "mini",
-            "--",
-            "--account",
-            "reserve",
-            "task",
-            "pursue",
-        ])
-        .expect("parse remote account preference");
-        assert!(after_host.account.is_empty());
-        assert!(matches!(
-            after_host.command,
-            Some(Commands::Machine { cmd: crate::lf::MachineCommand::Ssh { lf_args, .. } })
-                if lf_args == vec!["--account", "reserve", "task", "pursue"]
-        ));
-    }
-
-    #[test]
     fn account_use_takes_its_provider_before_the_verb() {
         let cli =
             Cli::try_parse_from(["lf", "account", "codex", "use", "jack@loopflow.studio"]).unwrap();
@@ -2352,14 +2379,11 @@ mod tests {
             "--reason",
             "Delivered",
             "--force",
-            "--accept-unknown-exec",
-            "00000000-0000-0000-0000-000000000001",
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true, accept_unknown_exec } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")
-                    && accept_unknown_exec.iter().map(|id| id.as_str()).collect::<Vec<_>>() == ["00000000-0000-0000-0000-000000000001"]));
+            Some(Commands::Task { cmd: TaskCommand::Move { issue, node, reason, force: true } })
+                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
         assert!(Cli::try_parse_from([
             "lf",
             "task",

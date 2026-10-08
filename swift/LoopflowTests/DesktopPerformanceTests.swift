@@ -84,7 +84,7 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: lf)
             process.arguments = ["monitor", "work", "--watch", "--json"]
             process.environment = reader
@@ -132,7 +132,7 @@ struct DesktopPerformanceTests {
                            "gaps": ["Compositor presentation and frame hitches are not measured.",
                                     "A Task created without a Run is not in the outline; task_created ends at its Wave's Task list.",
                                     "The interval starts when the writing process has exited, after its commit.",
-                                    "Rows are written with sqlite3, not lf: no Exec, sync or provider is involved.",
+                                    "Rows are written with sqlite3, not lf: no lf process, sync or provider is involved.",
                                     "Each write waits for the reader to be idle; overlapping writes are not sampled.",
                                     "Forced bitmap capture and OCR are intrusive observer costs."]])
         let navigator = try view.inspect().find(WorkNavigator.self).actualView()
@@ -553,7 +553,7 @@ struct DesktopPerformanceTests {
             model.syncWorkScope()
             try await sample("flow_log_active", population, attempt, journal, window, action: {
                 // This Task already has a retained Session choice; the Flow
-                // exec log opens alongside it.
+                // process log opens alongside it.
                 multiplexer.show(.flowLog(taskId: "perf-task-0"))
             }, ready: {
                 hasRendered(window, "task-work-perf-flow-0")
@@ -566,7 +566,7 @@ struct DesktopPerformanceTests {
                 openTask(.task(id: "perf-task-1"))
                 model.syncWorkScope()
                 multiplexer.show(.flowLog(taskId: "perf-task-1"))
-            }, ready: { hasRendered(window, "task-flow-runs-empty") })
+            }, ready: { hasRendered(window, "task-flow-processes-empty") })
             try await sample("session_return", population, attempt, journal, window, action: {
                 navigator.onOpenSession(first)
             }, ready: {
@@ -614,7 +614,7 @@ struct DesktopPerformanceTests {
                 }
                 try pressElement("flow-node-2", in: window)
             }, ready: {
-                model.navigation.expandedFlowRuns.contains("perf-flow-0")
+                model.navigation.expandedFlowProcesses.contains("perf-flow-0")
                     && window.allText.contains { $0.contains("realign") }
             })
             try pressElement("breadcrumb-task", in: window)
@@ -963,9 +963,9 @@ struct DesktopPerformanceTests {
         if let index = Int(id.replacingOccurrences(of: "session-row-perf-session-", with: "")) {
             return window.outlineText.contains { $0.contains(String(format: "Conversation %03d", index)) }
         }
-        // A Flow exec's row shows its Flow's name.
+        // A Flow process's row shows its Flow's name.
         if id == "task-work-perf-flow-0" { return window.contentText.contains { $0.contains("benchflow") } }
-        if id == "task-flow-runs-empty" {
+        if id == "task-flow-processes-empty" {
             return window.contentText.joined(separator: " ").contains("No Flow has run")
         }
         return false
@@ -1072,7 +1072,7 @@ struct DesktopPerformanceTests {
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
              "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
              "actions": sessionActionFixture(state: "active"),
-             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
+             "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": ["perf-work-\(index)"], "provider_generation": 1, "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             root.appendingPathComponent("tests/fixtures/dto/session_history_summary.json"))) as? [String: Any])
@@ -1086,6 +1086,7 @@ struct DesktopPerformanceTests {
         let workJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_work.json"), encoding: .utf8)
         let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
         let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
+        let workflowJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
         let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("flow_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
@@ -1095,6 +1096,7 @@ struct DesktopPerformanceTests {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
             case "roadmap": return await planning.read()
             case "flow" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
+            case "project" where args.dropFirst().prefix(2) == ["workflow", "list"]: return workflowJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
@@ -1191,7 +1193,7 @@ private final class PerformanceReader {
         send("sessions", request.id,
              #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
         guard let task = scope.task else { return }
-        // Only the first Task has a Flow exec.
+        // Only the first Task has a Flow process.
         let flows = task == "PERF-0" ? #"""
             [{"id":"perf-flow-0","name":"benchflow","state":"completed","task_id":null,"wave_id":null,
               "updated_at":1790270400,"repo":"/src/loopflow","ended_at":1790270460}]
@@ -1210,7 +1212,7 @@ private final class PerformanceReader {
             }
         }
         send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"flows":\#(flows),"execs":[],"workflow":null},"flow_runs":\#(runs)}
+            {"task":"\#(task)","work":{"sessions":[],"flow_processes":\#(flows),"processes":[],"workflow":null},"flow_processes":\#(runs)}
             """#)
     }
 
@@ -1317,7 +1319,7 @@ private struct PerformanceStore {
     let database: String
 
     func write(_ sql: String) throws {
-        let process = Process()
+        let process = Foundation.Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = ["-bail", "-cmd", ".timeout 5000", database, sql]
         let errors = Pipe()
@@ -1577,7 +1579,7 @@ private func snapshotRead(binary: String, home: String, args: [String], cwd: Str
     guard ["roadmap", "activity"].contains(args.first ?? "") || ["wave list", "wave status", "session list", "session history", "machine id", "task status", "task files", "task diff", "flow list"].contains(verb) else {
         throw RegistryQueryError("Snapshot does not execute \(verb)")
     }
-    let process = Process()
+    let process = Foundation.Process()
     process.executableURL = URL(fileURLWithPath: binary)
     process.arguments = args
     process.currentDirectoryURL = URL(fileURLWithPath: cwd)

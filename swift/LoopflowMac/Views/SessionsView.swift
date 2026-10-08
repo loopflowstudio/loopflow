@@ -207,6 +207,7 @@ final class SessionsStore: ObservableObject {
                 sessions.append(SessionItem(record: record, state: observedState))
             }
         }
+        surfaces.associateProgramStatus(sessions.map(\.record))
     }
 
     private func recover(_ id: String, replacing: Bool = false) async {
@@ -461,7 +462,9 @@ struct SessionsContentView: View {
                             model: model,
                             crumb: model.breadcrumb,
                             onOpenSession: openSession,
-                            onTaskDetails: { workspace.showsDetails = true }
+                            onTaskDetails: { workspace.showsDetails = true },
+                            programStatus: focusedProgramStatus,
+                            programStatusError: focusedProgramStatusSurface?.observationError
                         ) {
                             if taskPath != nil && !navigation.showsRetainedTerminals { workspaceCreation }
                             if terminalsVisible {
@@ -511,7 +514,7 @@ struct SessionsContentView: View {
                             .allowsHitTesting(terminalsVisible)
                             .accessibilityHidden(!terminalsVisible)
                             // Mounted only when shown: its readers ask `lf` and each
-                            // `lf` process records an Exec.
+                            // `lf` process records a process.
                             if !terminalsVisible {
                                 HSplitView {
                                     WorkSurfaceView(model: model, onOpenSession: openSession, onOpenTask: openTask,
@@ -551,8 +554,10 @@ struct SessionsContentView: View {
             set: { if !$0 { navigation.palette = nil } }
         )) {
             switch navigation.palette {
+            case .workflow(let name):
+                WorkflowCatalogInspector(entry: model.workflowCatalog.value?.first { $0.name == name }, model: model)
             case .flow(let name):
-                FlowCatalogInspector(entry: model.flowCatalog.value?.named(name), navigation: navigation)
+                FlowCatalogInspector(entry: model.flowCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
                 WorkPalette(model: model, activate: navigate)
             case nil:
@@ -626,7 +631,7 @@ struct SessionsContentView: View {
     }
 
     /// One menu changes what the multiplexer shows: a shell, the Task's files
-    /// or its Flow exec log.
+    /// or its Flow process log.
     private var workspaceCreation: some View {
         Menu {
             Button("New shell", systemImage: "terminal") { multiplexer.newShell() }
@@ -635,13 +640,13 @@ struct SessionsContentView: View {
             if let task = fileTask?.task.id {
                 Button("Files", systemImage: "doc") { multiplexer.show(.files(taskId: task)) }
                     .accessibilityIdentifier("work-add-files")
-                Button("Flow execs", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
+                Button("Flow processes", systemImage: "list.bullet.rectangle") { multiplexer.show(.flowLog(taskId: task)) }
                     .accessibilityIdentifier("work-add-flow-log")
             }
         } label: { Image(systemName: "plus") }
         .menuStyle(.borderlessButton).fixedSize()
-        .help("Add a shell, files or the Flow exec log")
-        .accessibilityLabel("Add a shell, files or the Flow exec log")
+        .help("Add a shell, files or the Flow process log")
+        .accessibilityLabel("Add a shell, files or the Flow process log")
         .accessibilityIdentifier("work-create")
     }
 
@@ -698,6 +703,7 @@ struct SessionsContentView: View {
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
         case .flow(let name): navigation.palette = .flow(name)
+        case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)
@@ -873,6 +879,26 @@ struct SessionsContentView: View {
         .help(path?.worktree ?? "Choose a worktree for this slot")
         .accessibilityLabel("Worktree")
         .accessibilityIdentifier("worktree-chip")
+    }
+
+    private var focusedProgramStatusSurface: ProgramStatusSurface? {
+        let pane = multiplexer.focusedPane
+        switch pane.content {
+        case .session(let id): return store.surfaces.programStatus(for: .session(id))
+        case .shell: return store.surfaces.programStatus(for: .shell(pane.id))
+        case .empty, .flowLog, .files: return nil
+        }
+    }
+
+    private var focusedProgramStatus: ProgramStatusRecords? {
+        guard terminalsVisible else { return nil }
+        if case .session(let id) = multiplexer.focusedPane.content {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        if let id = focusedProgramStatusSurface?.sessionId {
+            return store.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return focusedProgramStatusSurface?.snapshot
     }
 
     /// Sessions attached to the focused pane: a Session pane's own record, or
@@ -1237,6 +1263,14 @@ private struct SessionPaneView: View {
                 .font(Typography.code(11))
                 .foregroundStyle(TerminalPalette.dim)
                 .lineLimit(1)
+            if let status = _programStatus, status.summary != nil {
+                ProgramStatusLabel(status: status)
+                    .foregroundStyle(TerminalPalette.dim)
+            }
+            if let error = _programStatusSurface?.observationError {
+                Image(systemName: "exclamationmark.circle")
+                    .help(error).accessibilityLabel(error)
+            }
             Spacer(minLength: 8)
             if bellRinging {
                 Image(systemName: "bell.fill")
@@ -1312,7 +1346,7 @@ private struct SessionPaneView: View {
         .accessibilityIdentifier(id)
     }
 
-    /// The conversation's shared state, or nothing for a shell, files or the Flow exec log.
+    /// The conversation's shared state, or nothing for a shell, files or the Flow process log.
     private var stateDot: Color {
         guard let state = paneSessions.first?.record.state else { return TerminalPalette.divider }
         switch state {
@@ -1368,7 +1402,7 @@ private struct SessionPaneView: View {
             )
             .id(pane.id)
         case .flowLog(let taskId):
-            FlowExecLog(model: model, taskId: taskId)
+            FlowProcessLog(model: model, taskId: taskId)
                 .background(PaneFocusTarget(isFocused: isFocused))
                 .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })
         case .files(let taskId):
@@ -1516,9 +1550,21 @@ private struct SessionPaneView: View {
         case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
-        case .flowLog: "Flow execs"
+        case .flowLog: "Flow processes"
         case .files: "Files"
         }
+    }
+
+    private var _programStatusSurface: ProgramStatusSurface? {
+        _terminalIdentity.flatMap { sessions.surfaces.programStatus(for: $0) }
+    }
+
+    private var _programStatus: ProgramStatusRecords? {
+        if case .session = pane.content { return item?.record.programStatus }
+        if let id = _programStatusSurface?.sessionId {
+            return sessions.sessions.first { $0.id == id }?.record.programStatus
+        }
+        return _programStatusSurface?.snapshot
     }
 
     private var _terminalIdentity: TerminalIdentity? {

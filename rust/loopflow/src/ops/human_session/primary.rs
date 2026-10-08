@@ -6,9 +6,9 @@ use std::path::Path;
 use anyhow::{anyhow, bail, Context, Result};
 
 use super::{
-    capture_is_prepared, conversation_background_name, conversation_exec_is_running,
-    lock_session_exec, publish_prepared_input, session_not_found, start_durable_session, surface,
-    NativeSession, SessionRecord,
+    capture_is_prepared, conversation_background_name, conversation_process_is_running,
+    lock_session_process, publish_prepared_input, session_not_found, start_durable_session,
+    surface, NativeSession, SessionRecord,
 };
 use crate::session::{AgentSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::SharedStore;
@@ -97,7 +97,7 @@ pub(crate) async fn replace(store: &SharedStore, id: &str) -> Result<SessionReco
         .ok_or_else(|| session_not_found(id))?;
     if previous.completed_at.is_none() {
         let lock_id = previous.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&lock_id)).await??;
+        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
         stop_client(&previous)
             .with_context(|| format!("stop primary Session {id}; it remains primary"))?;
     }
@@ -144,7 +144,7 @@ pub(super) async fn admit_workspace(
     let Some(scope) = store.sqlite.primary_scope(&session.id)? else {
         return Ok(session);
     };
-    if conversation_exec_is_running(&session.id).await?
+    if conversation_process_is_running(&session.id).await?
         || !NativeSession::of(&session)?.clients()?.is_empty()
     {
         return Ok(session);
@@ -233,7 +233,7 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
         iterations: None,
         task_id: None,
         wave_id: None,
-        flow_id: None,
+        flow_process_lfid: None,
         work_source: None,
         bound_at: None,
         interactive: true,
@@ -250,11 +250,11 @@ fn conversation(cwd: &Path, agent: Option<&str>, skill: &str, title: String) -> 
 /// Publish the admitted input and launch it unless a launcher already holds
 /// it. A failed start keeps the prepared input for the next caller.
 async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionRecord> {
-    let session = if conversation_exec_is_running(&session.id).await? {
+    let session = if conversation_process_is_running(&session.id).await? {
         session
     } else {
         let id = session.id.clone();
-        let _launch = tokio::task::spawn_blocking(move || lock_session_exec(&id)).await??;
+        let _launch = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
         admit_workspace(store, session).await?
     };
     let session = if session.input_published {
@@ -267,7 +267,7 @@ async fn start(store: &SharedStore, session: AgentSession) -> Result<SessionReco
         )?
     };
     if capture_is_prepared(&session.artifact_key)?
-        && !conversation_exec_is_running(&session.id).await?
+        && !conversation_process_is_running(&session.id).await?
     {
         let lf = crate::engine::process::resolve_pinned_lf_binary()?;
         let argv = vec![
@@ -311,7 +311,7 @@ async fn lock_scope(scope: &PrimaryScope) -> Result<std::fs::File> {
         PrimaryScope::Wave(wave) => format!("primary:wave:{wave}"),
         PrimaryScope::Task(task) => format!("primary:task:{task}"),
     };
-    tokio::task::spawn_blocking(move || lock_session_exec(&key))
+    tokio::task::spawn_blocking(move || lock_session_process(&key))
         .await
         .context("lock primary Session scope")?
 }

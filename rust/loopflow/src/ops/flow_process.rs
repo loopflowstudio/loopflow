@@ -1,47 +1,47 @@
-//! A Flow exec is one driver Exec and the step Execs it starts. Its driver
-//! writes a FlowExec: the Flow's name and graph as compiled at launch, then one
+//! A Flow process is one driver Process and the step Processes it starts. Its driver
+//! writes a FlowProcess: the Flow's name and graph as compiled at launch, then one
 //! row per step it starts. The record is append-only and only the driver writes
 //! it. Each step is an ordinary command that knows nothing of its Flow; whether
-//! the Flow or a step is running, finished or failed is read from their Execs.
+//! the Flow or a step is running, finished or failed is read from their Processes.
 use crate::engine::flow_graph::FlowGraph;
-use crate::exec::Exec;
-use crate::id::ExecId;
+use crate::id::ProcessLfid;
+use crate::process::Process;
 
-/// A step's agent sees which Flow started it: the driver Exec's id. Steps of
+/// A step's agent sees which Flow started it: the driver Process's id. Steps of
 /// one Flow can share notes under it. It configures nothing in lf.
 pub(crate) const FLOW_ID_ENV: &str = "LF_FLOW_ID";
 
 /// One step its driver started.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FlowExecStep {
-    pub exec: Exec,
+pub(crate) struct FlowProcessStep {
+    pub process: Process,
     /// The step's node in the Flow's graph, counted in preorder.
     pub key: u32,
     /// Returns taken on each loop edge, per nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
 }
 
-/// One Flow exec as its driver recorded it.
+/// One Flow process as its driver recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FlowExec {
-    pub driver: Exec,
+pub(crate) struct FlowProcess {
+    pub driver: Process,
     pub name: String,
     pub graph: FlowGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.
-    pub steps: Vec<FlowExecStep>,
+    pub steps: Vec<FlowProcessStep>,
 }
 
-impl FlowExec {
-    pub(crate) fn id(&self) -> &ExecId {
-        &self.driver.id
+impl FlowProcess {
+    pub(crate) fn id(&self) -> &ProcessLfid {
+        &self.driver.lfid
     }
 
-    pub(crate) fn latest(&self) -> Option<&FlowExecStep> {
+    pub(crate) fn latest(&self) -> Option<&FlowProcessStep> {
         self.steps.last()
     }
 
     /// The graph label of a recorded step.
-    pub(crate) fn label(&self, step: &FlowExecStep) -> String {
+    pub(crate) fn label(&self, step: &FlowProcessStep) -> String {
         self.graph
             .node_at(step.key)
             .map(|node| node.label.clone())
@@ -51,9 +51,9 @@ impl FlowExec {
     /// How far the Flow got on the graph it launched with.
     pub(crate) fn detail(
         &self,
-        entry: crate::durable::FlowInventoryEntry,
-    ) -> crate::durable::FlowDetail {
-        let finished = entry.summary.state == crate::session::FlowSummaryState::Completed;
+        entry: crate::durable::FlowProcessInventoryEntry,
+    ) -> crate::durable::FlowProcessDetail {
+        let finished = entry.summary.state == crate::session::FlowProcessSummaryState::Completed;
         let latest = self.latest();
         let projection = crate::engine::flow_graph::project_position(
             &self.graph,
@@ -61,7 +61,7 @@ impl FlowExec {
             latest.map_or(&[], |step| &step.iterations),
             finished,
         );
-        crate::durable::FlowDetail {
+        crate::durable::FlowProcessDetail {
             entry,
             graph: self.graph.clone(),
             current: projection.current,
@@ -74,15 +74,15 @@ impl FlowExec {
             steps: self
                 .steps
                 .iter()
-                .map(|step| crate::durable::FlowStepExec {
-                    exec_id: step.exec.id.clone(),
+                .map(|step| crate::durable::FlowStepProcess {
+                    process_lfid: step.process.lfid.clone(),
                     label: self.label(step),
                     key: step.key,
                     iterations: step.iterations.clone(),
-                    started_at: step.exec.started_at,
-                    completed_at: step.exec.completed_at,
-                    outcome: step.exec.outcome.clone(),
-                    exit_code: step.exec.exit_code,
+                    started_at: step.process.started_at,
+                    completed_at: step.process.completed_at,
+                    outcome: step.process.outcome.clone(),
+                    exit_code: step.process.exit_code,
                 })
                 .collect(),
         }

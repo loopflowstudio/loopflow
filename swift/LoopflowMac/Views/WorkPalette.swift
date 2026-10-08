@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || flowCatalog.errorMessage != nil
+        roadmap.errorMessage != nil || sessions.errorMessage != nil || flowCatalog.errorMessage != nil || workflowCatalog.errorMessage != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -43,11 +43,15 @@ extension WorkModel {
         }
         for flow in flowCatalog.value ?? [] {
             rows.append(.init(id: .flow(flow.name), title: flow.name,
-                              detail: flow.kind == .workflow ? "Workflow" : "Flow template", key: flow.name))
+                              detail: "Flow definition", key: flow.name))
+        }
+        for workflow in workflowCatalog.value ?? [] {
+            rows.append(.init(id: .workflow(workflow.name), title: workflow.name,
+                              detail: "Workflow", key: workflow.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
-            rows.append(.init(id: .flowLog(selection.id), title: "Flow execs of \(found.task.task.identifier)",
-                              detail: "Action · Open the log", key: "Flow execs"))
+            rows.append(.init(id: .flowLog(selection.id), title: "Flow processes of \(found.task.task.identifier)",
+                              detail: "Action · Open the log", key: "Flow processes"))
         }
         if let id = navigation.selectedSessionId, let session = sessions.value?.first(where: { $0.id == id }) {
             if session.titleSource != .unavailable {
@@ -131,6 +135,7 @@ struct WorkPalette: View {
         .onExitCommand { model.navigation.palette = nil }
         .task {
             await model.loadFlowCatalog()
+            await model.loadWorkflowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
                 let available = Set(model.paletteRows.map(\.id))
                 model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
@@ -221,15 +226,64 @@ struct WorkPaletteShortcut: NSViewRepresentable {
 struct FlowCatalogInspector: View {
     let entry: FlowCatalogEntry?
     @Bindable var navigation: WorkNavigation
+    let model: WorkModel
+    @State private var sourceError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(entry?.name ?? "Flow unavailable").font(Typography.sectionTitle(26))
-            if let graph = entry?.graph, let template = entry?.template {
-                FlowTemplateView(graph: graph, template: template, navigation: navigation)
-            } else if let workflow = entry?.workflow {
-                WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
+            if let entry {
+                Text(entry.source ?? "builtin Flow").font(Typography.code(11))
+                Button(entry.source == nil ? "Customize" : "Edit") {
+                    Task {
+                        do {
+                            let url = try await model.definitionSource(entry)
+                            sourceError = nil
+                            NSWorkspace.shared.open(url)
+                        } catch { sourceError = error.localizedDescription }
+                    }
+                }
+            }
+            if let error = sourceError ?? model.flowCatalog.errorMessage {
+                Text(error).foregroundStyle(Color.statusWarning)
+            }
+            Button("Refresh") { Task { await model.loadFlowCatalog(force: true) } }
+            if let graph = entry?.graph, let composition = entry?.composition {
+                FlowCompositionView(graph: graph, composition: composition, navigation: navigation)
+
             } else { Text(entry?.unavailable ?? "Refresh the Flow catalog and try again.") }
+            Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+        }.padding(24).frame(width: 780)
+    }
+}
+
+struct WorkflowCatalogInspector: View {
+    let entry: WorkflowCatalogEntry?
+    let model: WorkModel
+    @State private var sourceError: String?
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(entry?.name ?? "Workflow unavailable").font(Typography.sectionTitle(26))
+            if let entry {
+                Text(entry.source ?? "builtin Workflow").font(Typography.code(11))
+                Button(entry.source == nil ? "Customize" : "Edit") {
+                    Task {
+                        do {
+                            let url = try await model.definitionSource(entry)
+                            sourceError = nil
+                            NSWorkspace.shared.open(url)
+                        } catch { sourceError = error.localizedDescription }
+                    }
+                }
+            }
+            if let error = sourceError ?? model.workflowCatalog.errorMessage {
+                Text(error).foregroundStyle(Color.statusWarning)
+            }
+            Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
+            if let workflow = entry?.workflow {
+                WorkflowGraph(nodes: workflow.nodes, edges: workflow.edges)
+            } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)
     }

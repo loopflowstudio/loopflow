@@ -4,7 +4,7 @@
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
 //! the one-shot `--json` reads print. The reader commits nothing, so it never
-//! wakes itself, and it records one Exec for its whole lifetime.
+//! wakes itself, and it records one Process for its whole lifetime.
 
 mod checkouts;
 
@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use super::activity::WorkActivitySnapshot;
 use super::top::ActivitySnapshot;
 use super::waves::{RoadmapSnapshot, WaveDetailSnapshot, WaveSnapshot};
-use crate::durable::FlowDetail;
+use crate::durable::FlowProcessDetail;
 use crate::ops::human_session::SessionRecord;
 use crate::repository::CanonicalRepo;
 use crate::store::changes::StoreChanges;
@@ -94,13 +94,13 @@ pub struct SessionsPart {
     pub entries: Vec<SessionRecord>,
 }
 
-/// `lf task status` work and `lf flow show --sessions` for each of its Flows,
+/// `lf task status` work and `lf flow show --processes` for each of its Flows,
 /// in the same order.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskPart {
     pub task: String,
     pub work: TaskWork,
-    pub flow_runs: Vec<FlowDetail>,
+    pub flow_processes: Vec<FlowProcessDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,17 +190,17 @@ impl Part {
 
     /// Whether a commit that moved revisions from `old` to `new` can change
     /// this part. Planning conditions read Sessions, Flows and unfinished
-    /// Execs; the Session list reads no Exec, and only a Wave's Session
+    /// Processes; the Session list reads no Process, and only a Wave's Session
     /// history shows token totals.
     fn changed(self, mut old: StoreRevisions, new: StoreRevisions) -> bool {
         if self == Part::Activity {
-            return old.execs != new.execs;
+            return old.processes != new.processes;
         }
         if self != Part::Wave {
             old.usage = new.usage;
         }
         if self == Part::Sessions {
-            old.execs = new.execs;
+            old.processes = new.processes;
         }
         old != new
     }
@@ -571,19 +571,19 @@ impl Reader {
                         .resolve_task_id(&selector, None)?
                         .ok_or_else(|| anyhow!("Task {selector} is not registered"))?;
                     let work = store.sqlite.task_work(&task)?;
-                    let mut flow_runs = Vec::with_capacity(work.flows.len());
-                    for flow in &work.flows {
+                    let mut flow_processes = Vec::with_capacity(work.flow_processes.len());
+                    for flow in &work.flow_processes {
                         let id = flow.summary.id.as_str();
-                        let (exec, entry) = store
+                        let (process, entry) = store
                             .sqlite
-                            .flow_exec(id)?
+                            .flow_process(id)?
                             .ok_or_else(|| anyhow!("Flow {id} has no driver record"))?;
-                        flow_runs.push(exec.detail(entry));
+                        flow_processes.push(process.detail(entry));
                     }
                     WorkContent::Task(Some(TaskPart {
                         task: selector,
                         work,
-                        flow_runs,
+                        flow_processes,
                     }))
                 }
                 Part::Wave => {
@@ -889,18 +889,18 @@ mod tests {
     use super::{fingerprint, Part, PartState, StoreRevisions, WorkContent};
     use crate::lf::commands::top::ActivitySnapshot;
 
-    fn revisions(planning: i64, sessions: i64, flows: i64, execs: i64) -> StoreRevisions {
+    fn revisions(planning: i64, sessions: i64, flows: i64, processes: i64) -> StoreRevisions {
         StoreRevisions {
             planning,
             sessions,
             flows,
-            execs,
+            processes,
             usage: 0,
         }
     }
 
     #[test]
-    fn an_exec_alone_does_not_reread_sessions() {
+    fn an_process_alone_does_not_reread_sessions() {
         let old = revisions(1, 1, 1, 1);
         assert!(!Part::Sessions.changed(old, revisions(1, 1, 1, 2)));
         assert!(Part::Planning.changed(old, revisions(1, 1, 1, 2)));

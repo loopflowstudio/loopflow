@@ -9,23 +9,58 @@ Opaque `home_…` IDs, existing scheduled-job keys and historical evidence retai
 their stored spelling. Live commands and DTOs use `machine` and `machine_id`.
 
 ```bash
-lf id
-lf wave place product <machine-id>
-lf ssh <machine-id> --wave product wave/operate
+lf machine add mini --repo '~/src/project'
+lf machine list
+lf machine status mini
+lf --machine mini session list
+lf --machine mini --task LOO-123 implement
+lf --machine mini machine add builder
+lf machine rename mini builder
+lf machine remove builder
 ```
+
+`--machine <label-or-id>` runs the entire command on that machine in its saved
+repository. Task, worktree and Wave selectors resolve there. `--secret NAME` and
+`--forward-agent` require `--machine`; the saved repository is set by `machine add`.
+
+Quote a remote `~/` path (`--repo '~/src/project'`) to avoid local shell expansion.
+Without `--repo`, add uses the local checkout's path relative to the local home.
+Absolute paths are accepted too. SSH aliases, `user@host` and SSH URIs are passed
+to OpenSSH. Add reads the remote identity itself; `--label` overrides the host name.
+The repository must already exist on the remote.
+
+List reads saved connections. Status checks without prompting and shows remote
+and local versions. Different versions produce an explicit remote update command;
+Loopflow does not maintain old-version compatibility or replace an existing peer.
+When `add` finds no `lf`, it offers the published installer with a default of yes,
+then reads the new identity. Batch, JSON and nonterminal commands never install.
+
+SSH key authentication and a known host key must already work. Failures identify
+sign-in, unknown or changed host keys, unreachable hosts, or missing `lf`, with a
+command to resolve each. Host-key repairs require verifying the fingerprint.
+Connections share a private OpenSSH control socket and expire after 60 idle
+seconds. Personal SSH control sockets are never reused or closed. Explicit
+agent forwarding uses a separate connection; account-forwarding routes are
+removed after each command. Add and status
+transfer no credentials. SSH requires an added connection and checks its identity
+before forwarding the existing foreground credentials through stdin.
+
+Remove forgets the connection without contacting the remote. Historical machine
+identity, routes and Work placements remain in SQLite. Previously observed routes
+need an explicit add before they can receive forwarded credentials.
 
 ## Local by default
 
 ```bash
-lf mon list                                # Execs recorded on this Machine
+lf mon list                                # Processes recorded on this Machine
 lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
-lf ssh build-home mon list   # run the same reader on build-home
-lf ssh build-home --wave product wave/operate
+lf --machine build-home mon list   # run the same reader on build-home
+lf --machine build-home --wave product wave/operate
 ```
 
-`lf ssh` is transport, not a second API. The target runs its own `lf`, verifies
+`lf --machine` is transport, not a second API. The target runs its own `lf`, verifies
 its Machine identity, resolves its own files and store, and returns the result.
 There is no implicit fan-out and no central execution database.
 
@@ -50,7 +85,7 @@ shell / automation / Loopflow.app
                |
         store + repository
                |
-       Flow driver Exec --> step Exec --> AgentSession <--> native engine
+       Flow driver Process --> step Process --> AgentSession <--> native engine
 ```
 
 Wave operations are finite attributed conversations. Each Task Flow
@@ -58,7 +93,7 @@ runs through the common driver. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
 The process that directly spawns a child owns its child handle. Cross-process
-recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Exec, Work identity or telemetry row alone grants
+recovery requires exact saved process identity and the applicable lock. A PID, tmux name, parent Process, Work identity or telemetry row alone grants
 no signal authority.
 
 ## Observe processes
@@ -75,8 +110,8 @@ the live view. This is observation, not a durable lifecycle model.
 
 `lf mon prune` removes dead command receipts only after their terminal outcome
 is recorded, and may reap only registered orphan OpenCode process groups whose
-ownership is known. Receipts use Exec IDs, so PID reuse cannot overwrite an
-unfinished Exec’s identity. Failed terminal writes and interrupt cleanup retain
+ownership is known. Receipts use Process IDs, so PID reuse cannot overwrite an
+unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
 that identity without inventing an outcome. An unclaimed provider PID is
 never killed merely because it resembles a Loopflow child.
 
@@ -144,7 +179,7 @@ install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf
 
 - Machine identity is stable; network route is replaceable.
 - Commands and read surfaces act locally unless explicitly routed with
-  `lf ssh`.
+  `lf --machine`.
 - Placement selects where Work belongs, not whether it is currently running.
 - Detached processes use credentials installed on their Machine.
 - Direct child handles are local capability; inferred process ownership is not.

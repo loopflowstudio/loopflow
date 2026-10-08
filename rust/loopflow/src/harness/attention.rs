@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::exec::SessionDriver;
+use crate::process::SessionDriver;
 use crate::session::SessionActivity;
 use crate::store::sqlite::SqliteStore;
 
@@ -270,8 +270,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{claude, codex, opencode, Attention, Signal};
-    use crate::exec::SessionDriver;
-    use crate::id::ExecId;
+    use crate::id::ProcessLfid;
+    use crate::process::SessionDriver;
     use crate::store::sqlite::SqliteStore;
 
     /// A conversation whose driver saves what a recorded stream says, one
@@ -287,6 +287,20 @@ mod tests {
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::WAITING_QUIET_SECONDS;
 
+    #[test]
+    fn automated_auth_and_permission_requests_do_not_wait_for_input() {
+        assert!(codex(
+            &json!({"id": 7, "method": "account/chatgptAuthTokens/refresh", "params": {}}),
+            false
+        )
+        .is_empty());
+        assert!(opencode(
+            &json!({"type": "permission.asked", "properties": {"sessionID": "thread", "id": "permission"}}),
+            "thread"
+        )
+        .is_empty());
+    }
+
     impl Driven {
         fn new(interactive: bool) -> Self {
             let home = tempfile::tempdir().unwrap();
@@ -294,16 +308,16 @@ mod tests {
             let store = SqliteStore::open_ephemeral(&path).unwrap();
             store.test_session("conversation", "run_00000000000000000000000000000001");
             let conn = rusqlite::Connection::open(&path).unwrap();
-            let exec = ExecId::new();
+            let process = ProcessLfid::new();
             conn.execute(
-                "INSERT INTO execs(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&exec],
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [&process],
             )
             .unwrap();
             conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
                 .unwrap();
             let driver = store
-                .claim_session_driver("conversation", None, &exec, false)
+                .claim_session_driver("conversation", None, &process, false)
                 .unwrap();
             Self {
                 _home: home,

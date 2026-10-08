@@ -157,9 +157,9 @@ workflow: feature
 
 A Task with no workflow takes that one up on its first `lf task run <task>`;
 naming another takes that up instead, and the Task keeps it.
-`lf update-plan --wave <wave> --workflow NAME` rewrites only that line; it does not
-check that NAME loads. `lf task run` refuses a name that is not a workflow
-until a Flow or workflow is named. A Project written with the earlier
+`lf project workflow set PROJECT NAME` validates the Workflow and rewrites only
+that selection, preserving KRs and metric targets. `lf task run` refuses a name
+that is not a workflow until a Flow or workflow is named. A Project written with the earlier
 `flow:` line reads the same and is rewritten by the next plan update. Existing
 Projects observed before the status-model upgrade retain their identity and
 custom workflow. The first explicit `lf refresh` or chapter rotation
@@ -315,10 +315,11 @@ to bring relevant findings into the parent's memory.
 
 ```bash
 lf id
-lf observe <machine-id> ssh://jack@mini.local
+lf machine add jack@mini.local --label mini
+lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf ssh <machine-id> --wave shipper wave/operate
-lf ssh <machine-id> wave status shipper --json
+lf --machine <machine-id> --wave shipper wave/operate
+lf --machine <machine-id> wave status shipper --json
 ```
 
 A Machine is a stable machine identity with a replaceable route. Placement records
@@ -345,8 +346,8 @@ See [Machines and processes](architecture/machines.md) and
 ```bash
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
-lf update-plan --wave infra --workflow research    # only the workflow
-lf flow customize research                     # .lf/workflows/research.yaml, written from the builtin
+lf project workflow set PROJECT research    # only the workflow
+lf project workflow customize research                     # .lf/workflows/research.yaml, written from the builtin
 ```
 
 `plan.json` contains the complete current plan:
@@ -412,7 +413,7 @@ Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
 KRs and targets. Explicit PR rotation selects the next serial branch while
 preserving the Task's worktree directory.
 
-AgentSessions and Execs own typed nullable Task/Wave ancestry.
+AgentSessions and Processes own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and

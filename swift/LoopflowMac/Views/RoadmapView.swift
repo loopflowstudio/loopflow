@@ -20,7 +20,7 @@ enum RoadmapTaskAction: Equatable {
 /// recommendation onto the affordance the app can offer, and never re-derives
 /// it from status.
 func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
-    let startable = task.flow.control(.start).map { $0.unavailable == nil } ?? false
+    let startable = task.runControl.unavailable == nil
     guard task.runtime != nil else { return startable ? .run : nil }
     switch task.actions.recommended {
     case .resume:
@@ -28,7 +28,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
         if startable { return .run }
     case .openPr:
         if task.activePr?.publication?.github != nil { return .openPr }
-    case .startNextPr, .complete, .noAction, .none:
+    case .startNextPr, .noAction, .none:
         break
     }
     return nil

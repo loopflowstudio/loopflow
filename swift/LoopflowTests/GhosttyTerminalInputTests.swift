@@ -114,7 +114,7 @@ struct GhosttyShellBlockTests {
 
         func run(rc: String) throws -> String {
             try rc.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = [
                 "-i",
@@ -162,11 +162,11 @@ struct GhosttyShellBlockTests {
         let stock = try run(rc: "PS1='\(LoopflowZshBootstrap.macOSDefaultPrompt)'\n")
         try expectInOrder([
             "\u{1B}]133;A;cl=line\u{7}",
-            "\n\u{1B}]133;A;k=s\u{7}",
+            "\n\u{1B}]133;P;k=s\u{7}",
             "\u{1B}[8m\(GhosttyBlockHeader.marker)",
             home.lastPathComponent,
             "\u{1B}[28m",
-            "\n\u{1B}]133;A;k=s\u{7}",
+            "\n\u{1B}]133;P;k=s\u{7}",
             "\u{276F}",
             "\u{1B}]133;B\u{7}",
             "\u{1B}]133;C\u{7}",
@@ -358,7 +358,7 @@ struct GhosttyTerminalInputTests {
             let data = try JSONSerialization.data(withJSONObject: [
                 "id": id, "run_id": id, "interactive": true, "work": NSNull(), "title": id,
                 "detail": "test", "cwd": NSTemporaryDirectory(), "state": "active",
-                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "terminal_ids": [pane], "open_argv": ["unused"],
+                "ready_summary": NSNull(), "work_path": NSNull(), "actions": sessionActionFixture(state: "active"), "title_source": "generated", "task_primary": false, "flow_membership": ["kind": "independent"], "task_ids": [], "provider_generation": 1, "terminal_ids": [pane], "open_argv": ["unused"],
             ])
             records.append(try JSONDecoder().decode(SessionRecord.self, from: data))
         }

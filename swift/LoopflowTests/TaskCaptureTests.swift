@@ -124,7 +124,7 @@ struct TaskCaptureTests {
             try "#!/bin/sh\nexit 0\n".write(to: helper, atomically: true, encoding: .utf8)
             try JSONSerialization.data(withJSONObject: ["lf_path": helper.path])
                 .write(to: directory.appendingPathComponent("LoopflowDevControl.json"))
-            let process = Process()
+            let process = Foundation.Process()
             process.executableURL = executable
             process.arguments = ["--test-bundle-path", try #require(Bundle(for: CaptureBundleMarker.self).executablePath),
                                  "--testing-library", "swift-testing", "--filter", "TaskCaptureTests/productionLaunch", "--no-parallel"]

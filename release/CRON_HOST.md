@@ -201,7 +201,7 @@ settlements. Two adjacent original due opportunities need two distinct automatic
 executions, with at least one publication; collapsed rows cannot form that pair.
 
 The publisher launcher must preserve the inherited `LF_RELEASE_LOCK_FD`
-descriptor and its environment reference through `exec`. It is an OS lock
+descriptor and its environment reference through `process`. It is an OS lock
 capability, not a permission flag. The Python publisher retains it through its
 subprocesses, so a surviving publication child still excludes another release
 when its parent exits. A launcher that closes it fails with a named diagnostic.

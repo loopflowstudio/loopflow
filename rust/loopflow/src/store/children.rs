@@ -88,7 +88,7 @@ impl Store {
     ) -> StoreResult<bool> {
         let task = task.clone();
         let skipped_pr = skipped_pr.cloned();
-        let by = crate::journal::current_exec_id();
+        let by = crate::journal::current_process_lfid();
         let note = note.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
             store.complete_task(

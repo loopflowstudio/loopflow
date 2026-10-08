@@ -111,7 +111,7 @@ fn default_summary_agent() -> String {
 /// Where interactive sessions launch.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum ExecTarget {
+pub enum ProcessTarget {
     #[default]
     Tui,
     Ide,
@@ -121,7 +121,7 @@ pub enum ExecTarget {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionConfig {
     #[serde(default)]
-    pub launch: ExecTarget,
+    pub launch: ProcessTarget,
     /// Machine-local terminal application used to present detached sessions.
     #[serde(default)]
     pub terminal: Option<String>,
@@ -567,14 +567,14 @@ linear:
         assert_eq!(config.land, "gh");
         assert!(config.context.is_empty());
         assert!(config.exclude.is_empty());
-        assert_eq!(config.session.launch, ExecTarget::Tui);
+        assert_eq!(config.session.launch, ProcessTarget::Tui);
         assert!(config.release.targets.is_empty());
     }
 
     #[test]
     fn default_session_config() {
         let session = SessionConfig::default();
-        assert_eq!(session.launch, ExecTarget::Tui);
+        assert_eq!(session.launch, ProcessTarget::Tui);
     }
 
     // ==========================================================================
@@ -647,7 +647,7 @@ session:
   launch: tui
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, ExecTarget::Tui);
+        assert_eq!(config.session.launch, ProcessTarget::Tui);
     }
 
     #[test]
@@ -657,7 +657,7 @@ session:
   launch: ide
 "#;
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
-        assert_eq!(config.session.launch, ExecTarget::Ide);
+        assert_eq!(config.session.launch, ProcessTarget::Ide);
     }
 
     #[test]

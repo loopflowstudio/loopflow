@@ -3,7 +3,7 @@
 ```bash
 lf session list --interactive false --json
 lf session history SESSION --json
-lf flow show DRIVER_EXEC --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 lf ps --json
 ```
 
@@ -21,7 +21,7 @@ methods are removed. This is a source-breaking change for Rust callers.
 Reserve conversations with `create_session`, retain replacement inputs with
 `replace_session_input`, and read conversation identity through `session` or
 `sessions`. Read native evidence through `SqliteStore::session_history`.
-An actual command records its Exec outcome independently of agent completion.
+An actual command records its Process outcome independently of agent completion.
 
 The cutover retains current Work, account routing and resumable conversations.
 Retired history stores and intermediate branch schemas have no runtime readers.
@@ -33,11 +33,11 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Authored goals, memory, Skills, Flows and code | Repository files and Git |
 | Shared planning | Linear Initiatives, Projects and Issues |
 | Commits, PR heads, checks and merge | Git and GitHub |
-| Actual lf command process, causal parent and observed command outcome | `execs` |
+| Actual lf command process, causal parent and observed command outcome | `processes` |
 | Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
-| Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Exec |
-| A Flow's identity, state and step results | Its driver Exec and child step Execs in `execs` |
-| A Flow's name, launched graph and each step's node | FlowExec: `flow_execs` and `flow_exec_steps`, appended by the driver |
+| Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Process |
+| A Flow's identity, state and step results | Its driver Process and child step processes in `processes` |
+| A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the driver |
 | A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
 | A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
@@ -54,15 +54,15 @@ retains exact current tables, source paths and subprocess edges in one place.
 
 ## Conversation and process history
 
-Exec records one actual lf process, including agent-issued nested commands.
-Each executed Flow step has its own child lf Exec. Multiple provider turns may
-belong to that Exec; their results remain distinct in AgentSession history.
+Process records one actual lf process, including agent-issued nested commands.
+Each executed Flow step has its own child lf Process. Multiple provider turns may
+belong to that Process; their results remain distinct in AgentSession history.
 A provider may succeed before its command fails later.
 
 AgentSession identity, name and feedback survive driver replacement. Its current
-driver is a nullable Exec reference with a generation fence. The native engine
+driver is a nullable Process reference with a generation fence. The native engine
 has separate identity and generation: a driver can die while the engine continues.
-History retains the original Exec and provider generation when a later driver
+History retains the original Process and provider generation when a later driver
 recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
@@ -73,19 +73,19 @@ notification behind each increment stays in the file. Complete items, usage,
 input and outcomes are kept in both. Sizes and the reasoning are in the
 [storage footprint review](../reviews/storage-footprint.md).
 
-A Flow is one driver Exec and the step Execs it starts, and its ID is the
-driver Exec's. The driver keeps the cursor in memory and appends FlowExec: the
-Flow's name and compiled graph at launch, then each step's Exec, node and
+A Flow is one lf process and the step processes it starts, and its ID is the
+Flow process's. The driver keeps the cursor in memory and appends FlowProcess: the
+Flow's name and compiled graph at launch, then each step's Process, node and
 iteration counts. Nothing updates those rows, and no step reads or writes them.
-A Session reaches its Flow through the step row of the Exec that captured its
+A Session reaches its Flow through the step row of the Process that captured its
 input. Every Flow naming a Task, or run in its checkout, is equally that Task's
 work. Taskless execution uses the same driver. A step's result is how its
 process exited; a deciding or routing step also answers through the Session turn
-its Exec captured. No generic attempt lifecycle sits between these owners.
+its Process captured. No generic attempt lifecycle sits between these owners.
 
-A retry appends Session history. A killed driver leaves its Execs as history;
+A retry appends Session history. A killed driver leaves its Processes as history;
 nothing resumes it, and its caller launches fresh work. A past Flow whose YAML
-changed is drawn from the sequence its step Execs recorded. Cursor movement
+changed is drawn from the sequence its step processes recorded. Cursor movement
 alone never proves an external operation happened once.
 
 ## Admission and publication
@@ -101,7 +101,7 @@ SQLite commit are separate boundaries with recoverable evidence. After a crash,
 reconcile the exact saved input and launch evidence. An unpublished reservation
 is not a successful launch; an absent receipt cannot prove that no engine started.
 
-General Exec observation cannot bypass installation preflight to open or migrate
+General Process observation cannot bypass installation preflight to open or migrate
 an incompatible store. Observation failures remain explicit; they never justify
 an agent launch without its required records. Optional stream failures preserve
 missingness without inventing a terminal result.
@@ -113,7 +113,7 @@ authority, and do not synchronize private writes back to the installation.
 
 ## Attribution and Started
 
-Typed ancestry belongs to AgentSession and Exec. Task implies Wave;
+Typed ancestry belongs to AgentSession and Process. Task implies Wave;
 constructors fill omitted ancestors and reject contradictions in the transaction.
 Flow members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or driver.
@@ -126,7 +126,7 @@ and its limits are in the
 [contract](../architecture-reference.md#attribution-binding-and-started).
 
 Actual work reservation, including first bind, sets Task Started once. Merely
-recording an inspection Exec does not. Later launch, chapter transfer or
+recording an inspection Process does not. Later launch, chapter transfer or
 conversion cannot move or erase an existing timestamp.
 
 ## Reads and cutover
@@ -136,7 +136,7 @@ in SQL before loading payloads. Detail reads load only the selected capture or
 transcript. Missing payloads remain visible rows with explicit missing evidence.
 Passive readers acquire no driver and never launch or import.
 
-The three migration groups create Exec rows, adopt Linear Project statuses, and
+The three migration groups create Process rows, adopt Linear Project statuses, and
 cut over Session ownership directly from the released schema. Current Task
 captures and review feedback survive; old command ledgers and finished
 conversation archives do not. Native recovery reads the current conversation's

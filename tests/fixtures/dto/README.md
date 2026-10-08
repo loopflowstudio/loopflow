@@ -27,7 +27,7 @@ backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 
-`activity_snapshot.json` pins `lf ps --json`: exact live Exec and provider
+`activity_snapshot.json` pins `lf ps --json`: exact live Process and provider
 processes carry OS-derived state, while a provider without exact ownership
 stays separate from the call tree. Desktop receives the same wire type through
 the Work observation stream; it does not poll `lf ps`.
@@ -50,7 +50,7 @@ The shared `LOO-*` identifier and canonical Project name remain presentation;
 the provider's Wave-qualified title is normalized before this reader returns.
 It is not a CLI/app DTO; Wave detail and roadmap fixtures cover those boundaries.
 
-`task_execution_stalled.json` and `task_flow_stalled.json` retain the same stalled Session and interrupt → resume reason across CLI and desktop.
+`task_execution_stalled.json` retains stalled Session evidence. `flow_process_progress.json` retains ordinary execution graphs and loop coordinates; run legality lives on the Task projection.
 
 `task_files.json` pins `lf diff --files`, `lf diff`, `lf file` and `lf save` JSON:
 exact comparison bases,

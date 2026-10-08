@@ -392,8 +392,8 @@ struct WorkNavigator: View {
     /// carry nothing.
     private func taskTone(_ row: WorkOutlineRow) -> WorkTone? {
         guard let work = row.workKey?.work, work.kind == .task, let found = model.task(id: work.id),
-              case .latest(let latest) = found.task.flow.record else { return nil }
-        let state = latest.execution.presentation
+              let execution = found.task.execution else { return nil }
+        let state = execution.state.presentation
         return state.label == nil ? nil : state.tone
     }
 

@@ -317,12 +317,16 @@ final class WorkModel {
     var flowCatalog: WorkReading<[FlowCatalogEntry]> {
         flowCatalogReadings[repoPath ?? ""] ?? .loading
     }
+    private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
+    var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
+        workflowCatalogReadings[repoPath ?? ""] ?? .loading
+    }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskWork>()
-    /// That Task's Flow execs keyed by driver Exec, from the same part.
-    private(set) var flowRuns: [String: FlowDetail] = [:]
+    /// That Task's Flow processes keyed by driver Process, from the same part.
+    private(set) var flowProcesses: [String: FlowProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
     private(set) var sessionHistory = TaskReadings<[SessionHistory]>()
     private(set) var taskContext = TaskReadings<ContextReport>()
@@ -704,8 +708,8 @@ final class WorkModel {
             guard body.task == task.task.identifier else { return }
             let next = WorkReading.available(body.work)
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
-            let runs = Dictionary(body.flowRuns.map { ($0.entry.id, $0) }) { _, newer in newer }
-            if flowRuns != runs { flowRuns = runs }
+            let runs = Dictionary(body.flowProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
+            if flowProcesses != runs { flowProcesses = runs }
         case .wave(let body):
             guard answers >= scopeFloor, let detailWaveId else { return }
             guard body == nil || body?.wave == detailWaveId else { return }
@@ -779,7 +783,7 @@ final class WorkModel {
         savedSessionRepos = []
         waveDetail = nil
         taskWork = TaskReadings<TaskWork>()
-        flowRuns = [:]
+        flowProcesses = [:]
     }
 
     /// One explicit read of everything, for a change the cadence should not wait on.
@@ -1094,8 +1098,9 @@ final class WorkModel {
     /// from an editor, read the catalogue this window already shows again, so
     /// a saved mistake shows as invalid.
     func rereadDefinitions() async {
-        guard flowCatalogReadings[repoPath ?? ""] != nil else { return }
+        guard flowCatalogReadings[repoPath ?? ""] != nil || workflowCatalogReadings[repoPath ?? ""] != nil else { return }
         await loadFlowCatalog(force: true)
+        await loadWorkflowCatalog(force: true)
     }
 
     /// Read the Flow catalogue for the current repository the first time it
@@ -1110,13 +1115,24 @@ final class WorkModel {
         flowCatalogReadings[key] = reading(from: result, lastGood: previous)
     }
 
+    func loadWorkflowCatalog(force: Bool = false) async {
+        let key = repoPath ?? ""
+        if !force, workflowCatalogReadings[key]?.value != nil { return }
+        let previous = workflowCatalogReadings[key]?.value
+        let result: Result<[WorkflowCatalogEntry], Error>
+        do { result = .success(try await query.workflowCatalog(cwd: repoPath)) }
+        catch { result = .failure(error) }
+        workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
+    }
+
     /// Why a Wave's last workflow or source change was refused, by Wave.
     private(set) var workflowErrors: [String: String] = [:]
 
     /// Make `name` the workflow of the Wave's current chapter, then reread planning.
     func setWorkflow(_ name: String, wave: WaveSnapshot) async {
         do {
-            try await query.setWorkflow(name, wave: wave.name, cwd: WaveOrigin.resolve(wave.repo))
+            guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else { throw RegistryQueryError("Current Project is unavailable") }
+            try await query.setWorkflow(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
             workflowErrors[wave.id] = nil
             await refresh()
         } catch {
@@ -1124,14 +1140,25 @@ final class WorkModel {
         }
     }
 
+    func definitionSource(_ entry: FlowCatalogEntry) async throws -> URL {
+        let path = try await query.customizeFlow(entry.name, cwd: repoPath)
+        await loadFlowCatalog(force: true)
+        return URL(fileURLWithPath: path)
+    }
+
+    func definitionSource(_ entry: WorkflowCatalogEntry) async throws -> URL {
+        let path = try await query.customizeWorkflow(entry.name, cwd: repoPath)
+        await loadWorkflowCatalog(force: true)
+        return URL(fileURLWithPath: path)
+    }
+
     /// The repository file to edit for a Flow or workflow. A builtin gets its
     /// `.lf/` file here; the catalog is reread so the entry names it.
-    func definitionSource(_ entry: FlowCatalogEntry, wave: WaveSnapshot) async -> URL? {
+    func definitionSource(_ entry: WorkflowCatalogEntry, wave: WaveSnapshot) async -> URL? {
         do {
-            let path = try await query.customizeDefinition(entry.name, cwd: repoPath)
+            let url = try await definitionSource(entry)
             workflowErrors[wave.id] = nil
-            await loadFlowCatalog(force: true)
-            return URL(fileURLWithPath: path)
+            return url
         } catch {
             workflowErrors[wave.id] = error.localizedDescription
             return nil
@@ -1142,21 +1169,21 @@ final class WorkModel {
     /// Without `flow`, Rust takes up the Project's workflow or the only edge.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startFlow(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
+    func startTask(_ flow: String?, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
-        guard owner.flowDrafts[taskId]?.acting != true else { return }
-        owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
-        owner.flowDrafts[taskId]?.error = nil
+        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
+        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
+        owner.taskRunDrafts[taskId]?.error = nil
         let issue = task.task.identifier
         let cwd = WaveOrigin.resolve(wave.repo)
         do {
-            try await query.runTaskFlow(issue: issue, flow: flow, cwd: cwd)
-            owner.flowDrafts[taskId] = nil
+            try await query.runTask(issue: issue, flow: flow, cwd: cwd)
+            owner.taskRunDrafts[taskId] = nil
             await refresh()
         } catch {
-            owner.flowDrafts[taskId]?.acting = false
-            owner.flowDrafts[taskId]?.error = error.localizedDescription
+            owner.taskRunDrafts[taskId]?.acting = false
+            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
         }
     }
 
@@ -1165,17 +1192,17 @@ final class WorkModel {
     func moveTask(to node: String, force: Bool = false, task: RoadmapTask, wave: WaveSnapshot) async {
         let owner = navigation
         let taskId = task.id
-        guard owner.flowDrafts[taskId]?.acting != true else { return }
-        owner.flowDrafts[taskId, default: TaskFlowDraft()].acting = true
-        owner.flowDrafts[taskId]?.error = nil
+        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
+        owner.taskRunDrafts[taskId, default: TaskRunDraft()].acting = true
+        owner.taskRunDrafts[taskId]?.error = nil
         do {
             try await query.moveTask(
                 issue: task.task.identifier, node: node, force: force, cwd: WaveOrigin.resolve(wave.repo))
-            owner.flowDrafts[taskId] = nil
+            owner.taskRunDrafts[taskId] = nil
             await refresh()
         } catch {
-            owner.flowDrafts[taskId]?.acting = false
-            owner.flowDrafts[taskId]?.error = error.localizedDescription
+            owner.taskRunDrafts[taskId]?.acting = false
+            owner.taskRunDrafts[taskId]?.error = error.localizedDescription
         }
     }
 

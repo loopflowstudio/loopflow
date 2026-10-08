@@ -113,18 +113,15 @@ fn explicit_home_ignores_retired_control_home_pins() {
     let home = tempfile::tempdir().unwrap();
     let source = tempfile::tempdir().unwrap();
     let store_path = home.path().join(".lf/loopflow.db");
-    SqliteStore::new(&store_path).unwrap();
+    let store = SqliteStore::new(&store_path).unwrap();
     let source_db = source.path().join("loopflow.db");
     fs::write(&source_db, b"source must not be opened").unwrap();
     let marker = loopflow::durable::MachineId::new();
+    store
+        .add_machine(&marker, "ssh://proof@example.invalid", "proof", "~/project")
+        .unwrap();
     for args in [
-        vec![
-            "machine",
-            "observe",
-            marker.as_str(),
-            "ssh://proof@example.invalid",
-            "--json",
-        ],
+        vec!["machine", "rename", "proof", "renamed"],
         vec!["monitor", "ps", "--json"],
     ] {
         let output = command(home.path(), home.path(), &args)
@@ -135,14 +132,14 @@ fn explicit_home_ignores_retired_control_home_pins() {
         success(output);
     }
     let connection = rusqlite::Connection::open(&store_path).unwrap();
-    let route: String = connection
+    let label: String = connection
         .query_row(
-            "SELECT route FROM machines WHERE id=?1",
+            "SELECT label FROM machines WHERE id=?1",
             [marker.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(route, "ssh://proof@example.invalid");
+    assert_eq!(label, "renamed");
     assert_eq!(fs::read(source_db).unwrap(), b"source must not be opened");
     assert_eq!(fs::read_dir(source.path()).unwrap().count(), 1);
 }
@@ -269,11 +266,11 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     assert!(!identity.trim().is_empty());
     let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let commands: i64 = database
-        .query_row("SELECT count(*) FROM execs", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
         commands, 2,
-        "the failed sync and Machine read each own an Exec"
+        "the failed sync and Machine read each own a process"
     );
     let output = command(
         home.path(),

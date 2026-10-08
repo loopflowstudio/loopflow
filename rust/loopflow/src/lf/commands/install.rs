@@ -577,7 +577,7 @@ fn serde_authority(authority: MigrationAuthority) -> &'static str {
     }
 }
 
-/// Validate through a read-only preview. The CLI may append its Exec to an
+/// Validate through a read-only preview. The CLI may append its Process to an
 /// existing compatible process ledger, but observation never initializes or
 /// migrates it. A frontier-incompatible candidate still reaches this refusal.
 /// Exits non-zero on refusal so a caller can gate on it.

@@ -4,7 +4,7 @@
 // current by one foreground workspace reader per window.
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
-// The injected runner on macOS execs the `lf` shipped inside the app. There is no
+// The injected runner on macOS launches the `lf` shipped inside the app. There is no
 // HTTP fallback for reads; remote reads need to become proxied `lf` queries.
 
 import Foundation
@@ -194,20 +194,26 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([FlowCatalogEntry].self, from: stdout)
     }
 
-    /// The repository file that defines a Flow or workflow, written from the
-    /// builtin when the repository has none.
-    public func customizeDefinition(_ name: String, cwd: String?) async throws -> String {
+    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
+        let stdout = try await run(["project", "workflow", "list", "--json"], cwd)
+        return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
+    }
+
+    public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Change the workflow of the Wave's current chapter, keeping its KRs and targets.
-    public func setWorkflow(_ name: String, wave: String, cwd: String?) async throws {
-        _ = try await run(["wave", "update-plan", "--wave", wave, "--workflow", name], cwd)
+    public func customizeWorkflow(_ name: String, cwd: String?) async throws -> String {
+        try await run(["project", "workflow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {
+        _ = try await run(["project", "workflow", "set", project, name], cwd)
     }
 
     /// Run a fresh Flow for the Task headless, placing it when needed. Without
     /// `flow`, Rust takes the Task's edge or its Project's workflow.
-    public func runTaskFlow(issue: String, flow: String?, cwd: String?) async throws {
+    public func runTask(issue: String, flow: String?, cwd: String?) async throws {
         var args = ["-b", "task", "run", issue]
         if let flow { args.append(flow) }
         if let start {
@@ -420,13 +426,15 @@ public struct RegistryQuery: Sendable {
 
 /// Durable execution authority and its mutable observed route.
 public struct Machine: Decodable, Sendable, Hashable {
+    public let label: String?
+    public let repo: String?
     public let id: String
     public let route: String
     public let createdAt: String
     public let observedAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, route
+        case id, route, label, repo
         case createdAt = "created_at"
         case observedAt = "observed_at"
     }
@@ -616,7 +624,7 @@ public struct SessionHistory: Decodable, Sendable, Identifiable, Hashable {
 
 public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let reference: ProviderHistoryReference
-    public let execId: String?
+    public let processLfid: String?
     public let taskId: String?
     public let waveId: String?
     public let startedAt: Int?
@@ -625,7 +633,7 @@ public struct ProviderHistory: Decodable, Sendable, Hashable {
     public let usage: SessionUsage
     enum CodingKeys: String, CodingKey {
         case reference, outcome, usage
-        case execId = "exec_id", taskId = "task_id", waveId = "wave_id"
+        case processLfid = "process_lfid", taskId = "task_id", waveId = "wave_id"
         case startedAt = "started_at", completedAt = "completed_at"
     }
 }
@@ -818,12 +826,12 @@ public struct ProjectReadiness: Decodable, Sendable, Hashable {
     public let activation: Activation?
 
     public struct Activation: Decodable, Sendable, Hashable {
-        public let execId: String
+        public let processLfid: String
         public let completedAt: Int64?
         public let outcome: String?
         public let error: String?
         enum CodingKeys: String, CodingKey {
-            case execId = "exec_id", completedAt = "completed_at", outcome, error
+            case processLfid = "process_lfid", completedAt = "completed_at", outcome, error
         }
     }
     enum CodingKeys: String, CodingKey {

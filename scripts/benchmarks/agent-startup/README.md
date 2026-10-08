@@ -52,7 +52,7 @@ Only publish numeric JSON, metadata, sanitized folded symbols, and SVGs.
 ## October 8, 2026: measured improvement is small
 
 Jack Heart requested an autonomous profiling pass through publication for review,
-without landing or Task completion. Two small deletions survive this pass:
+without landing or Task completion. Three small deletions survive this pass:
 
 - Interactive startup uses the actual provider spawn result instead of launching
   the selected provider once with `--version` and again to open it. Automatic
@@ -62,15 +62,20 @@ without landing or Task completion. Two small deletions survive this pass:
   and registry reads. Explicit and inherited Wave IDs retain their existing
   resolver, including stale-identity errors. Nothing is cached.
 
+- Prompt construction takes the directory already resolved by CLI dispatch.
+  It no longer launches Git a second time to find that same directory. Task-bound
+  execution retains its selected directory; no repository facts persist across
+  commands. A separate follow-up comparison below measures this third deletion.
+
 On an M4 Max, release builds with debuginfo, native Claude 2.1.294 and Codex
-0.161.0, the complete change improves warm bare launch by **41 ms paired median
+0.161.0, the first two deletions improve warm bare launch by **41 ms paired median
 for Claude and 24 ms for Codex**. Codex reconnect improves by **16 ms**.
 Claude reconnect has **no demonstrated final improvement**: its median was
-868 → 899 ms in the final run, with a paired difference interval spanning zero.
+868 → 899 ms in the last native run, with a paired difference interval spanning zero.
 The smaller initial probe-only run was more favorable. This is a modest reduction,
 not parity with direct provider startup.
 
-### Warm readiness, 16 alternating samples each
+### Native readiness with the first two deletions, 16 alternating samples each
 
 Times are milliseconds, measured from process creation to a marker appearing in
 the provider's editable prompt. Each row gives median, interquartile range, and
@@ -107,6 +112,38 @@ does not close that acceptance gap.
 | Codex bare lf | 692 [679–715]; 667–820 | 638 [637–711]; 632–817 | +347 |
 | Codex connect | 479 [478–495]; 465–501 | 466 [461–478]; 459–486 | +174 |
 
+### Cold-cache verification: deferred to an isolated macOS gate host
+
+No cold-cache result is claimed. On October 8 this run had macOS 26.0.1,
+a non-root account (uid 501), `/usr/sbin/purge`, and other active agent processes.
+No dedicated benchmark VM was provisioned; `tart`, `limactl`, and
+`qemu-system-aarch64` were absent from PATH. A shared virtualization process was
+present, which establishes no isolated host or cache-reset authority. Running
+`purge` or rebooting this shared Mac would disturb unrelated work; neither was
+attempted. Copying a fixture, `F_NOCACHE` on its database, or evicting just the CLI
+cannot establish cold executable, library, Git and native-provider pages.
+
+**Verification owner: LOO-436 gate on a dedicated disposable macOS benchmark
+host**, with exclusive cache-reset/reboot control and native provider login.
+This environment was not available to the current implementation run. Preserve
+the existing warm and first-use evidence; do not relabel either as cold.
+
+On that host, prepare one private dense Home and benchmark-only native Sessions
+before timing, using the same release binaries and provider versions for every
+route. Disconnect unrelated workloads. Alternate baseline/candidate and direct/
+bare/connect order for at least 16 rounds. Before *each* cold invocation, flush
+writes and reset the dedicated host's filesystem caches (or perform a full reboot,
+then run exactly one timed invocation); record the reset method and successful
+exit/boot identity outside the timer. Avoid inspecting the fixture or executing
+the binary between reset and timing. Measure raw-mode marker readiness with
+`measure.py`, then run the identical invocation immediately for its warm pair.
+A reset once per round is insufficient: the first route would warm the others.
+Report OS/file-cache cold separately from authenticated/trusted provider state;
+this is not a cold-login test. A VM additionally needs an explicit host-cache
+policy: a guest reboot alone leaves the host's backing-file cache warm. Retain
+numeric results, reset receipts and build hashes; keep credentials and transcripts
+private. The credential-free CI smoke cannot satisfy native cold readiness.
+
 ### Where the time went
 
 The [before/after bare-launch graphs](20261008/provider-probe-bare-baseline.svg)
@@ -118,6 +155,10 @@ entry point. The second deletion has separate
 [bare candidate](20261008/no-ambient-wave-bare-candidate.svg),
 [connect baseline](20261008/no-ambient-wave-connect-baseline.svg), and
 [connect candidate](20261008/no-ambient-wave-connect-candidate.svg) graphs.
+The third deletion has [bare baseline](20261008/reuse-directory-bare-baseline.svg),
+[bare candidate](20261008/reuse-directory-bare-candidate.svg),
+[connect baseline](20261008/reuse-directory-connect-baseline.svg), and
+[connect candidate](20261008/reuse-directory-connect-candidate.svg) graphs.
 Each SVG is standalone, titled, demangled, searchable and zoomable.
 XML and artifact sanitization checks passed; rendered visual review remains for
 review because this run has no rendering environment.
@@ -125,7 +166,8 @@ review because this run has no rendering environment.
 These are main-thread **wall-stack samples**, including blocked waits and
 shutdown, not CPU flamegraphs or exact elapsed-time accounting. Attach misses
 some initial startup; the very short first candidate capture missed most of it.
-Each graph aggregates three separate profiles. Child Git/provider CPU and worker
+Each graph aggregates three profile attempts; the third-deletion bare baseline
+has two nonempty captures because the first attach collected no stacks. Child Git/provider CPU and worker
 threads are excluded; a parent waiting on a child is visible. Timing comparisons
 use separate unprofiled runs.
 
@@ -150,28 +192,68 @@ The probe-only Claude comparison is noisy: bare 1019 → 1022 ms; connect
 bootstrap interval is −1 to 47 ms. It does not justify a broad Claude speed claim.
 The separate 20-pair Codex probe-only comparison isolates the deletion from the
 Wave change: bare 640 → 628 ms (paired 11 ms, interval 2–24 ms); connect
-470 → 464 ms (paired 8 ms, interval 4–17 ms). The complete Codex comparison is
+470 → 464 ms (paired 8 ms, interval 4–17 ms). The two-deletion Codex comparison is
 616 → 590 ms bare and 460 → 444 ms
 connect, with positive paired intervals of 16–27 and 8–22 ms respectively.
 
 The Wave-only stand-in comparison has 20 alternating pairs: bare 445 → 432 ms,
 paired improvement 14 ms (95% bootstrap interval 1–27 ms); connect 272 → 272 ms,
 interval −11 to 8 ms. Keep it for its measured bare-launch reduction, not a
-reconnect timing claim. The final Claude reconnect result is retained as contrary
+reconnect timing claim. The last native Claude reconnect result is retained as contrary
 evidence, not replaced by the more favorable earlier run.
 
-The last attempted optimization retained the SQLite handle between capture
+An earlier rejected optimization retained the SQLite handle between capture
 reservation and publication, removing an immediate close/reopen. Thirty matched
 pairs gave bare 431 → 428 ms, paired improvement 3 ms (interval −4 to 9 ms).
 Connect was an unchanged control: 283 → 277 ms, interval −5 to 11 ms. The signal
 did not separate from noise, so **that code was removed**. Its raw numbers remain
 in `rejected-retain-store.jsonl`.
 
-The pass stopped after this attempt stopped producing a measurable gain, rather
-than retaining speculative code. Repeated Git discovery remains a possible
-future target; reusing its facts across owners needs a deliberate API change,
-not a global cache. This pass does not claim every possible optimization was
-exhausted or that the remaining 0.3 s is an irreducible limit.
+The follow-up tested passing dispatch's resolved directory into prompt
+construction. Thirty alternating pairs from the same current source base gave
+bare handoff **402 → 390 ms**, paired improvement **7.5 ms** (95% bootstrap interval
+**3.5–14.2 ms**). Git children fell **16 → 15**; SQLite work stayed at 19 connections
+and 1,089 statements. Reconnect was unchanged: **242 → 239 ms**, paired interval
+**−3.3 to 8.3 ms**, still eight Git children and 676 statements. Keep this reduction
+for bare launch only. These are stand-in handoff timings, not another native
+Claude/Codex comparison; do not add 7.5 ms to the earlier native gains.
+
+| Route / variant | Median [Q1–Q3], ms | Full range, ms |
+|---|---:|---:|
+| Bare baseline | 402 [395–405] | 352–421 |
+| Bare candidate | 390 [384–399] | 367–921 |
+| Connect baseline | 242 [238–251] | 232–263 |
+| Connect candidate | 239 [234–250] | 227–276 |
+
+All 120 launches succeeded and remain in `reuse-directory-handoff.jsonl`, including
+the candidate's 921 ms outlier. The paired bootstrap uses the same fixed-seed
+method as earlier runs. Both immutable release binaries were rebuilt at the
+current merged source revision; hashes and fixture counts are in
+`reuse-directory-metadata.json`. The stand-in comparison ran through
+`scripts/test_network.py`: external egress denied, local IPC available. A prior
+blanket network denial prevented required local IPC during preparation; it
+produced no timed samples. Own builds finished before measurement; unrelated
+Clippy activity was observed on this shared host. Alternation and the unchanged
+control bound interpretation; this is not exclusive-host evidence.
+
+A final experiment deferred ancestor `.git` metadata probes until Git discovery
+failed. Thirty alternating release pairs gave bare **380 → 385 ms**, paired
+improvement **−3.1 ms** (95% interval **−9.0 to 4.8 ms**), and reconnect
+**238 → 234 ms**, paired **6.5 ms** (interval **−2.8 to 12.8 ms**). Neither result
+separates from noise. **That code was removed**; the patch, all 120 numeric rows
+(including a 2.58-second baseline outlier), and its binary hash remain under
+`rejected-defer-git-probes.*` and `reuse-directory-metadata.json`.
+
+**Stopping condition: attempted reductions stopped producing measurable gains.**
+The directory pass-through was a new gain, so investigation continued until the
+filesystem-probe experiment failed. Together with the earlier rejected store
+reuse, it bounds this pass; it does not prove every possible optimization is
+exhausted. Remaining Git calls serve placement, Task attribution, canonical
+Session repository identity, provider writable roots and account context at
+different ownership boundaries. Sharing those facts more broadly would require
+changing those APIs. Context/token counting, SQLite validation and durable
+capture publication remain required work. Native startup retains the provider
+cost described above. No persistent cache or skipped context was introduced.
 
 Several measurement approaches were rejected before comparison:
 
@@ -185,6 +267,13 @@ Several measurement approaches were rejected before comparison:
   hashes prevent that ambiguity in the accepted comparisons.
 - A stand-in's instantaneous `--version` cannot establish the native cost of
   the removed probe. Native matched runs determine that effect.
+
+The follow-up converter stalled with the Python parent blocked writing stdin
+and `rustfilt` blocked writing stdout. Its input now uses a temporary file;
+all four new SVGs generated successfully from the retained captures. One initial
+smoke assertion expected `AGENTS.md` in Claude's appended context; native-file
+deduplication deliberately removes it. The surviving assertion checks default
+skill context and the captured root from a nested-directory launch.
 
 ### Fixture and proof limits
 
@@ -214,6 +303,13 @@ the real spawn is authoritative. A broken managed-account route can therefore
 report its error before an absent executable. Actual spawn failure still records
 positive non-start evidence, and the retained-Session recovery test proves retry.
 Successful account selection, context assembly and control fencing are unchanged.
+
+The directory pass-through passed the public bare/connect smoke and checkout
+Task-attribution test. The smoke also launches from a nested directory and checks
+both repository context and the captured root, covering the path now passed by
+dispatch. The final review found no new owner, cache, migration or account-routing
+change; the missing native rerun, cold-cache evidence and rendered SVG judgment
+remain distinct from the handoff improvement.
 
 The [CI smoke test](../../../rust/loopflow/tests/agent_startup_tests.rs) runs both
 entry points with an empty environment and a stand-in provider. It preserves

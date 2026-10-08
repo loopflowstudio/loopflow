@@ -336,6 +336,68 @@
     ]
   },
   {
+    "dataset": "profile-reuse-directory",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "baseline",
+    "n": 3,
+    "failures": 0,
+    "min_ms": 396.91570797003806,
+    "q1_ms": 396.9989994657226,
+    "median_ms": 397.0822909614071,
+    "q3_ms": 405.4176244826522,
+    "max_ms": 413.7529580038972
+  },
+  {
+    "dataset": "profile-reuse-directory",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "candidate",
+    "n": 3,
+    "failures": 0,
+    "min_ms": 378.94320802297443,
+    "q1_ms": 389.8796455177944,
+    "median_ms": 400.8160830126144,
+    "q3_ms": 407.4419580283575,
+    "max_ms": 414.06783304410055,
+    "paired_improvement_ms": -0.3148750402033329,
+    "paired_median_95pct": [
+      -3.900375042576343,
+      18.139082938432693
+    ]
+  },
+  {
+    "dataset": "profile-reuse-directory",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "baseline",
+    "n": 3,
+    "failures": 0,
+    "min_ms": 252.03291699290276,
+    "q1_ms": 255.4568960040342,
+    "median_ms": 258.88087501516566,
+    "q3_ms": 261.66895852657035,
+    "max_ms": 264.45704203797504
+  },
+  {
+    "dataset": "profile-reuse-directory",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "candidate",
+    "n": 3,
+    "failures": 0,
+    "min_ms": 245.5926249967888,
+    "q1_ms": 247.8616875014268,
+    "median_ms": 250.13075000606477,
+    "q3_ms": 251.22147900401615,
+    "max_ms": 252.31220800196752,
+    "paired_improvement_ms": 8.750125009100884,
+    "paired_median_95pct": [
+      6.440291996113956,
+      12.144834036007524
+    ]
+  },
+  {
     "dataset": "provider-probe-native-claude",
     "provider": "claude",
     "path": "bare",
@@ -486,6 +548,68 @@
     "max_ms": 314.5477910293266
   },
   {
+    "dataset": "rejected-defer-git-probes",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "baseline",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 351.99608298717067,
+    "q1_ms": 369.4594687258359,
+    "median_ms": 379.66502050403506,
+    "q3_ms": 390.85206303570885,
+    "max_ms": 2582.3341669747606
+  },
+  {
+    "dataset": "rejected-defer-git-probes",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "candidate",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 351.9084579893388,
+    "q1_ms": 367.5554687215481,
+    "median_ms": 385.0921039993409,
+    "q3_ms": 393.04631247068755,
+    "max_ms": 908.709166047629,
+    "paired_improvement_ms": -3.07850050739944,
+    "paired_median_95pct": [
+      -8.954021002864465,
+      4.755625006509945
+    ]
+  },
+  {
+    "dataset": "rejected-defer-git-probes",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "baseline",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 214.62304203305393,
+    "q1_ms": 229.20059371972457,
+    "median_ms": 238.2179785054177,
+    "q3_ms": 250.01502127270214,
+    "max_ms": 327.4849999579601
+  },
+  {
+    "dataset": "rejected-defer-git-probes",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "candidate",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 215.51437495509163,
+    "q1_ms": 226.34688499965705,
+    "median_ms": 234.48997951345518,
+    "q3_ms": 246.01690647250507,
+    "max_ms": 263.59866705024615,
+    "paired_improvement_ms": 6.507437996333465,
+    "paired_median_95pct": [
+      -2.781521499855444,
+      12.793395493645221
+    ]
+  },
+  {
     "dataset": "rejected-retain-store",
     "provider": "stand-in",
     "path": "bare",
@@ -545,6 +669,68 @@
     "paired_median_95pct": [
       -5.353479558834806,
       10.970332950819284
+    ]
+  },
+  {
+    "dataset": "reuse-directory-handoff",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "baseline",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 351.8405419890769,
+    "q1_ms": 395.415239763679,
+    "median_ms": 401.8867084523663,
+    "q3_ms": 405.3701564989751,
+    "max_ms": 420.87370896479115
+  },
+  {
+    "dataset": "reuse-directory-handoff",
+    "provider": "stand-in",
+    "path": "bare",
+    "variant": "candidate",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 367.44987504789606,
+    "q1_ms": 384.29733375960495,
+    "median_ms": 390.3216879989486,
+    "q3_ms": 398.7911875010468,
+    "max_ms": 920.7925840164535,
+    "paired_improvement_ms": 7.501041458453983,
+    "paired_median_95pct": [
+      3.509937523631379,
+      14.209437009412795
+    ]
+  },
+  {
+    "dataset": "reuse-directory-handoff",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "baseline",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 232.46079200180247,
+    "q1_ms": 237.8154690086376,
+    "median_ms": 242.1563329990022,
+    "q3_ms": 250.63817725458648,
+    "max_ms": 263.01837497157976
+  },
+  {
+    "dataset": "reuse-directory-handoff",
+    "provider": "stand-in",
+    "path": "connect",
+    "variant": "candidate",
+    "n": 30,
+    "failures": 0,
+    "min_ms": 226.76154098007828,
+    "q1_ms": 234.1648122528568,
+    "median_ms": 238.84120848379098,
+    "q3_ms": 249.73243749991525,
+    "max_ms": 276.2931250035763,
+    "paired_improvement_ms": 4.738187475595623,
+    "paired_median_95pct": [
+      -3.3437089587096125,
+      8.295895997434855
     ]
   },
   {

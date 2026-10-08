@@ -1071,23 +1071,25 @@ proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart authorized measured optimization through publication for review,
-without landing or Task completion, plus a credential-free CI smoke. PR #1505
-was published; later benchmark cleanup remains local. [The report](../../scripts/benchmarks/agent-startup/README.md)
-owns numbers, release wall-stack SVGs and rejected attempts. Removing the provider
-version probe and absent-Wave resolution has matched evidence; capture-store
-reuse did not and was removed. Claude reconnect's final median worsens, with no
-demonstrated gain.
+Jack Heart authorized optimization and a credential-free CI smoke through review
+publication, without landing or Task completion. PR #1505
+was published; later cleanup and the directory-pass-through gain await delivery.
+[The report](../../scripts/benchmarks/agent-startup/README.md) owns numbers,
+release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
+resolution and directory reuse have matched evidence; capture-store reuse and
+ancestor-probe deferral did not and were removed. The last rejection meets
+the attempted-gains stopping condition, not exhaustion.
+Claude reconnect's native median worsens; the later handoff gain cannot repair it.
 
-Prompt readiness requires unsubmitted text echoed by the raw-mode application.
-Codex reconnect needs a seed turn outside timing. Fresh fixture state is not a
-cold OS cache: requested cold-cache evidence remains absent. SVG readability
-awaits visual review; neither gap is waived. Wall-stack samples include shutdown
-and are not CPU accounting.
+Readiness requires unsubmitted text echoed by the raw-mode application. Codex
+reconnect needs a seed turn outside timing. Fresh Homes are not cold OS caches.
+LOO-436 gate owns cold readiness on dedicated macOS with exclusive cache
+control/native login; the report records the limitation and reset method. SVG readability awaits review. Neither gap is waived.
+Wall stacks include shutdown, not CPU accounting.
 
-A copied database retains absolute provider-home paths. Strip account routes
-before launch; connect only benchmark-created Sessions. Early excluded probes
-reached those paths without a write audit; their isolation remains unproved.
-Native-account fixtures establish no installed gain or managed-account continuity.
-The smoke preserves identity, context and history while bounding launch work;
-CI runs it with network isolation. Hosted success remains separate evidence.
+Copied databases retain absolute provider-home paths. Strip routes before launch;
+connect only benchmark-created Sessions. Early excluded probes reached those
+paths without a write audit; isolation remains unproved. Fixtures prove no
+installed gain or managed-account continuity. The network-isolated CI smoke
+bounds launch work and preserves identity, context and history; nested-directory
+launch retains the repository root. Hosted success remains unproved.

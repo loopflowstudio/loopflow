@@ -183,16 +183,17 @@ read -r finish
         "{}",
         String::from_utf8_lossy(&initialized.stderr)
     );
-    launch(&home, &repo, &bin, &temp.path().join("bare"), &[]);
+    let nested = repo.join("nested");
+    fs::create_dir(&nested).unwrap();
+    launch(&home, &nested, &bin, &temp.path().join("bare"), &[]);
     let args = fs::read_to_string(home.join("provider-args")).unwrap();
     let context_file = args
         .lines()
         .skip_while(|arg| *arg != "--append-system-prompt-file")
         .nth(1)
         .unwrap();
-    assert!(fs::read_to_string(context_file)
-        .unwrap()
-        .contains("<lf:skill:default>"));
+    let context = fs::read_to_string(context_file).unwrap();
+    assert!(context.contains("<lf:skill:default>"));
     let native = args
         .lines()
         .skip_while(|arg| *arg != "--session-id")
@@ -202,6 +203,17 @@ read -r finish
     let session: String = db
         .query_row("SELECT id FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
+    let cwd: String = db
+        .query_row(
+            "SELECT cwd FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        Path::new(&cwd).canonicalize().unwrap(),
+        repo.canonicalize().unwrap()
+    );
     let captured: i64 = db
         .query_row(
             "SELECT current_capture FROM agent_sessions WHERE id=?1",

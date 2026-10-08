@@ -4,6 +4,7 @@ import argparse
 import collections
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -22,9 +23,14 @@ def main() -> None:
                 folded = subprocess.check_output(
                     [str(args.tools / "inferno-collapse-sample"), "--no-modules", str(sample)]
                 )
-                demangled = subprocess.check_output(
-                    [str(args.tools / "rustfilt")], input=folded, timeout=30
-                ).decode()
+                # A file avoids filling stdin and stdout pipes against each
+                # other on macOS when a sampled symbol tree is large.
+                with tempfile.TemporaryFile() as symbols:
+                    symbols.write(folded)
+                    symbols.seek(0)
+                    demangled = subprocess.check_output(
+                        [str(args.tools / "rustfilt")], stdin=symbols, timeout=30
+                    ).decode()
                 for line in demangled.splitlines():
                     stack, count = line.rsplit(" ", 1)
                     if not re.match(r"Thread_\d+: main;", stack):

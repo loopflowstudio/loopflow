@@ -59,11 +59,7 @@ pub fn prepare_process_prompt(
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
     let prepared = preview_process_prompt(config, input)?;
-    crate::engine::context_budget::check_input(
-        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
-        &prepared.config.task_input_for_budget(),
-        &prepared.budget_report.budgets,
-    )?;
+    prepared.budget_report.check_input()?;
     Ok(prepared)
 }
 
@@ -139,12 +135,6 @@ pub(crate) fn preview_process_prompt(
     let original_system = format_claude_system_prompt(&components);
     let original_task = format_claude_task_prompt(&components);
     let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
-    budget_report.measure_input(
-        &original_system,
-        &original_task,
-        &format_claude_system_prompt(&components),
-        &format_claude_task_prompt(&components),
-    );
     // Plain installed skills need no instructions for maintaining absent Work
     // context. Keep enforcing budgets and disclose any managed context or excerpts.
     if !components.is_standalone_skill()
@@ -156,6 +146,12 @@ pub(crate) fn preview_process_prompt(
             )
         })
     {
+        budget_report.measure_input(
+            &original_system,
+            &original_task,
+            &format_claude_system_prompt(&components),
+            &format_claude_task_prompt(&components),
+        );
         components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
     }
     let prompt = format_prompt(PromptFormatMode::Full, &components);
@@ -1065,14 +1061,19 @@ Test skill body.
         assert!(prepared.config.task_prompt.contains("docs content"));
         assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
 
-        let limited = Config {
-            context_budgets: [(crate::engine::context_budget::BudgetKey::InputTokens, 1)].into(),
-            ..default_test_config()
-        };
-        assert!(prepare_process_prompt(&limited, input.clone())
-            .unwrap_err()
-            .to_string()
-            .contains("exceeds the input budget"));
+        for key in [
+            crate::engine::context_budget::BudgetKey::InputTokens,
+            crate::engine::context_budget::BudgetKey::InputBytes,
+        ] {
+            let limited = Config {
+                context_budgets: [(key, 1)].into(),
+                ..default_test_config()
+            };
+            assert!(prepare_process_prompt(&limited, input.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds the input budget"));
+        }
 
         std::fs::create_dir_all(tmp.path().join("scratch")).unwrap();
         std::fs::write(tmp.path().join("scratch/plan.md"), "Preserve this decision").unwrap();

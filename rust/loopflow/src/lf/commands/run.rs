@@ -430,7 +430,6 @@ fn build_prompt_at(
         chrome: cli.chrome_setting().unwrap_or(config.chrome),
     };
 
-    let budgets = prepared.budget_report.budgets;
     let mut agent_config = prepared.config;
     if confine {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
@@ -448,11 +447,6 @@ fn build_prompt_at(
     let deduplication_decisions = prepared.deduplication_decisions;
     let effective_system =
         crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
-    crate::engine::context_budget::check_input(
-        &effective_system,
-        &agent_config.task_input_for_budget(),
-        &budgets,
-    )?;
     let context = attributed_context(
         &components,
         &effective_system,

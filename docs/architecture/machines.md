@@ -102,8 +102,11 @@ This is not complete distributed routing: a peer's absence of a checkout is not
 proof of an unstarted Task. Planning exchange excludes execution. An observed
 execution-location read, including unavailable/freshness state, must precede
 applying delegation to imported Work. The prototype handles recorded locations;
-remote observation and alias acquisition/rerouting remain unfinished. Do not infer
-a global execution destination from the current delegation alone.
+remote observation and alias acquisition/rerouting remain unfinished. A negative
+observation is not a reservation: first-start admission must also exclude another
+Machine starting between the read and allocation. The local SQLite transaction
+does not supply that cross-machine guarantee. Do not infer a global execution
+destination from the current delegation alone.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts

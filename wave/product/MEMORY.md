@@ -52,15 +52,15 @@ Shared Work replaces repository pairing; never rewrite a Machine default per
 request. Started Tasks stay on their Machine; inheritance remains unapproved.
 Exact targets do not protect unsent drafts; retain LOO-387's boundary.
 
-October 8: LOO-427's checkout cut (`21ce4e495`, `f8d3386da`, integrated at
-`f5f742058`) leaves unknown location unavailable. Its uncompiled prototype removes
-copied placements, preserves legacy overrides and adds repository-plan identity
-plus known-Task SSH routing without rewriting Machine defaults. Inheritance is
-not Jack's acceptance. Review exposed the remaining boundary: no local checkout
-cannot prove a peer never started the Task. Execution-location observation must
-precede applying delegation to imported Work; never synchronize runtime to solve
-it. Peer binding/exchange, complete routing, Desktop control and composed proof
-remain. Product has no child memories in this checkout.
+October 8: LOO-427's checkout cut (`f5f742058`) leaves unknown location unavailable.
+Prototypes through `92cafe61d` remove copied placements, preserve legacy overrides
+and add plan identity plus known-Task SSH routing without rewriting Machine defaults.
+Inheritance remains unapproved; Rust compilation is unverified. Local absence
+cannot prove a peer never started a Task. Even fresh negative observation is no
+reservation: first-start admission must exclude a peer starting before allocation.
+One store's SQLite transaction cannot provide that guarantee; never synchronize
+runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
+control and composed proof remain. Product has no child memories in this checkout.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

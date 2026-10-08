@@ -1,6 +1,6 @@
 //! Durable tracking for one Project's KRs.
 //!
-//! Linear status selects the current plan; Project planning facts include its
+//! A Wave selects its current Project; saved planning facts include status and
 //! workflow. A Project owns no worktree, shipping branch, PR, permanent
 //! memory, cadence, chat, or controller state.
 use serde::{Deserialize, Serialize};

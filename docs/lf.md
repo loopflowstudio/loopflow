@@ -180,11 +180,11 @@ lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
 
 Project names, summaries, Workflow selections and complete plan replacements save
-locally, including during a Linear outage. Connected repositories report pending sync; `lf project workflow
-show <project-id> --json` includes saved field changes and retained conflicts.
-Inbound refreshes preserve pending fields and accept unrelated changes. Project
-edit delivery and automatic Linear conflict precedence remain unfinished. Readback
-does not establish protection against unseen concurrent provider writes.
+locally, including during a Linear outage. Connected repositories report pending sync;
+`lf project workflow show <project-id> --json` includes pending field changes.
+Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
+Linear edits, retaining losing intentions in delivery history. Project edit delivery
+remains unfinished. Readback cannot protect against unseen concurrent provider writes.
 
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
@@ -219,8 +219,9 @@ before connection. Planning setup is separate from direct local execution.
 Task creation and edits save locally, including during a Linear outage. Retry with
 the original creation options and printed `--creation-id` to reuse the same Task;
 later edits and Project rotation preserve that receipt. Connected repositories
-report pending sync. Field receipts preserve pending titles, notes, assignment and
-ordering through inbound refreshes. Task export and field delivery remain unfinished;
+report pending sync. Field receipts retain titles, notes, assignment and ordering
+with their provider baselines; observed conflicts adopt Linear and retire the losing
+intention. Task export and field delivery remain unfinished;
 the saved Task's local ID works before it receives a Linear alias.
 
 ```bash

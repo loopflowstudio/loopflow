@@ -286,6 +286,20 @@ paths replace their exclusive tests. The enabled unseen-write regression remains
 Review exposed exact provider Project IDs losing to duplicate slugs; lookup now
 orders exact IDs first, covered by public refiling with the duplicate slug retained.
 
+Compression removes the uncalled Linear Project writers
+`set_project_status`, `create_project`, `attach_project`, `update_project` and
+`complete_and_archive_project`, their GraphQL payloads and exclusive tests.
+Their predecessor flow bypassed saved intentions; future delivery must consume
+common receipts and preserve exact creation identity. Live adoption/reteam readers
+and status selection remain. `PlanningChange` carries pending values and baselines;
+conflicts stay in retained receipts, rather than an always-null pending field.
+State reconciliation relies on its caller's immediate transaction for delivery
+identity, while retaining provider revision ordering. Project command resolution
+selects exact local/provider IDs before names, including colliding slugs. The public
+edit fixture retains the shadow Project unchanged. `start_planning_sync` names the
+foreground lifetime directly. CLI documentation now describes implemented observed
+conflict adoption and unfinished outbound delivery.
+
 ## Data and APIs
 
 - Existing `Task`, `Project` and `Wave` rows own the plan. Stable UUIDs precede
@@ -389,7 +403,7 @@ echo or duplicate-export guarantee. Publication here remains for review only.
 Current source boundaries (reconciled 2026-10-08):
 
 - `lf/commands/run.rs::prepare_task_input` refreshes comments before launch.
-  `ops/task_input.rs::TaskInput::refresh` now starts `PlanningSync` from the common
+  `ops/task_input.rs::TaskInput::start_planning_sync` starts `PlanningSync` from the common
   runner. Its inbound loop waits 15 seconds after each bounded attempt; batch
   `poll` consumes live steers and interrupts every 5 seconds. Acquisition and
   delivery run independently of that consumption.
@@ -525,3 +539,5 @@ The GOAL edit and historical review artifacts remain unchanged.
 
 Before conflict reconciliation, exact scratch and Wave memory bytes were preserved
 with a SHA-256 manifest at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-conflicts-w_8arsgw`.
+
+Compression preservation: scratch, review artifacts and Wave GOAL/memory bytes with SHA-256 manifest are retained at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-compress-qpevyw5s`.

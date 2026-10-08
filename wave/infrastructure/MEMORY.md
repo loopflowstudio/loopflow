@@ -59,21 +59,20 @@ body/author/time and retain the losing local comment, without replacement or ech
 `783305284` saves abandonment/cancellation atomically; cleanup checks execution separately.
 Safe cancellation delivery remains pending.
 
-Common Task/Project writers, selection, rotation and refiling are committed;
-prior proofs remain at `fa35cfd88:wave/infrastructure/MEMORY.md`, this heading.
-Ownership commit `84664e661` removes personal schema/types/addresses and authority
-selection. Wave documents, context, edits and relocation share SQLite;
-explicit ingestion preserves authored IDs and file bytes. The one v0.13.10 draft
-imports available registered definitions. Missing sources preserve identity for later
-import. Task deletion saves removal and stable pending identity atomically, retaining
-Workflow, Session, Process, PR, checkout and historical provider evidence.
-Provider-first deletion is removed. Local/migration fixtures preserve IDs,
-definitions, rollback and readable saved plans beside malformed provider evidence.
-Installed conversion, delivery and historical uncertain relocations/transitions
-remain unproved. LOO-412 can consume the committed source
-boundary; export, field/cancellation/deletion delivery, pending presentation and
-composed reconnect remain unfinished. Ownership alone is not shippable connected
-behavior.
+Common writers, selection, rotation and refiling are committed; prior proofs:
+`fa35cfd88:wave/infrastructure/MEMORY.md`, this heading. Ownership `84664e661`
+removes personal schema/types/addresses and authority selection. Wave documents,
+context, edits and relocation share SQLite. Explicit ingestion and the one v0.13.10
+draft preserve authored IDs and file bytes; unavailable sources retain identity for
+later import. Deletion commits removal and stable pending identity atomically,
+retaining execution, PR, checkout and historical provider evidence. Provider-first
+deletion is removed. Local/migration fixtures cover identity, definitions, rollback
+and saved plans beside malformed provider evidence. Compression removes unused
+Linear Project creation/update/archive writers and exclusive tests; active
+adoption/reteam paths remain. Exact Project IDs precede colliding names/slugs.
+Installed conversion, historical uncertain effects, export, field/cancellation/deletion
+delivery, pending presentation and composed reconnect remain unproved or unfinished.
+LOO-412 can consume the committed boundary; ownership alone is not shippable connected behavior.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

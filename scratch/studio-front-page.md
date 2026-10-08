@@ -146,3 +146,19 @@ everything" is not on the page; no claim was drafted for it. The four rows
 (Wave, Project, Task, Workflow) remain inside For you; whether they stay on the
 homepage is open. Only the structure of the cmux and herdr bars was studied; no
 code or copy was taken.
+
+## Merge and variants requested by Jack Heart (2026-10-08)
+
+Jack asked for the hero's command list to replace the right-hand box in For
+your agents, the headline and its agent sentence to merge into that section,
+the podium and orchestra language to merge into For you, Task content to move
+into the first section and Wave content into the second, and both sections to
+grow. Built: the page opens with For your agents (headline, his claim, Flow
+diagram beside the command list, ownership strip, three parts, Task and
+Workflow rows), then For you (podium line, Mac capture, the two kinds, Wave and
+Project rows), then install.
+
+He then asked for three new versions branching from this work that "explore
+alternative ways to be inspired by Herdr or cmux's website to counterposition
+and use some of the structures that they use". They are standalone files in
+`scratch/prototypes/`; the site itself is unchanged by them.

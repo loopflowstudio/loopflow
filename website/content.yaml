@@ -1,10 +1,5 @@
-# Homepage copy approved by Jack Heart, prototype 05, 2026-10-07.
 # Edit copy here; main.py renders it.
 
-# The studio bar, company page and effort pages. Drafted with Jack Heart on
-# 2026-10-08. His wording so far: the Loopflow sentence, and the company page's
-# argument (Etude is sold, Loopflow is the tool for building it, Fantasia is the
-# research for doing it well). Each effort says what exists today.
 navigation:
 - label: For your agents
   href: /#flows
@@ -30,7 +25,8 @@ navigation:
 install:
   label: Install
   href: /#start
-
+# The company page and the short pages under the Company menu. Drafted with Jack
+# Heart on 2026-10-08; copy beyond his quoted lines is draft.
 studio:
   company:
     title: Loopflow Studio
@@ -45,16 +41,16 @@ studio:
         href: /
     - name: Etude
       label: What we sell
-      text: 'Experiment orchestration, for doing science inside a company: state the hypothesis,
-        run the experiment, read the evidence, change your mind.'
+      text: 'Experiment orchestration, for doing science inside a company: state the hypothesis, run
+        the experiment, read the evidence, change your mind.'
       status: Not yet available
       link:
         label: Etude ↗
         href: /etude
     - name: Fantasia
       label: The research that drives both
-      text: 'Superhuman Magic: The Gathering bots. Building them is what drives the development
-        of Loopflow and Etude.'
+      text: 'Superhuman Magic: The Gathering bots. Building them is what drives the development of
+        Loopflow and Etude.'
       status: In progress
       link:
         label: Fantasia ↗
@@ -63,17 +59,17 @@ studio:
     title: Fantasia
     label: Fantasia · Loopflow Studio
     heading: 'Superhuman Magic: The Gathering bots.'
-    lede: 'An AI-assisted Pro Tour testing house: serious practice, visible disagreement, rapid
-      experiments, and the fun of discovering something together.'
+    lede: 'An AI-assisted Pro Tour testing house: serious practice, visible disagreement, rapid experiments,
+      and the fun of discovering something together.'
     points:
     - title: Today
-      text: A person can play a one-on-one game against a trained bot, a search bot, or random
-        play, and replay the finished game.
+      text: A person can play a one-on-one game against a trained bot, a search bot, or random play,
+        and replay the finished game.
     - title: The aim
       text: Bots that play better than the best people.
     - title: Why Magic
-      text: It is the lever for the other two. Building the bots shows us what Loopflow needs,
-        and running their training shows us what Etude needs. Fantasia is Etude’s first user.
+      text: It is the lever for the other two. Building the bots shows us what Loopflow needs, and
+        running their training shows us what Etude needs. Fantasia is Etude’s first user.
     status: In progress.
     link:
       label: Source ↗
@@ -88,50 +84,24 @@ studio:
     label: About · Loopflow Studio
     heading: Jack Heart
     lede: Founder of Loopflow Studio.
-
+# Two sections, named by their user. Structure set by Jack Heart on 2026-10-08.
 homepage:
-  hero:
-    label: Loopflow is a software instrument
-    tagline: A software engineering CLI for your agents.
-    subline:
-    - Ask your agents to build software and they can do it through this one command, breaking
-      the work into concrete steps you can trace and pick back up.
-    - For you, a free, open-source podium for conducting your software orchestra, with native
-      macOS and terminal interfaces.
+  agents:
+    label: Loopflow is a software instrument · for your agents
+    heading: A software engineering CLI for your agents.
+    claim: Give your agents the tools to do things the right way.
+    introduction:
+    - Ask your agents to build software and they can do it through this one command, breaking the
+      work into concrete steps you can trace and pick back up.
+    - 'lf covers each part of building software: planning, designing, prototyping, implementing, testing,
+      optimizing, researching, landing. A Flow is a file that puts those parts in order. Each step
+      is its own session, with a commit between them, so the work arrives planned, checked and reviewable
+      whether or not you watched it happen.'
     actions:
-    - label: See it ↓
-      href: '#flows'
     - label: Install ↓
       href: '#start'
-    commands: |-
-      $ lf skill design "Add CSV export"  # one session
-      $ lf run ship-api                   # a Flow: sessions in order
-      $ lf flow list                      # the Flows you have
-      $ lf task create --title "Add CSV export"
-      $ lf task run EXP-12                # a task's next step
-      $ lf task status EXP-12
-      $ lf session list                   # every conversation
-      $ lf wave status exports            # the plan
-      $ lf pr land                        # merge it
-  ownership:
-    items:
-    - title: Your models
-      text: Claude Code, Codex, or OpenCode, on your own accounts.
-    - title: Your machines
-      text: Runs locally, and over SSH where you choose.
-    - title: Your methods
-      text: Skills and workflows are files in your repo (or use the built-ins). MIT licensed.
-    - title: Your terminal
-      text: lf is a command. Run it in the terminal you already use.
-  flows:
-    label: In the terminal
-    heading: For your agents
-    claim: Give your agents the tools to do things the right way.
-    introduction: 'lf is a command your agents run. It covers each part of building software:
-      planning, designing, prototyping, implementing, testing, optimizing, researching, landing.
-      A Flow is a file that puts those parts in order. Each step is its own session, with a
-      commit between them, so the work arrives planned, checked and reviewable whether or not
-      you watched it happen.'
+    - label: For you ↓
+      href: '#mac'
     example:
       label: 'Example loopflow:'
       steps:
@@ -157,68 +127,40 @@ homepage:
       caption: The filled steps are conversations with you.
       file: .lf/flows/feature.yaml
     commands: |-
-      # .lf/flows/ship-api.yaml
-      - implement
-      - compress
-      - gate
-
-      # one session
-      $ lf implement "Rate-limit the export endpoint"
-
-      # the Flow: three sessions, in order
-      $ lf run ship-api "Rate-limit the export endpoint"
+      $ lf skill design "Add CSV export"  # one session
+      $ lf run ship-api                   # a Flow: sessions in order
+      $ lf flow list                      # the Flows you have
+      $ lf task create --title "Add CSV export"
+      $ lf task run EXP-12                # a task's next step
+      $ lf task status EXP-12
+      $ lf session list                   # every conversation
+      $ lf wave status exports            # the plan
+      $ lf pr land                        # merge it
     parts:
     - title: Checked before it reaches you
-      description: Checks run on each change. After a task’s pull request is handed off for
-        landing, a failed required check can start a repair in the same task.
+      description: Checks run on each change. After a task’s pull request is handed off for landing,
+        a failed required check can start a repair in the same task.
       link:
         label: Review workflows ↗
         href: /docs/authoring#loopflows
     - title: Your way of working, written down
-      description: Instructions are Markdown and sequences are YAML, kept in your repository,
-        or use the built-ins. Your agents follow the same steps every time.
+      description: Instructions are Markdown and sequences are YAML, kept in your repository, or use
+        the built-ins. Your agents follow the same steps every time.
       link:
         label: Skills and workflows ↗
         href: /docs/authoring
     - title: As much or as little of you
-      description: Stay in one session and steer as you go, come in at design and demo, or
-        let it run. Choose per task or per project.
+      description: Stay in one session and steer as you go, come in at design and demo, or let it
+        run. Choose per task or per project.
       link:
         label: Write your own Flow ↗
         href: /docs/authoring#flows
-  tasks:
-    label: How it is organized
-    introduction: Four plain things, each inside the one before. Have as many Waves as you
-      like.
-    kinds:
-    - title: Long-lived sessions
-      text: A session stays with a workstream and its results. Come back to it and the work
-        is where you left it.
-    - title: Isolated jobs
-      text: Routine process and autonomous development run as separate jobs, each in its own
-        working copy.
-    items:
-    - label: Wave
-      title: A goal
-      text: A lasting objective, with its plan and its memory. Reviewed notes carry goals and
-        lessons into later sessions, so you do not rebuild context by hand.
-      commands: |-
-        $ lf --wave exports : "Review the goal"
-        $ lf wave status exports
-      link:
-        label: Tasks and Waves ↗
-        href: /docs/waves
-    - label: Project
-      title: The plan
-      text: 'What the Wave is doing now: its tasks, its key results, and the workflow its tasks
-        follow.'
-      commands: |-
-        $ lf task create --wave exports \
-             --title "Add CSV export"
+    rows_label: One task, start to finish
+    rows:
     - label: Task
       title: One outcome
-      text: Each task gets its own working copy, branch, and pull request. Its sessions stay
-        with it. Return to a task and its work is where you left it.
+      text: Each task gets its own working copy, branch, and pull request. Its sessions stay with
+        it. Return to a task and its work is where you left it.
       commands: |-
         $ lf task run EXP-12
         $ lf task status EXP-12
@@ -228,8 +170,8 @@ homepage:
     - label: Workflow
       title: Your part in it
       text: A workflow joins them. It names the points where you take part in a task’s conversation
-        and the Flow that runs between each. A Flow is a file, so a team can review how it works
-        with agents the way it reviews code.
+        and the Flow that runs between each. A Flow is a file, so a team can review how it works with
+        agents the way it reviews code.
       commands: |-
         # .lf/workflows/feature.yaml
         nodes:
@@ -243,21 +185,58 @@ homepage:
       link:
         label: Write a workflow ↗
         href: /docs/authoring#workflows
-  mac:
-    label: On your Mac, or in cmux or herdr
-    heading: For you
-    claim: Stay in flow while you work with agents.
-    introduction: What needs your attention is on screen, and the rest is not. Loopflow for
-      Mac is laid out around your work, with each conversation filed under the task it belongs
-      to, so you follow the work and not a trail of chats.
+  ownership:
+    items:
+    - title: Your models
+      text: Claude Code, Codex, or OpenCode, on your own accounts.
+    - title: Your machines
+      text: Runs locally, and over SSH where you choose.
+    - title: Your methods
+      text: Skills and workflows are files in your repo (or use the built-ins). MIT licensed.
+    - title: Your terminal
+      text: lf is a command. Run it in the terminal you already use.
+  you:
+    label: For you · on your Mac, or in cmux or herdr
+    heading: Stay in flow while you work with agents.
+    introduction:
+    - Loopflow is a free, open-source podium for conducting your software orchestra, with native macOS
+      and terminal interfaces.
+    - What needs your attention is on screen, and the rest is not. Loopflow for Mac is laid out around
+      your work, with each conversation filed under the task it belongs to, so you follow the work
+      and not a trail of chats.
     capture:
       image: /static/wave-surface.png
-      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their
-        status
+      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their status
       width: 2880
       height: 1800
-      caption: Actual capture, unedited. The Mac app includes the command line tool; the command
-        line tool does not need the Mac app.
+      caption: Actual capture, unedited. The Mac app includes the command line tool; the command line
+        tool does not need the Mac app.
+    kinds:
+    - title: Long-lived sessions
+      text: A session stays with a workstream and its results. Come back to it and the work is where
+        you left it.
+    - title: Isolated jobs
+      text: Routine process and autonomous development run as separate jobs, each in its own working
+        copy.
+    rows_label: Your work, kept in order
+    rows_introduction: Have as many Waves as you like.
+    rows:
+    - label: Wave
+      title: A goal
+      text: A lasting objective, with its plan and its memory. Reviewed notes carry goals and lessons
+        into later sessions, so you do not rebuild context by hand.
+      commands: |-
+        $ lf --wave exports : "Review the goal"
+        $ lf wave status exports
+      link:
+        label: Tasks and Waves ↗
+        href: /docs/waves
+    - label: Project
+      title: The plan
+      text: 'What the Wave is doing now: its tasks, its key results, and the workflow its tasks follow.'
+      commands: |-
+        $ lf task create --wave exports \
+             --title "Add CSV export"
   install:
     label: Install
     heading: Start playing.

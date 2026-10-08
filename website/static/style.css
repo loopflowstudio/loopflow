@@ -1374,9 +1374,15 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .button.solid:hover { background: var(--wine-hover); border-color: var(--wine-hover); }
 .home-page .actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
-.home-hero { padding: 75px 0 50px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center; }
-.home-hero h1 { max-width: 820px; margin-bottom: 26px; }
-.home-hero .intro { max-width: 620px; font-size: 21px; line-height: 1.45; margin-bottom: 28px; }
+.home-hero { padding: 75px 0 20px; }
+.home-page .block.lead { padding-top: 0; }
+.home-page .block .home-hero .claim { margin-bottom: 26px; }
+.home-page .block .strip { margin-top: 56px; }
+.home-page .block.lead .parts { border-top: 0; margin-top: 12px; }
+.home-page .block .rows-label { color: var(--burgundy); margin: 64px 0 14px; }
+.home-page .block .rows-label + .lede { margin-bottom: 24px; }
+.home-hero h1 { max-width: 980px; margin-bottom: 20px; }
+.home-hero .intro { max-width: 760px; font-size: 20px; line-height: 1.5; margin-bottom: 28px; }
 .home-hero .kicker { color: var(--burgundy); margin-bottom: 18px; }
 .home-page .term { background: #1c1718; color: #efe9e6; border-radius: 8px; padding: 22px 24px; font: 13.5px/1.9 var(--font-mono); overflow-x: auto; white-space: pre; margin: 0; }
 .home-page .term .p, .home-page .term .c { color: #8f8582; }
@@ -1413,7 +1419,8 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .parts h3 { font-size: 16px; margin-bottom: 8px; }
 .home-page .parts p { font-size: 14px; color: var(--text-secondary); max-width: 330px; }
 .home-page .parts.kinds { grid-template-columns: 1fr 1fr; margin: 26px 0 56px; }
-.home-hero .intro + .intro { margin-top: -12px; }
+.home-hero .intro + .intro { margin-top: -12px; font-size: 17px; color: #333; }
+.home-page .block .lede + .lede { margin-top: -20px; }
 .home-page .parts.kinds article { padding-bottom: 14px; }
 .home-page .parts.kinds p { font-size: 16px; max-width: 460px; color: #333; }
 .home-page .parts a { font-size: 12px; text-decoration: underline; text-underline-offset: 4px; }
@@ -1454,7 +1461,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page footer { border-top: 1px solid var(--border); padding: 30px 0; display: flex; justify-content: space-between; gap: 20px; font-size: 12px; background: none; margin: 0; }
 .home-page footer a + a { margin-left: 14px; }
 /* Wide command blocks scroll inside their grid cell, never the page. */
-.home-hero > *, .home-page .pair > *, .home-page .work-row > *, .home-page .start > * { min-width: 0; }
+.home-page .pair > *, .home-page .work-row > *, .home-page .start > * { min-width: 0; }
 
 @media (max-width: 860px) {
     .home-page { padding: 0 16px; }
@@ -1462,7 +1469,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-page nav .optional { display: none; }
     .home-page nav { gap: 16px; }
     .home-hero { padding: 44px 0 34px; }
-    .home-hero, .home-page .pair, .home-page .start { grid-template-columns: 1fr; gap: 30px; }
+    .home-page .pair, .home-page .start { grid-template-columns: 1fr; gap: 30px; }
     .home-hero .intro { font-size: 18px; }
     .home-page .strip { grid-template-columns: 1fr 1fr; }
     .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: 14px; }

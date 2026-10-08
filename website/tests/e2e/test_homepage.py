@@ -10,16 +10,16 @@ def test_approved_homepage_sections(homepage: Page) -> None:
     expect(homepage.locator("h1")).to_have_text("A software engineering CLI for your agents.")
     assert homepage.locator("main > section").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["", "", "flows", "mac", "start"]
+    ) == ["flows", "mac", "start"]
     expect(homepage.locator(".strip > div")).to_have_count(4)
     expect(homepage.locator("#flows .parts article")).to_have_count(3)
     assert homepage.locator(".work-row .tag").evaluate_all(
         "tags => tags.map(tag => tag.firstChild.textContent.trim())"
-    ) == ["Wave", "Project", "Task", "Workflow"]
+    ) == ["Task", "Workflow", "Wave", "Project"]
 
 
 def test_hero_actions_reach_the_flow_and_install(homepage: Page) -> None:
-    for label, target in [("See it ↓", "#flows"), ("Install ↓", "#start")]:
+    for label, target in [("For you ↓", "#mac"), ("Install ↓", "#start")]:
         homepage.locator(".home-hero").get_by_role("link", name=label).click()
         expect(homepage.locator(target + " h2")).to_be_in_viewport()
 
@@ -92,7 +92,7 @@ def test_page_fits_and_terminals_scroll_within_their_cells(
 
 
 def test_body_command_names_use_monospace(homepage: Page) -> None:
-    names = homepage.locator(".strip code, .lede code")
+    names = homepage.locator(".strip code, .intro code")
     expect(names).to_have_count(2)
     for name in names.all():
         expect(name).to_have_text("lf")

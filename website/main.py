@@ -123,11 +123,9 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
-HERO_CONTENT = HOME_CONTENT["hero"]
+AGENTS_CONTENT = HOME_CONTENT["agents"]
 OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
-FLOWS_CONTENT = HOME_CONTENT["flows"]
-TASKS_CONTENT = HOME_CONTENT["tasks"]
-MAC_CONTENT = HOME_CONTENT["mac"]
+YOU_CONTENT = HOME_CONTENT["you"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
 
 # Markdown rendering
@@ -806,15 +804,6 @@ def _terminal(content: str, label: str) -> FT:
     return Pre(*lines, cls="term", tabindex="0", aria_label=label)
 
 
-def _section_heading(content: dict) -> tuple:
-    return (
-        P(content["label"], cls="eyebrow"),
-        H2(content["heading"]),
-        P(content["claim"], cls="claim"),
-        P(*_inline_command(content["introduction"]), cls="lede"),
-    )
-
-
 def _capture(content: dict) -> tuple:
     return (
         Div(
@@ -831,18 +820,60 @@ def _capture(content: dict) -> tuple:
     )
 
 
-def _flows_section() -> FT:
-    example = FLOWS_CONTENT["example"]
+def _work_rows(content: dict) -> FT:
+    return Div(
+        *[
+            Article(
+                Div(item["label"], Span(item["title"]), cls="tag"),
+                Div(
+                    P(*_inline_command(item["text"])),
+                    P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
+                    if "link" in item
+                    else None,
+                ),
+                _terminal(item["commands"], item["label"] + " example"),
+                cls="work-row",
+            )
+            for item in content["rows"]
+        ],
+        cls="work-rows",
+    )
+
+
+def _agents_section() -> FT:
+    example = AGENTS_CONTENT["example"]
     return Section(
-        *_section_heading(FLOWS_CONTENT),
+        Div(
+            P(AGENTS_CONTENT["label"], cls="eyebrow kicker"),
+            H1(AGENTS_CONTENT["heading"]),
+            P(AGENTS_CONTENT["claim"], cls="claim"),
+            *[P(*_inline_command(line), cls="intro") for line in AGENTS_CONTENT["introduction"]],
+            Div(
+                *[
+                    A(link["label"], href=link["href"], cls="button solid" if index == 0 else "button")
+                    for index, link in enumerate(AGENTS_CONTENT["actions"])
+                ],
+                cls="actions",
+            ),
+            cls="home-hero",
+        ),
         Div(
             Div(
                 P(example["label"], cls="eyebrow"),
                 _loopflow_diagram(example),
                 P(example["caption"], " ", Span(example["file"], cls="folio"), cls="capture-label"),
             ),
-            _terminal(FLOWS_CONTENT["commands"], "A Flow file and how to run it"),
+            _terminal(AGENTS_CONTENT["commands"], "lf commands"),
             cls="pair",
+        ),
+        Div(
+            *[
+                Div(B(item["title"]), *_inline_command(item["text"]))
+                for item in OWNERSHIP_CONTENT["items"]
+            ],
+            cls="strip",
+            role="group",
+            aria_label="Ownership",
         ),
         Div(
             *[
@@ -851,42 +882,30 @@ def _flows_section() -> FT:
                     P(*_inline_command(part["description"])),
                     A(part["link"]["label"], href=part["link"]["href"]),
                 )
-                for part in FLOWS_CONTENT["parts"]
+                for part in AGENTS_CONTENT["parts"]
             ],
             cls="parts",
         ),
+        P(AGENTS_CONTENT["rows_label"], cls="eyebrow rows-label"),
+        _work_rows(AGENTS_CONTENT),
         id="flows",
-        cls="block",
+        cls="block lead",
     )
 
 
 def _you_section() -> FT:
     return Section(
-        *_section_heading(MAC_CONTENT),
-        *_capture(MAC_CONTENT["capture"]),
+        P(YOU_CONTENT["label"], cls="eyebrow"),
+        H2(YOU_CONTENT["heading"]),
+        *[P(line, cls="lede") for line in YOU_CONTENT["introduction"]],
+        *_capture(YOU_CONTENT["capture"]),
         Div(
-            *[Article(H3(kind["title"]), P(kind["text"])) for kind in TASKS_CONTENT["kinds"]],
+            *[Article(H3(kind["title"]), P(kind["text"])) for kind in YOU_CONTENT["kinds"]],
             cls="parts kinds",
         ),
-        P(TASKS_CONTENT["label"], cls="eyebrow"),
-        P(TASKS_CONTENT["introduction"], cls="lede"),
-        Div(
-            *[
-                Article(
-                    Div(item["label"], Span(item["title"]), cls="tag"),
-                    Div(
-                        P(*_inline_command(item["text"])),
-                        P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
-                        if "link" in item
-                        else None,
-                    ),
-                    _terminal(item["commands"], item["label"] + " example"),
-                    cls="work-row",
-                )
-                for item in TASKS_CONTENT["items"]
-            ],
-            cls="work-rows",
-        ),
+        P(YOU_CONTENT["rows_label"], cls="eyebrow rows-label"),
+        P(YOU_CONTENT["rows_introduction"], cls="lede"),
+        _work_rows(YOU_CONTENT),
         id="mac",
         cls="block",
     )
@@ -994,40 +1013,12 @@ def build_effort_page(slug: str) -> tuple:
 
 def build_homepage() -> tuple:
     return (
-        Title("Loopflow — " + HERO_CONTENT["tagline"]),
+        Title("Loopflow — " + AGENTS_CONTENT["heading"]),
         SkipLink(),
         Div(
             _topbar("/"),
             Main(
-                Section(
-                    Div(
-                        P(HERO_CONTENT["label"], cls="eyebrow kicker"),
-                        H1(HERO_CONTENT["tagline"]),
-                        *[P(line, cls="intro") for line in HERO_CONTENT["subline"]],
-                        Div(
-                            *[
-                                A(
-                                    link["label"],
-                                    href=link["href"],
-                                    cls="button solid" if index == 0 else "button",
-                                )
-                                for index, link in enumerate(HERO_CONTENT["actions"])
-                            ],
-                            cls="actions",
-                        ),
-                    ),
-                    Div(_terminal(HERO_CONTENT["commands"], "lf commands")),
-                    cls="home-hero",
-                ),
-                Section(
-                    *[
-                        Div(B(item["title"]), *_inline_command(item["text"]))
-                        for item in OWNERSHIP_CONTENT["items"]
-                    ],
-                    cls="strip",
-                    aria_label="Ownership",
-                ),
-                _flows_section(),
+                _agents_section(),
                 _you_section(),
                 Section(
                     Div(P(INSTALL_CONTENT["label"], cls="eyebrow"), H2(INSTALL_CONTENT["heading"])),

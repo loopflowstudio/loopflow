@@ -162,3 +162,10 @@ He then asked for three new versions branching from this work that "explore
 alternative ways to be inspired by Herdr or cmux's website to counterposition
 and use some of the structures that they use". They are standalone files in
 `scratch/prototypes/`; the site itself is unchanged by them.
+
+Jack Heart then asked for a mix of "20% A 40%B 40% C", made three different
+ways. `scratch/prototypes/blend-a.html`, `blend-b.html` and `blend-c.html` are
+assembled from the three earlier prototypes' own sections: B's install-in-hero
+and numbered claims, C's two-pane surface and where-it-sits stack, and A's FAQ,
+plain list or name-as-headline opening. They differ in what opens the page and
+where the stack sits.

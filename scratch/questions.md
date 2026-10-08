@@ -5,9 +5,9 @@ settled the holder and the credential rules. Jack authorized the rename and then
 LOO-411's machine record through publication and review; later slices remain intent.
 
 - Jack Heart's original mini command and error from 2026-10-06 were never
-  captured. The design assumes `lf ssh mini --task <ISSUE> <skill>`, which fails
-  today with `Task "…" is not registered`. Reproduce before treating that as the
-  incident.
+  captured. The original design hypothesized `lf ssh mini --task <ISSUE> <skill>`
+  and `Task "…" is not registered`; this is not a reproduced incident. That
+  command spelling is retired by the accepted global selector.
 - A target machine is assumed to have the repository cloned. Cloning it is out
   of scope.
 - Provider facts come from docs and issue trackers, not experiments. Refresh
@@ -28,9 +28,9 @@ LOO-411's machine record through publication and review; later slices remain int
 read released cron JSON via an explicit field alias. These are persisted-data
 contracts, not alternate commands or runtime owners. No installed store is touched.
 
-LOO-411, 2026-10-07: the migration helper mistakes the stacked parent's draft for
-this Task's. Keep the parent's rename immutable and add this Task's one draft,
-dependent on it; the parent renames an existing released table, not a new owner.
+LOO-411, 2026-10-07: the migration helper mistook the stacked parent's draft for
+this Task's. This Task has one draft dependent on the inherited rename, which
+renames a released table; the parent's draft is unchanged.
 Jack Heart's October 7 PR review now permits a first-install offer during
 interactive add, default yes; existing lf is never replaced. Batch, JSON and
 nonterminal use report the install command. A 60-second idle lifetime is the

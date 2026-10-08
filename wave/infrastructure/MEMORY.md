@@ -13,9 +13,9 @@ relocation is proved. Recovery uses `install` for retained binaries. Cron reads
 released JSON keys; historical payloads survive.
 Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
 
-Jack explicitly rejected a stable cross-version API, negotiation and old-peer
-support. Read existing version/identity commands; retain a reported version even
-when identity fails, report differences and name the remote update command. Named connections live
+Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
+version/identity commands suffice: retain versions when identity fails; report
+differences and the update command without a version gate. Named connections live
 on Machine rows. Removal clears label/repo and releases destination uniqueness;
 identity, route and placements survive so a replacement can be added at that
 destination without deleting history or touching remote work. Only explicitly
@@ -33,11 +33,12 @@ superseding installation exclusion. Existing lf is never replaced; status, batch
 and JSON never install. Personal masters stay separate; explicit agent forwarding
 gets its own socket scope. Cancel account routes on return: shared masters outlive
 commands. Fixtures and loopback SSH prove behavior and reuse, not real broker
-cleanup, installation, account continuity or migration. Republication and review remain.
+cleanup, installation, account continuity or migration. Passing focused tests
+retained open-output-handle warnings; success does not establish child cleanup.
 
-Jack Heart's latest LOO-411 decision (`c597174a-6330-4be3-9509-3e7667caf7d3`)
-replaces `lf ssh` with global `--machine <label-or-id>`, alongside Task, worktree
-and Wave selectors. The target parses the whole command in its saved repository;
+Jack Heart's LOO-411 decision (`c597174a-6330-4be3-9509-3e7667caf7d3`) replaces
+`lf ssh` with global `--machine <label-or-id>`, alongside Task, worktree and Wave.
+The target parses the whole command in its saved repository;
 `--machine Y machine add X` edits Y's registry. No command allowlist, SSH alias or
 per-call repository override. Secret and agent-forwarding options require a
 machine. Account flags resolve on the target, not against origin-only accounts;

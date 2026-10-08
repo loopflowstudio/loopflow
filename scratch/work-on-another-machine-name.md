@@ -19,14 +19,17 @@ inherited origin restrictions still constrain its foreground grant.
 `lf --machine Y machine add X` adds X to Y's registry.
 
 The private shared OpenSSH connections, interactive first-install offer and
-specific recovery diagnostics remain. The selector and focused verification are complete; republication of PR #1489
-and review remain. Jack's latest comment
-explicitly requires stopping after republication, without landing. Later slices
-remain intent; their unresolved Codex holder and shell-pane choices are unchanged.
+specific recovery diagnostics remain. The selector and focused verification are
+complete, including the compression checkpoint `b347fe4d0`. Remaining for this
+slice: the affected gate, investigation of the retained open-output-handle
+warnings, disposable-account published-installer proof, and republication of
+PR #1489 for review. Real broker cleanup and configured SSH/account continuity
+remain unproved by the simulated transport and earlier loopback test. Jack's
+latest comment requires stopping after republication, without landing. Later
+slices remain intent; their Codex holder and shell-pane choices are unchanged.
 
-Do not lift code, tests, help text or config from herdr or cmux (Jack Heart,
-2026-10-07). Their behaviour is described here from docs and reading; write
-loopflow's version from scratch.
+Jack Heart prohibited copying code, tests, help text or config from herdr or cmux
+on 2026-10-07; their described behaviour informs an independent implementation.
 
 ## What to build
 
@@ -163,7 +166,8 @@ credential crosses.
 
 First connect probes the installed `lf` and reads its machine identity. Missing
 lf produces an install offer only during interactive add, otherwise an install
-command. An existing incompatible lf produces an update instruction.
+command. Version differences produce an update instruction; a difference alone
+does not reject a command. Identity or command failure stops it naturally.
 
 Versions across machines (Jack Heart, 2026-10-07, comment
 1958673f-baba-470e-b73a-1a544007dd86): no stable cross-version interface,
@@ -185,8 +189,9 @@ Proposal: Linear, GitHub and Git are already the official live copy. Derive.
 - Fetch whenever a decision depends on what the remote has, starting with
   branch placement.
 - Mint Task ids deterministically from the Linear issue id for new Tasks.
-- `lf --machine` sends the issue identifier and the Task's portable fields with the
-  request, so the first run on a cold machine needs no Linear round trip.
+- The earlier proposal to send portable Task fields with `lf --machine` remains
+  unimplemented. The accepted selector forwards command arguments only; a later
+  Task-adoption plan must reconcile cold-machine discovery with that boundary.
 
 The second machine works on the same remote branch (decided above). Placing a
 Task fetches its branch and checks it out, so a skill run there sees the code
@@ -466,8 +471,9 @@ an explicit add before forwarding credentials. Probe uses existing `lf --version
 and `lf machine id`; no provider login participates in it.
 An omitted repository uses the local checkout's home-relative path; outside a
 checkout, `--repo` is required. Absolute remote paths and `~/` paths are accepted.
-Remote installation/version replacement remains explicit: unsupported peers get
-an actionable upgrade error, never an unattended replacement of running work.
+Version differences are reported with an update command, without negotiation or
+a version gate. Failed identity reads retain any reported version. Installation
+is offered only for a missing executable; existing peers are never replaced.
 The deletion inventory above is complete for this slice. Exact machine checks
 and credential transport via stdin remain. Focused fixtures cover label lifecycle,
 nonprompting probe failures, quoting, version reporting and preservation from
@@ -513,4 +519,4 @@ compiled remote CLI against a separate registry and proves `machine add` changes
 that registry only. Simulated transports do not establish configured SSH/account
 continuity; the earlier real SSH sharing proof still covers unchanged transport.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and `lf context --skill compress` pass; `cargo nextest run -p loopflow --lib --test cli_discovery --test machine_commands -E 'test(lf::commands::ssh::tests::) | binary(cli_discovery) | binary(machine_commands)' --no-fail-fast` builds and passes 42 tests (LF_/LOOPFLOW_ cleared, LF_BIN pinned), with one open-output-handle warning in `preamble_omits_absent_credentials`; prior broader checks remain at `6886ec8db:scratch/work-on-another-machine-name.md`. Affected gate, leak investigation and disposable-account published-installer proof remain with gate/CI.
+Checks: `git diff --check` and `lf context --skill realign` pass; unchanged code reuses `b347fe4d0`'s recorded fmt, all-target Clippy and 42 focused nextest passes (LF_/LOOPFLOW_ cleared, LF_BIN pinned), including the open-output-handle warning in `preamble_omits_absent_credentials`; exact commands and prior broader evidence remain at `b347fe4d0:scratch/work-on-another-machine-name.md`. Affected gate, leak investigation and disposable-account published-installer proof remain with gate/CI.

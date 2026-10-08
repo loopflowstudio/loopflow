@@ -49,9 +49,10 @@ the provider evidence tables; orphan deletion identities remain recovery evidenc
 The released-frontier migration preserves existing identities, serialized provider
 observations, PRs, workflows and Session links.
 
-`--creation-id` identifies one creation request. Its transactional receipt retains
-the original Project and input through later edits and rotation. Independent requests
-with identical titles remain distinct. The same transaction owns local field edits,
+`lf task create` generates the durable ID, saves the Task and returns that ID.
+Each explicit invocation creates a distinct Task, including identical titles.
+Internal synchronization retries reuse the saved identity. The transactional creation
+receipt retains the original Project and input through later edits and rotation. The same transaction owns local field edits,
 assignment, Project ordering and comments. Revisions are local write concurrency,
 not fabricated provider observation times. Local Task selection displays the shortest
 unique UUID prefix of at least seven digits; full IDs remain stable. References
@@ -84,15 +85,17 @@ all selected Waves together, carrying started Tasks and preserving backlog. Stab
 local IDs select the rows and retry receipts; provider aliases select existing
 Projects through their stored mapping. Membership, Project fields, selection and
 pending effects commit together. Connected commands report pending Linear sync.
-Inbound observations preserve pending membership while accepting unrelated fields.
-Provider delivery is unfinished; local settlement does not acknowledge an external effect.
+Inbound observations preserve pending membership against an unchanged baseline;
+conflicting Linear membership wins while the losing local intention remains in history.
+Mapped membership and Project fields use foreground delivery below; local settlement
+alone does not acknowledge an external effect.
 
 Refiling resolves the saved Task and destination Project, holds both Wave locks,
 and commits membership and its field receipt together. Existing work, including
 Sessions, Processes, Workflows and PRs, retains its owner. Retrying the selected
 destination changes neither the revision nor receipt. Pending refiling allows inbound
-observations from another Wave to preserve both conflicting membership values and
-advance unrelated fields. It never grants execution or provider-write authority.
+observations from another Wave to adopt conflicting Linear membership, retain both
+values and advance unrelated fields. It never grants execution or provider-write authority.
 
 Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
 foreign keys. Each receipt retains a stable mutation identity, baseline and first
@@ -102,8 +105,18 @@ rank changes; `sqlite/project_content.rs` owns Project fields, content and Workf
 selection. Edits and receipts commit together before provider mapping or I/O.
 No-op saves preserve revisions and receipts without notifying readers. Accepted
 inbound changes advance the local optimistic-write revision; unrelated fields keep
-advancing during pending delivery. Neither matching readback nor provider timestamps
-acknowledge unsent changes.
+advancing during pending delivery. Matching readback acknowledges only an attempted
+receipt. Before conflict reconciliation, its observation advances subsequent saves'
+unchanged baselines without acknowledging them. Attempts recheck the stored provider
+revision and local deletion. Lost replies retain attempt/error evidence and use
+observation before any further effect; an unresolved attempt is never blindly replayed.
+
+`ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
+assignees and membership, and Project names, summaries, statuses and structured
+content. Content patches retain unrelated provider prose. The foreground lifetime
+runs this independently of comment/state delivery and acquisition. Relative Task
+rank remains pending: it is derived from the complete Project list, and independent
+ordinal writes would conflict with each other's effects.
 
 Workflow selection reads KRs and targets inside its definition-write transaction.
 `wave update-plan` uses the same content writer; inspection takes no Wave mutation
@@ -116,7 +129,7 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Task/Project export, field/deletion/cancellation
+CLI edits report pending sync. Task/Project export, relative-order/deletion/cancellation
 delivery, complete Desktop pending presentation and composed reconnect remain
 unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
@@ -150,8 +163,8 @@ Terminal, archived, paused or foreign Projects retain their history. Names, cont
 and an empty workflow remain intact. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
-Project export and safe status delivery remain unfinished; a locally active Project
-is not proof of Linear activation. Ensure never searches for candidates or rotates
+Project export remains unfinished. Mapped status receipts use foreground delivery;
+a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates or rotates
 Projects; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived

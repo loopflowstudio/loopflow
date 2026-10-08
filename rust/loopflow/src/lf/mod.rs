@@ -930,9 +930,6 @@ pub enum TaskCommand {
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
-        /// Retain this identity when retrying an interrupted creation
-        #[arg(long)]
-        creation_id: Option<crate::durable::TaskId>,
         #[arg(long)]
         json: bool,
     },

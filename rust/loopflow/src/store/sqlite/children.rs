@@ -103,11 +103,6 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub(crate) fn task_creation_intent(&self, task: &TaskId) -> StoreResult<Option<NewTask>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        task_creation_in(&conn, task)
-    }
-
     pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

@@ -4,22 +4,200 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
+use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
 use crate::store::StoreResult;
 
+impl SqliteStore {
+    pub(crate) fn planning_field_owners(
+        &self,
+        repo: &str,
+    ) -> StoreResult<Vec<crate::durable::WorkRef>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND t.planning_deleted_at IS NULL AND EXISTS(
+                 SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field!='deleted'
+                 AND c.acknowledged=0 AND c.conflict_json IS NULL
+                 AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
+             UNION ALL
+             SELECT 'project',p.id FROM projects p JOIN waves w ON w.id=p.wave_id
+             WHERE w.repo=?1 AND p.external_project_id IS NOT NULL AND EXISTS(
+                 SELECT 1 FROM project_changes c WHERE c.project_id=p.id AND c.acknowledged=0 AND c.conflict_json IS NULL
+                 AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM project_changes WHERE project_id=p.id AND field=c.field)))"
+        )?;
+        let rows = query.query_map([repo], |row| {
+            let kind: String = row.get(0)?;
+            let id: String = row.get(1)?;
+            Ok(if kind == "task" {
+                crate::durable::WorkRef::Task(TaskId::from_raw(id))
+            } else {
+                crate::durable::WorkRef::Project(ProjectId::from_raw(id))
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub(crate) fn attempt_planning_field(
+        &self,
+        owner: PlanningChanges<'_>,
+        change: &PlanningChange,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let observation = owner.observation(&tx)?;
+        if observation
+            .as_ref()
+            .and_then(|body| body["revision"].as_str())
+            != revision
+        {
+            return Ok(false);
+        }
+        if let PlanningChanges::Task(id) = owner {
+            let deleted: bool = tx.query_row(
+                "SELECT planning_deleted_at IS NOT NULL FROM tasks WHERE id=?1",
+                [id.as_str()],
+                |row| row.get(0),
+            )?;
+            if deleted {
+                return Ok(false);
+            }
+        }
+        let (owner, id) = owner.owner();
+        let changed = tx.execute(
+            &format!(
+                "UPDATE {owner}_changes SET attempted=1,error=NULL WHERE id=?1 AND {owner}_id=?2
+             AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
+             AND seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3)
+             AND NOT EXISTS(SELECT 1 FROM {owner}_changes WHERE {owner}_id=?2 AND field=?3
+                 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)"
+            ),
+            params![change.id, id, change.field],
+        )? == 1;
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    pub(crate) fn planning_field_error(
+        &self,
+        owner: PlanningChanges<'_>,
+        change: &PlanningChange,
+        error: &str,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (owner, id) = owner.owner();
+        conn.execute(
+            &format!(
+                "UPDATE {owner}_changes SET error=?3 WHERE id=?1 AND {owner}_id=?2
+            AND acknowledged=0 AND conflict_json IS NULL AND error IS NOT ?3"
+            ),
+            params![change.id, id, error],
+        )?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
-pub(super) enum PlanningChanges<'a> {
+pub(crate) enum PlanningChanges<'a> {
     Task(&'a TaskId),
     Project(&'a ProjectId),
 }
 
 impl<'a> PlanningChanges<'a> {
-    fn owner(self) -> (&'static str, &'a str) {
+    // A matching attempted write can arrive through either acquisition or readback.
+    // Rebase later saves before conflict reconciliation; never acknowledge them.
+    fn observe_attempts(self, conn: &Connection, observed: &Value) -> StoreResult<()> {
+        let (owner, id) = self.owner();
+        let mut query = conn.prepare(&format!(
+            "SELECT id,field,value_json,base_json FROM {owner}_changes
+             WHERE {owner}_id=?1 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL ORDER BY seq"
+        ))?;
+        let rows = query
+            .query_map([id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (receipt, field, value, base) in rows {
+            let Some(remote) = observed.get(&field) else {
+                continue;
+            };
+            let remote = self.normalize(conn, &field, remote.clone())?;
+            let value: Value = serde_json::from_str(&value)?;
+            let base: Option<Value> = base.map(|v| serde_json::from_str(&v)).transpose()?;
+            if super::planning::revision_nanos(observed["revision"].as_str())?
+                < super::planning::revision_nanos(
+                    base.as_ref().and_then(|b| b["revision"].as_str()),
+                )?
+            {
+                continue;
+            }
+            if remote == value {
+                let baseline =
+                    serde_json::json!({"revision": observed["revision"], "value": remote});
+                conn.execute(
+                    &format!(
+                        "UPDATE {owner}_changes SET base_json=?2 WHERE {owner}_id=?3 AND field=?4
+                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?1)
+                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
+                     AND (base_json IS ?5 OR (base_json IS NOT NULL AND ?5 IS NOT NULL
+                         AND json_extract(base_json,'$.value') IS json_extract(?5,'$.value')))"
+                    ),
+                    params![
+                        receipt,
+                        baseline.to_string(),
+                        id,
+                        field,
+                        base.as_ref().map(Value::to_string)
+                    ],
+                )?;
+                conn.execute(
+                    &format!("UPDATE {owner}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"),
+                    params![receipt, observed["revision"].as_str()],
+                )?;
+            } else if base.as_ref().is_none_or(|base| base["value"] != remote) {
+                conn.execute(
+                    &format!("UPDATE {owner}_changes SET conflict_json=?2,error=NULL WHERE id=?1"),
+                    params![
+                        receipt,
+                        serde_json::json!({"revision":observed["revision"],"value":remote})
+                            .to_string()
+                    ],
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn owner(self) -> (&'static str, &'a str) {
         match self {
             Self::Task(id) => ("task", id.as_str()),
             Self::Project(id) => ("project", id.as_str()),
         }
+    }
+
+    fn observation(self, conn: &Connection) -> StoreResult<Option<Value>> {
+        let (_, id) = self.owner();
+        let observation = match self {
+            Self::Task(_) => "SELECT i.body FROM tasks t JOIN projects p ON p.id=t.project_id
+                JOIN waves w ON w.id=p.wave_id
+                JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
+                WHERE t.id=?1",
+            Self::Project(_) => "SELECT o.body FROM projects p JOIN waves w ON w.id=p.wave_id
+                JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
+                WHERE p.id=?1",
+        };
+        let body: Option<String> = conn
+            .query_row(observation, [id], |row| row.get(0))
+            .optional()?;
+        body.map(|body| serde_json::from_str(&body).map_err(Into::into))
+            .transpose()
     }
 
     pub(super) fn record(
@@ -35,21 +213,9 @@ impl<'a> PlanningChanges<'a> {
             return Ok(false);
         }
         let (owner, id) = self.owner();
-        let observation = match self {
-            Self::Task(_) => "SELECT i.body FROM tasks t JOIN projects p ON p.id=t.project_id
-                JOIN waves w ON w.id=p.wave_id
-                JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
-                WHERE t.id=?1",
-            Self::Project(_) => "SELECT o.body FROM projects p JOIN waves w ON w.id=p.wave_id
-                JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear'
-                WHERE p.id=?1",
-        };
-        let body: Option<String> = conn
-            .query_row(observation, [id], |row| row.get(0))
-            .optional()?;
+        let body = self.observation(conn)?;
         let base = body
             .map(|body| -> StoreResult<Value> {
-                let body: Value = serde_json::from_str(&body)?;
                 Ok(serde_json::json!({"revision": body["revision"], "value": self.normalize(conn, field, body[field].clone())?}))
             })
             .transpose()?;
@@ -116,7 +282,7 @@ impl<'a> PlanningChanges<'a> {
     }
 
     /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
-    /// Both values remain in the receipt. Matching reads never acknowledge writes.
+    /// Both values remain in the receipt. Only attempted writes can be acknowledged.
     pub(super) fn reconcile<T: Serialize + DeserializeOwned>(
         self,
         conn: &Connection,
@@ -124,6 +290,7 @@ impl<'a> PlanningChanges<'a> {
     ) -> StoreResult<T> {
         let (owner, _) = self.owner();
         let mut saved = serde_json::to_value(observed)?;
+        self.observe_attempts(conn, &saved)?;
         for change in self.pending(conn)? {
             // A normal inventory cannot observe deletion.
             let Some(value) = saved.get(&change.field) else {

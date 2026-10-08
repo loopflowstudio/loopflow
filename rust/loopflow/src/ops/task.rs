@@ -1245,7 +1245,6 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-    identity: crate::durable::TaskId,
 ) -> OpsResult<crate::pm::PmItem> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
@@ -1293,36 +1292,16 @@ pub fn task_create(
             }
         };
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
-        let creation_project = match store
-            .sqlite
-            .task_creation_intent(&identity)
+        let creation_project = store
+            .get_project_by_project(&super::project::current_project(&store, &wave)?.id)
+            .await
             .map_err(task_error)?
-        {
-            Some(intent) => {
-                let id = intent.project_id;
-                let original = store
-                    .get_project(&id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| task_error("creation Project is missing"))?;
-                if original.wave_id != *wave.id() {
-                    return Err(task_error("creation identity belongs to a different Wave"));
-                }
-                id
-            }
-            None => {
-                store
-                    .get_project_by_project(&super::project::current_project(&store, &wave)?.id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| task_error("selected Project is missing"))?
-                    .id
-            }
-        };
+            .ok_or_else(|| task_error("selected Project is missing"))?
+            .id;
         let task = store
             .create_task(
                 &crate::planning::NewTask {
-                    id: identity,
+                    id: crate::durable::TaskId::new(),
                     project_id: creation_project,
                     title: input.title,
                     description: input.report,

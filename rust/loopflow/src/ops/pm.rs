@@ -257,7 +257,7 @@ fn require_linear_config(repo: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
+pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
     read_wave_pm_config(repo, wave)?
         .linear_initiative
         .filter(|initiative| !initiative.trim().is_empty())

@@ -902,6 +902,69 @@ impl LinearClient {
         self.project_node(project_id).await?.into_pm_project()
     }
 
+    pub(crate) async fn project_content_observation(
+        &self,
+        id: &str,
+    ) -> PmResult<(PmProject, String)> {
+        let node = self.project_node(id).await?;
+        let content = node.content.clone().unwrap_or_default();
+        Ok((node.into_pm_project()?, content))
+    }
+
+    pub(crate) async fn project_field_input(
+        &self,
+        field: &str,
+        value: &Value,
+        content: &str,
+    ) -> PmResult<Value> {
+        match field {
+            "name" => Ok(json!({"name": value})),
+            "summary" => Ok(json!({"description": value})),
+            "status" => {
+                let status = serde_json::from_value(value.clone())
+                    .map_err(|e| PmError::Message(format!("invalid Project status: {e}")))?;
+                Ok(json!({"statusId": self.project_status_id(status).await?}))
+            }
+            "workflow" | "krs" | "metric_targets" => {
+                Ok(json!({"content": patch_project_field(content, field, value)?}))
+            }
+            _ => Err(PmError::Message(format!(
+                "unsupported Project field {field}"
+            ))),
+        }
+    }
+
+    /// The caller persists its receipt before starting this one provider effect.
+    pub(crate) async fn deliver_planning_field(
+        &self,
+        id: &str,
+        project: bool,
+        input: Value,
+    ) -> PmResult<()> {
+        let (query, result) = if project {
+            (
+                r#"mutation DeliverProjectField($id: String!, $input: ProjectUpdateInput!) {
+                projectUpdate(id: $id, input: $input) { success }
+            }"#,
+                "projectUpdate",
+            )
+        } else {
+            (
+                r#"mutation DeliverTaskField($id: String!, $input: IssueUpdateInput!) {
+                issueUpdate(id: $id, input: $input) { success }
+            }"#,
+                "issueUpdate",
+            )
+        };
+        let response: Value = self.graphql(query, json!({"id":id,"input":input})).await?;
+        if response[result]["success"] != true {
+            return Err(PmError::Message(
+                "Linear did not confirm the field write; receipt retained".into(),
+            ));
+        }
+        Ok(())
+    }
+
     // Only migration-marked Projects reach this path. Ordinary parsing reads
     // workflow: and the earlier flow: line; no provider mutation occurs during
     // read projection.
@@ -1645,6 +1708,81 @@ struct ProjectNode {
     content: Option<String>,
     initiatives: IdConnection,
     teams: IdConnection,
+}
+
+// Replace only the selected planning field, retaining unrelated provider prose.
+fn patch_project_field(content: &str, field: &str, value: &Value) -> PmResult<String> {
+    let mut parsed = serde_json::to_value(parse_project_content(content)?)
+        .map_err(|e| PmError::Message(e.to_string()))?;
+    parsed[field] = value.clone();
+    let parsed: crate::pm::ProjectContent =
+        serde_json::from_value(parsed).map_err(|e| PmError::Message(e.to_string()))?;
+    parsed.validate()?;
+    let (header, replacement) = match field {
+        "workflow" => (None, format!("workflow: {}\n", parsed.workflow)),
+        "krs" => (
+            Some("## KRs"),
+            format!(
+                "## KRs\n\n{}\n",
+                parsed
+                    .krs
+                    .iter()
+                    .map(|kr| format!(
+                        "- [{}] {}",
+                        if kr.holds { "x" } else { " " },
+                        kr.text.trim()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            ),
+        ),
+        "metric_targets" => (
+            Some("## Metric targets"),
+            format!(
+                "## Metric targets\n\n```json\n{}\n```\n",
+                serde_json::to_string_pretty(&parsed.metric_targets)
+                    .map_err(|e| PmError::Message(e.to_string()))?
+            ),
+        ),
+        _ => {
+            return Err(PmError::Message(format!(
+                "unsupported content field {field}"
+            )))
+        }
+    };
+    let mut result = String::new();
+    let mut section = false;
+    let mut replaced = false;
+    for line in content.split_inclusive('\n') {
+        let trimmed = line.trim();
+        let workflow = trimmed.starts_with("workflow:") || trimmed.starts_with("flow:");
+        if header.is_none() && workflow {
+            if !replaced {
+                result.push_str(&replacement);
+                replaced = true;
+            }
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            section = header == Some(trimmed);
+            if section {
+                if !replaced {
+                    result.push_str(&replacement);
+                    replaced = true;
+                }
+                continue;
+            }
+        }
+        // Workflow lines are parsed independently of their Markdown section.
+        if !section || workflow {
+            result.push_str(line);
+        }
+    }
+    if !replaced {
+        result.push_str("\n\n");
+        result.push_str(&replacement);
+    }
+    Ok(result)
 }
 
 fn convert_legacy_project_content(content: &str) -> PmResult<String> {

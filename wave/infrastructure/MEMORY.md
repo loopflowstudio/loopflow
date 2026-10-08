@@ -18,9 +18,9 @@ manual refresh or unrelated outbound drain. Acceptance requires stable mutation
 identities, retained conflicts and reconnect deduplication. Jack Heart selected
 Linear as winner for every planning conflict.
 Without Linear, prefer the host where possible, otherwise last-write-wins with
-try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering. Local saves
-remain immediate/pending. The bounded source cut adopts observed Linear conflicts
-and retires losing intentions. Receipts preserve both values; unchanged baselines preserve saves.
+try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering.
+`185de5fbf` implements observed Linear conflict adoption and retires losing
+intentions. Receipts preserve both values; unchanged baselines preserve saves.
 Sessions, Processes, Flow/captured Workflow
 position, reservations and checkouts never synchronize. Planning completion grants
 no Workflow movement, Process control or cleanup authority.
@@ -40,39 +40,39 @@ from provider protocol research. Jack subsequently invoked ship-decomposed. No c
 replication here or real plan publication to the public code repo is authorized.
 
 Foreground connections independently acquire comments/inventory and deliver mapped
-Tasks' effects. Receipts replace duplicate writeback state without inventing Workflow
-history. Effect locks exclude neither saves nor inbound reads. Acknowledgements
-cannot settle newer decisions. Field/state ingestion and comment acquisition share
-that policy. Manual winner selection and replacement comments are removed.
-At `5a786d905`, inbound direction, threads and Steers commit together, without
-provider concurrency guarantees.
+Tasks' comments/state plus Task/Project field receipts. Attempted writes retain
+identity and uncertainty. Matching observations acknowledge only that attempt and
+advance later saves' unchanged baselines, preserving newer edits. Linear conflicts
+retain losing values and retire their delivery. Effect locks block neither saves
+nor acquisition. Relative Task rank needs complete-list reconciliation: one move
+changes several ordinals, so independent field writes would conflict with themselves.
+Fixtures prove recovery, lost-reply and late-save preservation;
+installed acceptance remains unproved.
 
-October 8's enabled regression `task_completion_preserves_linear_reopening_during_delivery`
-fails: between ownership read and unconditional mutation, Linear reopening is
-overwritten; matching readback falsely settles delivery. The published Linear schema
-at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
-Extra reads and matching readback cannot prove preserved concurrent changes.
-The race remains a limit; Linear-wins resolves precedence, not atomicity.
+Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
+Each create generates/saves/returns a distinct ID, even for identical titles;
+internal delivery retains it. His `34c1739a-8831-4578-96c9-797aeaa87743` proposes
+complete Task/Project planning with machine-local execution linked by Task ID.
+No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
-The conflict cut supersedes `b3cd894f3`’s manual comment choices: adopt provider
-body/author/time and retain the losing local comment, without replacement or echo.
-`783305284` saves abandonment/cancellation atomically; cleanup checks execution separately.
-Safe cancellation delivery remains pending.
+The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
+still fails: an unseen reopening is overwritten and matching readback falsely
+settles delivery. Linear's schema at `7d2bc4279f` exposes no expected-revision
+issue update. More reads cannot prove atomic preservation; Linear-wins selects
+precedence, not atomicity. The design retains exact race and schema evidence.
 
-Common writers, selection, rotation and refiling are committed; prior proofs:
-`fa35cfd88:wave/infrastructure/MEMORY.md`, this heading. Ownership `84664e661`
-removes personal schema/types/addresses and authority selection. Wave documents,
-context, edits and relocation share SQLite. Explicit ingestion and the one v0.13.10
-draft preserve authored IDs and file bytes; unavailable sources retain identity for
-later import. Deletion commits removal and stable pending identity atomically,
-retaining execution, PR, checkout and historical provider evidence. Provider-first
-deletion is removed. Local/migration fixtures cover identity, definitions, rollback
-and saved plans beside malformed provider evidence. Compression removes unused
-Linear Project creation/update/archive writers and exclusive tests; active
-adoption/reteam paths remain. Exact Project IDs precede colliding names/slugs.
-Installed conversion, historical uncertain effects, export, field/cancellation/deletion
-delivery, pending presentation and composed reconnect remain unproved or unfinished.
-LOO-412 can consume the committed boundary; ownership alone is not shippable connected behavior.
+`b3cd894f3`’s manual comment choices are superseded: adopt provider body/author/time,
+retain the losing comment without replacement or echo. `783305284` saves cancellation
+atomically; delivery remains pending and cleanup checks execution separately.
+
+Common writers and ownership are committed through `bbc6eb8d3`; its memory under
+this heading retains deletion, migration and compression proofs. `84664e661` is
+LOO-412's boundary. SQLite owns Wave documents and relocation; explicit
+ingestion preserves IDs/file bytes. Personal owners and provider-first deletion
+are gone; execution, PRs, checkout and uncertain effects survive. Exact Project IDs
+precede slugs. The draft retains attempt errors and acknowledged revisions.
+Installed conversion, historical uncertainty, export, relative-order/cancellation/
+deletion delivery, pending presentation and composed reconnect remain unfinished.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

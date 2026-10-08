@@ -363,6 +363,9 @@ CREATE TABLE project_changes (
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
+    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
+    error TEXT,
+    acknowledged_revision TEXT,
     acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1))
 );
 CREATE INDEX idx_project_changes_pending ON project_changes(project_id,field,seq);
@@ -382,6 +385,9 @@ CREATE TABLE task_changes (
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
+    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
+    error TEXT,
+    acknowledged_revision TEXT,
     acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1))
 );
 CREATE INDEX idx_task_changes_pending ON task_changes(task_id,field,seq);

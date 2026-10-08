@@ -159,9 +159,8 @@ lf wave edit parser --goal /tmp/goal.md --memory /tmp/memory.md
 lf task create --wave parser --title "Retain escaped quotes"
 ```
 
-Creation prints its retry identity before attempting the write. Repeat the original
-options with `--creation-id <task-id>` to recover an interrupted creation. A new
-creation without that identity creates a distinct Task, even with the same title.
+Creation generates and saves a Task, then prints its ID. Every invocation creates
+a distinct Task, even with the same title. Use the saved ID to inspect or edit it.
 Task references accept unique UUID prefixes of at least four hex digits, bare or
 prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
 Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
@@ -216,13 +215,13 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
-Task creation and edits save locally, including during a Linear outage. Retry with
-the original creation options and printed `--creation-id` to reuse the same Task;
-later edits and Project rotation preserve that receipt. Connected repositories
-report pending sync. Field receipts retain titles, notes, assignment and ordering
+Task creation and edits save locally, including during a Linear outage. Creation
+generates the Task ID; later edits, Project rotation and synchronization preserve it.
+Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
 with their provider baselines; observed conflicts adopt Linear and retire the losing
-intention. Task export and field delivery remain unfinished;
-the saved Task's local ID works before it receives a Linear alias.
+intention. An active Task connection delivers mapped titles, notes, assignment,
+membership and Project fields after recovery. Task export and relative-order delivery
+remain unfinished; the saved Task's local ID works before it receives a Linear alias.
 
 ```bash
 lf task refile <task-id> --wave exports

@@ -15,7 +15,7 @@ use super::{OpsError, OpsResult};
 use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
-fn connected(repo: &str) -> bool {
+pub(super) fn connected(repo: &str) -> bool {
     crate::engine::config::load_config_or_default(Some(std::path::Path::new(repo)))
         .pm
         .and_then(|pm| pm.linear_team)
@@ -105,6 +105,9 @@ impl PlanningSync {
                         }) => {},
                         _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
                             sync_repository_deliveries(&store, &task, false)
+                        }) => {},
+                        _ = repeat_sync("field delivery", Duration::from_secs(1), || {
+                            super::planning_delivery::sync_repository_fields(&store, &task)
                         }) => {},
                         _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
                             sync_repository_deliveries(&store, &task, true)

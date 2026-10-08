@@ -133,7 +133,7 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> Value {
 }
 
 #[test]
-fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
+fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     lf(
@@ -141,16 +141,8 @@ fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
         home.path(),
         &["wave", "ensure", "inbox", "--json"],
     );
-    let id = loopflow::durable::TaskId::new();
-    let args = [
-        "task",
-        "create",
-        "--title",
-        "Concurrent work",
-        "--creation-id",
-        id.as_str(),
-        "--json",
-    ];
+    let args = ["task", "create", "--title", "Concurrent work", "--json"];
+    let mut ids = std::collections::BTreeSet::new();
     let children: Vec<_> = (0..3)
         .map(|_| {
             command(repo.path(), home.path(), &args)
@@ -168,14 +160,16 @@ fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
             String::from_utf8_lossy(&output.stderr)
         );
         let task: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(task["id"], id.as_str());
+        assert!(ids.insert(task["id"].as_str().unwrap().to_owned()));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("Creation identity"));
     }
+    let id = ids.first().unwrap();
     let wave = lf(
         repo.path(),
         home.path(),
         &["wave", "status", "inbox", "--json"],
     );
-    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 3);
     let git = Command::new("/bin/sh")
         .args(["-c", "command -v git"])
         .output()
@@ -342,8 +336,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
 fn public_local_plan_matches_desktop() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let id = "task_0123456789ab40008000000000000001";
-    lf(
+    let created = lf(
         repo.path(),
         home.path(),
         &[
@@ -353,11 +346,10 @@ fn public_local_plan_matches_desktop() {
             "Retain quoted input",
             "--notes",
             "Keep the escaped quote",
-            "--creation-id",
-            id,
             "--json",
         ],
     );
+    let id = created["id"].as_str().unwrap();
     let comments = lf(
         repo.path(),
         home.path(),
@@ -393,6 +385,11 @@ fn public_local_plan_matches_desktop() {
     let proof = serde_json::json!({"task":task,"comments":comments});
     let canonical = serde_json::to_string(&proof)
         .unwrap()
+        .replace(id, "task_0123456789ab40008000000000000001")
+        .replace(
+            &format!("lf-{}", &id.trim_start_matches("task_")[..7]),
+            "lf-0123456",
+        )
         .replace(&comment_id, "00000000-0000-4000-8000-000000000001")
         .replace(&comment_date, "2026-10-08T00:00:00Z");
     let actual: Value = serde_json::from_str(&canonical).unwrap();
@@ -592,20 +589,30 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     let home = tempfile::tempdir().unwrap();
     let first = "task_abcd1234400080000000000000000001";
     let second = "task_abcd1235400080000000000000000002";
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", "inbox", "--json"],
+    );
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let project: String = conn
+        .query_row(
+            "SELECT current_project_id FROM waves WHERE name='inbox'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
     for (id, title) in [(first, "First"), (second, "Second")] {
-        lf(
-            repo.path(),
-            home.path(),
-            &[
-                "task",
-                "create",
-                "--title",
-                title,
-                "--creation-id",
-                id,
-                "--json",
-            ],
-        );
+        store
+            .create_task(&loopflow::planning::NewTask {
+                id: loopflow::durable::TaskId::parse(id).unwrap(),
+                project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
+                title: title.into(),
+                description: String::new(),
+            })
+            .unwrap();
     }
     for selector in ["abcd1234", "ABCD1234", "lf-abcd1234", "task_abcd1234"] {
         let status = lf(
@@ -647,10 +654,9 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
 }
 
 #[test]
-fn public_local_planning_survives_creation_reply_loss_and_restart() {
+fn public_local_planning_survives_restart_with_generated_identity() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let identity = loopflow::durable::TaskId::new();
     let args = [
         "task",
         "create",
@@ -658,14 +664,11 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
         "Fix parser",
         "--notes",
         "Keep quoted input",
-        "--creation-id",
-        identity.as_str(),
         "--json",
     ];
-    // Discard the first response, then invoke a new CLI process with the retained identity.
-    lf(repo.path(), home.path(), &args);
     let created = lf(repo.path(), home.path(), &args);
-    assert_eq!(created["id"], identity.as_str());
+    let identity = created["id"].as_str().unwrap().to_owned();
+    loopflow::durable::TaskId::parse(&identity).unwrap();
     assert!(created["team_id"].is_null());
     assert!(created["url"].is_null());
     let other = lf(
@@ -705,8 +708,6 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
         ],
     );
     assert_eq!(comments["comments"].as_array().unwrap().len(), 1);
-    let retried = lf(repo.path(), home.path(), &args);
-    assert_eq!(retried["name"], "Retain quoted input");
     let status = lf(
         repo.path(),
         home.path(),
@@ -1026,17 +1027,9 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let retry = lf(
         repo.path(),
         home.path(),
-        &[
-            "task",
-            "create",
-            "--title",
-            "Local execution",
-            "--creation-id",
-            id,
-            "--json",
-        ],
+        &["task", "create", "--title", "Local execution", "--json"],
     );
-    assert_eq!(retry["id"], id);
+    assert_ne!(retry["id"], id);
     lf(
         repo.path(),
         home.path(),
@@ -1559,9 +1552,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             )
             .unwrap();
         }
-        let first = TaskId::new();
-        let second = TaskId::new();
-        let create = |id: &TaskId| {
+        let create = || {
             let output = command(
                 repo.path(),
                 home.path(),
@@ -1574,8 +1565,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                     "Independent same title",
                     "--notes",
                     "Original notes",
-                    "--creation-id",
-                    id.as_str(),
                     "--json",
                 ],
             )
@@ -1592,9 +1581,9 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             );
             serde_json::from_slice::<Value>(&output.stdout).unwrap()
         };
-        assert_eq!(create(&first)["id"], first.as_str());
-        assert_eq!(create(&second)["id"], second.as_str());
-        assert_eq!(create(&first)["id"], first.as_str());
+        let first = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
+        let second = TaskId::parse(create()["id"].as_str().unwrap()).unwrap();
+        assert_ne!(first, second);
         assert_eq!(store.list_tasks(None).unwrap().len(), 2);
         let mut snapshot = loopflow::pm::PmSnapshot {
             projects: vec![project.clone()],
@@ -1696,7 +1685,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 }
             )
             .is_err());
-        assert_eq!(create(&second)["name"], "Saved offline");
         let status = lf(
             repo.path(),
             home.path(),
@@ -2486,4 +2474,57 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
         assert_eq!(reopened.pending_task_changes(&task_id).unwrap(), changes);
     }
+}
+
+#[test]
+fn ordinary_task_creation_returns_saved_identity_without_a_public_retry_token() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let help = command(repo.path(), home.path(), &["task", "create", "--help"])
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(!String::from_utf8_lossy(&help.stdout).contains("creation-id"));
+    let removed = command(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--title",
+            "Saved task",
+            "--creation-id",
+            "task_0123456789ab40008000000000000001",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!removed.status.success());
+    assert!(
+        String::from_utf8_lossy(&removed.stderr).contains("unexpected argument '--creation-id'")
+    );
+    let output = command(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "Saved task"],
+    )
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = String::from_utf8(output.stdout).unwrap();
+    let id = output.split_whitespace().next().unwrap();
+    loopflow::durable::TaskId::parse(id).unwrap();
+    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+    assert_eq!(status["execution"]["task_id"], id);
+    assert!(status["execution"]["worktree"].is_null());
+    assert!(status["execution"]["prs"].as_array().unwrap().is_empty());
 }

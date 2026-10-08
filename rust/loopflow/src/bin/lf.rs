@@ -1007,26 +1007,18 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             wave,
             title,
             notes,
-            creation_id,
             json,
         } => {
             let report = match notes {
                 Some(notes) => Some(notes.clone()),
                 None => piped_task_report()?,
             };
-            let identity = creation_id.clone().unwrap_or_default();
-            eprintln!("Creation identity: {identity}; retain --creation-id {identity} when retrying this request");
-            let issue = loopflow::ops::task::task_create(
-                repo,
-                wave.as_deref(),
-                title.clone(),
-                report,
-                identity,
-            )?;
+            let issue =
+                loopflow::ops::task::task_create(repo, wave.as_deref(), title.clone(), report)?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.identifier, issue.name);
+                println!("{} · {}", issue.id, issue.name);
             }
             if loopflow::engine::config::load_config_or_default(Some(repo))
                 .pm

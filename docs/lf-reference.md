@@ -1518,7 +1518,6 @@ Create a planning Task without allocating a checkout or starting work
 | `--wave` | Wave name; defaults to the bound Wave |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
-| `--creation-id` | Retain this identity when retrying an interrupted creation |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

@@ -389,13 +389,43 @@ codex app-server generate-json-schema --experimental --out /tmp/codex-schema
 
 The fetched official App Server reference does not document the queue methods.
 The fixture changes neither the protocol nor global skill roots and uses no real
-credentials, live model or replacement terminal. It does not prove pending queue
-survival across engine death, consumption without an attached terminal,
+credentials, live model or replacement terminal. It does not prove
 repeated-ID idempotency, LF active-capture preservation,
 full controls/resources or Claude parity. Loopflow's driver still attributes all
 events to one capture and returns on its first completion; integrating queue
 consumption must associate each input with its capture and own terminal outcome.
 Queue and receipt observations alone grant no LF dispatch authority.
+
+## Headless queue consumption and pending-input recovery
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --queue-headless
+uv run python scripts/test_network.py uv run --offline --script \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --queue-restart
+```
+
+October 8, Codex 0.160.1: `--queue-headless` repeats the lost-reply,
+cancelled-waiter and connection-handoff case without starting a terminal.
+The active turn, sibling and previous history survive; the skill expands on its
+own turn without a successful `thread/queue/start`. Four model requests and no
+title requests reach the fake API.
+
+`--queue-restart` kills the fixture engine with SIGKILL while the fake API holds
+the active turn and two accepted inputs remain queued. A fresh engine reads back
+the identical queue bytes before resume. Native `thread/resume` then consumes both
+inputs on distinct turns with unchanged content and client IDs, retaining the
+interrupted turn's input history. The skill expands once. Three model requests
+and no title requests are observed. Nothing is re-enqueued and this case sends no
+`thread/queue/start`; it tests pending-input recovery, separately from restarting
+after completed history has already been written.
+
+Resume consumes the queue asynchronously. A read can show an empty queue before
+its user message appears in turn history; that observation cannot authorize
+resubmission. The fixture waits for the exact retained IDs and terminal outcomes.
+It does not establish repeated-ID idempotency or external-effect execution once.
+These provider-only fixtures do not traverse LF admission, driver transfer,
+per-capture event attribution or settlement.
 
 ## LF dispatch receipts and reconnect
 

@@ -11,7 +11,17 @@ from codex_request_mapping import (
 
 @pytest.mark.parametrize(
     "mode",
-    ["catalog", "original", "alias", "redelivery", "boundary", "boundary-race", "queue-race"],
+    [
+        "catalog",
+        "original",
+        "alias",
+        "redelivery",
+        "boundary",
+        "boundary-race",
+        "queue-race",
+        "queue-headless",
+        "queue-restart",
+    ],
 )
 def test_missing_requests_report_failed_evidence(mode: str) -> None:
     observation = _assess_requests([], mode, Path("/audit/SKILL.md"), Path("/snapshot"), "m", "c")

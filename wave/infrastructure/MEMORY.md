@@ -1082,20 +1082,20 @@ lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
 `c91648d63`. Exact receipts can belong to another active turn without expansion.
 Historical expansion proves no new application.
 
-October 8's `02a073349` proves native `thread/queue/add` against an attached
-writer: dropped reply, cancelled waiter and successor retain one submission;
-it expands after the competing turn. Draft, sibling and prior history survive
-without resubmission or successful client queue-start. Seven fake-API requests
-include two titles. Completed identity survives restart; pending-queue recovery,
-terminal-free consumption, LF admission, idempotency and external effects remain
-unproved.
+October 8's `02a073349` proves native queue admission across dropped reply,
+cancellation and handoff, preserving draft/sibling/history. `496652f1d` adds
+terminal-free consumption and engine death with pending inputs: unchanged queue
+bytes survive, and native resume completes two inputs on separate turns without
+resubmission.
+Resume can empty the queue before its userMessage appears; that gap cannot
+authorize resend. LF admission, idempotency and external effects remain unproved.
 
-LF maps only its first start per writer to capture/provenance. Retries retain
-distinct native IDs; cross-capture reuse is rejected and missing/duplicate receipts
-stay uncertain. Controlled handoff preserves text/capture/siblings/ancestry.
-Admission, per-input attribution and matching-turn completion must change together:
-the driver records one capture and exits on first completion. Resume clears
-structured invocation. Held-owner delivery, LF lost-ack/draft recovery,
-catalog/resources, Claude parity and cost acceptance remain. Prior detail:
+LF maps only its first start per writer; retries retain distinct IDs and ambiguous
+receipts stay uncertain. Controlled handoff preserves text/capture/siblings/ancestry.
+Admission, SQLite start attribution, per-input events and completion must change
+together: the driver records one capture and exits on first completion; settlement
+can close later same-thread work. Resume clears structured invocation. Held-owner
+delivery, LF lost-ack/draft recovery, catalog/resources, Claude parity and cost
+acceptance remain. Prior detail:
 `94006060f`, `302fbd7cf`, this heading.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -98,7 +98,15 @@ async def _boundary_recovery(
     async with _app_server(codex, workspace, env, endpoint):
         for interrupt in [False] if queued else [False, True]:
             case, thread_id, capture = await _boundary_delivery(
-                endpoint, workspace, source, context, delivery, interrupt, codex, env, queued,
+                endpoint,
+                workspace,
+                source,
+                context,
+                delivery,
+                interrupt,
+                codex,
+                env,
+                queued,
                 terminal,
             )
             status = "interrupted" if interrupt else "completed"
@@ -243,7 +251,6 @@ async def _pending_queue_recovery(
                     ],
                 },
             )
-            before = await _ws_request(owner, "thread/queue/list", {"threadId": thread_id})
             await _ws_request(
                 owner,
                 "thread/queue/add",
@@ -254,11 +261,14 @@ async def _pending_queue_recovery(
                 },
             )
             before = await _ws_request(owner, "thread/queue/list", {"threadId": thread_id})
-            history = await _read_thread(owner, thread_id)
+            active_before = await _read_thread(owner, thread_id)
             checks = {
                 "accepted_pending_once": [item["clientUserMessageId"] for item in before["data"]]
                 == [capture, second_capture],
-                "not_started_before_engine_death": not _invocation_receipts(history, capture),
+                "not_started_before_engine_death": not any(
+                    _invocation_receipts(active_before, ident)
+                    for ident in (capture, second_capture)
+                ),
             }
             os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
@@ -274,12 +284,8 @@ async def _pending_queue_recovery(
         )
         receipts = _invocation_receipts(history["thread"], capture)
         second_receipts = _invocation_receipts(history["thread"], second_capture)
-        if pending["data"] == before["data"]:
-            await _request(
-                process,
-                "thread/queue/start",
-                {"threadId": thread_id, "queuedSubmissionId": pending["data"][0]["id"]},
-            )
+        # Native resume consumes pending input asynchronously. An empty queue
+        # before its userMessage appears is not evidence that the input was lost.
         try:
             async with asyncio.timeout(15):
                 while (
@@ -305,6 +311,19 @@ async def _pending_queue_recovery(
             and second_receipts[0][0]["status"] == "completed"
             and receipts[0][0]["id"] != second_receipts[0][0]["id"]
         )
+        checks["recovered_input_bytes_unchanged"] = (
+            len(receipts) == len(second_receipts) == 1
+            and receipts[0][1]["content"] == before["data"][0]["input"]
+            and second_receipts[0][1]["content"] == before["data"][1]["input"]
+        )
+        checks["interrupted_turn_history_preserved"] = (
+            len(history["thread"]["turns"]) == 3
+            and history["thread"]["turns"][0]["id"] == active_before["turns"][0]["id"]
+            and history["thread"]["turns"][0]["items"][: len(active_before["turns"][0]["items"])]
+            == active_before["turns"][0]["items"]
+        )
+        pending = await _request(process, "thread/queue/list", {"threadId": thread_id})
+        checks["queue_consumed_after_restart"] = pending["data"] == []
     return checks
 
 
@@ -890,9 +909,12 @@ def _assess_requests(
                 )
                 for request in native_requests
             ),
-            draft_not_submitted_with_skill=len(native_requests) == expected_expansions
-            and all("UNSUBMITTED_DRAFT_" not in json.dumps(request) for request in native_requests),
         )
+        if mode in ("boundary", "queue-race"):
+            checks["draft_not_submitted_with_skill"] = len(native_requests) == expected_expansions
+            checks["draft_not_submitted_with_skill"] &= all(
+                "UNSUBMITTED_DRAFT_" not in json.dumps(request) for request in native_requests
+            )
         return observation
     if mode == "redelivery":
         texts = _user_texts(requests[1]) if len(requests) >= 2 else []

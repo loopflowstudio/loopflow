@@ -48,7 +48,7 @@ CONTRACT = "Return the final answer as the declared JSON value: "
 
 
 def _contract(parts):
-    """The answer schema a Flow's driver wrote into the message, if any."""
+    """The answer schema a Flow's driver supplied in context, if any."""
     text = "".join(part.get("text", "") for part in parts)
     start = text.rfind(CONTRACT)
     if start < 0:
@@ -190,7 +190,8 @@ class Server(BaseHTTPRequestHandler):
             self._json({})
             threading.Thread(
                 target=_launch,
-                args=(self.path.split("/")[2], body["messageID"], body["parts"]),
+                args=(self.path.split("/")[2], body["messageID"],
+                      [{"text": body.get("system", "")}, *body["parts"]]),
                 daemon=True,
             ).start()
         elif self.path.startswith("/permission/"):

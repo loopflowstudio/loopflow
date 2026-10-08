@@ -118,14 +118,6 @@ impl GatherContextOpts {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PromptFormatMode {
-    #[default]
-    Full,
-    Context,
-    Task,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
@@ -1512,10 +1504,7 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
-/// Render system-safe reference sections (instructions only, no user content).
-///
-/// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: loopflow, surface.
+/// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1575,8 +1564,7 @@ pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
 
 /// Render user-content reference sections (docs, diffs, wave context, clipboard).
 ///
-/// These contain repo content that may trigger third-party app classifiers
-/// if placed in the system prompt. Safe to include in the user message.
+/// Preserve source boundaries and reference escaping in the assembled context.
 pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1707,85 +1695,28 @@ fn format_skill_tag(skill: &Skill) -> String {
     }
 }
 
-/// All reference sections combined (system + content).
-fn format_reference_sections(components: &PromptComponents) -> Vec<String> {
+/// Render the complete context, skill and current request in source order.
+pub fn format_prompt(components: &PromptComponents) -> String {
     let mut parts = format_system_sections(components);
     parts.extend(format_content_sections(components));
-    parts
-}
-
-/// Format prompt content for the requested mode.
-///
-/// Used by the daemon, ops callers, and prompt log writers.
-pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> String {
-    match mode {
-        PromptFormatMode::Full => {
-            let mut parts = format_reference_sections(components);
-
-            // Task sections: skill, message
-            if let Some(ref skill) = components.skill {
-                parts.push(format!("The skill.\n\n{}", format_skill_tag(skill)));
-            }
-
-            if let Some(ref message) = components.message {
-                parts.push(format!(
-                    "Additional instructions from user.\n\n\
-                     <lf:message>\n{}\n</lf:message>",
-                    render_message(message)
-                ));
-            }
-
-            parts.join("\n\n")
-        }
-        PromptFormatMode::Context => format_reference_sections(components).join("\n\n"),
-        PromptFormatMode::Task => {
-            let mut parts = Vec::new();
-
-            if let Some(ref skill) = components.skill {
-                parts.push(format_skill_tag(skill));
-            }
-
-            if let Some(ref message) = components.message {
-                parts.push(render_message(message));
-            }
-
-            parts.join("\n\n")
-        }
-    }
-}
-
-/// Format context components for system prompt (everything except task).
-pub fn format_context_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Context, components)
-}
-
-/// Format task prompt for user message (skill + free text).
-pub fn format_task_prompt(components: &PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Task, components)
-}
-
-/// Format system prompt for Claude (system-safe sections only).
-///
-/// Excludes docs, diffs, wave context, and clipboard — those go in the task
-/// prompt to avoid triggering third-party app classifiers.
-pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
-    format_system_sections(components).join("\n\n")
-}
-
-/// Format task prompt for Claude (content sections + skill + message).
-pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_content_sections(components);
 
     if let Some(ref skill) = components.skill {
-        parts.push(format_skill_tag(skill));
+        parts.push(format!("The skill.\n\n{}", format_skill_tag(skill)));
     }
 
     if let Some(ref message) = components.message {
-        parts.push(render_message(message));
+        parts.push(format!(
+            "Additional instructions from user.\n\n\
+             <lf:message>\n{}\n</lf:message>",
+            render_message(message)
+        ));
     }
 
     parts.join("\n\n")
 }
+
+/// Starts the turn after the assembled instructions have loaded from the system file.
+pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied context.";
 
 /// Write a runtime prompt file and return its path.
 ///
@@ -1905,18 +1836,11 @@ mod tests {
             )),
             ..Default::default()
         };
-        for prompt in [
-            format_prompt(PromptFormatMode::Full, &components),
-            format_context_prompt(&components),
-            format_task_prompt(&components),
-            format_claude_task_prompt(&components),
-        ] {
-            assert!(!prompt.contains("$kickoff"));
-            assert!(!prompt.contains("$wave/operate"));
-            assert!(prompt.contains("&#36;kickoff"));
-            assert!(prompt.contains("&#36;{HOME} &#36;HOME &#36;(pwd) &#36;5 café"));
-        }
-        let submitted = format_claude_task_prompt(&components);
+        let submitted = format_prompt(&components);
+        assert!(!submitted.contains("$kickoff"));
+        assert!(!submitted.contains("$wave/operate"));
+        assert!(submitted.contains("&#36;kickoff"));
+        assert!(submitted.contains("&#36;{HOME} &#36;HOME &#36;(pwd) &#36;5 café"));
         assert!(submitted.contains("Use $implement."));
         assert!(submitted
             .contains("The selected skill and live request determine the current operation."));
@@ -1945,7 +1869,7 @@ mod tests {
     }
 
     fn render_full_prompt(components: PromptComponents) -> String {
-        format_prompt(PromptFormatMode::Full, &components)
+        format_prompt(&components)
     }
 
     #[test]
@@ -2586,7 +2510,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+        let prompt = format_prompt(&ctx);
 
         assert!(prompt.contains("mod a;"));
         assert!(prompt.contains("mod c;"));
@@ -2606,7 +2530,7 @@ mod tests {
         })
         .unwrap();
         let decisions = drop_duplicate_docs(&mut components, repo.path());
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = format_prompt(&components);
 
         assert_eq!(prompt.matches("Keep rollback available.").count(), 1);
         assert!(decisions.iter().any(|decision| {
@@ -2662,7 +2586,7 @@ mod tests {
         };
         let ctx = gather_context(&opts).expect("gather context");
         let has_diff = ctx.diff.is_some();
-        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+        let prompt = format_prompt(&ctx);
 
         assert!(
             !has_diff,
@@ -2695,7 +2619,7 @@ mod tests {
             ..Default::default()
         };
         let ctx = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &ctx);
+        let prompt = format_prompt(&ctx);
 
         assert!(prompt.contains("mod changed;"));
         assert!(!prompt.contains("mod unchanged;"));
@@ -2940,150 +2864,6 @@ mod tests {
         assert!(content.contains("target/"));
         assert!(content.contains("node_modules/"));
         assert!(content.contains(".lf/prompts/"));
-    }
-
-    // ==========================================================================
-    // format_context_prompt tests
-    // ==========================================================================
-
-    #[test]
-    fn format_context_prompt_excludes_skill() {
-        let components = PromptComponents {
-            surface: Surface::Headless,
-            skill: Some(Skill {
-                name: "implement".to_string(),
-                content: Some("Implement the feature.".to_string()),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            ..Default::default()
-        };
-
-        let context = format_context_prompt(&components);
-        // Should NOT include skill content
-        assert!(!context.contains("<lf:skill:implement>"));
-        assert!(!context.contains("Implement the feature."));
-        // Should include surface instructions
-        assert!(context.contains("Run mode is headless"));
-    }
-
-    #[test]
-    fn format_context_prompt_includes_all_context() {
-        let components = PromptComponents {
-            surface: Surface::Cli,
-            docs: vec![Document {
-                path: "README.md".to_string(),
-                content: "# Project".to_string(),
-                source: DocumentSource::Docs,
-            }],
-            clipboard: Some("Error message".to_string()),
-            skill: Some(Skill {
-                name: "debug".to_string(),
-                content: Some("Fix the error.".to_string()),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            ..Default::default()
-        };
-
-        let context = format_context_prompt(&components);
-        // Should include context parts
-        assert!(context.contains("<lf:files>"));
-        assert!(context.contains("# Project"));
-        assert!(context.contains("<lf:clipboard>"));
-        // Should NOT include skill (goes in task prompt)
-        assert!(!context.contains("<lf:skill:debug>"));
-        assert!(!context.contains("Fix the error."));
-    }
-
-    #[test]
-    fn format_context_prompt_headless_surface_message() {
-        let components = PromptComponents {
-            surface: Surface::Headless,
-            ..Default::default()
-        };
-
-        let context = format_context_prompt(&components);
-        assert!(context.contains("Run mode is headless"));
-        assert!(context.contains("scratch/questions.md"));
-    }
-
-    // ==========================================================================
-    // format_task_prompt tests
-    // ==========================================================================
-
-    #[test]
-    fn format_task_prompt_returns_skill_content() {
-        let components = PromptComponents {
-            skill: Some(Skill {
-                name: "implement".to_string(),
-                content: Some("Implement the feature.".to_string()),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            ..Default::default()
-        };
-
-        let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:skill:implement>"));
-        assert!(task.contains("Implement the feature."));
-        assert!(task.contains("</lf:skill:implement>"));
-    }
-
-    #[test]
-    fn format_task_prompt_empty_when_no_skill_or_message() {
-        let components = PromptComponents::default();
-        let task = format_task_prompt(&components);
-        assert!(task.is_empty());
-    }
-
-    #[test]
-    fn format_task_prompt_includes_message() {
-        let components = PromptComponents {
-            message: Some("fix the login bug".to_string()),
-            ..Default::default()
-        };
-        let task = format_task_prompt(&components);
-        assert_eq!(task, "fix the login bug");
-    }
-
-    #[test]
-    fn format_task_prompt_message_with_skill() {
-        let components = PromptComponents {
-            skill: Some(Skill {
-                name: "debug".to_string(),
-                content: Some("Debug the error.".to_string()),
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            message: Some("login page crashes".to_string()),
-            ..Default::default()
-        };
-        let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:skill:debug>"));
-        assert!(task.contains("login page crashes"));
-    }
-
-    #[test]
-    fn format_task_prompt_skill_without_content() {
-        let components = PromptComponents {
-            skill: Some(Skill {
-                name: "review".to_string(),
-                content: None,
-                agent: None,
-                default_agent: None,
-                action_style: None,
-            }),
-            ..Default::default()
-        };
-
-        let task = format_task_prompt(&components);
-        assert!(task.contains("<lf:skill:review>"));
-        assert!(task.contains("</lf:skill:review>"));
     }
 
     // ==========================================================================

@@ -45,16 +45,20 @@ printf '%s\n' "$@"
     }
     let output = command
         .args(["-a", "claude:sonnet"])
-        // Outside the checkout: the launch prompt carries the working directory's
-        // scratch notes, and a branch with large notes exceeds Linux's argument limit.
+        // Keep the conversational fixture independent of this checkout's context.
         .current_dir(&repo)
         .env("LF_HOME", temp.path().join("home"))
         .env("PATH", path)
         .output()
         .unwrap();
 
-    let prompt = String::from_utf8_lossy(&output.stdout);
-    assert!(prompt.contains("--model\nsonnet\n"), "{prompt}");
+    let arguments = String::from_utf8_lossy(&output.stdout);
+    assert!(arguments.contains("--model\nsonnet\n"), "{arguments}");
+    let mut arguments = arguments.lines();
+    arguments
+        .find(|arg| *arg == "--append-system-prompt-file")
+        .expect("context file argument");
+    let prompt = fs::read_to_string(arguments.next().unwrap()).unwrap();
     assert!(prompt.contains("<lf:skill:default>"), "{prompt}");
     assert!(!prompt.contains("<lf:skill:repo/operate>"), "{prompt}");
     assert!(!prompt.contains("lf session list --json"), "{prompt}");

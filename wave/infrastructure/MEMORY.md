@@ -171,13 +171,9 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
-one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
-comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
-(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
-select history. Preservation constraints and contrary evidence remain under
-Capture cutover below. This decision authorizes neither installed conversion nor
-live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
+LOO-370's decision and preservation limits live under Capture cutover below.
+PR #1450 (`1af81fe03`) is integrated. Delegation and the exact Task steer remain
+at `2d333d18c:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -385,18 +381,12 @@ unproved. The branch’s prior memory curation remains in Git history at
 
 ## Operator acceptance and account direction (2026-10-04)
 
-Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine
-usage rather than another staged acceptance exercise. Both now read `done`
-through `lf task status`. LOO-367's retained feature invocation completed design
-review, traversed four loop returns and reached demo; LOO-285 independently
-reached demo after four returns. Together with LOO-295's reconciled merged
-PR #1283, this closes its remaining continuation proof. Its unrelated viewer and
-earlier assessment survive at `~/.lf-retired/20261004-loo295/scratch`.
-
-LOO-342's installed routing checks and ongoing main-Home usage establish its
-outcome. Jack explicitly declined more work on retired Ask tooling. Four old
-stores still had legacy process handles at that read; their later authorized
-retirement is recorded below. Cleanup no longer blocks this Task's completion.
+Jack Heart closed LOO-295 and LOO-342 on actual machine usage; both read `done`.
+LOO-367/285's retained Flow progress and PR #1283 established continuation;
+installed routing established the one-Home outcome. Jack declined retired Ask
+work. Exact acceptance and preserved viewer artifacts:
+`35e759aaf4:wave/infrastructure/MEMORY.md` under this heading. Legacy retirement
+below supersedes the then-live process handles.
 
 LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
 cross-binary history means discovering native Session records across folders,
@@ -1068,11 +1058,26 @@ follow-ups. Measure command drift, avoidable rebases and post-land repairs befor
 tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (curated 2026-10-05)
+## Direct invocation and large inputs (LOO-429, 2026-10-07)
 
-`44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
-checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
-Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
+Jack Heart selected all assembled context in one system file, including skills
+and Task briefs; no split, fallback or lf-side refusal wording. The historical
+Claude block was a first-response error inside its terminal. Jack requested
+queue preparation then landing of PR #1498 and Task completion, superseding the
+review-only boundary; unobserved checks remain unproved and do not hold landing.
+
+Jack's cmux screenshot shows Claude reading the exact fixture marker, OpenCode
+and the first Infrastructure memory heading. Its title was “Supplied context
+instructions”; auto mode supplies no plan-mode proof. Codex exited 2 on duplicate
+`--dangerously-bypass-hook-trust` before responding. LOO-428 owns that repair;
+retry its configured wrapper path afterward. Plan mode, Codex readback/title and
+native resume remain unverified. LOO-422 owns broader titles.
+
+Terminal, batch and persistent harnesses share one context-file writer; stubs
+prove transport/retention, not native resume.
+Demo evidence remains in Git. `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpoint,
+common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
+remains unresolved. Claude success proves no repair.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,

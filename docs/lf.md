@@ -62,6 +62,18 @@ lf --agent claude:opus debug
 
 `--agent` / `-a` selects the harness and optional model as `harness[:model]`.
 
+## Run a Flow interactively
+
+```bash
+lf -i -a claude run my-flow
+lf -b -a claude run my-flow # run every step headlessly
+```
+
+Each skill opens in the native agent conversation. Exit the conversation
+successfully to advance to the next step; an interrupted or failed step stops
+the Flow. Without either flag, an attached terminal selects interactive mode,
+just like a standalone skill. Task Flow launches preserve the same choice.
+
 ## Select where work happens
 
 ```bash
@@ -113,10 +125,14 @@ lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
+Claude and Codex terminal launches load the complete assembled context from a
+system instructions file. The first user message is a short execution request;
+Wave memory, scratch, diffs, clipboard, skills and Task briefs stay out of the
+command-line argument. Provider refusals remain visible in the native terminal.
+
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches. IDE launches with Wave documents
-use the assembled prompt so those references reach the provider.
+remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.

@@ -185,8 +185,11 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--batch".to_string()];
+        let mut args = Vec::new();
         for (flag, enabled) in [
+            ("--batch", self.batch),
+            ("--interactive", self.interactive),
+            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),

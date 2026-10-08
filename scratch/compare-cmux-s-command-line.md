@@ -2,7 +2,9 @@
 
 **Status (October 8, 2026):** implementation authorized by Jack Heart; slice 1
 implemented at `21ce4e495`, simplified at `f8d3386da`.
-One PR through demo review; slices 2–5 remain. Jack selected execution-machine local operations and custom Git-ref Task sync
+One PR through demo review; slices 2–5 remain. Slice 2 awaits coherent committed
+LOO-406/412 APIs; the dependency inspection is recorded in [findings](findings.md#integration-boundary-october-8).
+Jack selected execution-machine local operations and custom Git-ref Task sync
 on October 8, superseding the planning-machine/callback proposal.
 The implementation sequence below replaces the earlier combined architecture
 slice. [Findings](findings.md) hold the source evidence;
@@ -44,6 +46,21 @@ opening; LOO-416 saved panes; LOO-387 draft preparation; LOO-415/424 relay/resum
 LOO-422 host status; LOO-402/403 Waiting/shortcuts; LOO-397 command discovery.
 These boundaries are integration constraints, not separate replacement projects.
 
+## Delete — do not maintain
+
+- Replace `store/sqlite/durable.rs::inherit_placement`'s creation-time copies
+  with effective delegation in slice 2. Preserve historical assignments as
+  unknown provenance and keep `tasks.checkout_machine_id` independent.
+- Replace `LoopflowApp`'s unaddressed workspace `WindowGroup`, `WavesView`'s
+  separate opening path and `WorkLinkRouter`'s unrelated-window fallback/single
+  pending URL together in slice 3. Preserve utility windows and every destination.
+- Replace path-only Session read keys and Machine-unqualified `TerminalIdentity`
+  lookups with their consumers, callbacks and fixtures in slice 4. Preserve
+  retained native surfaces, focus, drafts and explicit Session bindings.
+- LOO-412 owns replacing `TaskSource::accept_planning`'s independent adoption;
+  LOO-406 owns deleting split planning-authority dispatch. Consume their finished
+  paths here; neither predecessor supplies the shared repository identity.
+
 ## Implementation sequence — one PR
 
 ### 1. Separate recorded checkout location from delegation — Implemented locally
@@ -72,8 +89,15 @@ history, alias pagination and explicit bindings. No installed store was changed.
 
 ### 2. Shared Work identity, delegation and routing
 
-**This slice. Depends on 1 and the common APIs from LOO-406/412.** Preserve
-shared planning identity through local reads/writes, synchronization and delegation. Add the repository
+**Next slice; dependency unavailable at this inspection.** LOO-406's
+`b3cd894f3` shares comments but retains split planning owners; LOO-412's
+`2bb5ce5c4` has no committed Git planning exchange. Required integration is a
+common local create/edit/comment/planning-outcome writer with stable pending
+mutation IDs, plus portable export/import and exchange preserving execution.
+Repository identity and delegation need that same portable schema. Uncommitted
+transport work is not an integration API. Slices 3–5 retain their dependencies.
+
+Preserve shared planning identity through local reads/writes, synchronization and delegation. Add the repository
 root identity within the shared model, including repositories with no Tasks.
 Reuse LOO-406's storage primitives rather than implementing its local lifecycle
 again. Preserve connected-plan ownership and existing historical identities.
@@ -191,4 +215,4 @@ original input target and draft survive. Review native usability separately from
 headless gate. Preserve comparison dispositions and evidence limits; no real
 provider accounts or live user terminals.
 
-Check: prior compression results retained for unchanged Rust: `cargo test -p loopflow --lib` filters `task_checkout_machine`, `human_session::workspace::tests`, `task_files_`, `task_workspace_context_covers` (13 pass, execution variables cleared), fmt and Clippy pass; realign: `git diff --check` and `lf context --skill realign --json` pass; gate owns materialized/installation migrations, full Session lifecycle and Desktop; native demo remains.
+Check: `git diff --check` and `lf context --skill implement --json` pass for the dependency reconciliation; unchanged Rust retains 13 focused passes, fmt and Clippy from compression; gate owns materialized/installation migrations, full Session lifecycle and Desktop; native demo remains.

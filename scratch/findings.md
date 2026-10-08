@@ -126,3 +126,25 @@ overwrites a single pending URL and falls back to an unrelated window. These
 findings preserve the remaining work in slices 2–5, rather than establishing any Desktop control
 as complete. Product has no child directories or child memories in this checkout;
 Infrastructure's Machine/reporting notes retain the existing integration owners.
+
+## Integration boundary — October 8
+
+Read-only inspection from LOO-427 at `eccb65253` checked both owner branches and
+their current designs. LOO-406 at `b3cd894f3` has shared comment transactions,
+but `PlanningAuthority`, `project_authority_on` and personal-plan creation/edit
+paths remain. Its current design explicitly says the coherent writer boundary
+is unfinished; the later abandonment changes are also uncommitted. The separate
+Linear reopening race is not itself a prerequisite for Git transport.
+
+LOO-412 at `2bb5ce5c4` still ships `TaskSource::accept_planning`, which imports a
+provider snapshot without carrying shared Task identity. Its selected Git design
+is in the working tree; `engine/planning_git.rs` is untracked, with no committed
+portable export/import or common-writer integration. No dirty dependency code was
+copied and neither owner's checkout was changed.
+
+Slice 2 needs committed common local mutations with stable pending identities,
+portable export/import preserving causal reopening and local execution, and Git
+exchange. Repository identity/delegation must extend that shared schema. Building
+Desktop identity on today's adoption path would retain the authority being
+replaced; a new local writer or Git engine here would duplicate an explicit owner.
+The complete outcome remains unchanged and implementation stops at this dependency.

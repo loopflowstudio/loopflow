@@ -3,6 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -40,7 +41,7 @@ exec env -i HOME='{}' PATH=/usr/bin:/bin bash -c "$remote_command"
         }
         let fixture = Self { root };
         fixture.remote(
-            env!("CARGO_PKG_VERSION"),
+            loopflow::build_info::BUILD_VERSION,
             "home_11111111111111111111111111111111",
         );
         fixture
@@ -131,6 +132,45 @@ INSTALLER
         );
     }
 
+    fn foreground(&self, args: &[&str]) -> Output {
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: valid output pointers; null selects default terminal settings.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two fresh owned descriptors.
+        let _master = unsafe { fs::File::from_raw_fd(master) };
+        // SAFETY: slave is the other fresh owned descriptor from openpty.
+        let slave = unsafe { fs::File::from_raw_fd(slave) };
+        let mut command = self.command(args);
+        command.stdin(Stdio::from(slave));
+        // SAFETY: the child only calls async-signal-safe OS functions before exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::tcgetpgrp(0) != libc::getpgrp() {
+                    return Err(std::io::Error::other(
+                        "fixture needs the foreground terminal",
+                    ));
+                }
+                Ok(())
+            });
+        }
+        command.output().unwrap()
+    }
+
     fn json(&self, args: &[&str]) -> Value {
         let output = self.run(args);
         assert_success(&output);
@@ -181,12 +221,19 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     assert_eq!(added["id"], repeated["id"]);
     assert_eq!(added["created_at"], repeated["created_at"]);
     let statuses = fixture.json(&["machine", "status", "mini", "--json"]);
-    assert_eq!(statuses[0]["remote_version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(statuses[0]["local_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        statuses[0]["remote_version"],
+        loopflow::build_info::BUILD_VERSION
+    );
+    assert_eq!(
+        statuses[0]["local_version"],
+        loopflow::build_info::BUILD_VERSION
+    );
     assert!(statuses[0]["error"].is_null());
     assert_success(&fixture.run(&["machine", "rename", "mini", "builder"]));
     let connected = fixture.run(&["--machine", "builder", "session", "list"]);
     assert_success(&connected);
+    assert!(!String::from_utf8_lossy(&connected.stderr).contains("versions differ"));
     let text = String::from_utf8_lossy(&connected.stdout);
     assert!(text.contains("project's checkout"), "{text}");
     assert!(text.contains("argument: session"), "{text}");
@@ -212,7 +259,7 @@ fn add_alias_rename_connect_and_remove_preserve_identity() {
     assert_eq!(retained, added["id"].as_str().unwrap());
     // A replacement at the same destination can be explicitly added after removal.
     fixture.remote(
-        env!("CARGO_PKG_VERSION"),
+        loopflow::build_info::BUILD_VERSION,
         "home_22222222222222222222222222222222",
     );
     assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
@@ -261,7 +308,7 @@ fn unregistered_and_changed_machines_cannot_receive_a_command() {
     assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));
     assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));
     fixture.remote(
-        env!("CARGO_PKG_VERSION"),
+        loopflow::build_info::BUILD_VERSION,
         "home_22222222222222222222222222222222",
     );
     let output = fixture.run(&["--machine", "mini", "session", "list"]);
@@ -416,7 +463,10 @@ fn machine_selector_dispatches_before_local_help_and_placement() {
         assert_success(&output);
         let stdout = String::from_utf8_lossy(&output.stdout);
         if args.last() == Some(&"--version") {
-            assert!(stdout.contains(env!("CARGO_PKG_VERSION")), "{stdout}");
+            assert!(
+                stdout.contains(loopflow::build_info::BUILD_VERSION),
+                "{stdout}"
+            );
         } else {
             for arg in args.iter().filter(|arg| {
                 !matches!(**arg, "--machine" | "--machine=mini" | "mini")
@@ -463,7 +513,7 @@ case "$1 $2 $3" in
 *) printf 'selection: %s\nisolation: %s\n' "$LF_ACCOUNT_SELECTION" "$LF_ACCOUNT_ISOLATION"; printf 'argument: %s\n' "$@";;
 esac
 "#,
-            env!("CARGO_PKG_VERSION")
+            loopflow::build_info::BUILD_VERSION
         ),
     );
     let args = [
@@ -524,6 +574,37 @@ esac
         assert!(stderr.contains("lf machine connect"), "{stderr}");
         assert!(!String::from_utf8_lossy(&output.stdout).contains("argument:"));
     }
+
+    for args in [
+        vec![
+            "-b",
+            "machine",
+            "connect",
+            "mini",
+            "codex",
+            "person@example.com",
+        ],
+        vec![
+            "--machine",
+            "mini",
+            "-b",
+            "--account",
+            "codex=person@",
+            "implement",
+        ],
+    ] {
+        fs::write(remote.join("connected"), "false").unwrap();
+        let output = fixture.foreground(&args);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("foreground terminal without --batch"),
+            "{stderr}"
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("argument:"));
+        fs::write(remote.join("connected"), "true").unwrap();
+        assert_success(&fixture.foreground(&args));
+    }
 }
 
 #[test]
@@ -580,7 +661,7 @@ fn machine_add_on_the_remote_updates_only_its_registry() {
         &remote.join(".local/bin/ssh"),
         &format!(
             "#!/bin/sh\nprintf 'lf {}\\nhome_33333333333333333333333333333333\\n'\n",
-            env!("CARGO_PKG_VERSION")
+            loopflow::build_info::BUILD_VERSION
         ),
     );
     assert_success(&fixture.run(&["machine", "add", "mini", "--repo", "."]));

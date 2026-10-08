@@ -1,10 +1,9 @@
 # Sign a machine in as me — LOO-413
 
 October 8 delivery update: Jack Heart accepted the reported Codex demo with
-“sounds good. advance the task.” The saved `code` workflow is at `demo`; its
-forward edge is `ship` (gate, then `pr land -c`). This proceeds beyond the prior
-publication-and-review boundary. Gate owns the recorded version-warning repair,
-OAuth output-handle investigation and affected checks. Unperformed provider,
+“sounds good. advance the task.” The saved `code` workflow advances through
+`ship` (gate, then `pr land -c`). This proceeds beyond the prior
+publication-and-review boundary. Gate findings and remaining CI coverage are recorded below. Unperformed provider,
 later-refresh, reboot and installed-runtime acceptance remains unproved; the
 accepted Codex demo does not invent those results.
 
@@ -86,30 +85,39 @@ refresh, historical captures, machine records and routes remain.
 
 ## Remaining work
 
-- Source reconciliation found no additional product decision. The compression
-  changes are checkpointed at `407bcde3eb54c079e9fd6cc2d2e7b97d411c6f5f`;
-  their recorded focused results below still apply. Publication remains pending.
-- Advance PR #1493 through the accepted `ship` edge, preserving the demo proof
-  and its limits in delivery copy.
-- Gate/CI owns the full affected suite. The focused source checks cover account
-  routing, native receipt/registration, byte preservation, command discovery and
-  token-key handling. Diagnose the retained output handle in
-  `linear_oauth_proactive_failure_tracing_is_secret_free`; passing assertions
-  do not establish child cleanup. Release's bounded-cleanup lesson applies,
-  but its earlier Swift cause does not explain this Rust fixture. No installed
-  store or real credential was used.
-- Hand verification, first: a second login for the same account leaves the first
-  signed in. Codex now passes immediate coexistence and remote execution in the
-  source deployment; the other providers remain. Then independent Claude/Codex refresh chains; independent Linear
-  grants refreshed on different days; copied gh token usable on both machines;
-  Mac after reboot with a locked Keychain; at most one browser approval per account
-  and no remote terminal. Fixtures cannot establish these results. Real-account
-  verification for the first check is now authorized by Jack Heart's October 8
-  reply; see the demo note for execution and evidence limits.
-- Correct the source-version warning: identical local/remote binaries compare
-  the remote build suffix against the local package version and report a false
-  difference. The successful source demo does not establish default installed
-  runtime or migration acceptance.
+- Continue PR #1493 through the saved `ship` edge after gate. Jack Heart's
+  October 8 acceptance supersedes publication-only delivery. The Flow owns
+  the following `pr land -c` operation; gate does not launch another Flow.
+- Preserve the demonstrated Codex outcome and the unproved later independent
+  refresh, Claude/Linear/GitHub, missing-account interactive launch, unrelated
+  target-account live preservation, reboot/locked-Keychain and default-installed
+  acceptance. No additional real login or installation ran during gate.
+- CI owns the release-materialized Rust matrix and the Python suite under its
+  supported isolation boundary. Local Python found two macOS sandbox limitations:
+  redundant process-group cleanup returned EPERM after pipe EOF, and nested
+  `sandbox-exec` could not apply its policy. The three direct headless cases
+  passed; the 405 other Python cases passed with external networking denied.
+
+## Gate findings — 2026-10-08
+
+Machine status and version warnings now use the same build identity as
+`lf --version`, retaining source suffixes. Equal-build SSH dispatch and status
+are covered alongside the existing unequal-version/recovery cases.
+The rendered security guide test still asserted removed broker behavior; it now
+checks added-machine scope, stdin transfer, retained accounts and opt-in SSH
+agent forwarding. The other ten rendered documentation checks passed.
+
+Batch mode can inherit a foreground terminal. Missing login preparation now
+honors `--batch` in both explicit connect and selected remote launch, while
+already installed logins remain usable. A public CLI fixture gives each child
+its own controlling foreground PTY to exercise that boundary.
+
+The OAuth fixture was inspected: it joins its isolated tracing child with
+`output()`, and its loopback server belongs to the child runtime. The exact
+network-isolated test passed, then passed in the 520-case affected run with no
+retained-output warning. The earlier leak's cause remains unknown; no speculative
+cleanup change or retry was added. Release's bounded-cleanup lesson informed the
+investigation, without importing its unrelated Swift diagnosis.
 
 Review repairs: interrupted file-to-SQLite registration reuses the received login;
 remote flags cannot relax the selected identity; credential-free and previously
@@ -145,4 +153,4 @@ fixtures establish no real refresh-chain or installed acceptance.
 Main-sync selector/login checks and earlier routing/rendered-guide evidence remain
 at `d442386dbdc8d49cc85a64a34644e64f6483a3f1:scratch/work-on-another-machine-name.md`.
 
-Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib -E 'test(ops::pm::oauth_tests::) | test(provider_account::account_first_tests::) | test(provider_account::inspection_tests::) | test(provider_account::tests::hard_rate_limit_cools_the_active_account)' --no-fail-fast` passed (40/40; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned). Nextest reported an open output handle in `linear_oauth_proactive_failure_tracing_is_secret_free`; gate/CI owns cleanup investigation and full affected verification.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check`, `uv run python scripts/check_architecture.py` passed; with LF_/LOOPFLOW_ cleared, LF_BIN pinned and the absolute `scripts/test_network.py` Cargo runner, `cargo nextest run -p loopflow --lib --bin lf --test machine_commands --test machine_credentials --test auth_tests --test cli_discovery --test global_commands --test dto_fixtures --test documented_commands -E 'not binary(loopflow) | test(lf::) | test(provider_account::) | test(provider_auth::) | test(store::token_crypto::) | test(ops::pm::oauth_tests::) | test(engine::process::) | test(harness::codex::) | test(harness::conformance_tests::)' --no-fail-fast --build-jobs 4 --test-threads 4` passed 520/520; after batch repair, `cargo nextest run -p loopflow --lib --test machine_commands --test machine_credentials -E 'test(machine_credentials::) | binary(machine_commands) | binary(machine_credentials)' --no-fail-fast --build-jobs 4 --test-threads 4 --status-level fail` passed 22/22; `uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/ -q` passed 405 with two sandbox-boundary failures, all three direct `test_desktop_performance.py -k 'cleanup_closes_descendant_pipes_even_after_leader_exit or checkout_observation_preserves_read_boundary_and_detects_changes'` cases passed; website `uv run python dev.py test -k test_docs` passed 10 plus the stale security test repaired and passed individually; release-materialized Rust and isolated Python completion remain CI-owned.

@@ -38,6 +38,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 *provider,
                 email.as_deref(),
                 chrome_profile.as_deref(),
+                batch,
             )
             .await;
         }
@@ -139,7 +140,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 let status = MachineStatus {
                     update_command: update_command(&machine.route),
                     machine,
-                    local_version: env!("CARGO_PKG_VERSION"),
+                    local_version: crate::build_info::BUILD_VERSION,
                     remote_version,
                     error,
                 };
@@ -399,7 +400,7 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
 }
 
 pub(super) fn report_version(target: &str, remote: &str) {
-    let local = env!("CARGO_PKG_VERSION");
+    let local = crate::build_info::BUILD_VERSION;
     if remote != local {
         eprintln!(
             "lf versions differ: remote {remote}, local {local}. Update the remote with `{}`",

@@ -66,24 +66,22 @@ is integrated. Parent landing grants no later-slice or LOO-413 landing authority
 
 ## Resident machine logins (LOO-413, 2026-10-08)
 
-Jack Heart authorized #1493 publication, real Codex/source verification, then
-accepted the demo and requested `ship`. Transfer stdin only to added machines.
-Preserve received logins after registration failure and selected identity despite
-remote preferences. Keep keys atomic/private; unreadable Keychain permits a new
-key only without encrypted tokens. Reorder account arguments before selection;
-preserve `--` literals and target-owned resolution.
+Jack Heart accepted the real Codex demo and requested `ship` for #1493,
+superseding publication-only delivery. Only added machines receive stdin logins.
+Retain interrupted registrations, selected identity, atomic/private keys and
+target-owned resolution. Keychain read failure permits a new key only without
+encrypted tokens. Batch never starts missing logins, even with a terminal.
 
 Browser-approved Codex transfer to MINI (`mini-heart`), authenticated reads on
-both machines, selected remote execution and headless reconnect passed. Source
-deployments use isolated stores; standard installs remain unchanged.
-Later refresh independence, other providers, locked-Keychain reboot and installed
-acceptance remain unproved. Identical binaries falsely report a version difference
-from mismatched version formatting. Evidence:
-`scratch/machine-sign-in-demo.md`.
+both machines, selected execution and headless reconnect passed in isolated
+source deployments; standard installs remain unchanged. Later refresh independence,
+other providers, locked-Keychain reboot and installed acceptance remain unproved.
+Demo evidence: `353cd661e:scratch/machine-sign-in-demo.md`.
 
-Main sync, forwarding removal and Linear preservation proofs:
-`178abab13:wave/infrastructure/MEMORY.md`. Gate/CI owns the OAuth output-handle
-leak; Release's cleanup lesson applies, not its Swift diagnosis.
+Gate repaired build-version comparison; OAuth's output-handle warning did not
+reproduce, without a known cause or repair. CI retains materialized Rust and
+macOS sandbox Python checks. Earlier proofs: `178abab13:wave/infrastructure/MEMORY.md`;
+current checks: `scratch/work-on-another-machine-name.md`.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 

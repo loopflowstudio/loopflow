@@ -52,6 +52,7 @@ pub(super) async fn connect(
     provider: Provider,
     email: Option<&str>,
     chrome_profile: Option<&str>,
+    batch: bool,
 ) -> Result<()> {
     let store = open_account_store().await?;
     let credential = match provider {
@@ -62,7 +63,7 @@ pub(super) async fn connect(
             if remote_has(machine, provider, login)? {
                 return Ok(());
             }
-            require_foreground()?;
+            require_foreground(batch)?;
             eprintln!(
                 "Connecting {provider} {login} on {}",
                 machine.label.as_deref().unwrap_or(&machine.route)
@@ -100,7 +101,7 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground()?;
+            require_foreground(batch)?;
             Credential::Github {
                 login,
                 token: token.expose_secret().clone(),
@@ -115,7 +116,7 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            require_foreground()?;
+            require_foreground(batch)?;
             let fresh = super::account::fresh_linear_login(&store, chrome_profile).await?;
             if linear_login(&fresh.access_token).await? != login {
                 bail!("fresh Linear login belongs to a different account; discarded");
@@ -147,12 +148,12 @@ pub(super) async fn connect(
     Ok(())
 }
 
-fn require_foreground() -> Result<()> {
+fn require_foreground(batch: bool) -> Result<()> {
     use std::io::IsTerminal;
     // SAFETY: querying this process and stdin's foreground process group does not mutate either.
     let foreground = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
-    if !std::io::stdin().is_terminal() || !foreground {
-        bail!("a missing machine login needs a foreground terminal; run `lf machine connect <machine> <provider> [email]` there first");
+    if batch || !std::io::stdin().is_terminal() || !foreground {
+        bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine connect <machine> <provider> [email]` there first");
     }
     Ok(())
 }
@@ -616,7 +617,7 @@ pub(super) async fn prepare_launch(
             .as_ref()
             .ok_or_else(|| anyhow!("selected account has no expected login email"))?
             .as_str();
-        connect(machine, provider, Some(login), None).await?;
+        connect(machine, provider, Some(login), None, cli.batch).await?;
         selectors.push(format!("{provider}={login}"));
     }
     // An explicitly requested login may not fall back to somebody else remotely.

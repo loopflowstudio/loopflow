@@ -390,7 +390,8 @@ to the requested accounts, so it cannot fall back to a different login. A simple
 launch without selectors uses the laptop's configured provider route when available.
 Read commands without account selectors do not connect accounts.
 
-Transfers run in the foreground. A headless launch needing a missing login reports
+Transfers run in the foreground. `--batch` never starts a missing login, even
+with a terminal attached. A headless launch needing a missing login reports
 the connect command; it does not start browser authorization. SSH launches use
 isolated, file-backed account homes, including on macOS. The target needs its own
 provider CLI. Credential bytes travel on SSH stdin, never in argv or an exported

@@ -1,0 +1,372 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LOO-386 · Workflow and Flow review</title><style>
+:root{color-scheme:light;--paper:#faf8f3;--ink:#282322;--muted:#68605d;--line:#d9d2c9;--accent:#752c40}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,sans-serif}main{max-width:1120px;margin:auto;padding:54px 42px 90px}h1,h2{font-family:Georgia,serif;line-height:1.15;font-weight:400}h1{font-size:46px;margin:14px 0 20px}h2{font-size:32px;margin:0 0 22px}h3{font-size:19px}p{max-width:840px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;gap:12px 24px;flex-wrap:wrap;margin:30px 0}small,.meta,figcaption{color:var(--muted);font-size:13px}section{border-top:1px solid var(--line);padding-top:38px;margin-top:44px;scroll-margin-top:24px}table{border-collapse:collapse;width:100%;margin:28px 0}th,td{padding:16px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}th:first-child,td:first-child{padding-left:0;width:23%}th{font-size:13px;color:var(--muted)}figure{margin:28px 0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}pre{background:#efebe4;padding:22px 24px;margin:0;font:14px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:auto;tab-size:4;border-left:2px solid #c6b6ae}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}pre code{font-size:inherit}.note{border-left:3px solid var(--accent);padding:0 0 0 20px;margin:26px 0}.terminal pre{background:#272422;color:#f4ede3;border:0}details{margin:22px 0}summary{cursor:pointer;color:var(--accent);padding:8px 0}:focus-visible{outline:2px solid var(--accent);outline-offset:4px}.eyebrow{letter-spacing:.06em;text-transform:uppercase;font-size:12px;color:var(--muted)}@media(max-width:680px){main{padding:28px 20px 60px}h1{font-size:34px}h2{font-size:27px}pre{padding:16px;font-size:13px}thead{display:none}table,tbody,tr,td{display:block}tr{padding:10px 0;border-bottom:1px solid var(--line)}td,td:first-child{width:100%;border:0;padding:8px 0}td:before{content:attr(data-label);display:block;font-size:12px;color:var(--muted);font-weight:600}}@media print{body{background:white}main{max-width:none;padding:0}nav{display:none}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:9px}figure{break-inside:avoid}a{color:inherit}h1{font-size:30px}section{margin-top:24px;padding-top:20px}}
+</style><main><header><div class="eyebrow">PR #1492 · LOO-386 · October 7, 2026</div><h1>Workflow belongs to the work.<br>Flow executes it.</h1><p>The implementation keeps the names Jack Heart selected, places Workflow controls under Project and Task, and separates definition lookup and Desktop navigation. Restart returns a captured Workflow to <code>start</code>.</p><p class="meta">Published <a href="https://github.com/loopflowstudio/loopflow/pull/1492">PR #1492</a> · base e467ea995 · head 7d2f0fd48. LOO-400’s Process rename is already in the base. Product code was clean when reviewed; this walkthrough is local and unpublished.</p><nav aria-label="Review route"><a href="#choose">1 Choose</a><a href="#restart">2 Restart</a><a href="#discover">3 Discover</a><a href="#attempt">4 Task run</a><a href="#proof">Evidence & decisions</a></nav></header>
+<table><thead><tr><th>When Jack…</th><th>What happens</th><th>Where code controls this</th></tr></thead><tbody>
+<tr><td data-label="When Jack…">Chooses a Project Workflow</td><td data-label="What happens">Tasks without a captured Workflow inherit that selection. Existing Task graphs stay fixed.</td><td data-label="Code"><a href="#choose">Project workflow API</a> updates authored planning while preserving the Project’s KRs and metric targets.</td></tr>
+<tr><td data-label="When Jack…">Restarts a Task Workflow</td><td data-label="What happens">Position returns to start; history and the captured graph remain. Restart launches nothing.</td><td data-label="Code"><a href="#restart">Restart dispatch and the existing move transaction</a> clear the current edge and append a move.</td></tr>
+<tr><td data-label="When Jack…">Uses the same name for a Flow and Workflow</td><td data-label="What happens">Both remain available. Each customization and Desktop search result opens its own kind.</td><td data-label="Code"><a href="#discover">Separate loaders and typed navigation</a> keep the definition kind throughout lookup.</td></tr>
+<tr><td data-label="When Jack…">Runs a Workflow edge</td><td data-label="What happens">One conceptual attempt can start several Flow processes. Its position and process history remain separate.</td><td data-label="Code"><a href="#attempt">Task projections</a> carry Workflow selection, process history and run permission independently; no TaskRun record is added.</td></tr>
+</tbody></table>
+<section id="choose"><h2>1. Choose a Workflow on its Project</h2><p>Definition discovery lives under Project too. <code>list</code> and <code>customize</code> operate on repository definitions; <code>show PROJECT</code> and <code>set PROJECT NAME</code> address a Project. This placement was an implementation choice within Jack’s owner-scoped direction.</p><figure class="terminal"><figcaption>Captured local branch binary; temporary repository and private Home. No live planning writes.</figcaption><pre tabindex="0"><code>$ lf project workflow list
+code
+feature
+research</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/lf/mod.rs#L486-L512">rust/loopflow/src/lf/mod.rs · ProjectCommand / ProjectWorkflowCommand · 7d2f0fd48 · L486–512</a></figcaption><pre tabindex="0"><code>#[derive(Subcommand, Debug)]
+pub enum ProjectCommand {
+    /// Select and inspect reusable Workflows
+    Workflow {
+        #[command(subcommand)]
+        cmd: ProjectWorkflowCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProjectWorkflowCommand {
+    /// List Workflow definitions, including unavailable local files
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the Project&#x27;s selected Workflow
+    Show {
+        project: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
+    Set { project: String, name: String },
+    /// Copy a builtin Workflow when needed and print its local path
+    Customize { name: String },
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/ops/project.rs#L424-L476">rust/loopflow/src/ops/project.rs · workflow · 7d2f0fd48 · L424–476</a></figcaption><pre tabindex="0"><code>/// Address a retained Project by durable ID, provider ID, or unique slug/name.
+/// A read uses accepted planning; a write refreshes provider facts under its lock.
+pub async fn workflow(
+    repo: &amp;Path,
+    selector: &amp;str,
+    selection: Option&lt;&amp;str&gt;,
+) -&gt; OpsResult&lt;PmProject&gt; {
+    let store = super::pm::pm_store().await?;
+    let projects = store.list_projects(None).await.map_err(project_error)?;
+    let mut matches = projects.iter().filter(|project| {
+        project.id.as_str() == selector
+            || project.plan.id.as_str() == selector
+            || project.plan.slug == selector
+            || project.plan.name == selector
+    });
+    let project = matches
+        .next()
+        .ok_or_else(|| project_error(format!(&quot;Project {selector:?} not found&quot;)))?;
+    if matches.next().is_some() {
+        return Err(project_error(&quot;Project name is ambiguous; use its ID&quot;));
+    }
+    let wave = store
+        .get_wave(&amp;project.wave_id)
+        .await
+        .map_err(project_error)?
+        .ok_or_else(|| project_error(&quot;Project Wave is unavailable&quot;))?;
+    if let Some(name) = selection {
+        crate::engine::workflow::load_workflow(name, repo)
+            .map_err(project_error)?
+            .ok_or_else(|| project_error(format!(&quot;Workflow {name:?} not found&quot;)))?;
+        super::pm::require_planning_home(&amp;store, &amp;wave).await?;
+        let acquisition = super::pm::lock_wave_planning(&amp;wave).await?;
+        let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+        let provider = require_project(&amp;ctx, project.plan.id.as_str()).await?;
+        let content = ProjectContent {
+            workflow: name.to_string(),
+            metric_targets: provider.metric_targets.clone(),
+            krs: provider.krs.clone(),
+        };
+        ctx.client
+            .update_project(&amp;provider.id, &amp;provider.name, &amp;content)
+            .await
+            .map_err(project_error)?;
+        super::pm::refresh_pm_snapshot_locked(repo, &amp;wave, &amp;ctx, &amp;store, acquisition).await?;
+    }
+    store
+        .sqlite
+        .accepted_projects(wave.id())
+        .map_err(project_error)?
+        .into_iter()
+        .find(|p| p.id == project.plan.id.as_str())
+        .ok_or_else(|| project_error(&quot;Project planning is unavailable; sync its Wave&quot;))
+}</code></pre></figure><p class="note">A selection write refreshes the provider under the planning lock and changes its authored Workflow field. This is a real Linear write, not a local UI preference. No Project selection was changed for this review. A failed refresh after the provider write can still mean the write took effect; verify provider state before retrying.</p></section>
+<section id="restart"><h2>2. Restart changes position</h2><p><code>lf task workflow restart ISSUE</code> enters the existing move operation with <code>start</code>. The following transcript is <strong>illustrative from source</strong>; the live LOO-386 Task remains at demo.</p>
+<figure class="terminal"><figcaption>Expected fixture interaction, not a captured live mutation</figcaption><pre><code>$ lf task workflow restart INF-123
+Task INF-123 is at start of workflow rounds
+$ lf task workflow show INF-123 --json
+# JSON contains position {"kind":"node","node":"start"},
+# the same nodes/edges and one additional history move.</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/ops/workflow.rs#L14-L41">rust/loopflow/src/ops/workflow.rs · Workflow / WorkflowPosition · 7d2f0fd48 · L14–41</a> · existing model, Process naming supplied by LOO-400</figcaption><pre tabindex="0"><code>/// One Task&#x27;s Workflow as `lf task status --json` carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Workflow {
+    #[serde(flatten)]
+    pub definition: WorkflowDefinition,
+    pub position: WorkflowPosition,
+    /// Edges `lf task run` can choose now, by their place among the edges:
+    /// those leaving the Task&#x27;s node, or the node its stopped edge left.
+    pub outgoing: Vec&lt;u32&gt;,
+    /// Every move of this Task, across the definitions it has taken up.
+    pub history: Vec&lt;WorkflowMove&gt;,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = &quot;kind&quot;, rename_all = &quot;snake_case&quot;)]
+pub enum WorkflowPosition {
+    /// The Task waits on a person at this node, or stands at `start` or `end`.
+    Node { node: String },
+    /// The Task is on this edge. `process_lfid` is the `lf task run` carrying it;
+    /// each Flow process it starts is that Process&#x27;s child. `running` is read from
+    /// that Process: an edge whose Task run has ended has stopped and holds the
+    /// Task until it is chosen again or the Task is moved.
+    Edge {
+        edge: u32,
+        process_lfid: String,
+        running: bool,
+    },
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/bin/lf.rs#L952-L973">rust/loopflow/src/bin/lf.rs · TaskCommand::Workflow dispatch · 7d2f0fd48 · L952–973</a></figcaption><pre tabindex="0"><code>        TaskCommand::Workflow { cmd } =&gt; match cmd {
+            loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } =&gt; {
+                let workflow = loopflow::ops::task::workflow_show(issue)?;
+                println!(&quot;{}&quot;, serde_json::to_string_pretty(&amp;workflow)?);
+                Ok(())
+            }
+            loopflow::lf::TaskWorkflowCommand::Restart { issue } =&gt; {
+                println!(
+                    &quot;{}&quot;,
+                    loopflow::ops::task::workflow_set(
+                        repo,
+                        issue,
+                        &quot;start&quot;,
+                        Some(&quot;Restart Workflow&quot;),
+                        &amp;loopflow::ops::task::EndOptions::default()
+                    )?
+                );
+                Ok(())
+            }
+        },
+        TaskCommand::Run { .. } =&gt; unreachable!(&quot;task run dispatches as an ordinary run&quot;),
+        TaskCommand::Move {</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/store/sqlite/task_work.rs#L240-L290">rust/loopflow/src/store/sqlite/task_work.rs · arrive_in / set_node_in · 7d2f0fd48 · L240–290</a> · existing transaction reused by restart</figcaption><pre tabindex="0"><code>fn arrive_in(tx: &amp;rusqlite::Transaction&lt;&#x27;_&gt;, task: &amp;TaskId, by: &amp;ProcessLfid) -&gt; StoreResult&lt;()&gt; {
+    let Some((definition, _, Some((edge, carrier)))) = workflow_row(tx, task)? else {
+        return Ok(());
+    };
+    if &amp;carrier.lfid != by {
+        return Ok(());
+    }
+    let arrived = &amp;definition.edges[edge as usize];
+    tx.execute(
+        &quot;UPDATE task_workflows SET node=?2,edge=NULL,process_lfid=NULL,updated_at=?3 WHERE task_id=?1&quot;,
+        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &amp;definition.name,
+        WorkflowMoveKind::Arrived,
+        (&amp;arrived.from, &amp;arrived.to),
+        Some(edge),
+        Some(by),
+        None,
+    )
+}
+
+fn set_node_in(
+    tx: &amp;rusqlite::Transaction&lt;&#x27;_&gt;,
+    task: &amp;TaskId,
+    node: &amp;str,
+    by: Option&lt;&amp;ProcessLfid&gt;,
+    note: Option&lt;&amp;str&gt;,
+) -&gt; StoreResult&lt;bool&gt; {
+    let Some((definition, from, edge)) = workflow_row(tx, task)? else {
+        return Ok(false);
+    };
+    tx.execute(
+        &quot;UPDATE task_workflows SET node=?2,edge=NULL,process_lfid=NULL,updated_at=?3 WHERE task_id=?1&quot;,
+        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
+    )?;
+    append_workflow_move(
+        tx,
+        task,
+        &amp;definition.name,
+        WorkflowMoveKind::Set,
+        (&amp;from, node),
+        edge.map(|(edge, _)| edge),
+        by,
+        note,
+    )?;
+    Ok(true)
+}
+</code></pre></figure><p class="note"><strong>Consequential behavior:</strong> restarting while a Flow is active does not stop that process. Clearing the edge means its eventual arrival cannot move the Task. This follows the existing move contract; Jack accepted resetting position, but did not separately review this active-process scenario.</p>
+<details><summary>Failure and recovery: no captured Workflow</summary><p>The operation returns a concrete command for taking up a Workflow; it makes no move and launches nothing. A registered Process is also required to attribute a successful move.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/ops/task.rs#L716-L764">rust/loopflow/src/ops/task.rs · workflow_set — lookup, validation and registered move · 7d2f0fd48 · L716–764</a></figcaption><pre tabindex="0"><code>            .await
+            .map_err(|error| task_error(format!(&quot;failed to resolve task: {error}&quot;)))?
+            .ok_or_else(|| task_error(format!(&quot;no Task exists for {issue:?}&quot;)))?;
+        let issue = &amp;task.plan.identifier;
+        let none = || {
+            task_error(format!(
+                &quot;Task {issue} has no workflow; `lf task run {issue} &lt;workflow&gt;` takes one up&quot;
+            ))
+        };
+        let workflow = store
+            .sqlite
+            .workflow(&amp;task.id)
+            .map_err(task_error)?
+            .ok_or_else(none)?;
+        let definition = &amp;workflow.definition;
+        if !workflow.names_node(node) {
+            let nodes: Vec&lt;&amp;str&gt; = std::iter::once(START)
+                .chain(definition.nodes.iter().map(|node| node.name.as_str()))
+                .chain([END])
+                .collect();
+            return Err(task_error(format!(
+                &quot;workflow {} has no node {node:?}. Nodes: {}&quot;,
+                definition.name,
+                nodes.join(&quot;, &quot;)
+            )));
+        }
+        let process = crate::journal::current_process_lfid()
+            .ok_or_else(|| task_error(&quot;a workflow move requires a registered Process&quot;))?;
+        if !store
+            .sqlite
+            .set_workflow_node(&amp;task.id, node, &amp;process, note)
+            .map_err(task_error)?
+        {
+            return Err(none());
+        }
+        Ok(format!(
+            &quot;Task {issue} is at {node} of workflow {}&quot;,
+            definition.name
+        ))
+    })
+}
+
+pub fn task_checkout(repo: &amp;Path, issue: &amp;str, options: TaskCheckoutOptions) -&gt; OpsResult&lt;Task&gt; {
+    prepare_task(
+        repo,
+        issue,
+        TaskProcessOptions {
+            name: options.name,
+            stack_on: options.stack_on,</code></pre></figure></details></section>
+<section id="discover"><h2>3. Same name, distinct definitions</h2><p>The fixture has a local Flow <code>.lf/flows/feature.yaml</code> containing <code>- cmd: help</code>. The builtin Workflow <code>feature</code> stays available. Customizing each prints a different source path.</p><figure class="terminal"><figcaption>Captured local branch binary; temporary repository and private Home. No live planning writes.</figcaption><pre tabindex="0"><code>$ lf flow show feature
+cmd: help
+$ lf flow customize feature
+/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo386-review-m6ftwuaa/repo/.lf/flows/feature.yaml
+$ lf project workflow customize feature
+/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo386-review-m6ftwuaa/repo/.lf/workflows/feature.yaml</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/engine/workflow.rs#L168-L174">rust/loopflow/src/engine/workflow.rs · WorkflowCatalogEntry · 7d2f0fd48 · L168–174</a></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowCatalogEntry {
+    pub name: String,
+    pub source: Option&lt;String&gt;,
+    pub workflow: Option&lt;WorkflowDefinition&gt;,
+    pub unavailable: Option&lt;String&gt;,
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/engine/workflow.rs#L199-L215">rust/loopflow/src/engine/workflow.rs · names_workflow / load_workflow · 7d2f0fd48 · L199–215</a></figcaption><pre tabindex="0"><code>pub fn names_workflow(name: &amp;str, repo: &amp;Path) -&gt; bool {
+    workflow_path(name, repo).is_some() || builtin_workflow(name).is_some()
+}
+
+/// Load a Workflow; a local Workflow overrides only a builtin Workflow.
+pub fn load_workflow(name: &amp;str, repo: &amp;Path) -&gt; Result&lt;Option&lt;WorkflowDefinition&gt;, LoadError&gt; {
+    let content = match workflow_path(name, repo) {
+        Some(path) =&gt; fs::read_to_string(path)?,
+        None =&gt; match builtin_workflow(name) {
+            Some(content) =&gt; content.to_string(),
+            None =&gt; return Ok(None),
+        },
+    };
+    parse_workflow(name, &amp;content, repo)
+        .map(Some)
+        .map_err(|error| LoadError::InvalidFlow(format!(&quot;workflow {name}: {error}&quot;)))
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/swift/LoopflowMac/Views/WorkPalette.swift#L44-L51">swift/LoopflowMac/Views/WorkPalette.swift · WorkModel.paletteRows — kind-specific destinations · 7d2f0fd48 · L44–51</a></figcaption><pre tabindex="0"><code>        for flow in flowCatalog.value ?? [] {
+            rows.append(.init(id: .flow(flow.name), title: flow.name,
+                              detail: &quot;Flow definition&quot;, key: flow.name))
+        }
+        for workflow in workflowCatalog.value ?? [] {
+            rows.append(.init(id: .workflow(workflow.name), title: workflow.name,
+                              detail: &quot;Workflow&quot;, key: workflow.name))
+        }</code></pre></figure><p>Previously, a repository Flow could suppress a same-name builtin Workflow, and Desktop could prefer one by name alone. Now a broken local Workflow remains unavailable; it neither reveals a builtin behind it nor damages the Flow. Removing the deliberately broken local override restores the builtin.</p><figure class="terminal"><figcaption>Captured local branch binary; temporary repository and private Home. No live planning writes.</figcaption><pre tabindex="0"><code>$ lf project workflow list
+code
+feature (unavailable: invalid flow: workflow feature: unknown field `invalid`, expected `nodes` or `edges`)
+research
+$ lf flow show feature
+cmd: help
+$ lf project workflow list
+code
+feature
+research</code></pre></figure><p>A name that resolves only to a Workflow gives the Task command as recovery:</p><figure class="terminal"><figcaption>Captured local branch binary; temporary repository and private Home. No live planning writes.</figcaption><pre tabindex="0"><code>$ lf run outer-only
+
+Error: outer-only is a workflow, not a Flow. Traverse it with `lf task run &lt;issue&gt; outer-only`
+[exit 1]</code></pre></figure><details><summary>Names can also match skills</summary><p>The exploratory <code>lf run research</code> command resolved the existing research skill, despite research also naming a builtin Workflow. Its agent reported no supplied question or source and returned. This is not evidence of Workflow traversal; the separate <code>outer-only</code> fixture above has no skill or Flow collision. No additional implementation contribution was launched.</p></details>
+<p class="note">Desktop source now distinguishes <code>.flow(name)</code> and <code>.workflow(name)</code>. The native picker and inspectors were not exercised in this review; CLI success is not native acceptance.</p></section>
+<section id="attempt"><h2>4. What “Task run” means</h2><p>Jack asked what a TaskRun is. There is <strong>no TaskRun type or table</strong>. A Task run is one attempt by <code>lf task run</code> to traverse an edge; retries can produce several child Flow processes. The Task-run Process and Workflow move history represent that attempt.</p><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/lf/commands/waves.rs#L246-L261">rust/loopflow/src/lf/commands/waves.rs · TaskDetailSnapshot · 7d2f0fd48 · L246–261</a></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskDetailSnapshot {
+    pub task: PmTaskSummary,
+    pub reference: TaskReferenceSnapshot,
+    pub runtime: Option&lt;TaskRuntimeSnapshot&gt;,
+    pub direction: Option&lt;DirectionSnapshot&gt;,
+    pub next_move: NextMove,
+    pub condition: TaskConditionSnapshot,
+    pub actions: TaskActionModel,
+    pub workflow_name: Option&lt;String&gt;,
+    pub latest_flow_process: Option&lt;FlowProcessDetail&gt;,
+    pub execution: Option&lt;TaskExecutionSnapshot&gt;,
+    pub run_control: TaskRunControl,
+    pub prs: Vec&lt;PrSnapshot&gt;,
+    pub active_pr: Option&lt;String&gt;,
+}</code></pre></figure><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/src/ops/task_run.rs#L1-L33">rust/loopflow/src/ops/task_run.rs · TaskRunControl / task_run_control · 7d2f0fd48 · L1–33</a></figcaption><pre tabindex="0"><code>//! Task run legality, independent of Workflow selection and execution history.
+use crate::durable::WorkStatus;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRunControl {
+    pub unavailable: Option&lt;String&gt;,
+}
+
+/// Facts beyond the Flow record that decide control legality.
+#[derive(Debug)]
+pub(crate) struct TaskRunGate&lt;&#x27;a&gt; {
+    /// `None` when no durable Task Work exists yet.
+    pub status: Option&lt;&amp;&#x27;a WorkStatus&gt;,
+    pub plan_terminal_reason: Option&lt;&amp;&#x27;a str&gt;,
+    pub worktree_blocker: Option&lt;&amp;&#x27;a str&gt;,
+    pub launch_refusal: Option&lt;&amp;&#x27;a str&gt;,
+}
+
+pub(crate) fn task_run_control(gate: &amp;TaskRunGate) -&gt; TaskRunControl {
+    let terminal = match gate.status {
+        Some(WorkStatus::Done) =&gt; Some(&quot;Task is complete&quot;),
+        Some(WorkStatus::Abandoned) =&gt; Some(&quot;Task is abandoned; recover it before running a Flow&quot;),
+        _ =&gt; gate.plan_terminal_reason,
+    };
+    TaskRunControl {
+        unavailable: terminal
+            .or(gate.worktree_blocker)
+            .or(gate.launch_refusal)
+            .map(str::to_string),
+    }
+}
+</code></pre></figure><p><code>TaskRunControl</code> says why execution is unavailable. Desktop’s <code>TaskRunDraft</code> contains only an in-flight flag and error for run/move commands; it is transient UI state, not another attempt record.</p><p>The base combined recommendation, latest execution and Start controls in <code>TaskFlowSnapshot</code>. This PR separates those readings without introducing a new lifecycle. <code>FlowDefinition</code> is authored execution, <code>FlowComposition</code> is its expanded disclosure tree, and <code>FlowProcess</code> records one driver and its steps.</p></section>
+<section id="proof"><h2>Evidence and decisions left visible</h2><p class="note">Subsequent review: Jack Heart found TaskRunGate confusing beside the gate skill, accepted TaskRunEvidence, and requested shipping. The excerpts remain pinned to the published pre-correction head; the working branch renames that struct and parameter without changing behavior. Approval covers delivery, not unperformed native checks.</p><p><strong>Observed here:</strong> branch CLI catalogs, customization paths, malformed-definition behavior and recovery, and the Workflow-only execution error. Source excerpts are pinned to the published head and embedded for offline reading.</p><p id="restart-check">Newly run: the focused restart CLI test passed (1/1). It replaces the source with invalid YAML before restart, then verifies the captured graph, history and recorded Flow processes survive unchanged apart from the new position/move.</p>
+<details><summary>The restart scenario being checked</summary><figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/7d2f0fd48241c7480c35e181637db27aed7d4992/rust/loopflow/tests/task_flow_launch_tests.rs#L785-L815">rust/loopflow/tests/task_flow_launch_tests.rs · workflow_restart_keeps_the_captured_graph_and_execution_history · 7d2f0fd48 · L785–815</a></figcaption><pre tabindex="0"><code>#[test]
+fn workflow_restart_keeps_the_captured_graph_and_execution_history() {
+    let task = WorkflowTask::new();
+    task.ok(&amp;[&quot;-b&quot;, &quot;task&quot;, &quot;run&quot;, &quot;INF-123&quot;, &quot;rounds&quot;]);
+    let before = task.workflow();
+    let processes = support::recorded_flows(task.home.path());
+    fs::write(
+        task.repo.path().join(&quot;.lf/workflows/rounds.yaml&quot;),
+        &quot;invalid: source\n&quot;,
+    )
+    .unwrap();
+    task.ok(&amp;[&quot;task&quot;, &quot;workflow&quot;, &quot;restart&quot;, &quot;INF-123&quot;]);
+    let after = task.workflow();
+    assert_eq!(
+        after[&quot;position&quot;],
+        serde_json::json!({&quot;kind&quot;:&quot;node&quot;,&quot;node&quot;:&quot;start&quot;})
+    );
+    assert_eq!(after[&quot;nodes&quot;], before[&quot;nodes&quot;]);
+    assert_eq!(after[&quot;edges&quot;], before[&quot;edges&quot;]);
+    assert_eq!(
+        after[&quot;history&quot;].as_array().unwrap().len(),
+        before[&quot;history&quot;].as_array().unwrap().len() + 1
+    );
+    assert_eq!(support::recorded_flows(task.home.path()), processes);
+    let shown = task.run(&amp;[&quot;task&quot;, &quot;workflow&quot;, &quot;show&quot;, &quot;INF-123&quot;, &quot;--json&quot;]);
+    assert!(shown.status.success());
+    assert_eq!(
+        serde_json::from_slice::&lt;serde_json::Value&gt;(&amp;shown.stdout).unwrap(),
+        after
+    );
+}</code></pre></figure></details><p><strong>Recorded earlier:</strong> CI was passing on the published head; implementation notes record Rust discovery/graph checks, Swift DTO/headless checks, build, docs, formatting and Clippy. These are prior receipts, not reruns of the entire acceptance plan.</p><p><strong>Still unverified:</strong> native Desktop selection and retained panes, live Project mutation, and provider continuity. The installed <code>lf</code> rejected the new <code>project</code> command; demonstrations used <code>target/debug/lf</code>. Help on that binary also emitted “Process history unavailable: no compatible process ledger for this process”; catalog operations completed without that warning. Installed adoption is not established.</p><p>Review the active-process restart behavior and whether Project’s definition commands read naturally. No demo approval, merge decision or Task completion is recorded.</p><p class="meta">Working design: <a href="align-the-data-model-and-names-after-workflows-one-more-pass.md">Workflow alignment</a>. Feedback stays in this Task conversation.</p></section></main></html>

@@ -14,12 +14,13 @@ failed on an unbound Initiative.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
   replaces `lf ssh` with global `lf --machine LABEL COMMAND`, no alias or
   cross-version negotiation. Source owns current vocabulary, not older installed help.
-- **One repository window across machines.** Jack Heart proposed at most one
-  open window per repo and explicitly chose “One repo window across machines”
-  in the LOO-427 conversation. Open/focus by repository; closed repos need no
-  window. Tasks/worktrees and machine placements stay inside it, with machine
-  identity, execution authority and freshness retained. This is design direction,
-  not implemented window behavior. Shared Work supplies repository identity; paths and remote URLs do not.
+- **Work first.** Jack Heart (October 8): agents are first-class users of the
+  software engineering CLI. Desktop centers Work; orchestra language stays top-level.
+  One repository window across machines, identified by Work. Jack accepted
+  CLI Session+diff opening, inspection and arrangement. Execution
+  and display machines differ; takeover is explicit. Unimplemented.
+- Jack: delegation applies to open, unstarted and future Tasks. Started Tasks stay
+  on their machine across later runs. Inheritance remains proposed.
 - Jack specified macOS-only Desktop launching/control, with actionable Linux
   errors and a terminal alternative before launch or Work mutation (LOO-426/427).
   Ordinary lf remains cross-platform; the displaying Mac and execution machine
@@ -58,14 +59,14 @@ Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
 October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
-assignment; unknown stays unavailable. Jack selected local operations and custom
-Git-ref Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions,
-Processes, checkouts and control stay local; imported completion cannot move or
-clean them. Preserve pending changes, semi-live comments/completion, causal
-reopening and stable mutation IDs. No real plan publication is authorized.
-406 retains split writers (`b3cd894f3`); 412 retains adoption (`2bb5ce5c4`), with
-Git transport uncommitted. Common API integration, cold-open queue repair and
-native/shared proof remain.
+assignment; unknown stays unavailable. Jack selected local operations and Git-ref
+Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions, Processes,
+checkouts and control stay local; imported completion cannot move or clean them.
+Preserve pending changes, semi-live comments/completion, causal reopening and
+stable mutation IDs. No real plan publication is authorized. 406 still splits
+writers (`783305284`); 412's committed transport (`3ceb41bf4`) preserves revisions
+but lacks semantic merge and common-writer import. Integration, cold-open queue
+repair and native/shared proof remain.
 
 ## Terminal-host adoption (2026-10-07)
 

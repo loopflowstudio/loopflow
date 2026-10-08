@@ -614,21 +614,23 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected the originating-host callback and a fresh `pursue` through
-publication for another review, superseding adoption-only PR #1491. Task planning calls the host writer; execution and machine/account operations
-stay on the worker. LOO-406 owns one local planning model with optional Linear
-sync; host loss must not silently select a worker plan or direct Linear fallback.
-Keep original mutation IDs through lost replies; unavailable is not failure proof.
-New worker records carry host identity; existing divergent IDs/history survive.
-Delete copied-planning/bootstrap ownership, retaining pushed-code validation,
-fetch-before-placement and dirty-checkout preservation. Nested calls retain the
-origin; clean up invocation forwarding even with a surviving SSH master.
-No automatic replay, resident service, detached-work guarantee or landing.
+Jack Heart selected host callbacks through publication for review,
+superseding PR #1491's adoption. Planning uses the host writer; execution and
+machine/accounts stay on the worker. LOO-406 owns one local model with optional
+Linear sync. Host loss permits neither worker planning nor direct Linear fallback.
+Retain mutation IDs, host-born identity and divergent existing IDs/history.
+Delete copied planning/bootstrap; retain pushed-code checks, fetch-before-placement
+and dirty files. Nested calls retain the origin; cancel invocation forwarding
+even when the SSH master survives. No replay, resident service, detached-work
+guarantee or landing.
 
-Design: `scratch/work-on-another-machine-name.md`. Demo the worktree build.
-Five adoption scenarios passed at `0cd8e7f14`; they prove no
-callback or real SSH behavior. Public callback dispatch, lost-reply recovery,
-populated history and real loopback cleanup remain. Earlier evidence: `0cd8e7f14:wave/infrastructure/MEMORY.md` under this heading.
+LOO-406 published `dfe18ab60` and local `3a219561a` still
+use personal/Linear writers; the latter updates memory only. Creation retains an
+ID, but public edits lack operation identity and comments mint one per call.
+Callback retry cannot wrap a separate mutation/receipt crash gap. Required writer
+APIs: `scratch/work-on-another-machine-name.md`. Callback unimplemented.
+Five scenarios at `0cd8e7f14` prove only adoption. Worktree-built public
+dispatch, lost replies, history and loopback cleanup remain open.
 
 ## Synced planning integration (LOO-334)
 

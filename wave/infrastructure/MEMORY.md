@@ -618,26 +618,23 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart reconsidered the full host-store callback design and clarified that
-the second machine needs to file follow-up Tasks that persist on the originating
-machine. Jack also requires semi-live comments/completion and suggested Task sync
-on machine registration. Whole-store callbacks and follow-up-only delivery are
-insufficient directions. Jack selected local stores with bidirectional planning
-sync, retaining execution per machine, and suggested Git as a possible transport.
-Jack explicitly separates shared planning/completion from unshared execution.
-Imported completion never moves a local Workflow or controls its Processes.
-Jack selected a custom Git ref. LOO-412 owns transport; LOO-406 owns the common
-writer and Linear sync. Scope, sync lifetime, conflicts and Linear coordination
-remain open. Independent Git work can proceed.
+Jack Heart selected local stores with bidirectional planning sync through one
+custom Git ref, superseding host callbacks. Share identity, briefs, comments and
+completion; never replicate execution, paths or controls. Imported completion
+cannot move a local Workflow. LOO-412 owns transport/machine integration; LOO-406
+owns the common local writer and optional Linear sync. No real planning publication
+to the public code remote is selected. Publication remains for review, never landing.
 
-The pursue Flow `73f78216-2429-4d5a-a404-ef4bd1f5ae81` stopped for review;
-partial callback transport remains unverified in the checkout. Preserve existing
-IDs/history, pushed-code checks, fetch-before-placement and dirty files. No
-automatic turn/Flow retry or landing. Further pursuit follows the selected sync
-direction; publication remains for Jack Heart's review. Five scenarios at
-`0cd8e7f14` prove only adoption; real SSH and follow-up delivery remain unproved.
-The current decision and superseded full-store proposal are distinguished in
-`scratch/work-on-another-machine-name.md`.
+The source transport prototype preserves local revisions, rejects stale pushes
+and confirms remote ancestry after lost replies. Five isolated real-Git tests
+pass, including source-index/dirty-file preservation and fresh-clone recovery.
+These prove no semantic merge, SQLite import, semi-live arrival or hosted policy.
+At committed LOO-406 `783305284`, creation still splits local/Linear paths and no
+common peer export/import/checkpoint contract exists. That is the integration
+dependency; no dirty code or second planner was introduced. Incomplete callback
+code is removed with its bytes retained. Adoption/identity cutover and end-to-end
+acceptance remain in `scratch/work-on-another-machine-name.md`. Preserve existing
+IDs, history and pushed-code checks. No automatic turn/Flow retry.
 
 ## Synced planning integration (LOO-334)
 

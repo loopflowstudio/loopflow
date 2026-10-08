@@ -1062,10 +1062,9 @@ Codex `turn/start` remaining waiting is unresolved; Claude success proves no rep
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports otherwise, and inlined builtins. Codex 0.160.1 app-server
 receipts prove selected-file expansion, separate user context and same-thread
-resume. Claude 2.1.293 preserves arguments and hook context across resume after
-hook-file deletion, but records that context with system authority, contradicting
-the design's reference constraint. Require native receipts, including role and
-source, not answers or exits; exclude answer leakage in recall probes.
-Resume links do not prove context-settings handoff. IDE delivery, existing-driver
-dispatch, third-party fidelity and implementation remain open. Reproduction and
-limits: [skill probes](../../scripts/benchmarks/skill-invocation/README.md).
+resume; resupplied context does not prove recall. Claude 2.1.293 retains arguments
+and hook context after hook-file deletion, but gives context system authority,
+contradicting the design. Require native role/source receipts; exclude answer
+leakage and resupply in recall proofs. Resume links prove no settings handoff.
+IDE delivery, existing-driver dispatch, third-party
+fidelity and implementation remain open. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

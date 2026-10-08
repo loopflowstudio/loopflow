@@ -22,7 +22,8 @@ On 2026-10-07, Claude 2.1.293 recognized standalone stream-json invocation.
 Prefixing context or using separate text blocks bypassed native expansion.
 Suffixing context put it inside the provider's `<command-args>` receipt. A
 `UserPromptSubmit` hook supplied context while preserving the argument. Codex
-0.160.1 `exec` loaded the `.agents/skills` fixture by its `$name` invocation.
+0.160.1 `exec` returned the `.agents/skills` fixture marker for its `$name`
+invocation; this script does not inspect Codex's native expansion receipt.
 
 These are synthetic native fixtures. They establish neither third-party ports,
 frontmatter/tool/model fidelity, bundled-file behavior, IDE handoff, Session
@@ -51,8 +52,10 @@ killing only the probe's process group.
 
 Codex sends an explicit `skill` item beside the invocation and a separate text
 context item through `turn/start`. After restarting app-server, it resumes the
-same thread and repeats with a new argument. Checks require returned skill/path
-and text items, unchanged first-turn history, and native user-role expansion of
+same thread and repeats with a new argument, supplying context again. This checks
+history retention and new input delivery, not recall without context resupply.
+Checks require returned skill/path and text items, unchanged first-turn history,
+and native user-role expansion of
 the selected file for each turn. Claude checks native command replay, source
 directory and substituted arguments across three processes. Before its second
 turn, the probe deletes the hook program and omits hook settings; the original

@@ -17,8 +17,10 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT 'task',t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND t.planning_deleted_at IS NULL AND EXISTS(
-                 SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field!='deleted'
+             WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND EXISTS(
+                 SELECT 1 FROM task_changes c WHERE c.task_id=t.id
+                 AND ((t.planning_deleted_at IS NULL AND c.field!='deleted')
+                     OR (t.planning_deleted_at IS NOT NULL AND c.field='deleted'))
                  AND c.acknowledged=0 AND c.conflict_json IS NULL
                  AND (c.attempted=1 OR c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
              UNION ALL
@@ -61,7 +63,7 @@ impl SqliteStore {
                 [id.as_str()],
                 |row| row.get(0),
             )?;
-            if deleted {
+            if deleted != (change.field == "deleted") {
                 return Ok(false);
             }
         }
@@ -75,6 +77,72 @@ impl SqliteStore {
                  AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL)"
             ),
             params![change.id, id, change.field],
+        )? == 1;
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    pub(crate) fn observe_task_deletion(&self, id: &TaskId, revision: &str) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let owner = PlanningChanges::Task(id);
+        let retained = owner.observation(&tx)?;
+        if retained.as_ref().and_then(|body| body["revision"].as_str()) != Some(revision) {
+            return Ok(());
+        }
+        if let Some(change) = owner
+            .pending(&tx)?
+            .into_iter()
+            .find(|c| c.field == "deleted")
+        {
+            let baseline = change
+                .base
+                .as_ref()
+                .and_then(|base| base["revision"].as_str());
+            // Deletion competes with the whole issue. Only an explicitly active
+            // issue at a newer revision can restore planning visibility.
+            if baseline.is_some()
+                && super::planning::revision_nanos(Some(revision))?
+                    > super::planning::revision_nanos(baseline)?
+            {
+                tx.execute(
+                    "UPDATE task_changes SET conflict_json=?2,error=NULL WHERE id=?1 AND conflict_json IS NULL",
+                    params![change.id, serde_json::json!({"revision":revision,"value":false}).to_string()],
+                )?;
+                tx.execute(
+                    "UPDATE tasks SET planning_deleted_at=NULL,planning_revision=planning_revision+1
+                     WHERE id=?1 AND planning_deleted_at IS NOT NULL",
+                    [id.as_str()],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Only a positive trash observation or the exact mutation acknowledgement settles removal.
+    pub(crate) fn acknowledge_task_deletion(
+        &self,
+        id: &TaskId,
+        change: &PlanningChange,
+        revision: Option<&str>,
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(revision) = revision {
+            let observed = PlanningChanges::Task(id).observation(&tx)?;
+            let retained = observed.as_ref().and_then(|body| body["revision"].as_str());
+            if super::planning::revision_nanos(Some(revision))?
+                < super::planning::revision_nanos(retained)?
+            {
+                return Ok(false);
+            }
+        }
+        let changed = tx.execute(
+            "UPDATE task_changes SET acknowledged=1,acknowledged_revision=?3,error=NULL
+             WHERE id=?1 AND task_id=?2 AND field='deleted'
+             AND acknowledged=0 AND conflict_json IS NULL",
+            params![change.id, id.as_str(), revision],
         )? == 1;
         tx.commit()?;
         Ok(changed)
@@ -292,7 +360,7 @@ impl<'a> PlanningChanges<'a> {
         let mut saved = serde_json::to_value(observed)?;
         self.observe_attempts(conn, &saved)?;
         for change in self.pending(conn)? {
-            // A normal inventory cannot observe deletion.
+            // Ordinary inventory does not establish whether an issue is trashed.
             let Some(value) = saved.get(&change.field) else {
                 continue;
             };

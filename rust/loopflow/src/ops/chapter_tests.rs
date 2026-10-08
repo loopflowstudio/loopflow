@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{classify_task, TaskDisposition, TaskStartEvidence};
+use crate::ops::pm::test_fixture::PlanningEnvironment;
 use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
@@ -128,11 +129,6 @@ struct Provider {
     revision: i64,
     interrupt_after: Option<usize>,
     unavailable: bool,
-    interrupt_after_transfer_readback: bool,
-    status_after_transfer: Option<(String, String)>,
-    binding_collision: Option<std::path::PathBuf>,
-    binding_replacement: Option<(std::path::PathBuf, String)>,
-    inventory_pause: Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>,
 }
 
 fn page(nodes: Vec<Value>) -> Value {
@@ -146,13 +142,6 @@ async fn graphql(
     let query = request["query"].as_str().unwrap();
     let vars = &request["variables"];
     let id = vars["id"].as_str().unwrap_or("");
-    if query.contains("query FindProject") {
-        let pause = state.lock().await.inventory_pause.take();
-        if let Some((entered, release)) = pause {
-            entered.notify_one();
-            release.notified().await;
-        }
-    }
     let mut provider = state.lock().await;
     if provider.unavailable {
         return Json(json!({"errors":[{"message":"fixture interrupted connection"}]}));
@@ -173,7 +162,6 @@ async fn graphql(
         issue["branchName"] = Value::Null;
     }
     let prior_projects = provider.projects.clone();
-    let prior_issues = provider.issues.clone();
     let data = if query.contains("query ListTeams") {
         json!({"teams":page(vec![json!({"id":"team-1", "name":"Fixture", "key":"FIX", "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"})])})
     } else if query.contains("query ProjectInitiative") {
@@ -196,44 +184,10 @@ async fn graphql(
     } else if query.contains("query IssueOwnership") {
         let mut issue = provider.issues[id].clone();
         issue["project"] = provider.projects[issue["project"]["id"].as_str().unwrap()].clone();
-        if provider.interrupt_after_transfer_readback
-            && id == "a-started"
-            && issue["project"]["id"] != "00000000-0000-4000-8000-000000000001"
-        {
-            provider.interrupt_after_transfer_readback = false;
-            provider.unavailable = true;
-        }
-        if id == "a-started" && issue["project"]["id"] != old_id("a") {
-            if let Some((project, status)) = provider.status_after_transfer.take() {
-                provider.revision += 1;
-                let revision = fixture_revision(provider.revision);
-                let project = provider.projects.get_mut(&project).unwrap();
-                project["status"]["type"] = json!(status);
-                project["updatedAt"] = revision;
-            }
-        }
         json!({"issue":issue})
-    } else if query.contains("query IssueTeam") {
-        json!({"issue":{"team":{"id":"team-1"}}})
     } else if query.contains("query ProjectStatuses") {
         json!({"projectStatuses":page(["planned", "started", "completed"].into_iter().map(|kind|
             json!({"id":kind,"type":kind,"teamId":null,"position":0.0})).collect())})
-    } else if query.contains("query CanceledWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"cancel-state","position":0.0}]}})
-    } else if query.contains("mutation CreateProject") {
-        let supplied = uuid::Uuid::parse_str(id).unwrap();
-        if supplied.get_version_num() != 4 || supplied.get_variant() != uuid::Variant::RFC4122 {
-            return Json(json!({"errors":[{"message":"supplied Project id must be UUID v4"}]}));
-        }
-        provider.projects.insert(id.into(), json!({"id":id,"name":vars["name"],"description":"", "archivedAt":null,
-            "content":vars["content"],"status":{"type":vars["statusId"]},"teams":{"nodes":[{"id":"team-1"}]},"initiatives":{"nodes":[]}}));
-        json!({"projectCreate":{"project":{"id":id}}})
-    } else if query.contains("mutation AttachProject") {
-        provider
-            .projects
-            .get_mut(vars["projectId"].as_str().unwrap())
-            .unwrap()["initiatives"]["nodes"] = json!([{"id":vars["initiativeId"]}]);
-        json!({"initiativeToProjectCreate":{"initiativeToProject":{"id":"link"}}})
     } else if query.contains("mutation AdoptProject") {
         let project = provider.projects.get_mut(id).unwrap();
         project["content"] = vars["input"]["content"].clone();
@@ -241,46 +195,9 @@ async fn graphql(
             project["status"]["type"] = status.clone();
         }
         json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation RenameProject") {
-        provider.projects.get_mut(id).unwrap()["name"] = vars["name"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation ApplyProjectPlan") {
-        provider.projects.get_mut(id).unwrap()["content"] = vars["content"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation UpdateProject") {
-        let project = provider.projects.get_mut(id).unwrap();
-        for field in ["name", "description", "content"] {
-            project[field] = vars[field].clone();
-        }
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation SetProjectStatus") {
-        provider.projects.get_mut(id).unwrap()["status"]["type"] = vars["statusId"].clone();
-        json!({"projectUpdate":{"success":true}})
-    } else if query.contains("mutation MoveIssueToProject") {
-        let target = vars["projectId"].as_str().unwrap();
-        let name = provider.projects[target]["name"].clone();
-        provider.issues.get_mut(id).unwrap()["project"] = json!({"id":target,"name":name});
-        json!({"issueUpdate":{"issue":{"id":id}}})
-    } else if query.contains("mutation SetIssueState") {
-        provider.issues.get_mut(id).unwrap()["state"]["type"] = json!("canceled");
-        json!({"issueUpdate":{"issue":{"id":id}}})
     } else {
         panic!("unexpected fixture operation: {query}")
     };
-    if query.contains("mutation SetProjectStatus") && vars["statusId"] == "started" {
-        if let Some(path) = provider.binding_collision.take() {
-            rusqlite::Connection::open(path).unwrap().execute_batch(
-                "CREATE TRIGGER fail_selection BEFORE UPDATE OF current_project_id ON waves
-                 WHEN NEW.current_project_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'fixture selection failure'); END;"
-            ).unwrap();
-        }
-    }
-    if query.contains("mutation SetProjectStatus") && vars["statusId"] == "completed" {
-        if let Some((path, project)) = provider.binding_replacement.take() {
-            rusqlite::Connection::open(path).unwrap().execute(
-                "UPDATE waves SET current_project_id=(SELECT id FROM projects WHERE external_project_id=?1 AND wave_id=waves.id) WHERE id=(SELECT wave_id FROM projects WHERE external_project_id=?1)", [&project]).unwrap();
-        }
-    }
     if query.starts_with("mutation") {
         provider.mutations += 1;
         provider.revision += 1;
@@ -288,11 +205,6 @@ async fn graphql(
         for (id, project) in &mut provider.projects {
             if prior_projects.get(id) != Some(project) {
                 project["updatedAt"] = revision.clone();
-            }
-        }
-        for (id, issue) in &mut provider.issues {
-            if prior_issues.get(id) != Some(issue) {
-                issue["updatedAt"] = revision.clone();
             }
         }
         if provider.interrupt_after == Some(provider.mutations) {
@@ -333,9 +245,12 @@ fn provider_fixture() -> Provider {
     provider
 }
 
-async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+async fn context(home: &std::path::Path, repo: &std::path::Path, url: &str) -> PmTestContext {
+    std::fs::create_dir_all(home).unwrap();
+    std::env::set_var("LF_HOME", home);
+    let path = home.join("loopflow.db");
     let store = Arc::new(
-        open_ephemeral_store(&StorageConfig::sqlite(path.into()))
+        open_ephemeral_store(&StorageConfig::sqlite(path.clone()))
             .await
             .unwrap(),
     );
@@ -356,7 +271,7 @@ async fn context(path: &std::path::Path, repo: &std::path::Path, url: &str) -> P
         .await
         .unwrap();
     PmTestContext {
-        path: path.into(),
+        path,
         store,
         graphql_url: url.into(),
     }
@@ -593,7 +508,11 @@ async fn serve_fixture(provider: Arc<Mutex<Provider>>) -> (String, tokio::task::
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let original = "Keep this prose.\n\n## Flows\nrecommended: custom\n\n## KRs\n- [ ] Keep this KR\n\n## Notes\nRetain this closing note.\n";
@@ -611,7 +530,7 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
     expected["status"]["type"] = json!("started");
     let provider = Arc::new(Mutex::new(state));
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("sync.db"), &repo, &url).await;
+    let home = context(&directory.path().join("sync"), &repo, &url).await;
     let (task, pr, flow) = local_started_task(&home, &repo).await;
     rusqlite::Connection::open(&home.path)
         .unwrap()
@@ -661,7 +580,11 @@ async fn explicit_sync_converts_legacy_flow_without_renaming_or_losing_content()
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -677,7 +600,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             .unwrap()["archivedAt"] = json!("2026-09-01T00:00:00Z");
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("archive.db"), &repo, &url).await;
+    let home = context(&directory.path().join("archive"), &repo, &url).await;
     let (task, pr, flow) = local_started_task(&home, &repo).await;
     PM_TEST_CONTEXT
         .scope(home, async {
@@ -736,14 +659,18 @@ async fn legacy_home(path: &std::path::Path, repo: &std::path::Path, url: &str) 
         .await;
     }
     // These are the migration's retained receipt identities, not provider status.
-    let conn = rusqlite::Connection::open(path).unwrap();
+    let conn = rusqlite::Connection::open(&home.path).unwrap();
     conn.execute("UPDATE projects SET legacy_current=CASE external_project_id WHEN '00000000-0000-4000-8000-000000000001' THEN 1 ELSE 0 END WHERE wave_id=?1",
         [wave.id().as_str()]).unwrap();
     home
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -790,7 +717,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                 let first = legacy_home(
                     &directory
                         .path()
-                        .join(format!("legacy-{status}-{stop}-{second_home}.db")),
+                        .join(format!("legacy-{status}-{stop}-{second_home}")),
                     &repo,
                     &url,
                 )
@@ -843,7 +770,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                 }
                 let resumed = if second_home {
                     legacy_home(
-                        &directory.path().join(format!("resume-{status}-{stop}.db")),
+                        &directory.path().join(format!("resume-{status}-{stop}")),
                         &repo,
                         &url,
                     )
@@ -906,7 +833,11 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -930,7 +861,7 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
         }
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = legacy_home(&directory.path().join("foreign.db"), &repo, &url).await;
+    let home = legacy_home(&directory.path().join("foreign"), &repo, &url).await;
     PM_TEST_CONTEXT
         .scope(home, async {
             let store = super::pm_store().await.unwrap();
@@ -977,7 +908,11 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
 }
 
 #[tokio::test]
+// Each test has its own runtime; serialize process-global environment for its full lifetime.
+#[allow(clippy::await_holding_lock)]
 async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let directory = tempfile::tempdir().unwrap();
     let repo = fixture_repo(directory.path());
     let provider = Arc::new(Mutex::new(provider_fixture()));
@@ -993,7 +928,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
             .unwrap()["content"] = json!("## Flows\nrecommended: custom");
     }
     let (url, server) = serve_fixture(provider.clone()).await;
-    let home = context(&directory.path().join("unrecorded.db"), &repo, &url).await;
+    let home = context(&directory.path().join("unrecorded"), &repo, &url).await;
     local_started_task(&home, &repo).await;
     rusqlite::Connection::open(&home.path)
         .unwrap()

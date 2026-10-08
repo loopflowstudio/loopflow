@@ -588,7 +588,7 @@ tokio::task_local! {
 }
 
 #[cfg(test)]
-mod test_fixture;
+pub(super) mod test_fixture;
 
 #[cfg(test)]
 mod task_planning_tests;

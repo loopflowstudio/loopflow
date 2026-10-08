@@ -53,9 +53,13 @@ async fn serve(
     (url, server)
 }
 
-// Stateful provider evidence for completion, membership, and deletion.
+// Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
 struct PlanningState {
+    deletion_writes: usize,
+    lose_deletion_reply: bool,
+    deletion_unconfirmed: bool,
+    trash_unavailable: bool,
     field_outage: bool,
     field_reply_lost: bool,
     field_reads_blocked: bool,
@@ -75,13 +79,6 @@ struct PlanningState {
     reopen_during_completion: bool,
     lose_comment: bool,
     completion_writes: usize,
-    trashed: bool,
-    deletion_writes: usize,
-    lose_deletion: bool,
-    refuse_deletion: bool,
-    unreadable_trash: bool,
-    fail_deleted_snapshot: bool,
-    omit_trashed_issues: bool,
     current_project_id: Option<String>,
     initial_project_id: Option<String>,
     completion_state: Option<String>,
@@ -166,14 +163,11 @@ async fn planning_graphql(
                 json!({"errors":[{"message":"foreign Project issues are unavailable"}]}),
             );
         }
-        let issues = if state.trashed && state.omit_trashed_issues {
-            vec![]
-        } else {
-            state.issues.clone()
-        };
-        let issues = issues
-            .into_iter()
+        let issues = state
+            .issues
+            .iter()
             .filter(|issue| issue["project"]["id"] == vars["projectId"])
+            .cloned()
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query FindProject") {
@@ -244,6 +238,34 @@ async fn planning_graphql(
         } else {
             json!({"data":{"issueUpdate":{"success":true}}})
         });
+    } else if query.contains("query IssueTrash") {
+        let issue = if state.trash_unavailable {
+            None
+        } else {
+            state
+                .issues
+                .iter()
+                .find(|issue| issue["id"] == vars["id"])
+                .cloned()
+        };
+        json!({"issue":issue})
+    } else if query.contains("mutation DeliverTaskDeletion") {
+        state.deletion_writes += 1;
+        if state.deletion_unconfirmed {
+            return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
+        }
+        let issue = state
+            .issues
+            .iter_mut()
+            .find(|issue| issue["id"] == vars["id"])
+            .unwrap();
+        issue["trashed"] = json!(true);
+        mark_issue_updated(issue);
+        if state.lose_deletion_reply {
+            state.lose_deletion_reply = false;
+            return axum::Json(json!({"errors":[{"message":"deletion reply lost"}]}));
+        }
+        json!({"issueDelete":{"success":true}})
     } else if query.contains("query IssueOwnership") {
         if let Some(remaining) = state.fail_issue_read_after.as_mut() {
             if *remaining == 0 {
@@ -253,11 +275,6 @@ async fn planning_graphql(
                 );
             }
             *remaining -= 1;
-        }
-        if state.trashed {
-            return axum::Json(
-                json!({"errors":[{"message":"ordinary ownership unavailable after trash"}]}),
-            );
         }
         let mut issue = state
             .issues
@@ -272,28 +289,10 @@ async fn planning_graphql(
             .cloned()
             .unwrap_or(project);
         json!({"issue":issue})
-    } else if query.contains("query IssueDeletion") {
-        if state.trashed && state.unreadable_trash {
-            json!({"issue":null})
-        } else {
-            json!({"issue":{"trashed":state.trashed}})
-        }
-    } else if query.contains("mutation DeleteIssue") {
-        if state.refuse_deletion || state.trashed {
-            return axum::Json(json!({"data":{"issueDelete":{"success":false}}}));
-        }
-        state.trashed = true;
-        state.deletion_writes += 1;
-        state.fail_snapshot = state.fail_deleted_snapshot;
-        if state.lose_deletion {
-            state.lose_deletion = false;
-            return axum::Json(json!({"errors":[{"message":"lost deletion response"}]}));
-        }
-        json!({"issueDelete":{"success":true}})
     } else if query.contains("query IssueTeam") {
         json!({"issue":{"team":{"id":"team-1"}}})
-    } else if query.contains("query CompletedWorkflowStates") {
-        if state.reopen_during_completion {
+    } else if query.contains("query WorkflowStates") {
+        if vars["type"] == "completed" && state.reopen_during_completion {
             state.reopen_during_completion = false;
             // Another Linear client completes and explicitly reopens after our
             // ownership read, before our unconditional issueUpdate arrives.
@@ -302,15 +301,11 @@ async fn planning_graphql(
             state.issues[0]["state"] = json!({"type":"unstarted"});
             mark_issue_updated(&mut state.issues[0]);
         }
-        json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
-    } else if query.contains("query CanceledWorkflowStates") {
-        json!({"workflowStates":{"nodes":if state.missing_canceled_state {
+        json!({"workflowStates":{"nodes":if vars["type"] == "canceled" && state.missing_canceled_state {
             vec![]
         } else {
-            vec![json!({"id":"canceled","position":0})]
+            vec![json!({"id":vars["type"],"position":0})]
         }}})
-    } else if query.contains("query UnstartedWorkflowStates") {
-        json!({"workflowStates":{"nodes":[{"id":"unstarted","position":0}]}})
     } else if query.contains("mutation SetIssueState") {
         if state.fail_completion {
             state.fail_completion = false;
@@ -431,7 +426,7 @@ fn seed_provider_task(
         state.issues.push(json!({
             "id":id,"identifier":format!("FIX-{index}"),"url":null,
             "title":title,"description":description,"completedAt":null,
-            "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,
+            "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
             "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
         }));
@@ -477,6 +472,306 @@ fn with_completion_task(
         test(&runtime, &fixture, &repo, &task, state);
     });
     server.abort();
+}
+
+#[test]
+fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        conn.execute(
+            "UPDATE tasks SET worktree=?2 WHERE id=?1",
+            rusqlite::params![task.id.as_str(), repo.to_str().unwrap()],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO processes(lfid,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code',?1,2)",[repo.to_str().unwrap()]).unwrap();
+        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,provider_thread,input_published) VALUES('session-retained','Conversation','human',2,?1,?2,?3,'11111111-1111-4111-8111-111111111111','native-retained',1)",rusqlite::params![repo.to_str().unwrap(),task.id.as_str(),task.wave_id.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.id.as_str()]).unwrap();
+        let graph = json!({"name":"code", "nodes":[{"name":"review","skill":"review","description":null}],
+            "edges":[{"from":"start","to":"review","flow":"implement"},{"from":"review","to":"end","flow":null}]});
+        conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,process_lfid,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)",rusqlite::params![task.id.as_str(),graph.to_string()]).unwrap();
+        conn.execute("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,process_lfid,note,at) VALUES(?1,'code','chose','start','review',0,'11111111-1111-4111-8111-111111111111','Original choice',3)",[task.id.as_str()]).unwrap();
+        let rows = || {
+            [
+                "processes",
+                "agent_sessions",
+                "task_prs",
+                "task_workflows",
+                "task_workflow_moves",
+            ]
+            .iter()
+            .map(|table| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                    .unwrap();
+                let columns = query.column_count();
+                query
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+        };
+        let before = rows();
+        let workflow = fixture.store.sqlite.workflow(&task.id).unwrap().unwrap();
+        std::fs::write(repo.join("retained-work"), "unfinished").unwrap();
+        runtime.block_on(async { state.lock().await.field_outage = true });
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        let sync =
+            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
+                .unwrap();
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                loop {
+                    let error: Option<String> = conn
+                        .query_row(
+                            "SELECT error FROM task_changes WHERE id=?1",
+                            [&receipt.id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    if error.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                state.lock().await.field_outage = false;
+                while !fixture
+                    .store
+                    .sqlite
+                    .pending_task_changes(&task.id)
+                    .unwrap()
+                    .is_empty()
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["trashed"], true);
+            assert_eq!(provider.deletion_writes, 1);
+        });
+        drop(sync);
+        assert_eq!(rows(), before);
+        assert_eq!(
+            fixture.store.sqlite.workflow(&task.id).unwrap().unwrap(),
+            workflow
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.join("retained-work")).unwrap(),
+            "unfinished"
+        );
+        let reopened =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&fixture.database).unwrap();
+        assert!(reopened.list_tasks(None).unwrap().is_empty());
+        assert_eq!(
+            reopened.task(&task.id).unwrap().unwrap().plan.linear_id,
+            task.plan.linear_id
+        );
+        assert!(reopened.pending_task_changes(&task.id).unwrap().is_empty());
+        assert_eq!(
+            conn.query_row(
+                "SELECT id FROM task_changes WHERE task_id=?1 AND field='deleted'",
+                [task.id.as_str()],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            receipt.id
+        );
+    });
+}
+
+#[test]
+fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime.block_on(async {
+            state.lock().await.lose_deletion_reply = true;
+            assert!(
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(state.lock().await.issues[0]["trashed"], true);
+            state.lock().await.trash_unavailable = true;
+            assert!(
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(
+                fixture.store.sqlite.pending_task_changes(&task.id).unwrap()[0].id,
+                receipt.id
+            );
+            state.lock().await.trash_unavailable = false;
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+            crate::ops::planning_delivery::sync_repository_fields(&fixture.store, task)
+                .await
+                .unwrap();
+            assert_eq!(state.lock().await.deletion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+    });
+}
+
+#[test]
+fn task_deletion_concurrent_delivery_has_one_effect() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime.block_on(async {
+            let (first, second) = tokio::join!(
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work),
+                crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work),
+            );
+            first.unwrap();
+            second.unwrap();
+            assert_eq!(state.lock().await.deletion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+    });
+}
+
+#[test]
+fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["trashed"] = json!(true);
+            provider.issues[0]["updatedAt"] = json!("2026-09-28T12:00:00Z");
+            drop(provider);
+            assert!(crate::ops::planning_delivery::sync_fields(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone())
+            )
+            .await
+            .is_err());
+            assert_eq!(state.lock().await.deletion_writes, 0);
+        });
+        assert_eq!(
+            fixture.store.sqlite.pending_task_changes(&task.id).unwrap()[0].id,
+            receipt.id
+        );
+    });
+}
+
+#[test]
+fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime.block_on(async {
+            state.lock().await.deletion_unconfirmed = true;
+            for _ in 0..2 {
+                assert!(
+                    crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                        .await
+                        .is_err()
+                );
+            }
+            assert_eq!(state.lock().await.deletion_writes, 1);
+            assert_ne!(state.lock().await.issues[0]["trashed"], true);
+        });
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_task_changes(&task.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(fixture.store.sqlite.list_tasks(None).unwrap().is_empty());
+    });
+}
+
+#[test]
+fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .remove(0);
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["title"] = json!("Keep this work");
+            mark_issue_updated(&mut provider.issues[0]);
+            drop(provider);
+            crate::ops::planning_delivery::sync_fields(
+                &fixture.store,
+                repo,
+                &crate::durable::WorkRef::Task(task.id.clone()),
+            )
+            .await
+            .unwrap();
+            assert_eq!(state.lock().await.deletion_writes, 0);
+        });
+        assert_eq!(
+            fixture.store.sqlite.list_tasks(None).unwrap()[0].plan.title,
+            "Keep this work"
+        );
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let (value, conflict): (String, String) = conn
+            .query_row(
+                "SELECT value_json,conflict_json FROM task_changes WHERE id=?1",
+                [receipt.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(value, "true");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&conflict).unwrap()["value"],
+            false
+        );
+    });
 }
 
 #[test]
@@ -1927,7 +2222,6 @@ esac
                 runtime.block_on(fixture.store.task_prs(&task.id)).unwrap()[0].phase(),
                 PrPhase::Abandoned
             );
-            assert!(!runtime.block_on(async { state.lock().await.trashed }));
             // Retry survives deletion of the checkout and refs.
             crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
         });
@@ -2092,12 +2386,12 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        seed_provider_task(&runtime, &state, &repo, "Planning work", "Retain evidence").unwrap();
         runtime
             .block_on(crate::ops::project::bind_project(
                 &repo, "product", selected,
             ))
             .unwrap();
-        seed_provider_task(&runtime, &state, &repo, "Planning work", "Retain evidence").unwrap();
         assert!(crate::ops::task::task_sweep(&repo, true)
             .unwrap()
             .is_empty());
@@ -2169,7 +2463,6 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
         });
         let applied = crate::ops::task::task_sweep(&repo, true).unwrap();
         assert_eq!(applied[0].outcome, "canceled");
-        assert!(!runtime.block_on(async { state.lock().await.trashed }));
         assert!(crate::ops::task::task_sweep(&repo, true)
             .unwrap()
             .is_empty());

@@ -68,9 +68,12 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
     let changes = pending(store, owner)?;
     let attempt = async {
         let client = super::pm::linear_client(repo).await?;
+        if let Some(change) = changes.iter().find(|change| change.field == "deleted") {
+            return sync_deletion(store, repo, owner, &client, change).await;
+        }
         // Also reconcile an older attempted receipt whose successor is no longer pending.
         observe(store, repo, owner, &client).await?;
-        for change in changes.iter().filter(|change| change.field != "deleted") {
+        for change in &changes {
             if let Err(error) = sync_field(store, repo, owner, &client, change).await {
                 store
                     .sqlite
@@ -93,6 +96,80 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         }
     }
     result
+}
+
+async fn sync_deletion(
+    store: &Store,
+    repo: &Path,
+    owner: PlanningChanges<'_>,
+    client: &LinearClient,
+    change: &PlanningChange,
+) -> OpsResult<()> {
+    let PlanningChanges::Task(id) = owner else {
+        return Err(message("Only Task removal has a deletion receipt"));
+    };
+    let task = store
+        .get_task(id)
+        .await
+        .map_err(message)?
+        .ok_or_else(|| message("Task is missing"))?;
+    let external = task.plan.linear_id()?.as_str();
+    let (trashed, trash_revision) = client
+        .issue_trash(external)
+        .await
+        .map_err(message)?
+        .ok_or_else(|| message("Linked Linear issue is unavailable; deletion remains uncertain"))?;
+    if trashed {
+        if !store
+            .sqlite
+            .acknowledge_task_deletion(id, change, Some(&trash_revision))
+            .map_err(message)?
+        {
+            return Err(message(
+                "Newer Linear evidence retained; deletion remains uncertain",
+            ));
+        }
+        return Ok(());
+    }
+    // Complete active-issue ingestion adopts conflicting Linear edits through
+    // the common writer before attempting the saved removal.
+    let (_, _, revision) = observe(store, repo, owner, client).await?;
+    if revision.as_deref() != Some(trash_revision.as_str()) {
+        return Err(message(
+            "Linear deletion observations disagree; saved removal retained",
+        ));
+    }
+    store
+        .sqlite
+        .observe_task_deletion(id, &trash_revision)
+        .map_err(message)?;
+    if !pending(store, owner)?.iter().any(|c| c.id == change.id) {
+        return Ok(());
+    }
+    let baseline = change
+        .base
+        .as_ref()
+        .and_then(|base| base["revision"].as_str());
+    if baseline.is_none() || revision.is_none() {
+        return Err(message(
+            "Deletion has no provider baseline; saved removal retained",
+        ));
+    }
+    if !store
+        .sqlite
+        .attempt_planning_field(owner, change, revision.as_deref())
+        .map_err(message)?
+    {
+        return Err(message(
+            "Deletion remains uncertain; no repeated mutation issued",
+        ));
+    }
+    client.delete_issue(external).await.map_err(message)?;
+    store
+        .sqlite
+        .acknowledge_task_deletion(id, change, None)
+        .map_err(message)?;
+    Ok(())
 }
 
 // Serialize provider effects only; saves and acquisition never take this lock.

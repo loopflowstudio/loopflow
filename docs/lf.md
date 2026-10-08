@@ -187,8 +187,9 @@ Project names, summaries, Workflow selections and complete plan replacements sav
 locally, including during a Linear outage. Connected repositories report pending sync;
 `lf project workflow show <project-id> --json` includes pending field changes.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
-Linear edits, retaining losing intentions in delivery history. Project edit delivery
-remains unfinished. Readback cannot protect against unseen concurrent provider writes.
+Linear edits, retaining losing intentions in delivery history. An active Task Session
+or Desktop connection delivers mapped Project fields; Project export remains unfinished.
+Readback cannot protect against unseen concurrent provider writes.
 
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
@@ -225,16 +226,19 @@ generates the Task ID; later edits, Project rotation and synchronization preserv
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
 with their provider baselines; observed conflicts adopt Linear and retire the losing
 intention. An active Task connection delivers mapped titles, notes, assignment,
-membership and Project fields after recovery. Task export and relative-order delivery
-remain unfinished; the saved Task's local ID works before it receives a Linear alias.
+membership, deletion and Project fields after recovery. Deletion retains execution
+and checkout history. Missing provider evidence keeps deletion pending; newer
+observed Linear edits retire removal and restore planning visibility. Task export
+and relative-order delivery remain unfinished; the saved Task's local ID works before it receives a Linear alias.
 
 ```bash
 lf task refile <task-id> --wave exports
 ```
 
 Move unplaced work to the Wave's selected Project. Membership saves locally during
-an outage and retains pending sync; recorded work keeps its owner. Linear delivery
-of the move remains unfinished.
+an outage and retains pending sync; recorded work keeps its owner. An active Task
+Session or Desktop connection delivers the move when both Task and destination
+Project have Linear mappings. Unmapped records still await export.
 
 ## Inspect and continue
 

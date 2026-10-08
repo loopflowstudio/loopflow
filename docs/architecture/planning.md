@@ -38,8 +38,11 @@ sources can be imported later with `lf wave ensure`.
 Task deletion atomically records local removal and a stable pending field receipt.
 It preserves Workflow, Session, Process, PR and checkout state, including completed
 outcomes. Retry retains the first receipt. Confirmed historical provider removals
-remain independent evidence. Deletion delivery is unfinished; connected commands
-report pending Linear sync and do not claim provider trash succeeded.
+remain independent evidence. Active foreground connections deliver mapped removals.
+An exact trash observation or deletion acknowledgement settles the receipt; missing
+issues and lost replies retain uncertainty without replaying the mutation. A newer
+explicitly active Linear revision retires removal and restores planning visibility,
+retaining the losing receipt. This grants no execution or cleanup authority.
 
 Task and Project rows own identity for both paths. Random UUIDs are minted before
 placement; provider UUIDs and ticket aliases remain optional mappings. Accepted
@@ -129,7 +132,7 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Task/Project export, relative-order/deletion
+CLI edits report pending sync. Task/Project export, relative-order
 delivery, complete Desktop pending presentation and composed reconnect remain
 unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never

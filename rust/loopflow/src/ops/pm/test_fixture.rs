@@ -105,10 +105,12 @@ pub(super) fn token(access: &str, refresh: &str, expires_at: i64) -> ProviderTok
 }
 
 // Callers hold the shared test environment lock for this guard's lifetime.
-pub(super) struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>);
+pub(in crate::ops) struct PlanningEnvironment(
+    Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>,
+);
 
 impl PlanningEnvironment {
-    pub(super) fn isolate() -> Self {
+    pub(in crate::ops) fn isolate() -> Self {
         let mut saved = vec![("PATH".into(), std::env::var_os("PATH"))];
         for (name, value) in
             std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))

@@ -215,25 +215,8 @@ const MOVE_ITEM_TO_TEAM_MUTATION: &str = r#"mutation MoveIssueToTeam($id: String
   }
 }"#;
 
-const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
-    nodes {
-      id
-    }
-  }
-}"#;
-
-const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "unstarted" } }) {
-    nodes {
-      id
-      position
-    }
-  }
-}"#;
-
-const LIST_CANCELED_WORKFLOW_STATES_QUERY: &str = r#"query CanceledWorkflowStates($teamId: ID!) {
-  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+const LIST_WORKFLOW_STATES_QUERY: &str = r#"query WorkflowStates($teamId: ID!, $type: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: $type } }) {
     nodes {
       id
       position
@@ -599,15 +582,16 @@ impl LinearClient {
 
     /// Resolve before reserving a write: failed reads leave delivery retryable.
     pub(crate) async fn item_state_id(&self, item_id: &str, target: &str) -> PmResult<String> {
-        let query = match target {
-            "completed" => LIST_COMPLETED_WORKFLOW_STATES_QUERY,
-            "unstarted" => LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
-            "canceled" => LIST_CANCELED_WORKFLOW_STATES_QUERY,
-            _ => return Err(PmError::Message(format!("unsupported Task state {target}"))),
-        };
+        if !matches!(target, "completed" | "unstarted" | "canceled") {
+            return Err(PmError::Message(format!("unsupported Task state {target}")));
+        }
         let team_id = self.item_team_id(item_id).await?;
-        let response: WorkflowStatesData =
-            self.graphql(query, json!({ "teamId": team_id })).await?;
+        let response: WorkflowStatesData = self
+            .graphql(
+                LIST_WORKFLOW_STATES_QUERY,
+                json!({ "teamId": team_id, "type": target }),
+            )
+            .await?;
         response
             .workflow_states
             .nodes
@@ -855,6 +839,66 @@ impl LinearClient {
             .graphql(ISSUE_OWNERSHIP_QUERY, json!({ "id": issue_id }))
             .await?;
         response.issue.map(IssueNode::into_ownership).transpose()
+    }
+
+    pub(crate) async fn issue_trash(&self, id: &str) -> PmResult<Option<(bool, String)>> {
+        #[derive(Deserialize)]
+        struct Data {
+            #[serde(deserialize_with = "Option::deserialize")]
+            issue: Option<Issue>,
+        }
+        #[derive(Deserialize)]
+        struct Issue {
+            id: String,
+            #[serde(rename = "updatedAt")]
+            revision: String,
+            #[serde(deserialize_with = "Option::deserialize")]
+            trashed: Option<bool>,
+        }
+        let data: Data = self
+            .graphql(
+                r#"query IssueTrash($id: String!) {
+                issue(id: $id) { id updatedAt trashed }
+            }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        data.issue
+            .map(|issue| {
+                if issue.id != id {
+                    return Err(PmError::Message(
+                        "Linear trash observation returned a different issue".into(),
+                    ));
+                }
+                Ok((issue.trashed == Some(true), issue.revision))
+            })
+            .transpose()
+    }
+
+    pub(crate) async fn delete_issue(&self, id: &str) -> PmResult<()> {
+        #[derive(Deserialize)]
+        struct Data {
+            #[serde(rename = "issueDelete")]
+            deletion: Payload,
+        }
+        #[derive(Deserialize)]
+        struct Payload {
+            success: bool,
+        }
+        let data: Data = self
+            .graphql(
+                r#"mutation DeliverTaskDeletion($id: String!) {
+                issueDelete(id: $id) { success }
+            }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        if !data.deletion.success {
+            return Err(PmError::Message(
+                "Linear deletion was not acknowledged; receipt retained".into(),
+            ));
+        }
+        Ok(())
     }
 
     pub async fn find_project(&self, project_id: &str) -> PmResult<Option<PmProject>> {
@@ -1595,7 +1639,6 @@ struct WorkflowStatesConnection {
 #[derive(Deserialize)]
 struct WorkflowStateNode {
     id: String,
-    #[serde(default)]
     position: f64,
 }
 
@@ -2048,9 +2091,8 @@ mod tests {
 
     #[test]
     fn workflow_state_filters_use_linear_team_id() {
-        assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
-        assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
-        assert!(LIST_CANCELED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+        assert!(LIST_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+        assert!(LIST_WORKFLOW_STATES_QUERY.contains("$type: String!"));
     }
 
     #[test]
@@ -2728,58 +2770,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn complete_item_resolves_state_from_the_issue_team_not_the_wave_team() {
-        // The client is bound to the repository Team, but this fixture puts the
-        // issue in a different Team. The completed state must be
-        // resolved from the issue's own team or Linear rejects the transition.
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-wave".to_string()),
-            base_url,
-        );
-
-        let state = client.item_state_id("ENG-7", "completed").await.unwrap();
-        client.set_item_state("ENG-7", &state).await.unwrap();
-
-        let requests = requests.lock().await;
-        assert_eq!(requests.len(), 3);
-
-        let team_body: Value = serde_json::from_str(&requests[0].body).expect("team body is json");
-        assert!(team_body["query"]
-            .as_str()
-            .expect("query present")
-            .contains("IssueTeam"));
-        assert_eq!(team_body["variables"]["id"], json!("ENG-7"));
-
-        // The state lookup carries the issue's team, never the wave-bound team.
-        // Sabotage the fix (resolve from `team_id`) and this assertion goes red.
-        let states_body: Value =
-            serde_json::from_str(&requests[1].body).expect("states body is json");
-        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
-
-        let set_body: Value = serde_json::from_str(&requests[2].body).expect("set body is json");
-        assert_eq!(set_body["variables"]["stateId"], json!("state-done"));
-        assert_eq!(set_body["variables"]["id"], json!("ENG-7"));
-    }
-
-    #[tokio::test]
-    async fn reopening_and_cancellation_resolve_the_issue_team_default_state() {
-        for target in ["unstarted", "canceled"] {
+    async fn item_state_uses_the_issue_team_and_lowest_position_for_each_outcome() {
+        for target in ["completed", "unstarted", "canceled"] {
             let (base_url, requests) = test_server::spawn(vec![
                 json_response(
                     StatusCode::OK,
@@ -2792,24 +2784,33 @@ mod tests {
                         { "id": "state-default", "position": 1.0 }
                     ] } } }),
                 ),
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
+                ),
             ])
             .await;
+            // The issue belongs to a different Team from the repository binding.
             let client = LinearClient::with_base_url(
                 "linear-secret".to_string(),
                 Some("team-wave".to_string()),
                 base_url,
             );
-            assert_eq!(
-                client.item_state_id("ENG-7", target).await.unwrap(),
-                "state-default"
-            );
+            let state = client.item_state_id("ENG-7", target).await.unwrap();
+            assert_eq!(state, "state-default");
+            client.set_item_state("ENG-7", &state).await.unwrap();
+
             let requests = requests.lock().await;
-            let body: Value = serde_json::from_str(&requests[1].body).unwrap();
-            assert_eq!(body["variables"]["teamId"], "team-eng");
-            assert!(body["query"]
-                .as_str()
-                .unwrap()
-                .contains(&format!("eq: \"{target}\"")));
+            let lookup: Value = serde_json::from_str(&requests[1].body).unwrap();
+            assert_eq!(
+                lookup["variables"],
+                json!({"teamId":"team-eng", "type":target})
+            );
+            let update: Value = serde_json::from_str(&requests[2].body).unwrap();
+            assert_eq!(
+                update["variables"],
+                json!({"id":"ENG-7", "stateId":"state-default"})
+            );
         }
     }
 

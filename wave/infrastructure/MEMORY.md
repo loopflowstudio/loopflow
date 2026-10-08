@@ -34,8 +34,7 @@ Jack Heart selected LOO-412’s custom Git planning ref prototype on October 8
 (`b5402659-b825-4c12-b278-5d56ae1aa518`). LOO-406 owns common storage/writers and
 Linear sync; LOO-412 owns transport, excluding execution. Isolated transport fixtures
 can proceed now; integration consumes a coherent committed writer cut, never dirty
-code or duplicated planning. The ownership/deletion cut is independently reviewable
-from provider protocol research. Jack subsequently invoked ship-decomposed. No competing Flow, machine
+code or duplicated planning. Ownership is independently reviewable. Jack invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
 Foreground connections independently acquire comments/inventory and deliver mapped
@@ -60,18 +59,20 @@ settles delivery. Linear's schema at `7d2bc4279f` exposes no expected-revision
 issue update. More reads cannot prove atomic preservation; Linear-wins selects
 precedence, not atomicity. The design retains exact race and schema evidence.
 
-`b3cd894f3`’s manual comment choices are superseded: adopt provider body/author/time,
-retain the losing comment without replacement or echo. Cancellation saves atomically
-and now delivers through state receipts. Resolve Team/state before marking attempted;
-failed discovery stays retryable. Foreground reconnect, lost-reply and conflict fixtures
-pass; installed acceptance is unproved. Cleanup still checks execution separately.
+Comments adopt provider body/author/time, retaining the loser without echo.
+`67ee4024a` delivers cancellation. Resolve Team/state before marking attempted;
+failed discovery stays retryable. Select the issue Team's lowest position.
+Mapped deletion reuses field receipts: positive trash/acknowledgement settles;
+absence never permits replay. A newer explicitly active Linear revision restores
+planning visibility and retires the retained loser. Inventory cannot prove trash
+or restoration. Execution stays local; composed/installed acceptance remains unproved.
 
 Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundary:
 `84664e661`. SQLite owns Wave documents/relocation; ingestion preserves IDs/files.
 Personal owners and provider-first deletion are removed; execution, PRs, checkouts
 and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
 attempt errors and acknowledged revisions.
-Installed conversion, historical uncertainty, export, relative-order/deletion delivery, pending presentation and composed reconnect remain unfinished.
+Installed conversion, historical uncertainty, export, relative-order delivery, pending presentation and composed reconnect remain unfinished.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -883,9 +884,9 @@ Wave learning stays with its identified owner, never miscellaneous .lf notes.
 
 ## Prompt reduction boundary (2026-09-24)
 
-`719226ef4:wave/infrastructure/MEMORY.md` retains the evidence. Intelligence owns
-prompt assembly. LOO-287's architecture/weekly proof remains open; historical
-identity, execution eligibility and consumed launch evidence stay separate.
+`719226ef4:wave/infrastructure/MEMORY.md` retains the evidence and LOO-287's open
+proof. Intelligence owns prompt assembly; identity, eligibility and consumed launch
+evidence remain separate.
 
 ## Installation and command scope (curated 2026-10-02)
 

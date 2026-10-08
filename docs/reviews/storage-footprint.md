@@ -184,6 +184,34 @@ so neither was built without Jack Heart's choice. Proposal 6 (sizes in
 without this kind of pass. The four fixes above need no further observation
 except the snapshot path at a release whose migration is pending.
 
+## Install artifact retention · 2026-10-07
+
+Every install staged a CLI under `~/.lf/bin` and an app bundle under
+`~/.lf-machine/install/artifacts` by content address, and nothing removed them.
+The cause was in the record as well as the files: published promotion appended
+each release's artifact set to `retained_published_sets` in `active.json`, so 18
+sets were named as retained here, while switch recovery already kept two. Nothing
+reads the older sets except an error message; a receipt-managed install refuses
+legacy rollback to an arbitrary retained binary.
+
+**Fixed here**, not yet installed: a settled install retains its published
+fallback and the one it replaced. After settlement, still under the promotion
+lock, `lf-<sha256>` and `lfd-<sha256>` files and `published-`/`development-<sha256>`
+bundle directories are removed unless the active install names them or a live
+process executes them. Any other name stays (`hotfix-*`, `lf.stale-*`, `lfd`),
+as do the switch receipts. An unreadable process table skips the pass; a failed
+removal waits for the next settlement. Proof:
+`a_settled_install_keeps_only_what_it_can_select_or_is_running`.
+
+Read-only projection for the next settled install on this machine: 161 of 168
+binaries (6.06 GiB) and 62 of 63 bundles (5.32 GiB) are superseded; two binaries
+are kept because processes run them. These are `du` sizes. Staging copies with
+`fs::copy`, which clones on APFS, so blocks still shared with a surviving build
+output are not returned; that share was not measured. Reclamation is unobserved
+until a release containing this change installs. Steady state afterwards is two
+releases: about 100 MB of CLI and 180 MB of bundle, where each release used to
+add 140 MB for good.
+
 ## Customer growth
 
 Assumptions, from October 2–6 here: 1,227 captures (one agent launch or Flow
@@ -206,9 +234,9 @@ ten captures; the ninetieth percentile was 63 MB and the largest 249 MB.
 | Heavy: several agents all day | 100 | 14 GB | 168 GB | about 148 GB |
 | This machine | 285 | 39 GB | 480 GB | about 420 GB |
 
-Fixed costs per release: 50 MB of CLI and about 90 MB of app bundle kept
-forever, roughly 7 GB a year at weekly releases, plus one store copy per
-migrating release before the backup fix. Before LOO-382, Desktop polling added
+Fixed costs per release, before the install retention fix: 50 MB of CLI and
+about 90 MB of app bundle kept forever, roughly 7 GB a year at weekly releases,
+plus one store copy per migrating release before the backup fix. Before LOO-382, Desktop polling added
 about 30 MB a day whether or not anyone worked.
 
 Development-only costs, not customer costs: 118 GiB of Cargo output, benchmark
@@ -222,8 +250,8 @@ the retention decisions below.
 ## Producer audit and proposals
 
 No Loopflow producer expires anything except per-minute cron receipts, the
-Desktop cache and launch journal (both size-capped), and dead process receipts
-through `lf monitor prune`. `lf home doctor` reports no sizes.
+Desktop cache and launch journal (both size-capped), dead process receipts
+through `lf monitor prune`, and now migration backups and install artifacts. `lf home doctor` reports no sizes.
 
 In priority order, all **proposed**:
 
@@ -238,9 +266,8 @@ In priority order, all **proposed**:
    and final answer. A 90-day window would cap a heavy user near 40 GB. Needs a
    decision on what history is worth; started-Task and captured rows are
    protected by triggers today.
-3. **Binary and artifact retention.** Keep what `active.json` and `switch.json`
-   reference plus the retained published set; delete the rest after a settled
-   switch. About 11 GiB here.
+3. **Binary and artifact retention.** **Fixed here**; see
+   [install artifact retention](#install-artifact-retention--2026-10-07).
 4. **Narrow `session_driver_exit`.** Index only rows carrying an outcome.
    About 110 MB here; needs a migration.
 5. **Store each prompt once.** `manifest.json`, `user_input` and `context.json`

@@ -138,22 +138,25 @@ LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
 CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
 Session lacks exact process evidence; driver success proves no provider exit.
 
-## Storage footprint (LOO-390, 2026-10-06)
+## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
-measurements and prioritized proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
-`session_events` was 92% of a 2.6 GiB store: every streamed token was two rows,
-also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9) coalesces increments,
-validates an exact-frontier store in place at install preflight, limits the WAL
-to 64 MiB and keeps two fingerprinted migration backups. Installed October 7 and
-measured 8.5 h later: new captures keep 28% of rows and 72% of bytes, preflight
-1.0 s with no copy, WAL 64 MiB, backups 13.6 → 5.9 GiB. Old rows are not
-rewritten. Growth is still unbounded, about 1.7 MB of store per capture. Next
-condition is Jack's retention choice: system of record (SQLite or `events.jsonl`)
-and capture expiry; then binary/artifact pruning and sizes in `lf home doctor`.
-27.9 GiB was reclaimed October 6; Jack's 78.7 GiB recording and 81-copy leads
-were gone before measurement. Left intact: 23 GiB of unread legacy `traces`, `backups`,
-`lfd.db*`, `logs`; LOO-304's 40 GiB of `/private/tmp` fixture copies. Unknown ownership is not permission to delete. Test
+Jack Heart authorized autonomous investigation, cleanup and delivery. Evidence
+and proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
+`session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
+also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
+measured): new captures keep 28% of rows and 72% of bytes, preflight validates
+an exact store in place (1.0 s, no copy), WAL holds 64 MiB, two fingerprinted
+migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
+PR 2 (source, not installed): published promotion appended every release to
+`retained_published_sets`; a settled install now retains its fallback and the
+prior one, then removes unnamed content-addressed binaries/bundles no live
+process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
+Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
+retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
+then sizes in `lf home doctor`. 27.9 GiB was reclaimed October 6; Jack's 78.7 GiB
+recording and 81-copy leads were gone before measurement. Left intact: 23 GiB of
+unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
+`/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)

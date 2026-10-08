@@ -1401,28 +1401,23 @@ unsafe extern "C" {
     fn proc_pidpath(pid: libc::c_int, buffer: *mut libc::c_void, size: u32) -> libc::c_int;
 }
 
+/// Every process as `(pid, launched name, executable path)`. The path is absent
+/// when the kernel refuses it.
 #[cfg(target_os = "macos")]
-fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> {
     use std::ffi::CStr;
 
-    if paths.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names = paths
-        .iter()
-        .filter_map(|path| path.file_name())
-        .collect::<std::collections::HashSet<_>>();
     let output = Command::new("/bin/ps")
         .args(["-axo", "pid=,comm="])
         .output()
-        .context("enumerate macOS processes before app activation")?;
+        .context("enumerate macOS processes")?;
     if !output.status.success() {
         return Err(anyhow!(
-            "enumerate macOS processes before app activation: {}",
+            "enumerate macOS processes: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let mut matches = Vec::new();
+    let mut processes = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         let mut fields = line.trim().splitn(2, char::is_whitespace);
         let Some(pid) = fields
@@ -1438,11 +1433,6 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
         else {
             continue;
         };
-        // `comm` is only a hint when the kernel refuses the executable path;
-        // exact path identity still has to be checked for every live process.
-        let command_may_match = Path::new(command)
-            .file_name()
-            .is_some_and(|name| names.contains(name));
         let mut buffer = vec![0_u8; 4096];
         // SAFETY: `buffer` is writable for its reported size and `pid` came
         // from the kernel-backed process table emitted by `/bin/ps`.
@@ -1453,20 +1443,47 @@ fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)
                 buffer.len() as u32,
             )
         };
-        if length <= 0 {
+        let executable = if length <= 0 {
             // SAFETY: signal zero does not mutate the process and only probes
             // whether the pid observed above still exists.
-            let live = unsafe { libc::kill(pid, 0) } == 0;
-            if live && command_may_match {
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                continue;
+            }
+            None
+        } else {
+            let executable = CStr::from_bytes_until_nul(&buffer)
+                .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
+            Some(PathBuf::from(executable.to_string_lossy().as_ref()))
+        };
+        processes.push((pid, command.to_string(), executable));
+    }
+    Ok(processes)
+}
+
+#[cfg(target_os = "macos")]
+fn running_app_processes(paths: &[PathBuf]) -> Result<Vec<(libc::pid_t, PathBuf)>> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = paths
+        .iter()
+        .filter_map(|path| path.file_name())
+        .collect::<std::collections::HashSet<_>>();
+    let mut matches = Vec::new();
+    for (pid, command, executable) in process_executables()? {
+        let Some(executable) = executable else {
+            // `comm` is only a hint when the kernel refuses the executable path;
+            // exact path identity still has to be checked for every live process.
+            if Path::new(&command)
+                .file_name()
+                .is_some_and(|name| names.contains(name))
+            {
                 return Err(anyhow!(
                     "cannot prove executable identity for live app/helper process {pid}"
                 ));
             }
             continue;
-        }
-        let executable = CStr::from_bytes_until_nul(&buffer)
-            .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
-        let executable = PathBuf::from(executable.to_string_lossy().as_ref());
+        };
         if paths.iter().any(|path| path == &executable) {
             matches.push((pid, executable));
         }
@@ -2135,18 +2152,25 @@ fn active_install_from_switch(
             .clone()
             .expect("validated development switch retains a published fallback"),
     };
-    let mut retained = vec![published_fallback.clone()];
-    if let Some(prior_fallback) = &receipt.published_fallback {
-        if prior_fallback != &published_fallback {
-            retained.push(prior_fallback.clone());
-        }
-    }
     crate::installation::ActiveInstall {
         schema_version: 1,
         selection: receipt.target.clone(),
+        retained_published_sets: retained_published_sets(
+            &published_fallback,
+            receipt.published_fallback.as_ref(),
+        ),
         published_fallback,
-        retained_published_sets: retained,
     }
+}
+
+/// A settled install keeps its published fallback and the one it replaced.
+fn retained_published_sets(
+    fallback: &crate::installation::ArtifactSet,
+    prior_fallback: Option<&crate::installation::ArtifactSet>,
+) -> Vec<crate::installation::ArtifactSet> {
+    let mut retained = vec![fallback.clone()];
+    retained.extend(prior_fallback.filter(|prior| *prior != fallback).cloned());
+    retained
 }
 
 fn settle_switch(
@@ -2158,7 +2182,98 @@ fn settle_switch(
     receipt.phase = crate::installation::SwitchPhase::Settled;
     receipt.active_selection_committed = true;
     crate::installation::write_switch(root, receipt)?;
-    crate::installation::settle_switch(root, receipt, active)
+    crate::installation::settle_switch(root, receipt, active)?;
+    prune_superseded_artifacts(root, &lf_bin_dir(), active);
+    Ok(())
+}
+
+fn is_content_addressed(name: &str, labels: &[&str]) -> bool {
+    name.split_once('-').is_some_and(|(label, digest)| {
+        labels.contains(&label)
+            && digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    })
+}
+
+/// Every install stages a CLI and an app bundle under their content address,
+/// and nothing removed them. Once a switch settles, only the active install's
+/// own sets can be selected again, so the rest goes: staged binaries (and the
+/// retired daemon's) and retained bundles that no set names and no live process
+/// executes. Other names are left alone. Failure leaves files for the next
+/// settlement and never fails the install.
+fn prune_superseded_artifacts(
+    root: &Path,
+    bin_dir: &Path,
+    active: &crate::installation::ActiveInstall,
+) {
+    let running = match running_executables() {
+        Ok(running) => running,
+        Err(error) => {
+            tracing::warn!(%error, "superseded install artifacts were kept: live executables are unknown");
+            return;
+        }
+    };
+    let kept: Vec<PathBuf> = [&active.selection.artifact_set, &active.published_fallback]
+        .into_iter()
+        .chain(&active.retained_published_sets)
+        .flat_map(|set| &set.artifacts)
+        .map(|artifact| artifact.path.clone())
+        .chain(running)
+        .map(|path| fs::canonicalize(&path).unwrap_or(path))
+        .collect();
+    for (directory, labels) in [
+        (bin_dir.to_path_buf(), ["lf", "lfd"]),
+        (root.join("artifacts"), ["published", "development"]),
+    ] {
+        let Ok(directory) = fs::canonicalize(&directory) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let superseded = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| is_content_addressed(name, &labels))
+                && !kept.iter().any(|kept| kept.starts_with(&path));
+            if !superseded {
+                continue;
+            }
+            match remove_path(&path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "removed superseded install artifact")
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "superseded install artifact was not removed")
+                }
+            }
+        }
+    }
+}
+
+/// Executable paths of every live process this account can see.
+#[cfg(target_os = "macos")]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    Ok(process_executables()?
+        .into_iter()
+        // A process whose path the kernel withholds keeps the name it was launched as.
+        .map(|(_, command, executable)| executable.unwrap_or_else(|| PathBuf::from(command)))
+        .collect())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running_executables() -> Result<Vec<PathBuf>> {
+    let mut running = Vec::new();
+    for entry in fs::read_dir("/proc").context("enumerate processes")? {
+        if let Ok(executable) = fs::read_link(entry?.path().join("exe")) {
+            running.push(executable);
+        }
+    }
+    Ok(running)
 }
 
 pub fn recover_switch(switch_id: &str) -> Result<()> {
@@ -2202,6 +2317,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     {
         let active = active_install_from_switch(&receipt);
         crate::installation::settle_switch(&root, &receipt, &active)?;
+        prune_superseded_artifacts(&root, &lf_bin_dir(), &active);
         drop(lock);
         return Ok(());
     }
@@ -2425,17 +2541,14 @@ fn promote_published_from_installation(
     )?;
     switch.phase = crate::installation::SwitchPhase::Activated;
     crate::installation::write_switch(&root, &switch)?;
-    let mut retained = prior
-        .map(|prior| prior.retained_published_sets)
-        .unwrap_or_default();
-    if !retained.iter().any(|set| set == &target_published_fallback) {
-        retained.push(target_published_fallback.clone());
-    }
     let active = crate::installation::ActiveInstall {
         schema_version: 1,
         selection: target.clone(),
         published_fallback: target_published_fallback.clone(),
-        retained_published_sets: retained,
+        retained_published_sets: retained_published_sets(
+            &target_published_fallback,
+            prior.as_ref().map(|prior| &prior.published_fallback),
+        ),
     };
     settle_app_artifacts(&prepared)?;
     settle_switch(&root, &mut switch, &active)?;
@@ -2512,9 +2625,103 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 
 #[cfg(test)]
 mod artifact_tests {
-    use super::{commit_cli_symlink, copy_tree, stage_binary, tree_digest};
+    use super::{
+        commit_cli_symlink, copy_tree, prune_superseded_artifacts, retained_published_sets,
+        stage_binary, tree_digest,
+    };
+    use crate::installation::{
+        ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
+    };
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    fn published_set(id: &str, paths: &[&Path]) -> ArtifactSet {
+        ArtifactSet {
+            id: id.to_string(),
+            source: InstallSource::Published,
+            source_revision: id.to_string(),
+            source_identity: "release".to_string(),
+            content_sha256: id.to_string(),
+            artifacts: paths
+                .iter()
+                .map(|path| ArtifactIdentity {
+                    role: ArtifactRole::Cli,
+                    path: path.to_path_buf(),
+                    sha256: String::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn a_settled_install_keeps_only_what_it_can_select_or_is_running() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("install");
+        let bin = home.path().join("bin");
+        let artifacts = root.join("artifacts");
+        fs::create_dir_all(&bin).unwrap();
+        let binary = |label: &str, digit: char| {
+            let path = bin.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            fs::write(&path, label).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o555)).unwrap();
+            path
+        };
+        let bundle = |label: &str, digit: char| {
+            let path = artifacts.join(format!("{label}-{}", digit.to_string().repeat(64)));
+            let helper = path.join("Loopflow.app/Contents/MacOS/lf");
+            fs::create_dir_all(helper.parent().unwrap()).unwrap();
+            fs::write(&helper, label).unwrap();
+            (path, helper)
+        };
+        let (selected, previous, superseded) =
+            (binary("lf", '1'), binary("lf", '2'), binary("lf", '3'));
+        let daemon = binary("lfd", '4');
+        let (selected_app, selected_helper) = bundle("published", '5');
+        let (superseded_app, _) = bundle("development", '6');
+        let running = bin.join(format!("lf-{}", "7".repeat(64)));
+        fs::copy("/bin/sleep", &running).unwrap();
+        let mut process = std::process::Command::new(&running)
+            .arg("60")
+            .spawn()
+            .unwrap();
+        let by_hand = bin.join("hotfix-61609c56");
+        fs::write(&by_hand, "hotfix").unwrap();
+        let unfinished = artifacts.join("published-partial");
+        fs::create_dir_all(&unfinished).unwrap();
+
+        let fallback = published_set("new", &[&selected, &selected_helper]);
+        let prior = published_set("prior", &[&previous]);
+        let active = ActiveInstall {
+            schema_version: 1,
+            selection: InstallSelection {
+                installation_id: "published-new".to_string(),
+                source: InstallSource::Published,
+                artifact_set: fallback.clone(),
+                store: home.path().join("loopflow.db"),
+            },
+            retained_published_sets: retained_published_sets(&fallback, Some(&prior)),
+            published_fallback: fallback,
+        };
+        prune_superseded_artifacts(&root, &bin, &active);
+        let survived = running.exists();
+        process.kill().unwrap();
+        process.wait().unwrap();
+
+        assert!(selected.exists() && previous.exists() && selected_app.exists());
+        assert!(survived, "a binary a live process executes was removed");
+        assert!(by_hand.exists() && unfinished.exists());
+        assert!(!superseded.exists() && !daemon.exists() && !superseded_app.exists());
+    }
+
+    #[test]
+    fn a_reinstalled_fallback_is_retained_once() {
+        let fallback = published_set("new", &[]);
+        assert_eq!(
+            retained_published_sets(&fallback, Some(&fallback)),
+            [fallback]
+        );
+    }
 
     #[test]
     fn staging_is_content_addressed_and_rejects_replaced_bytes() {

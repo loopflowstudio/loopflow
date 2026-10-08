@@ -38,6 +38,7 @@ use std::time::Instant;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
     let progress = CliProgress;
+    let wait = matches!(cmd, Some(PrCommand::Land { wait: true, .. }));
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
@@ -66,8 +67,6 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Submit {
             strict,
             create_pr,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -77,8 +76,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: false,
                 create_pr: *create_pr,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait: false,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -90,18 +88,15 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Arm {
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
             body,
         })
         | Some(PrCommand::Land {
+            wait: _,
             strict,
             local,
-            complete,
-            next,
             worktree,
             message,
             title,
@@ -111,8 +106,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: *local,
                 create_pr: true,
-                complete: *complete,
-                next_slug: next.clone(),
+                wait,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -124,21 +118,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
         Some(PrCommand::Abandon { force, branch }) => {
             abandon_current(branch.as_deref(), *force, &progress)
         }
-        Some(PrCommand::Next { slug }) => pr_next(slug.as_deref()),
     }
-}
-
-fn pr_next(slug: Option<&str>) -> Result<()> {
-    let repo_root = find_repo_root()?;
-    let pr = crate::ops::task::pr_next(&repo_root, slug)?;
-    println!(
-        "Rotated to PR {} on {} (base {}).",
-        pr.sequence,
-        pr.branch,
-        &pr.base_commit[..pr.base_commit.len().min(12)]
-    );
-    println!("Push your follow-up edits, then `lf pr open` when ready.");
-    Ok(())
 }
 
 pub fn run_release(cmd: &ReleaseCommand) -> Result<()> {
@@ -618,7 +598,14 @@ pub(crate) fn land_repo(
     options: &LandOptions,
     progress: &impl Progress,
 ) -> Result<()> {
-    // The wave home stays put on land — no rotation, no cd.
+    if options.wait
+        && crate::ops::task::reconcile_checkout_pr(repo_root)?
+            .is_some_and(|pr| pr.phase() == crate::work::task::PrPhase::Merged)
+    {
+        progress.status("Pull request already merged; follow-through can proceed.");
+        return Ok(());
+    }
+    // The wave home stays put on land.
     let pr = with_sync_retry(repo_root, "land", progress, |repo, integrated| {
         if integrated {
             finish_arm_after_sync(repo, options, progress, &|_| {})
@@ -627,6 +614,15 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
+        if options.wait {
+            crate::engine::agent::register_interrupt_cleanup(|| {
+                eprintln!("Landing wait interrupted; merge intent retained.");
+            });
+            crate::ops::pr_landing::wait_for_merge(repo_root, options, &pr)
+                .map_err(|error| crate::process::FlowHeld(error.to_string()))?;
+            progress.status("Pull request merged; follow-through can proceed.");
+            return Ok(());
+        }
         progress.status(&format!(
             "PR #{} handed off; lf pr reconcile checks delivery.",
             pr.number

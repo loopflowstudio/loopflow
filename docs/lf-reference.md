@@ -105,15 +105,6 @@ Show CI status for current branch
 | `--logs / -l` | logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf pr next
-
-After an out-of-band merge, rotate this Task to its next serial PR, carrying committed and uncommitted follow-up onto the new branch
-
-| Argument | What it does |
-|---|---|
-| `<slug>` | Name the next serial branch (defaults to the settled PR's next slug, then the sequence number) |
-| `--help / -h` | Print help |
-
 ## lf pr publish
 
 Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens no review surface
@@ -144,8 +135,6 @@ Prepare a PR to land: sync, clear scratch, mark ready, and assign it to you. Not
 |---|---|
 | `--strict` | strict Default: false. |
 | `--create-pr / -p` | create pr Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -160,8 +149,6 @@ Prepare a PR, request exact-head auto-merge, and return without watching
 |---|---|
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -174,10 +161,9 @@ Request auto-merge, retain settlement intent, and return
 
 | Argument | What it does |
 |---|---|
+| `--wait` | Wait up to 30 minutes for verified merge; timeout retains the request Default: false. |
 | `--strict` | strict Default: false. |
 | `--local` | local Default: false. |
-| `--complete / -c` | Complete after verified merge (the default unless --next is supplied) Default: false. |
-| `--next` | next |
 | `--worktree / -w` | worktree |
 | `--message / -m` | message |
 | `--title` | title |
@@ -447,6 +433,17 @@ Inspect and continue Sessions
 
 | Argument | What it does |
 |---|---|
+| `--help / -h` | Print help |
+
+## lf session observe-status
+
+Observe validated Program Status snapshots from an active local terminal
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--terminal` | The terminal marker in the current provider client receipt |
+| `--generation` | Provider generation from the Session reading |
 | `--help / -h` | Print help |
 
 ## lf session resume
@@ -1374,15 +1371,19 @@ Check authorized deliveries once, then exit
 
 ## lf task follow-up
 
-Record accepted work remaining after merge, or resolve it with evidence
+File or link follow-up Tasks after merge, then record the disposition
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--outcome` | outcome |
-| `--evidence` | evidence |
-| `--check-at` | Next observation or decision, as an RFC 3339 timestamp |
-| `--clear` | Evidence that the remaining work is satisfied or no longer needed |
+| `--title` | title |
+| `--notes` | notes |
+| `--due` | due |
+| `--wave` | wave |
+| `--existing` | existing |
+| `--none` | none |
+| `--finish` | finish |
+| `--key` | Stable obligation key; use a distinct key for each additional follow-up |
 | `--help / -h` | Print help |
 
 ## lf task automate
@@ -1417,6 +1418,7 @@ Ensure tracked Task Work and its worktree without launching a Flow
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
+| `--design` | Hand off a child-specific design from the caller's checkout |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -1432,6 +1434,17 @@ Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
 | `--reason` | Direction for this run, published to the Task |
+| `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
+| `--help / -h` | Print help |
+
+## lf task complete
+
+Complete a Task: the same transition and checks as `task move ISSUE end`
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | Why, kept in the Task's workflow history |
 | `--force` | Reach `end` although Linear already calls the active Task complete Default: false. |
 | `--help / -h` | Print help |
 

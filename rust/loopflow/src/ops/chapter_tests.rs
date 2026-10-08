@@ -43,6 +43,7 @@ fn task(state: &str) -> PmItem {
         rank: 0,
         completed: state == "completed",
         completed_at: None,
+        due_date: None,
         state: Some(state.into()),
         project_id: Some("old".into()),
         project: Some("old".into()),
@@ -427,6 +428,9 @@ async fn local_task(
         project_id: parent.id,
         worktree: worktree.into(),
         workspace_slug: issue.into(),
+        branch: issue.into(),
+        base_commit: base.into(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -465,7 +469,11 @@ async fn local_task(
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
-    context.store.create_task(&task, &pr, None).await.unwrap();
+    context
+        .store
+        .create_task(&task, Some(&pr), None)
+        .await
+        .unwrap();
     (task, pr)
 }
 

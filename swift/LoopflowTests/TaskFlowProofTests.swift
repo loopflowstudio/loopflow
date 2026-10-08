@@ -45,6 +45,29 @@ private func captureIfRequested(_ window: NSWindow, name: String) throws {
 
 @Suite("Task Flow")
 struct TaskFlowTests {
+
+    @Test("Task delivery shows pending work and confirmed follow-up links beside the conversation")
+    @MainActor
+    func deliveryEvidence() throws {
+        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: fixture("task_delivery_rows.json"))
+        let pending = TaskDeliveryView(task: try #require(rows["pending"]))
+        #expect(try pending.inspect().find(text: "Merged · Follow-through pending").string()
+                == "Merged · Follow-through pending")
+        let conversion = TaskDeliveryView(task: try #require(rows["conversion"]))
+        #expect(try conversion.inspect().find(text: "Verify the installed release. Evidence: the command succeeds on the released version.").string()
+                == "Verify the installed release. Evidence: the command succeeds on the released version.")
+        let done = TaskDeliveryView(task: try #require(rows["done"]))
+        #expect(try done.inspect().find(text: "Done · Follow-up W2-FOLLOW").string()
+                == "Done · Follow-up W2-FOLLOW")
+        #expect(try done.inspect().find(ViewType.Link.self).url().absoluteString
+                == "https://linear.app/loopflow/issue/W2-FOLLOW")
+        let none = TaskDeliveryView(task: try #require(rows["none"]))
+        #expect(try none.inspect().find(text: "No accepted remaining obligations.").string()
+                == "No accepted remaining obligations.")
+        let due = TaskDeliveryView(task: try #require(rows["due"]))
+        #expect(try due.inspect().find(text: "Follow-up to W2-SOURCE · Due 2026-10-08").string()
+                == "Follow-up to W2-SOURCE · Due 2026-10-08")
+    }
     @Test("Separate catalogs retain invalid entries and graph composition")
     func flowFixtures() throws {
         let catalog = try JSONDecoder().decode([FlowCatalogEntry].self, from: fixture("flow_catalog.json"))

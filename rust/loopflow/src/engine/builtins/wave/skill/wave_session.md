@@ -17,8 +17,10 @@ is the whole method; this section only says when to apply it.
 - Answer the user first. A question, a change of direction or a new idea
   interrupts operation; it does not end it. Resume the pass afterwards and
   finish it before the turn ends.
-- End a turn only when every started Task has its disposition. Report in the
-  procedure's order: waiting on the user, moving, stuck.
+- End a turn only when every started Task has its disposition, including merged
+  Tasks awaiting follow-through. Surface due follow-ups, even when unstarted,
+  under the included procedure's authorization rule. Report in the procedure's
+  order: waiting on the user, moving, stuck, then due follow-ups and backlog.
 
 ## What happens between turns
 

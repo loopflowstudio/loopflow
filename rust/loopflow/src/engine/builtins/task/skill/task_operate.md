@@ -1,13 +1,13 @@
 ---
-description: Advance a Task through its Loopflow process until landed or blocked, asking for judgment inline when interactive.
+description: Advance a Task through its Loopflow process until completed or blocked, asking for judgment inline when interactive.
 requires: a Task identity or the current checkout's tracked Task
-produces: a landed or completed outcome, or an exact blocker with a command to open its Session
+produces: a completed outcome, or an exact blocker with a command to open its Session
 action_style: procedural
 ---
 Move the Task forward as far as possible through its authored Loopflow process.
 You are this Task's operator: with no live driver, nobody else takes its next
 step. Resolve routine decisions autonomously and ask for needed judgment in the
-present conversation, then continue. Headless, exit when blocked or landed. An
+present conversation, then continue. Headless, exit when blocked or completed. An
 already satisfied Task needs no new execution.
 
 Finish with one disposition and its evidence: **moving** (a live driver was
@@ -27,7 +27,8 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    Task's Flows with `lf flow show <id> --processes`: each one's steps, how each
    ended, whether its driver is alive, and its effects. Every
    conversation and Flow in the checkout is the Task's work; none is privileged.
-   If Task identity is missing or ambiguous, ask for it; do not file duplicate work.
+   If Task identity is missing or ambiguous, ask when interactive; headless, report
+   the missing identity and stop. Do not file duplicate work.
 
    Keep the current design in the Task checkout. If required material lives
    elsewhere, copy its contents and necessary references into the Task's scratch
@@ -37,8 +38,11 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
 
 2. **Choose the Flow.** A Task on a workflow reports it as
    `execution.work.workflow` in status: nodes where a person takes part,
-   joined by edges that each run one Flow. On an edge, its Flow is running:
-   leave it. At a node its last edge reached, the Task waits on a person in
+   joined by edges that each run one Flow. An edge alone does not prove a live
+   driver: check every associated Flow and unfinished Process against `lf ps --json`.
+   Leave observed live work alone; unknown liveness never authorizes a second driver.
+   Before selecting another edge, recover verified merged delivery as described
+   below. At a node its last edge reached, the Task waits on a person in
    its conversation; say which node and which edges leave it. At a node
    because the last edge stopped or failed, that edge is the remaining work.
    Only an edge leaving the current node moves the Task:
@@ -58,8 +62,8 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    work only; review happens in the conversation. Read composed steps before launching.
    Explain any departure from the default. Scratch history alone cannot approve
    a design or waive a review. A finished Flow proves neither completion nor
-   unfinished work: inspect its outcome, and stop if the Task's outcome is
-   already satisfied. Ask about consequential scope
+   unfinished work: inspect its outcome, and stop if status confirms the Task
+   is complete. A merged PR alone leaves follow-through pending. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
 3. **Advance the work.** `lf task run <issue> [flow]` runs a
@@ -80,14 +84,27 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    live driver. Continue through the authored steps, resolve recoverable failures,
    and use inline answers to unblock interactive work. Read a failure's log
    before retrying, and retry with `--reason "<what changed>"` only on new
-   evidence or a repaired cause. Stop when the Task lands,
-   its intended outcome is otherwise complete, or a concrete blocker remains.
-   Report publication, review, landing, Task completion and remaining scope as
-   separate facts. Arming a merge the Flow did not, and
-   rotating to a next PR with `lf pr next`, are the person's to choose. Repeated
-   calls must preserve existing work without duplicating Flows or conversations.
+   evidence or a repaired cause. Stop when status confirms Task completion or a
+   concrete blocker remains. Report publication, review, merge, follow-through
+   and completion as separate facts. Arming a merge the Flow did not remains the
+   person's choice. Each Task has zero or one PR; further implementation needing
+   another PR belongs in another Task, stacked if dependent. Repeated calls must
+   preserve existing work without duplicating Flows or conversations.
 
-5. **Report the outcome or blocker.** For landed or completed work, state the
+5. **Finish merged delivery.** A verified merge, including a manual GitHub merge,
+   leaves the Task pending until follow-ups are filed or none needed is recorded.
+   First inspect every associated live Flow and unfinished Process; a live ship
+   Flow owns its finish. With no live driver, if the disposition is already durable,
+   run `lf task complete <issue>` and reread status. Otherwise run
+   `lf --task <issue> run finish-delivery`, which performs only follow-through.
+   Do not replay gate, re-arm the PR, resume an old Flow or require its template.
+   Inspect receipts after failure before retrying; unavailable scope judgment
+   stays a concrete blocker in this conversation. The source does not wait for
+   its follow-up Tasks to finish. A PR-less Task can reach end with retained files
+   and commits; no placeholder PR or landing ceremony is required. Completion
+   shares `task move end` checks and is safe to repeat after driver arrival.
+
+6. **Report the outcome or blocker.** For completed work, state the
    observed outcome. For blocked work, name what prevents progress and the exact
    decision or action needed. Identify the blocking AgentSession from fresh Task
    and Flow records, including the pending review when that is the blocker, and

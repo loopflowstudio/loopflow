@@ -398,7 +398,7 @@ lf task run INF-124 --stack-on INF-123 # dependent work before the parent merges
 lf task run INF-125 incident
 ```
 
-Task Work advances through one active remote branch and PR to `main`. Its
+Task Work owns one checkout and zero or one PR. Its
 Project's `workflow:` (`feature`, `code`, `research`, or a file in
 `.lf/workflows/`) is the one it takes up. The Task moves through its
 nodes: each `lf task run` takes one edge leaving the current node and runs
@@ -410,8 +410,10 @@ leaves Task Work open until an explicit completion or delivery operation
 settles it.
 
 Task context includes the Wave's `GOAL.md` and `MEMORY.md` plus its Project's
-KRs and targets. Explicit PR rotation selects the next serial branch while
-preserving the Task's worktree directory.
+KRs and targets. Separate dependent Tasks stack on a published parent PR and
+can publish before it merges. `lf sync` preserves child code and design through
+parent updates and squash merge. Use `lf checkout CHILD --stack-on PARENT
+--design PATH` to transfer a child-specific design before launch.
 
 AgentSessions and Processes own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
@@ -430,29 +432,33 @@ steering and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf land --next parser-proof   # after verified merge, rotate to the next
-lf land -c                    # after verified merge, complete the Task
-lf task move INF-124 end --reason "investigation recorded"   # no PR needed
+lf land --wait
+lf task follow-up INF-124 --none 'No accepted obligations remain'
+lf task complete INF-124
 ```
 
+A Task's state is its Workflow position: ready at `start`, active between, done
+at `end`. `task complete` is an alias for `task move end`. A Task with a PR needs
+authoritative merge and a durable disposition: linked follow-ups filed, or none
+needed with a reason. A PR-less Task may finish with research files and commits;
+unsafe or occupied checkouts are retained. Completion does not settle Session
+turns or process exits. Repeat completion to retry pending planning writeback.
 
-A Task's state is where it stands on its workflow: ready at `start`, active
-between, done at `end`. Reaching `end`, by an edge or by `task move`, completes
-the Task; no other command does. It is refused over uncommitted changes, an
-unsettled PR or unresolved execution, and retires a PR whose branch never moved.
-An edge that runs nothing lands nothing: it accepts uncommitted changes and
-keeps the checkout.
-`task move ISSUE end` also finishes planning-only Tasks without creating a
-checkout, recording the reason once in Linear. If completion reports pending PM
-writeback, repeat the command to reconcile Linear. Canceled and duplicate
-issues cannot be changed to completed.
+`ship` waits for merge, then performs follow-through. A manual merge or stopped
+finishing Flow stays visibly pending until the next Task/Wave operation recovers
+it with `finish-delivery`, after inspecting live drivers. No fresh gate or landing
+is required. The source completes after filing, without waiting for the children.
 
-Linear completing a Task that is active here is shown on the Task as an error.
-Its work goes on; `end` then takes `--force`. Linear completing a Task that
-never left `start` withdraws it from what is offered.
+A due follow-up returns on its owning Wave's next operation, even if unstarted.
+Surface it for selection unless its brief already authorizes a concrete unattended
+check. Filing installs no schedule; an open conversation schedules no next turn.
+Without an installed Wave schedule, report no automatic check scheduled. Missing
+installation or provider evidence stays unknown, and time is never proof of success.
 
-Keep each PR reviewable — roughly 1000 LOC. A Task may need several serial
-PRs, but it still needs one concrete finish line.
+An early Linear completion cannot supply local merge or follow-through evidence.
+Canceled and duplicate issues cannot become successful completion. Each additional
+PR belongs to another Task, stacked where dependent; a reopened Task keeps its
+same PR.
 
 ## Independent evidence
 

@@ -751,6 +751,7 @@ fn put_item(
     if let Some((previous, acquired)) = previous {
         let previous_json: serde_json::Value = serde_json::from_str(&previous)?;
         let has_completed_at = previous_json.get("completed_at").is_some();
+        let has_due_date = previous_json.get("due_date").is_some();
         let previous: PmItem = serde_json::from_value(previous_json)?;
         let previous_revision = revision_nanos(previous.revision.as_deref())?;
         if revision < previous_revision {
@@ -769,6 +770,9 @@ fn put_item(
             }
             if !has_completed_at {
                 comparable.completed_at = None;
+            }
+            if !has_due_date {
+                comparable.due_date = None;
             }
             if comparable != previous {
                 return Err(StoreError::InvalidData(format!(
@@ -915,6 +919,41 @@ mod tests {
         assert!(super::put_item(&conn, "/repo", "linear", 5, &item).unwrap());
         item.completed_at = Some("2026-10-01T12:00:00Z".into());
         assert!(super::put_item(&conn, "/repo", "linear", 6, &item).is_err());
+    }
+
+    #[test]
+    fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE pm_items(repo TEXT,provider TEXT,id TEXT,identifier TEXT,project_id TEXT,observed_at INTEGER,body TEXT,PRIMARY KEY(repo,provider,id)); CREATE TABLE pm_issue_changes(issue_id TEXT,revision_ns INTEGER,removed INTEGER);").unwrap();
+        let planning: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let mut item = planning.items[0].clone();
+        let mut old = serde_json::to_value(&item).unwrap();
+        old.as_object_mut().unwrap().remove("due_date");
+        conn.execute(
+            "INSERT INTO pm_items VALUES('/repo','linear',?1,?2,?3,1,?4)",
+            params![item.id, item.identifier, item.project_id, old.to_string()],
+        )
+        .unwrap();
+        item.due_date = Some("2026-10-08".into());
+        assert!(super::put_item(&conn, "/repo", "linear", 2, &item).unwrap());
+        let observed: String = conn
+            .query_row("SELECT body FROM pm_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<crate::pm::PmItem>(&observed)
+                .unwrap()
+                .due_date,
+            item.due_date
+        );
+        item.due_date = None;
+        assert!(super::put_item(&conn, "/repo", "linear", 3, &item).is_err());
+        item.id = "observed-null".into();
+        assert!(super::put_item(&conn, "/repo", "linear", 4, &item).unwrap());
+        item.due_date = Some("2026-10-09".into());
+        assert!(super::put_item(&conn, "/repo", "linear", 5, &item).is_err());
     }
 
     #[tokio::test]

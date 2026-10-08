@@ -138,6 +138,9 @@ impl Machine {
             project_id: project.id.clone(),
             worktree: worktree.clone(),
             workspace_slug: "fix-one".into(),
+            branch: "fix-one".into(),
+            base_commit: head.clone(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,
@@ -163,7 +166,9 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        self.store.insert_task(task.clone(), &pr, false).unwrap();
+        self.store
+            .insert_task(task.clone(), Some(&pr), false)
+            .unwrap();
         worktree
     }
 

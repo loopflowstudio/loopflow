@@ -16,9 +16,7 @@ use loopflow::ops::task::task_stack;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 
@@ -27,8 +25,7 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
         strict: true,
         local: false,
         create_pr,
-        complete: false,
-        next_slug: None,
+        wait: false,
         worktree: None,
         commit_message: None,
         pr_title: Some(pr_title.to_string()),
@@ -352,6 +349,14 @@ fn valid_authority_publishes_and_records_the_pr() {
     repo.push_new_branch(branch);
 
     let task = register_task(home.path(), repo.path(), branch, &base);
+    // Start with placement only, as a newly checked-out Task does.
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "DELETE FROM task_prs WHERE task_id=?1",
+            [task.task.id.as_str()],
+        )
+        .unwrap();
 
     create_or_update_pr(
         repo.path(),
@@ -389,6 +394,13 @@ fn valid_authority_publishes_and_records_the_pr() {
         .github()
         .expect("GitHub PR must be attached under valid authority");
     assert_eq!(github.number, 1, "the published PR number must be attached");
+    assert_eq!(
+        runtime
+            .block_on(task.store.task_prs(&task.task.id))
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 fn gh_publication_script(home: &std::path::Path) -> String {
@@ -535,8 +547,6 @@ fn existing_pr_identity_survives_readiness_failure() {
             mode: PrMergeMode::User,
             requested_at: now,
             head_sha: base.clone(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     runtime

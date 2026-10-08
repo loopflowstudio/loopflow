@@ -13,9 +13,7 @@ use loopflow::engine::git::{current_branch, worktree_remove};
 use loopflow::ops::{
     commit_workflow, release_publish, release_tag, CommitOptions, NullProgress, OpsError,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -1705,8 +1703,6 @@ NOTES
                 mode: PrMergeMode::Auto,
                 requested_at: now,
                 head_sha: head.clone(),
-                after_merge: AfterMerge::CompleteTask,
-                next_slug: None,
             }),
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();

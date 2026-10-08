@@ -12,7 +12,7 @@ struct TaskFilesView: View {
     @Bindable var store: TaskFilesStore
     let prURL: URL?
     /// The recorded base moves with a store commit, not a file.
-    let prBase: String?
+    let checkoutBase: String?
     @Environment(\.palette) private var palette
     @FocusState private var navigatorFocused: Bool
 
@@ -26,7 +26,7 @@ struct TaskFilesView: View {
             documentPane
         }
         .background(palette.background)
-        .task(id: "\(store.base)|\(store.needsComparison)|\(prBase ?? "")") {
+        .task(id: "\(store.base)|\(store.needsComparison)|\(checkoutBase ?? "")") {
             // Later readings follow the checkout and its Git metadata changing.
             if store.needsComparison { await store.refreshChanges() }
         }

@@ -780,17 +780,8 @@ fn process_ci_fix(
     Ok(conclusion)
 }
 
-fn repair_arm_command(landing: &PrLanding) -> String {
-    if landing.after_merge == Some(crate::work::task::AfterMerge::CompleteTask) {
-        "lf arm -c".to_string()
-    } else if let Some(slug) = &landing.next_slug {
-        format!(
-            "lf arm --next {}",
-            crate::engine::process::shell_escape(slug)
-        )
-    } else {
-        "lf arm".to_string()
-    }
+fn repair_arm_command(_landing: &PrLanding) -> String {
+    "lf arm".into()
 }
 
 fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> CiIncident {
@@ -1262,8 +1253,6 @@ async fn refresh_joined_request(store: &SharedStore, landing: &mut PrLanding) ->
         )));
     }
     landing.requested_head_sha = current.requested_head_sha;
-    landing.after_merge = current.after_merge;
-    landing.next_slug = current.next_slug;
     Ok(())
 }
 
@@ -1288,7 +1277,7 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         {
             return crate::ops::task::cleanup_completed_task(store, &task).await;
         }
-        eprintln!("Task {} remains open; retained its checkout for further work and the next PR. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
+        eprintln!("Task {} has merged; retained its checkout for follow-through. Inspect remaining work with `lf task status {}`.", task.plan.identifier, task.plan.identifier);
         return Ok(());
     }
     // Only a Flow still being driven needs the checkout; a stopped one is history.
@@ -1382,7 +1371,7 @@ async fn create_landing(
     let repo_id = crate::repository::RepoId::discover(&worktree)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let task = crate::ops::task::task_for_checkout(store, &worktree).await?;
-    let (task_id, after_merge, next_slug) = match task {
+    let task_id = match task {
         Some(task) => {
             let task_pr = store
                 .active_task_pr(&task.id)
@@ -1399,13 +1388,9 @@ async fn create_landing(
                     "Task merge request does not match the armed GitHub PR head".to_string(),
                 ));
             }
-            (
-                Some(task.id),
-                Some(request.after_merge),
-                request.next_slug.clone(),
-            )
+            Some(task.id)
         }
-        None => (None, None, None),
+        None => None,
     };
     PrLanding::new(
         NewPrLanding {
@@ -1420,8 +1405,6 @@ async fn create_landing(
             branch,
             task_id,
             requested_head_sha,
-            after_merge,
-            next_slug,
         },
         OffsetDateTime::now_utc(),
     )
@@ -1494,6 +1477,36 @@ pub(crate) fn repair_running(store: &SharedStore, landing: &PrLanding) -> OpsRes
 pub struct DeliveryCheck {
     pub checked_at: i64,
     pub errors: Vec<String>,
+}
+
+/// Wait on the ordinary finite observer; each check releases its landing claim.
+pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsResult<()> {
+    let initial = record_armed_pr(repo, options, pr)?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(async {
+        let store = landing_store().await?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30 * 60);
+        loop {
+            let landing = store.get_pr_landing(&initial.id).await.map_err(repair_error)?
+                .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
+            let observed = tokio::select! {
+                result = reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver { repairs: false, release: None })) => result?,
+                _ = tokio::time::sleep_until(deadline) => return Err(repair_error("Landing wait timed out; merge intent retained. Run lf pr reconcile or wait again.")),
+            };
+            match observed.state {
+                PrLandingState::Merged => return Ok(()),
+                PrLandingState::Closed => return Err(repair_error("Pull request closed without merging; follow-through has not run")),
+                PrLandingState::Blocked => return Err(repair_error(observed.blocked_reason.as_deref().unwrap_or("Landing is blocked"))),
+                PrLandingState::Watching | PrLandingState::Repairing => {}
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(15)) => {},
+                _ = tokio::time::sleep_until(deadline) => return Err(repair_error("Landing wait timed out; merge intent retained.")),
+            }
+        }
+    });
+    runtime.shutdown_background();
+    result
 }
 
 pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {
@@ -1623,8 +1636,6 @@ mod tests {
                 branch: "jack/landing".to_string(),
                 task_id: None,
                 requested_head_sha: "pr-head".to_string(),
-                after_merge: None,
-                next_slug: None,
             },
             OffsetDateTime::now_utc(),
         )
@@ -1759,8 +1770,6 @@ mod tests {
                 branch: "feature".into(),
                 task_id: None,
                 requested_head_sha: "head".into(),
-                after_merge: None,
-                next_slug: None,
             },
             OffsetDateTime::now_utc(),
         )
@@ -1783,21 +1792,6 @@ mod tests {
             head_sha: "head".into(),
             merge_commit: "merge".into(),
         }
-    }
-
-    #[tokio::test]
-    async fn repair_retains_completion_and_rotation_intent() {
-        let (_directory, _store, mut landing) = fixture().await;
-        landing.after_merge = Some(crate::work::task::AfterMerge::CompleteTask);
-        assert_eq!(super::repair_arm_command(&landing), "lf arm -c");
-        landing.after_merge = Some(crate::work::task::AfterMerge::ContinueTask);
-        landing.next_slug = Some("follow-up".into());
-        assert_eq!(
-            super::repair_arm_command(&landing),
-            "lf arm --next 'follow-up'"
-        );
-        landing.next_slug = None;
-        assert_eq!(super::repair_arm_command(&landing), "lf arm");
     }
 
     #[tokio::test]

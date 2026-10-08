@@ -176,6 +176,7 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
         identifier
         branchName
         completedAt
+        dueDate
         updatedAt
         url
         title
@@ -210,6 +211,7 @@ const ISSUE_OWNERSHIP_QUERY: &str = r#"query IssueOwnership($id: String!) {
     identifier
     branchName
     completedAt
+    dueDate
     updatedAt
     url
     title
@@ -1132,6 +1134,118 @@ impl LinearClient {
         }
     }
 
+    pub(crate) async fn follow_up_creation_state(&self) -> PmResult<(String, Option<String>)> {
+        let team = self.require_team_id()?;
+        let state = self.unstarted_state_id(&team).await?;
+        Ok((team, state))
+    }
+
+    pub(crate) async fn confirm_follow_up(
+        &self,
+        intent: &crate::work::task::follow_through::FollowThroughIntent,
+    ) -> PmResult<PmItem> {
+        let exists = self.follow_up_exists(&intent.issue_id).await?;
+        if !exists && intent.existing {
+            return Err(PmError::Message(
+                "linked follow-up is missing or inaccessible".into(),
+            ));
+        }
+        if !exists {
+            let result: PmResult<serde_json::Value> = self.graphql(
+                "mutation FollowUpCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id } } }",
+                json!({"input": {"id": intent.issue_id, "teamId": intent.team_id, "projectId": intent.project_id,
+                    "title": intent.title, "description": intent.notes, "dueDate": intent.due, "stateId": intent.state_id}}),
+            ).await;
+            // A lost response or duplicate UUID is reconciled by identity, even if
+            // the issue was edited or moved since the first successful request.
+            if !self.follow_up_exists(&intent.issue_id).await? {
+                return Err(result.err().unwrap_or_else(|| {
+                    PmError::Message("Linear did not confirm the follow-up issue".into())
+                }));
+            }
+        }
+        self.issue_ownership(&intent.issue_id)
+            .await?
+            .map(|(item, _)| item)
+            .ok_or_else(|| PmError::Message("follow-up disappeared during readback".into()))
+    }
+
+    async fn follow_up_exists(&self, id: &str) -> PmResult<bool> {
+        let data: serde_json::Value = self.graphql(
+            "query FollowUpExists($id: ID!) { issues(filter: {id: {eq: $id}}, includeArchived: true, first: 1) { nodes { id } } }",
+            json!({"id": id}),
+        ).await?;
+        let nodes = data
+            .pointer("/issues/nodes")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| PmError::Message("Linear omitted follow-up lookup results".into()))?;
+        Ok(nodes.iter().any(|node| node["id"].as_str() == Some(id)))
+    }
+
+    pub(crate) async fn ensure_follow_up_relation(
+        &self,
+        source: &str,
+        target: &str,
+        id: &str,
+    ) -> PmResult<()> {
+        if self.follow_up_relation_exists(source, target).await? {
+            return Ok(());
+        }
+        let result: PmResult<serde_json::Value> = self.graphql(
+            "mutation FollowUpRelation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) { success issueRelation { id } } }",
+            json!({"input": {"id": id, "issueId": source, "relatedIssueId": target, "type": "related"}}),
+        ).await;
+        if self.follow_up_relation_exists(source, target).await? {
+            return Ok(());
+        }
+        Err(result.err().unwrap_or_else(|| {
+            PmError::Message("Linear did not confirm the follow-up relation".into())
+        }))
+    }
+
+    async fn follow_up_relation_exists(&self, source: &str, target: &str) -> PmResult<bool> {
+        for (issue, related) in [(source, target), (target, source)] {
+            let mut after: Option<String> = None;
+            loop {
+                let data: serde_json::Value = self.graphql(
+                    "query FollowUpRelationExists($id: String!, $after: String) { issue(id: $id) { relations(first: 100, after: $after) { nodes { type relatedIssue { id } } pageInfo { hasNextPage endCursor } } } }",
+                    json!({"id": issue, "after": after}),
+                ).await?;
+                let page = data.pointer("/issue/relations").ok_or_else(|| {
+                    PmError::Message("Linear omitted relation lookup results".into())
+                })?;
+                let nodes = page["nodes"]
+                    .as_array()
+                    .ok_or_else(|| PmError::Message("Linear omitted relation nodes".into()))?;
+                if nodes
+                    .iter()
+                    .any(|node| node["type"] == "related" && node["relatedIssue"]["id"] == related)
+                {
+                    return Ok(true);
+                }
+                match page["pageInfo"]["hasNextPage"].as_bool() {
+                    Some(false) => break,
+                    Some(true) => {
+                        after = Some(
+                            page["pageInfo"]["endCursor"]
+                                .as_str()
+                                .ok_or_else(|| {
+                                    PmError::Message("Linear omitted relation cursor".into())
+                                })?
+                                .into(),
+                        )
+                    }
+                    None => {
+                        return Err(PmError::Message(
+                            "Linear omitted relation pagination".into(),
+                        ))
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     pub async fn create_item(&self, project_id: &str, item: &PmItemCreate) -> PmResult<String> {
         let team_id = self.require_team_id()?;
         let state_id = self.unstarted_state_id(&team_id).await?;
@@ -1932,6 +2046,8 @@ struct IssueNode<P = ProjectRef> {
 struct IssueFields {
     #[serde(rename = "completedAt", deserialize_with = "Option::deserialize")]
     completed_at: Option<String>,
+    #[serde(rename = "dueDate", deserialize_with = "Option::deserialize")]
+    due_date: Option<String>,
     #[serde(rename = "updatedAt")]
     updated_at: String,
     id: String,
@@ -1969,6 +2085,12 @@ impl IssueFields {
                     PmError::Message(format!("invalid Linear completion time: {error}"))
                 })?;
         }
+        if let Some(date) = &self.due_date {
+            let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")
+                .expect("constant date format is valid");
+            time::Date::parse(date, &format)
+                .map_err(|error| PmError::Message(format!("invalid Linear due date: {error}")))?;
+        }
         let completed = self
             .state
             .as_ref()
@@ -2001,6 +2123,7 @@ impl IssueFields {
             rank,
             completed,
             completed_at: self.completed_at,
+            due_date: self.due_date,
             state: self.state.map(|state| state.r#type),
             project_id,
             project,
@@ -2552,7 +2675,7 @@ mod tests {
                 "branchName":null,"url":null,"title":item.name,"description":item.description,
                 "prioritySortOrder":0.0,"sortOrder":0.0,"assignee":null,
                 "state":{"type":item.state},"team":{"id":"team"},
-                "completedAt":item.completed_at
+                "completedAt":item.completed_at, "dueDate":item.due_date
             });
             let fields: super::IssueFields = serde_json::from_value(wire.clone()).unwrap();
             let observed = fields.into_pm_item(item.rank, None).unwrap();
@@ -2572,6 +2695,39 @@ mod tests {
             Some("Linear Task is duplicate")
         );
         assert_eq!(crate::pm::terminal_reason(Some("unknown"), false), None);
+    }
+
+    #[test]
+    fn issue_due_date_survives_reads_without_changing_completion() {
+        let mut wire = json!({
+            "id":"issue", "identifier":"LOO-1", "updatedAt":"2026-10-07T00:00:00Z",
+            "branchName":null, "url":null, "title":"Check installation", "description":null,
+            "prioritySortOrder":0.0, "sortOrder":0.0, "assignee":null,
+            "state":{"type":"unstarted"}, "team":{"id":"team"},
+            "completedAt":null, "dueDate":"2026-10-08"
+        });
+        let item = serde_json::from_value::<super::IssueFields>(wire.clone())
+            .unwrap()
+            .into_pm_item(0, None)
+            .unwrap();
+        assert_eq!(item.due_date.as_deref(), Some("2026-10-08"));
+        assert!(!item.completed);
+        wire["dueDate"] = json!("2026-02-30");
+        assert!(serde_json::from_value::<super::IssueFields>(wire.clone())
+            .unwrap()
+            .into_pm_item(0, None)
+            .is_err());
+        wire["dueDate"] = serde_json::Value::Null;
+        assert_eq!(
+            serde_json::from_value::<super::IssueFields>(wire.clone())
+                .unwrap()
+                .into_pm_item(0, None)
+                .unwrap()
+                .due_date,
+            None
+        );
+        wire.as_object_mut().unwrap().remove("dueDate");
+        assert!(serde_json::from_value::<super::IssueFields>(wire).is_err());
     }
 
     #[tokio::test]
@@ -2740,7 +2896,7 @@ mod tests {
                                     "url": "https://linear.app/loopflow/issue/INF-1/first",
                                     "title": "First",
                                     "description": "one",
-                                    "completedAt": null, "prioritySortOrder": 10.0,
+                                    "completedAt": null, "dueDate": null, "prioritySortOrder": 10.0,
                                     "sortOrder": 10.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "assignee": { "id": "user-1" },
                                     "state": { "type": "unstarted" },
@@ -2754,7 +2910,7 @@ mod tests {
                                     "assignee": null,
                                     "title": "Second",
                                     "description": "two",
-                                    "completedAt": null, "prioritySortOrder": 0.0,
+                                    "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0,
                                     "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                                     "state": { "type": "completed" },
                                     "project": { "id": "project-123", "name": "Scan" },
@@ -3536,7 +3692,7 @@ mod tests {
             json!({ "data": { "issue": {
                 "id": "issue-uuid", "identifier": "LOO-42", "url": null,
                 "title": "Resolve ownership", "description": "",
-                "completedAt": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
+                "completedAt": null, "dueDate": null, "prioritySortOrder": 0.0, "sortOrder": 0.0, "updatedAt":"2026-09-29T12:00:00.123Z",
                 "assignee": null, "state": { "type": "unstarted" },
                 "team": { "id": "team-loo" },
                 "project": {
@@ -3657,3 +3813,7 @@ mod tests {
         assert_eq!(linear_description(""), "");
     }
 }
+
+#[cfg(test)]
+#[path = "linear_follow_through_tests.rs"]
+mod follow_through_tests;

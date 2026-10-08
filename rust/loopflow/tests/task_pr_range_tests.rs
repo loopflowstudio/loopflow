@@ -5,9 +5,9 @@
 //! tested there. These tests drive the *real* `submit`/`land` publication path
 //! over a bare-origin fixture to prove the observable acceptance property the
 //! design demands: a contaminated range is refused **before any push or
-//! `gh pr`**, and a stale serial base heals so GitHub's range, `lf diff --files`, and the recorded `base_commit` agree. W2-255 extends the proof
+//! `gh pr`**, and a stale base heals so GitHub's range, `lf diff --files`, and the recorded `base_commit` agree. W2-255 extends the proof
 //! matrix to divergent ancestry (both sides named), squash-merged parents,
-//! no-remote refusal, and serial rotation.
+//! and no-remote refusal.
 
 mod support;
 
@@ -19,9 +19,7 @@ use loopflow::ops::{
     arm as land, create_or_update_pr, submit, sync_with_recovery, LandOptions, NullProgress,
     PrOptions, SyncOptions,
 };
-use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
-};
+use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 use time::OffsetDateTime;
@@ -31,8 +29,7 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
         strict: true,
         local: false,
         create_pr,
-        complete: false,
-        next_slug: None,
+        wait: false,
         worktree: None,
         commit_message: None,
         pr_title: Some(pr_title.to_string()),
@@ -189,12 +186,12 @@ fn submit_refuses_a_contaminated_range_before_any_push() {
     );
 }
 
-/// The serial / dogfood shape: a continuation PR's recorded base sits behind the
+/// A Task PR's recorded base sits behind the
 /// current `origin/main` because a sibling landed. `land` syncs, heals the
 /// base to the true fork point, and publishes a minimal range — proving the
 /// three views (recorded base, `lf diff --files`, GitHub range) agree.
 #[test]
-fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
+fn task_pr_heals_stale_base_and_aligns_the_three_views() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new(); // origin/main = P
     let stale_base = repo.head_sha(); // the base recorded at placement time
@@ -206,12 +203,12 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
         home.path(),
     );
 
-    // The serial PR's own commit, cut from the (soon stale) base and pushed.
-    let branch = "jack/serial-pr-proof";
+    // The Task PR's own commit, cut from the (soon stale) base and pushed.
+    let branch = "jack/task-pr-proof";
     repo.create_branch(branch);
-    repo.create_file("task.txt", "serial PR work\n");
+    repo.create_file("task.txt", "Task PR work\n");
     repo.stage_all();
-    repo.commit("serial PR commit");
+    repo.commit("Task PR commit");
     repo.push_new_branch(branch);
 
     // A sibling lands: origin/main advances past the recorded base.
@@ -225,12 +222,8 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
 
     let task = register_task(home.path(), repo.path(), branch, &stale_base);
 
-    land(
-        repo.path(),
-        &land_options(false, "serial pr"),
-        &NullProgress,
-    )
-    .expect("stale serial base heals and lands");
+    land(repo.path(), &land_options(false, "Task PR"), &NullProgress)
+        .expect("stale base heals and lands");
 
     // The recorded base healed forward to the current origin tip.
     let runtime = tokio::runtime::Runtime::new().expect("read task runtime");
@@ -240,7 +233,7 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
         .expect("active PR");
     assert_eq!(
         pr.base_commit, advanced,
-        "the stale serial base must heal forward to origin/main"
+        "the stale base must heal forward to origin/main"
     );
 
     // The three views agree. The recorded base is exactly the fork point
@@ -262,7 +255,7 @@ fn serial_pr_heals_stale_base_and_aligns_the_three_views() {
         "the merged upstream commit must be excluded from the range, got:\n{range_commits}"
     );
     assert!(
-        range_commits.contains("serial PR commit"),
+        range_commits.contains("Task PR commit"),
         "the Task's original commit must remain in the branch, got:\n{range_commits}"
     );
     let files = git_out(&repo, &["diff", "--name-only", &range]);
@@ -510,8 +503,6 @@ fn sync_revokes_auto_before_force_pushing_a_new_task_head() {
             mode: PrMergeMode::Auto,
             requested_at: now,
             head_sha: old_head,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");

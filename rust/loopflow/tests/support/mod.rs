@@ -278,7 +278,7 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    register_task_fixture(home, worktree, branch, base_commit, true)
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
@@ -288,7 +288,17 @@ pub fn register_unrun_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    register_task_fixture(home, worktree, branch, base_commit, true)
+}
+
+#[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
+pub fn register_task_without_pr(
+    home: &Path,
+    worktree: &Path,
+    branch: &str,
+    base_commit: &str,
+) -> RegisteredTask {
+    register_task_fixture(home, worktree, branch, base_commit, false)
 }
 
 fn register_task_fixture(
@@ -296,6 +306,7 @@ fn register_task_fixture(
     worktree: &Path,
     branch: &str,
     base_commit: &str,
+    with_pr: bool,
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime
@@ -340,6 +351,9 @@ fn register_task_fixture(
         project_id: project.id.clone(),
         worktree: worktree.to_path_buf(),
         workspace_slug: "task-pr-proof".to_string(),
+        branch: branch.to_string(),
+        base_commit: base_commit.to_string(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -419,7 +433,7 @@ fn register_task_fixture(
             .await
             .expect("cache Task PR context");
         store
-            .create_task(&task, &pr, None)
+            .create_task(&task, with_pr.then_some(&pr), None)
             .await
             .expect("create test Task");
     });
@@ -445,6 +459,7 @@ pub fn register_sibling_task(
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
+    task.branch = branch.to_string();
     task.worktree = worktree.to_path_buf();
     task.created_at = now;
     task.updated_at = now;
@@ -458,7 +473,7 @@ pub fn register_sibling_task(
         ..registered.pr.clone()
     };
     runtime
-        .block_on(registered.store.create_task(&task, &pr, None))
+        .block_on(registered.store.create_task(&task, Some(&pr), None))
         .expect("create sibling Task");
     task
 }

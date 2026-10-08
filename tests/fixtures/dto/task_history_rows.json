@@ -9,7 +9,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -39,13 +41,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -58,7 +67,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -88,13 +99,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -107,7 +125,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -137,13 +157,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -156,7 +183,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -186,13 +215,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -205,7 +241,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -235,13 +273,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -254,7 +299,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -284,13 +331,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -303,7 +357,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -333,13 +389,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -352,7 +415,9 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -382,13 +447,20 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -401,7 +473,9 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -431,13 +505,20 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -450,7 +531,9 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -480,13 +563,20 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -499,7 +589,9 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -529,13 +621,20 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -548,7 +647,9 @@
       "completed": true,
       "state": "completed",
       "completed_at": "2026-10-01T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -578,13 +679,20 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -597,7 +705,9 @@
       "completed": true,
       "state": "completed",
       "completed_at": "2026-09-12T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -627,13 +737,20 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -646,7 +763,9 @@
       "completed": true,
       "state": "completed",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -676,13 +795,20 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is complete"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -695,7 +821,9 @@
       "completed": false,
       "state": "unstarted",
       "completed_at": "2026-09-01T12:00:00Z",
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -725,13 +853,20 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   {
@@ -744,7 +879,9 @@
       "completed": false,
       "state": "canceled",
       "completed_at": null,
-      "assignee": null
+      "assignee": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -774,13 +911,20 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "active_pr": null,
     "section": "later",
     "workflow_name": "feature",
     "latest_flow_process": null,
     "execution": null,
     "run_control": {
       "unavailable": "Linear Task is canceled"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   }
 ]

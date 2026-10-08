@@ -7,6 +7,25 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+
+    @Test("Follow-through remains pending until confirmed, with dated unstarted follow-ups")
+    func taskDeliveryFixture() throws {
+        let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: loadFixtureData("task_delivery_rows.json"))
+        let pending = try #require(rows["pending"])
+        #expect(!pending.followThrough.resolved)
+        #expect(pending.followThrough.deliveryLabel(merged: true, done: false) == "Merged · Follow-through pending")
+        let done = try #require(rows["done"])
+        #expect(done.followThrough.resolved)
+        #expect(done.followThrough.deliveryLabel(merged: true, done: true) == "Done · Follow-up W2-FOLLOW")
+        #expect(done.followThrough.links.first?.url?.absoluteString == "https://linear.app/loopflow/issue/W2-FOLLOW")
+        #expect(rows["none"]?.followThrough.resolved == true)
+        let due = try #require(rows["due"])
+        #expect(due.runtime == nil)
+        #expect(due.task.dueDate == "2026-10-08")
+        #expect(!due.task.completed)
+        #expect(rows["unrelated"]?.task.followUpSources.isEmpty == true)
+        #expect(due.task.followUpLabel == "Follow-up to W2-SOURCE · Due 2026-10-08")
+    }
     @Test("Task work retains conversations, Flows and command history")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")
@@ -244,9 +263,9 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
         #expect(detail.tasks.items[0].task.completedAt == nil)
-        #expect(detail.tasks.items[0].prs.compactMap(\.publication?.github?.number) == [912])
-        #expect(detail.tasks.items[0].activePr == "pr_33333333333333333333333333333333")
-        #expect(detail.tasks.items[0].prs[0].publication?.merge?.afterMerge == .completeTask)
+        #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
+        #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
+        #expect(detail.tasks.items[0].pr?.publication?.merge?.mode == .user)
         #expect(detail.tasks.items[0].directive?.version == 2)
         #expect(detail.tasks.items[0].directive?.incorporatedAt != nil)
         #expect(detail.tasks.items[0].reference.workspace?.slug == "infrastructure-task")

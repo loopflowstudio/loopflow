@@ -15,9 +15,9 @@ use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
-    AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
-    PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEventKind, TaskId, TaskPr, TaskPrId,
+    GithubObservation, GithubObservationResult, GithubPr, Observation, PmWritebackState,
+    PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
+    TaskId, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -990,6 +990,9 @@ fi
                 project_id: project.id,
                 worktree: repo.clone(),
                 workspace_slug: "completion".into(),
+                branch: crate::engine::git::current_branch(&repo).unwrap().unwrap(),
+                base_commit: crate::engine::git::rev_parse(&repo, "HEAD").unwrap(),
+                parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -1016,7 +1019,7 @@ fi
                 updated_at: timestamp,
             };
             runtime
-                .block_on(fixture.store.create_task(&task, &pr, None))
+                .block_on(fixture.store.create_task(&task, Some(&pr), None))
                 .unwrap();
             pr.abandoned_at = merge.is_none().then_some(timestamp);
             pr.publication = Some(PrPublication {
@@ -1035,8 +1038,6 @@ fi
                     mode,
                     requested_at: timestamp,
                     head_sha: pr.base_commit.clone(),
-                    after_merge: AfterMerge::CompleteTask,
-                    next_slug: None,
                 }),
             });
             pr.github_observation = merge.is_none().then_some(GithubObservation {
@@ -1062,8 +1063,6 @@ fi
                         branch: pr.branch,
                         task_id: Some(task.id.clone()),
                         requested_head_sha: pr.base_commit,
-                        after_merge: Some(AfterMerge::CompleteTask),
-                        next_slug: None,
                     },
                     time::OffsetDateTime::now_utc(),
                 )
@@ -1451,6 +1450,9 @@ esac
                 project_id: project.id,
                 worktree: checkout.clone(),
                 workspace_slug: "cancel-me".into(),
+                branch: "cancel-me".into(),
+                base_commit: git(&repo, &["rev-parse", "HEAD"]).trim().into(),
+                parent_pr_id: None,
                 abandon_intent: None,
                 created_at: timestamp,
                 updated_at: timestamp,
@@ -1477,7 +1479,7 @@ esac
                 updated_at: timestamp,
             };
             runtime
-                .block_on(fixture.store.create_task(&task, &pr, None))
+                .block_on(fixture.store.create_task(&task, Some(&pr), None))
                 .unwrap();
             fixture.store.sqlite.test_flow(
                 "review",

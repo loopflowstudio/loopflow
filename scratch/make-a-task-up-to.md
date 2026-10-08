@@ -44,16 +44,16 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The sibling-checkout launch repair is implemented and supplies supporting proof.
-The next demo covers the complete lifecycle above, after slices 2–4 are built.
+The full lifecycle is implemented locally. The complete demo remains after
+gate; focused evidence below does not substitute for Jack's review.
 
 ## Inventory and findings
 
 Initial inventory: `626789dcd0382c6754ba3b7c61ea2448b57658ce`. Reconciled
 October 7 after integrating `35e759aaf`: #1492 supplies the FlowProcess API and
 `flow list --processes`; #1495 simplifies completion readiness and keeps
-terminal Task actions inert. The milestone preserves those changes. Ship still
-runs `gate → pr land -c`; neither waited landing nor follow-through exists yet.
+terminal Task actions inert. The implementation preserves those changes. This inventory records the
+pre-change mechanisms; ship now runs `gate → land --wait → follow-through`.
 
 | Existing mechanism | Finding and treatment |
 | --- | --- |
@@ -124,7 +124,10 @@ Keep `lf land` and `lf arm` as prepare/request/return operations. Add an explici
 `--wait` to land for callers that own a blocking Flow. It uses the existing finite
 landing observation operation, releases its lock between checks, and never runs
 an agent inside reconciliation. Poll every 15 seconds for at most 30 minutes;
-interruption or timeout returns held, leaving merge intent and evidence intact.
+timeout returns held (exit 3), leaving merge intent and evidence intact.
+Interruption uses the existing global handler (exit 130), which stops a Flow
+without retry and retains merge intent. A second Tokio signal handler conflicted
+with that owner in the public CLI test and was removed.
 These are proposed initial operational limits, not measured performance claims.
 CI repair remains the existing CI watcher's responsibility.
 
@@ -347,8 +350,8 @@ commands must use the new command contract.
 
 ### Delete — do not maintain (remaining lifecycle slices)
 
-These cuts are the remaining implementation scope in this PR, slices 2–4.
-Delete each predecessor with its consumer cutover:
+These cuts are implemented together in slices 2–4; retained historical readers
+are the explicit migration exception:
 
 - `PrCommand::Next`, next-slug CLI fields, `AfterMerge` runtime branching,
   rotation-only helpers listed above, and serial-only tests/copy/fixtures.
@@ -397,17 +400,15 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. Slice 1 and the completion alias are
-implemented locally; slices 2–4 remain, apart from that alias.
+its own Task and child-specific design. All four slices and the completion alias are implemented locally. Gate and the
+complete demo remain; the internal slices are not separate delivery boundaries.
 
-**Current scope:** finish slices 2–4 on PR #1499, preserving slice 1 and its
-evidence. The current alias still rejects dirty checkouts and unpublished
-commits; that limitation must be removed for PR-less research through optional
-placement in slice 2. Mandatory post-merge follow-through belongs to slice 3.
-An internal slice is no longer a demo stop or a reason to advance past unfinished
-lifecycle work. Review the complete target against every acceptance row below.
-The implementation defaults below resolve the remaining proposals for building;
-they are not additional decisions attributed to Jack.
+**Remaining work:** gate the affected suites and automated acceptance rows below,
+then Jack's complete demo. Focused implementation checks pass.
+No-PR research now retains dirty files and committed findings; merged Tasks need
+the filing disposition. The implementation defaults below are reversible choices,
+not additional decisions attributed to Jack. Docker installation coverage belongs
+to capable CI; installed/native proof is absent and landing is unauthorized.
 
 1. **First demonstration — truthful Flow launch (implemented locally).**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
@@ -467,6 +468,43 @@ crash or access loss; this design claims neither. No new performance metric is
 needed for these bounded reads and existing UI surfaces. Gate should verify
 that ordinary Task reads add no per-follow-up subprocess or network call.
 
+## Working implementation (2026-10-07)
+
+Slices 2–4 now have code in the working tree: Task-owned checkout placement,
+optional current PR with immutable historical rows, post-merge disposition and
+UUID-pinned Linear filing, waited land/finishing Flows, shared due/link projections,
+and explicit design handoff. Focused implementation checks pass. The earlier
+inventory records the starting point; full affected verification and Jack's
+complete demo remain separate acceptance boundaries.
+
+Review removed serial store settlement and PR-based placement writers as well as
+CLI rotation. Task placement writes update the validated PR copy in one direction.
+Publishing now separates reserved intent from confirmed reviewer copy, preserving
+the prior copy when draft promotion fails. Historical continuation followed by an
+unpublished placeholder requires explicit scope conversion. No-PR completion keeps
+its artifacts, and merged completion checks the disposition inside its transaction.
+Legacy scope notes retain the original outcome, evidence condition, date and reason
+in CLI/Swift projections; a conversion flag alone did not give the finisher enough
+context. Reconcile observes a merge successfully while follow-through is pending.
+
+The public waited-landing test found competing Ctrl-C handlers. The existing
+process handler owns interruption (130, stopped without retry); timeout is held
+(3). Its lifecycle proof retains the same PR/request and checkout across interruption,
+retry, authoritative merge and later reconcile. Detached repair fixtures clear
+inherited `LF_BIN`: otherwise their children silently use the installed binary.
+
+Filing uses `--key` (default `follow-up`) for stable obligation identity; a second
+obligation needs a distinct key. Retries retain the original UUID, relation UUID,
+Project, Team, initial state and exact content. This is an implementation choice,
+not a new decision attributed to Jack. The operation-level fixture loses both
+mutation responses and readbacks, rotates the chapter and edits/moves the issue,
+then confirms the original receipt and exactly one provider issue/relation.
+The CLI proves no-PR retained research and post-merge completion within a Flow;
+Swift fixtures prove pending/done links and legacy scope text. These separate
+proofs do not establish a single configured provider-to-monitor-to-native run.
+Gate retains the unified lifecycle population, timeout-expiry and full affected
+suite acceptance rows; Docker installation belongs to capable CI.
+
 ## Implementation defaults and delivery boundary
 
 Jack's zero-or-one PR and post-merge follow-through check are accepted: file
@@ -475,9 +513,8 @@ accepted the landing Flow/operator recovery approach and clarified that end is
 completion, with `task complete` an alias for moving to end. Jack's correction
 keeps the full lifecycle under implementation before demo, on the existing PR.
 
-Use the proposed polling limits and filing interface as implementation defaults,
-remove redundant `-c` and serial `--next`, and implement explicit `--design`
-handoff. Dated follow-ups return on the owning Wave's next operation; filing
+The implementation uses the proposed polling limits and filing interface,
+removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
 does not install a schedule, and unattended execution requires a concrete check
 already authorized in the brief. These are reversible implementation choices,
 not separate approvals attributed to Jack. Validate them in the complete demo;
@@ -497,8 +534,7 @@ for each Task. Completion adds no authority or state. The suspected combined
 `--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
 no extra guard remains. Fixture corrections selected an authored workflow edge,
 used `flow list --processes`, and decoded the actual flattened inventory DTO.
-Full lifecycle checks remain with later slices and gate; rendered judgment is
-the demo boundary.
+Full affected checks remain with gate; rendered judgment is the demo boundary.
 
 Compression keeps placement as a returned binding and the driver as the sole
 holder of its Task during execution. Flow registration takes its name from the
@@ -506,4 +542,4 @@ captured graph, removing a second input that could disagree. Historical fixtures
 retain their test-only Started writer because they distinguish retained Flow
 history from admission; production writes Flow and Started together.
 
-Check (2026-10-07): `cargo test -p loopflow --test task_flow_launch_tests` 19 passed; `cargo test -p loopflow --lib store::sqlite::flow_inventory` 2 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Earlier post-sync `cargo test -p loopflow --lib task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership` passed (1 test); pre-sync graph/CLI/docs/architecture checks remain at `a7492b78e:scratch/make-a-task-up-to.md`. Realign: `git diff --check` passed; `lf context --skill realign` fits all limits (memory 15,999/16,000 tokens); no code changed or tests rerun. Gate owns affected suites; demo owns Jack's review.
+Check (2026-10-07): focused Rust lifecycle/filing/placement/stack/migration tests passed; `cargo test -p loopflow --test task_follow_through_tests --test dto_fixtures` 25 passed; `swift test --package-path swift --filter 'DTOFixtureTests|TaskFlowTests/deliveryEvidence'` 24 passed; documented commands/goldens 4 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; gate owns the `scripts/test.py` plan and Docker installation, demo owns Jack's judgment.

@@ -164,7 +164,7 @@ driver Process --< step Process     FlowProcess: the driver's graph and each ste
 | Chapter | No stored object: the shared name of each Wave's In Progress Project |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments |
 | Project | Linear status, Tasks, KRs, targets and the workflow |
-| Task | Worktree, serial PRs and every associated Session, Flow and Process; no Flow is privileged |
+| Task | Worktree, optional PR and every associated Session, Flow and Process; no Flow is privileged |
 | Flow | Reusable authored graph of agent/mechanical/router nodes; a running one is a driver Process and its step processes |
 | Process | One lf process's immutable causal ancestry and command completion |
 | AgentSession | Conversation identity, title, feedback, native thread and provider history |
@@ -478,7 +478,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Directory discovery reconciles names and parents without replacing IDs. `wave/<name>/GOAL.md` and `MEMORY.md` own repository intent; the Linear Initiative owns shared planning membership. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`; `wave/<name>/`; an in-flight relocation receipt under `.lf/tmp/wave-relocations/` | Finite Wave-attributed conversations; relocation owns the repository locator lock | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
 | **Chapter / Project** — shared current plan name and one Linear Project per Wave | Linear Project status owns planned/current/completed plans; the repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_events`; Linear Project status/content | deterministic convergent rotation from fresh provider facts | `lf project`, `lf project workflow`, `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
-| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow process for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
+| **Task** — concrete work inside exactly one Project | The Linear Issue owns directive/status. The checked-out branch identifies the Task through its checkout placement; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow process for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one recorded intent to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one check at a time; an incident without a recorded response admits one repair. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The process holding the claim: `lf pr reconcile` to observe and settle, `lf ci watch` to repair | `lf arm`, `lf land`, `lf pr reconcile`, `lf ci watch`, `lf pr checks` | `provider:github`, model provider for `ci-fix`, `process:git`, `process:gh` |
 | **PM projection** — locally readable planning facts | Linear remains authoritative. Repository/provider-scoped Project and issue facts serve both exact Task lookup and Wave views. Wave membership and sync observations reference those shared facts; change receipts invalidate admission without rewriting execution history. | [`PmSnapshotRow`](../rust/loopflow/src/store/mod.rs), [`PmTaskRecord`](../rust/loopflow/src/store/mod.rs), [`PmWave`](../rust/loopflow/src/pm/mod.rs) | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `pm_project_name_cutover`, `project_binding_imports`, `project_transitions`, `project_transition_items` | Foreground PM sync and Task lookup | `lf repo`, `lf refresh`, `lf task status` | `provider:linear` |
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its Runs | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task Runs refresh comments into their starting context | `lf comment`, Linear issue comments | Linear |
@@ -524,7 +524,7 @@ kernel locks                 live local exclusion authority
 | Flow processes | `flow_processes`, `flow_process_steps` | One append-only row per Flow process and per step its driver started |
 | Workflows | `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
-| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
+| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Machine placement |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | PM projection | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes` | Bounded Linear reads |
@@ -772,12 +772,11 @@ process-control authority.
 
 ## Task delivery algorithm
 
-A Task binds planning to one active PR branch and managed Git worktree. A
-checkout on that branch identifies the Task regardless of its upstream; the
-stored path supplies placement for explicit Task selection. The current delivery
-implementation can rotate a settled Task onto a later serial branch. Once that happens, the old branch no
-longer identifies the Task. Collapsing the Task lifetime to one Linear-associated
-branch remains a separate delivery simplification.
+A Task binds planning to one managed checkout and zero or one PR. Placement owns
+its branch and base independently of publication; a research Task needs no PR.
+A checkout on that branch identifies the Task regardless of its upstream; the
+stored path supplies placement for explicit Task selection. Old multi-PR rows
+remain read-only history; new delivery never appends a successor.
 
 ```text
 Linear Issue
@@ -790,11 +789,13 @@ Task row ----> managed worktree ----> commits
                                        |
                               checks / repair / merge
                                        |
+                         file follow-ups or record none
+                                       |
                               complete Task
 ```
 
 1. `lf checkout` resolves one Linear Issue inside one Project and creates
-   or reuses Task Work, its worktree, and its serial PR identity. It starts no
+   or reuses Task Work and its checkout placement without creating a PR. It starts no
    agent work.
 2. Independent `lf --task ...` conversations may work in that substrate directly.
    `lf task run` places the Task, defaults its Flow, then runs it through the
@@ -808,8 +809,14 @@ Task row ----> managed worktree ----> commits
 5. PR landing is fenced by landing generation. A check repairs an unchanged
    incident once; a moved head requires fresh evidence. A blocked landing still
    observes merge, and explicit arm or land resumes it.
-6. Verified merge completes the Task unless explicit remaining work keeps it open. Serial PR
-   rotation and separately stacked dependent Tasks retain their own identities.
+6. Verified merge leaves follow-through pending. `ship` uses `land --wait`,
+   then files linked follow-up Tasks or records none needed before completing.
+   The next Task/Wave operation recovers stopped finishing work with
+   `finish-delivery`, after checking live drivers. Reconciliation records facts
+   and settles an existing disposition; it never invents the agent's verdict.
+7. `task complete` and `task move end` share the same checks. A PR-less Task
+   may finish with retained artifacts; a Task with a PR needs authoritative
+   merge and durable follow-through. Dependent PRs belong to stacked Tasks.
 
 GitHub remains merge truth. SQLite stores the observed PR/head/check/disposition
 needed to resume safely; it cannot declare an unmerged PR merged.

@@ -5,13 +5,13 @@ use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 
 use loopflow::durable::WorkStatus;
-use loopflow::ops::task::{pr_next, task_end, task_snapshot, task_status};
+use loopflow::ops::task::{task_end, task_snapshot, task_status};
 use loopflow::ops::{
-    arm as land, commit_workflow, create_or_update_pr, current_pr, present_pr_review,
-    CommitOptions, LandOptions, NullProgress, OpsError, PrOptions,
+    commit_workflow, create_or_update_pr, current_pr, present_pr_review, CommitOptions,
+    NullProgress, OpsError, PrOptions,
 };
 use loopflow::work::task::{
-    AfterMerge, GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
+    GithubPr, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
 };
 use loopflow_test_support::TestRepo;
 use support::{
@@ -404,27 +404,6 @@ exit 0
     .replace("__LOG_PATH__", log_path)
 }
 
-fn gh_merged_pr_logging_script(log_path: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-echo "$@" >> "{log_path}"
-if [ "$1" = "--version" ]; then
-  exit 0
-fi
-if [ "$1" = "api" ]; then
-  head=$(git rev-parse HEAD)
-  printf '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"merge-912","merged_at":"2026-07-21T19:00:00Z","number":912,"html_url":"https://example.com/pr/912","head":{{"sha":"%s"}}}}\n' "$head"
-  exit 0
-fi
-if [ "$1 $2" = "pr list" ]; then
-  echo '[]'
-  exit 0
-fi
-exit 0
-"#
-    )
-}
-
 fn gh_changed_head_script(log_path: &str) -> String {
     let armed = support::github_merge_response(912, "fixture-head", "OPEN", "CLEAN", Some("auto"));
     format!(
@@ -798,7 +777,7 @@ fn github_failure_leaves_publication_intent_observable() {
     ));
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
-        "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
+        "> **PR lifecycle:** The pull request is published for review; no Task settlement is requested."
     ));
     assert!(presentation
         .body
@@ -860,7 +839,7 @@ fn configured_feature_generation_adds_task_intent_and_lifecycle_to_pr_copy() {
 <!-- loopflow:task-pr-context:start -->\n\
 > [!NOTE]\n\
 > **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)\n\
-> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested.\n\
+> **PR lifecycle:** The pull request is published for review; no Task settlement is requested.\n\
 <!-- loopflow:task-pr-context:end -->\n\n\
 ## What changes\n\n\
 Publication adds durable Task context.\n\n\
@@ -915,7 +894,7 @@ fn task_pr_generation_does_not_require_a_controller() {
     assert_eq!(presentation.title, "generated title");
     assert!(!presentation.body.contains("Task cycle:"));
     assert!(presentation.body.contains(
-        "> **PR lifecycle:** PR 1 is published for review; no Task settlement is requested."
+        "> **PR lifecycle:** The pull request is published for review; no Task settlement is requested."
     ));
 }
 
@@ -984,7 +963,7 @@ fn task_pr_missing_cached_linear_url_refuses_before_remote_mutation() {
 }
 
 #[test]
-fn serial_task_pr_publication_restores_task_context() {
+fn manual_merge_observation_preserves_the_task_and_sole_pr() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh_log = home.path().join("gh.log");
     let gh = gh_merged_pr_without_time_script(gh_log.to_string_lossy().as_ref());
@@ -1042,7 +1021,6 @@ fn serial_task_pr_publication_restores_task_context() {
     assert_eq!(prs.len(), 1);
     assert_eq!(prs[0].phase(), PrPhase::Merged);
     let publication = prs[0].publication.as_ref().expect("adopted publication");
-    assert_eq!(prs[0].after_merge(), AfterMerge::CompleteTask);
     assert_eq!(publication.github.as_ref().map(|pr| pr.number), Some(912));
     let work = runtime
         .block_on(
@@ -1054,188 +1032,6 @@ fn serial_task_pr_publication_restores_task_context() {
         runtime.block_on(task.store.work_status(&work)).unwrap(),
         WorkStatus::Done
     ));
-
-    let restore = Command::new("git")
-        .current_dir(repo.path())
-        .args([
-            "remote",
-            "set-url",
-            "origin",
-            repo.bare_path().to_str().expect("bare origin path"),
-        ])
-        .status()
-        .expect("restore local origin");
-    assert!(restore.success());
-
-    let next = pr_next(repo.path(), None).expect("rotate merged continuation");
-    assert_eq!(next.sequence, 2);
-    assert_eq!(next.phase(), PrPhase::Working);
-    let prs = runtime
-        .block_on(task.store.task_prs(&task.task.id))
-        .expect("read rotated PR chain");
-    assert_eq!(prs.len(), 2);
-    assert_eq!(prs[0].phase(), PrPhase::Merged);
-    assert_eq!(prs[1].id, next.id);
-    assert_eq!(prs[1].sequence, next.sequence);
-    assert_eq!(prs[1].branch, next.branch);
-    assert_eq!(prs[1].phase(), PrPhase::Working);
-
-    let current_branch = Command::new("git")
-        .current_dir(repo.path())
-        .args(["branch", "--show-current"])
-        .output()
-        .expect("read rotated branch");
-    assert!(current_branch.status.success());
-    assert_eq!(
-        String::from_utf8_lossy(&current_branch.stdout).trim(),
-        next.branch
-    );
-
-    assert!(!matches!(
-        runtime.block_on(task.store.work_status(&work)).unwrap(),
-        WorkStatus::Done
-    ));
-
-    repo.create_file("serial-proof.txt", "second PR\n");
-    repo.stage_all();
-    repo.commit("add serial proof");
-    create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            draft: false,
-            title: Some("Second delivery slice".to_string()),
-            body: Some("Serial reviewer context".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("publish serial Task PR");
-    let serial = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read serial PR")
-        .expect("active serial PR");
-    assert_eq!(serial.sequence, 2);
-    let presentation = serial
-        .publication
-        .as_ref()
-        .and_then(|publication| publication.presentation.as_ref())
-        .expect("serial reviewer copy");
-    assert_eq!(presentation.title, "Second delivery slice");
-    assert!(presentation.body.starts_with(
-        "Serial reviewer context\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
-    ));
-    assert!(!presentation.body.contains("Task cycle:"));
-    assert!(presentation.body.contains(
-        "> **PR lifecycle:** PR 2 is published for review; no Task settlement is requested."
-    ));
-    let gh_calls = fs::read_to_string(gh_log).expect("read GitHub calls");
-    assert!(gh_calls.contains("--title Second delivery slice"));
-    assert!(gh_calls.contains("--body Serial reviewer context"));
-}
-
-#[test]
-fn completing_land_discards_an_empty_successor_without_a_controller() {
-    let home = tempfile::TempDir::new().expect("temp home");
-    let log_path = home.path().join("gh.log");
-    let script = gh_merged_pr_logging_script(log_path.to_string_lossy().as_ref());
-    let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
-    let repo = TestRepo::new();
-    fs::create_dir_all(repo.path().join("scratch")).expect("create scratch");
-    fs::write(repo.path().join("scratch/.gitkeep"), "").expect("write gitkeep");
-    repo.stage_all();
-    repo.commit("track scratch");
-    push_branch(&repo, "main");
-    let base = repo.head_sha();
-    let branch = "jack/task-pr-proof";
-    repo.create_branch(branch);
-    push_branch(&repo, branch);
-    point_origin_at_github(&repo);
-    let task = register_task(home.path(), repo.path(), branch, &base);
-    let mut pr = task.pr.clone();
-    pr.publication = Some(PrPublication {
-        requested_at: time::OffsetDateTime::now_utc(),
-        presentation: None,
-        github: Some(GithubPr {
-            number: 912,
-            url: "https://example.com/pr/912".to_string(),
-            head_sha: None,
-        }),
-        merge: None,
-    });
-    let runtime = tokio::runtime::Runtime::new().expect("task runtime");
-    runtime
-        .block_on(task.store.update_task_pr(&pr))
-        .expect("mark PR as published");
-    task_status(repo.path(), Some("INF-123"))
-        .expect("reconcile merged Task PR")
-        .execution
-        .expect("execution");
-
-    let restore = Command::new("git")
-        .current_dir(repo.path())
-        .args([
-            "remote",
-            "set-url",
-            "origin",
-            repo.bare_path().to_str().expect("bare origin path"),
-        ])
-        .status()
-        .expect("restore local origin");
-    assert!(restore.success());
-    let successor = pr_next(repo.path(), None).expect("rotate merged continuation");
-    assert_eq!(successor.phase(), PrPhase::Working);
-
-    let options = LandOptions {
-        strict: false,
-        local: false,
-        create_pr: true,
-        complete: false,
-        next_slug: None,
-        worktree: None,
-        commit_message: None,
-        pr_title: None,
-        pr_body: None,
-        agent: None,
-    };
-    let work = runtime
-        .block_on(
-            task.store
-                .work_for_child(&loopflow::child::ChildRef::Task(task.task.id.clone())),
-        )
-        .expect("resolve Task Work");
-    assert!(!matches!(
-        runtime.block_on(task.store.work_status(&work)).unwrap(),
-        WorkStatus::Done
-    ));
-    fs::create_dir_all(repo.path().join("scratch")).expect("recreate scratch after rotation");
-    fs::write(repo.path().join("scratch/review.md"), "final gate evidence")
-        .expect("write final evidence");
-    let calls_before = fs::read_to_string(&log_path).expect("read setup calls");
-
-    let result = land(repo.path(), &options, &NullProgress).expect("complete final Task");
-
-    assert!(result.is_none(), "no empty GitHub PR should be created");
-    let calls_after = fs::read_to_string(&log_path).expect("read final calls");
-    let final_calls = calls_after
-        .strip_prefix(&calls_before)
-        .expect("setup calls remain a prefix");
-    for mutation in ["pr create", "pr edit", "pr ready", "pr merge"] {
-        assert!(
-            !final_calls.contains(mutation),
-            "direct completion must not mutate GitHub: {final_calls}"
-        );
-    }
-    assert_eq!(
-        runtime.block_on(task.store.work_status(&work)).unwrap(),
-        WorkStatus::Done
-    );
-    let prs = runtime
-        .block_on(task.store.task_prs(&task.task.id))
-        .expect("read completed PR chain");
-    assert_eq!(prs.len(), 2, "retain branch identity for cleanup retries");
-    assert_eq!(prs[0].phase(), PrPhase::Merged);
-    assert_eq!(prs[1].phase(), PrPhase::Abandoned);
-    assert!(!repo.path().join("scratch/review.md").exists());
 }
 
 #[test]
@@ -1264,8 +1060,6 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
             mode: PrMergeMode::Auto,
             requested_at: now,
             head_sha: "old-head".to_string(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -1284,7 +1078,6 @@ fn changed_head_revokes_auto_merge_and_clears_the_stale_request() {
         .expect("active PR");
     assert_eq!(persisted.head_sha(), Some("new-head"));
     assert!(persisted.merge_request().is_none());
-    assert_eq!(persisted.after_merge(), AfterMerge::CompleteTask);
     let log = std::fs::read_to_string(log_path).expect("read gh log");
     assert!(log.contains("pr merge 912 --disable-auto"));
 }
@@ -1318,8 +1111,6 @@ fn pushed_task_commit_revokes_auto_before_exposing_the_new_head() {
             mode: PrMergeMode::Auto,
             requested_at: now,
             head_sha: repo.head_sha(),
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -1395,8 +1186,6 @@ fn observed_merge_does_not_complete_a_task_from_status() {
             mode: PrMergeMode::User,
             requested_at: now,
             head_sha: head,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -1470,8 +1259,11 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
     )
     .expect_err("a merged PR cannot take another head");
     let message = error.to_string();
-    assert!(message.contains("pull request #912 merged"), "{message}");
-    assert!(message.contains("lf pr next"), "{message}");
+    assert!(
+        message.contains("already delivered its pull request (merged)"),
+        "{message}"
+    );
+    assert!(message.contains("another Task"), "{message}");
     assert_eq!(repo.head_sha(), committed, "the Flow's commit is untouched");
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
@@ -1480,7 +1272,7 @@ fn publishing_after_the_pr_merged_names_the_next_step() {
 }
 
 #[test]
-fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
+fn observed_auto_merge_waits_for_follow_through_to_complete_the_task() {
     let home = tempfile::TempDir::new().expect("temp home");
     let _env = EnvGuard::with_lf_home(&[("gh", gh_merged_pr_script())], home.path());
     let repo = TestRepo::new();
@@ -1504,8 +1296,6 @@ fn observed_auto_merge_waits_for_watched_landing_to_complete_the_task() {
             mode: PrMergeMode::Auto,
             requested_at: now,
             head_sha: head,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -1549,8 +1339,6 @@ fn repeated_status_of_merged_task_never_completes_work() {
             mode: PrMergeMode::User,
             requested_at: now,
             head_sha: head,
-            after_merge: AfterMerge::CompleteTask,
-            next_slug: None,
         }),
     });
     let runtime = tokio::runtime::Runtime::new().expect("task runtime");
@@ -1608,10 +1396,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
 }
 
 #[test]
-fn end_is_refused_while_a_working_pr_holds_unpublished_commits() {
-    // W2-151: a Task must not reach `end` while it still owns an unsettled
-    // PR, so the PR cannot be published later into a Task the PM already
-    // calls done. Only a PR whose branch never moved is retired there.
+fn end_is_refused_while_a_published_pr_is_unmerged() {
     let home = tempfile::TempDir::new().expect("temp home");
     let gh_script = write_gh_script("[]", None);
     let _env = EnvGuard::with_lf_home(&[("gh", gh_script.as_str())], home.path());
@@ -1624,17 +1409,30 @@ fn end_is_refused_while_a_working_pr_holds_unpublished_commits() {
     repo.commit("Unpublished work");
     let task = register_task(home.path(), repo.path(), branch, &base);
 
+    let runtime = tokio::runtime::Runtime::new().expect("read runtime");
+    let mut pr = task.pr.clone();
+    pr.publication = Some(PrPublication {
+        requested_at: time::OffsetDateTime::now_utc(),
+        presentation: None,
+        github: Some(GithubPr {
+            number: 912,
+            url: "https://example.com/pr/912".into(),
+            head_sha: Some(repo.head_sha()),
+        }),
+        merge: None,
+    });
+    runtime.block_on(task.store.update_task_pr(&pr)).unwrap();
+
     let result = task_end(repo.path(), "INF-123", Some("done"), &Default::default());
     let message = result
-        .expect_err("an unpublished working PR must block completion")
+        .expect_err("an unmerged published PR must block completion")
         .to_string();
     assert!(
-        message.contains("cannot complete") && message.contains("unpublished"),
-        "expected a gate refusal naming the unpublished PR, got: {message}"
+        message.contains("cannot complete") && message.contains("not merged"),
+        "expected a gate refusal naming the unmerged PR, got: {message}"
     );
 
     // The Task and PR are unchanged: no premature completion, no deleted PR.
-    let runtime = tokio::runtime::Runtime::new().expect("read runtime");
     let work = runtime
         .block_on(
             task.store
@@ -1648,7 +1446,7 @@ fn end_is_refused_while_a_working_pr_holds_unpublished_commits() {
     let prs = runtime
         .block_on(task.store.task_prs(&task.task.id))
         .expect("read PRs");
-    assert_eq!(prs.len(), 1, "working PR must survive the refusal");
+    assert_eq!(prs.len(), 1, "published PR must survive the refusal");
 }
 
 #[test]
@@ -1930,122 +1728,4 @@ fn persistent_publication_pushes_committed_docs_and_preserves_local_files() {
     );
     assert!(persistent.path.join("scratch/design.md").exists());
     assert!(persistent.path.join("unrelated.md").exists());
-}
-
-#[test]
-fn repository_reconciliation_completes_delivery_and_preserves_explicit_remaining_work() {
-    for remaining in ["none", "production", "empty-next-pr", "committed-next-pr"] {
-        let home = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::with_lf_home(&[("gh", "#!/bin/sh\nexit 1\n")], home.path());
-        let repo = TestRepo::new();
-        repo.create_branch("delivered");
-        let registered = register_task(home.path(), repo.path(), "delivered", &repo.head_sha());
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let mut pr = registered.pr.clone();
-        let now = time::OffsetDateTime::now_utc();
-        pr.publication = Some(PrPublication {
-            requested_at: now,
-            presentation: None,
-            github: Some(GithubPr {
-                number: 912,
-                url: "https://example.com/pr/912".into(),
-                head_sha: Some(repo.head_sha()),
-            }),
-            merge: None,
-        });
-        pr.merge_commit = Some(repo.head_sha());
-        let next = if remaining.ends_with("next-pr") {
-            let mut next = registered.pr.clone();
-            next.id = loopflow::work::task::TaskPrId::new();
-            next.sequence += 1;
-            next.branch = "remaining-work".into();
-            next.parent_pr_id = None;
-            repo.create_branch(&next.branch);
-            if remaining == "committed-next-pr" {
-                repo.create_file("remaining.txt", "unfinished work\n");
-                repo.stage_all();
-                repo.commit("Unfinished additional work");
-            }
-            Some(next)
-        } else {
-            None
-        };
-        runtime
-            .block_on(registered.store.settle_task_pr(&pr, next.as_ref()))
-            .unwrap();
-        if remaining == "production" {
-            loopflow::ops::task::task_follow_up(
-                "INF-123",
-                Some(loopflow::work::task::TaskFollowUp {
-                    outcome: "Installed latency meets budget".into(),
-                    evidence: "20 warm samples below 1s p95".into(),
-                    check_at: now.unix_timestamp() + 3600,
-                }),
-                "Accepted installed observation",
-            )
-            .unwrap();
-        }
-        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let unknown = uuid::Uuid::new_v4().to_string();
-        db.execute(
-            "INSERT INTO processes(lfid,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
-            rusqlite::params![
-                unknown,
-                repo.path().canonicalize().unwrap().to_str().unwrap(),
-                now.unix_timestamp()
-            ],
-        )
-        .unwrap();
-        let work = loopflow::durable::WorkRef::Task(registered.task.id.clone());
-        for _ in 0..2 {
-            let report = loopflow::ops::pr_landing::reconcile_repository(repo.path()).unwrap();
-            let state = runtime
-                .block_on(registered.store.work_status(&work))
-                .unwrap();
-            assert_eq!(
-                state == WorkStatus::Done,
-                remaining == "none",
-                "{remaining}: {report:?}"
-            );
-            assert!(repo.path().exists());
-        }
-        if remaining == "production" {
-            loopflow::ops::task::task_follow_up(
-                "INF-123",
-                None,
-                "Installed measurements meet the budget",
-            )
-            .unwrap();
-            assert_eq!(
-                runtime
-                    .block_on(registered.store.work_status(&work))
-                    .unwrap(),
-                WorkStatus::Done
-            );
-        }
-        let unknown_unchanged: bool = db
-            .query_row(
-                "SELECT completed_at IS NULL AND outcome IS NULL FROM processes WHERE lfid=?1",
-                [&unknown],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(unknown_unchanged);
-        let events = runtime
-            .block_on(registered.store.task_events_after(&registered.task.id, 0))
-            .unwrap();
-        let completions = events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    loopflow::work::task::TaskEventKind::Completed { .. }
-                )
-            })
-            .count();
-        assert_eq!(
-            completions,
-            usize::from(remaining == "none" || remaining == "production")
-        );
-    }
 }

@@ -2622,11 +2622,15 @@ mod tests {
                 assert_eq!(landing.requested_head_sha, "requested");
                 assert_eq!(landing.observed_head_sha, "observed");
                 assert_eq!(landing.task_id.as_ref().unwrap().as_str(), "landing_task");
-                assert_eq!(
-                    landing.after_merge,
-                    Some(crate::work::task::AfterMerge::ContinueTask)
-                );
-                assert_eq!(landing.next_slug.as_deref(), Some("follow-up"));
+                let historical: (String, String) = rusqlite::Connection::open(&path)
+                    .unwrap()
+                    .query_row(
+                        "SELECT after_merge,next_slug FROM pr_landings WHERE id=?1",
+                        [id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(historical, ("continue_task".into(), "follow-up".into()));
                 assert_eq!(landing.updated_at.unix_timestamp(), 40);
                 assert_eq!(
                     landing.blocked_reason.as_deref(),

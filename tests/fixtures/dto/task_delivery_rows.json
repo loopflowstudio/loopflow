@@ -1,0 +1,1789 @@
+{
+  "pending": {
+    "task": {
+      "id": "source-issue",
+      "identifier": "W2-SOURCE",
+      "name": "Authored commits",
+      "description": "",
+      "rank": 4,
+      "completed": false,
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "machine_id": "home_00000000000000000000000000000001",
+        "slug": "commits",
+        "branch": "jack/commits",
+        "worktree": "/src/loopflow.commits",
+        "base_commit": "abc",
+        "local_exists": null
+      }
+    },
+    "runtime": {
+      "work_id": "ts_commits",
+      "status": "active",
+      "planning_conflict": null,
+      "reason": "ready",
+      "updated_at": "2026-07-14T22:00:00Z",
+      "provider": "codex",
+      "started": true
+    },
+    "next_move": {
+      "owner": "wave",
+      "reason": "Merged · Follow-through pending"
+    },
+    "section": "waiting",
+    "actions": {
+      "recommended": "open_pr",
+      "reason": "merge head head-commits on GitHub"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Merged · Follow-through pending",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 7260,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": true,
+        "recovery_required": false,
+        "reason": null
+      },
+      "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "current",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 2,
+      "completed": [
+        0,
+        1
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 2
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          2,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "running",
+      "reason": "Worker is running realign",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "merged",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits"
+        }
+      },
+      "merge_commit": "merged-head",
+      "abandoned_at": null
+    },
+    "follow_through": {
+      "intents": [
+        {
+          "key": "installed-check",
+          "issue_id": "follow-up-issue",
+          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
+          "project_id": "project-1",
+          "wave": "product",
+          "title": "Verify the installed command",
+          "notes": "Check the installed release after deployment",
+          "due": "2026-10-08",
+          "existing": false,
+          "team_id": "team-product",
+          "state_id": "state-unstarted"
+        }
+      ],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
+    }
+  },
+  "done": {
+    "task": {
+      "id": "source-issue",
+      "identifier": "W2-SOURCE",
+      "name": "Authored commits",
+      "description": "",
+      "rank": 4,
+      "completed": true,
+      "assignee": null,
+      "state": "completed",
+      "completed_at": "2026-10-07T20:00:00Z",
+      "due_date": null,
+      "follow_up_sources": []
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "machine_id": "home_00000000000000000000000000000001",
+        "slug": "commits",
+        "branch": "jack/commits",
+        "worktree": "/src/loopflow.commits",
+        "base_commit": "abc",
+        "local_exists": null
+      }
+    },
+    "runtime": {
+      "work_id": "ts_commits",
+      "status": "done",
+      "planning_conflict": null,
+      "reason": "done",
+      "updated_at": "2026-07-14T22:00:00Z",
+      "provider": "codex",
+      "started": true
+    },
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is complete"
+    },
+    "section": "later",
+    "actions": {
+      "recommended": "open_pr",
+      "reason": "merge head head-commits on GitHub"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is complete",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 7260,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": true,
+        "recovery_required": false,
+        "reason": null
+      },
+      "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "current",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 2,
+      "completed": [
+        0,
+        1
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 2
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          2,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "running",
+      "reason": "Worker is running realign",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "merged",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits"
+        }
+      },
+      "merge_commit": "merged-head",
+      "abandoned_at": null
+    },
+    "follow_through": {
+      "intents": [
+        {
+          "key": "installed-check",
+          "issue_id": "follow-up-issue",
+          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
+          "project_id": "project-1",
+          "wave": "product",
+          "title": "Verify the installed command",
+          "notes": "Check the installed release after deployment",
+          "due": "2026-10-08",
+          "existing": false,
+          "team_id": "team-product",
+          "state_id": "state-unstarted"
+        }
+      ],
+      "links": [
+        {
+          "key": "installed-check",
+          "issue_id": "follow-up-issue",
+          "identifier": "W2-FOLLOW",
+          "url": "https://linear.app/loopflow/issue/W2-FOLLOW",
+          "due": "2026-10-08"
+        }
+      ],
+      "reason": "Installed-release verification filed.",
+      "needs_conversion": false,
+      "scope_notes": []
+    }
+  },
+  "none": {
+    "task": {
+      "id": "source-issue",
+      "identifier": "W2-SOURCE",
+      "name": "Authored commits",
+      "description": "",
+      "rank": 4,
+      "completed": true,
+      "assignee": null,
+      "state": "completed",
+      "completed_at": "2026-10-07T20:00:00Z",
+      "due_date": null,
+      "follow_up_sources": []
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "machine_id": "home_00000000000000000000000000000001",
+        "slug": "commits",
+        "branch": "jack/commits",
+        "worktree": "/src/loopflow.commits",
+        "base_commit": "abc",
+        "local_exists": null
+      }
+    },
+    "runtime": {
+      "work_id": "ts_commits",
+      "status": "done",
+      "planning_conflict": null,
+      "reason": "done",
+      "updated_at": "2026-07-14T22:00:00Z",
+      "provider": "codex",
+      "started": true
+    },
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is complete"
+    },
+    "section": "later",
+    "actions": {
+      "recommended": "open_pr",
+      "reason": "merge head head-commits on GitHub"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Task is complete",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 7260,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": true,
+        "recovery_required": false,
+        "reason": null
+      },
+      "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "current",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 2,
+      "completed": [
+        0,
+        1
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 2
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          2,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "running",
+      "reason": "Worker is running realign",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "merged",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits"
+        }
+      },
+      "merge_commit": "merged-head",
+      "abandoned_at": null
+    },
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": "No accepted remaining obligations.",
+      "needs_conversion": false,
+      "scope_notes": []
+    }
+  },
+  "due": {
+    "task": {
+      "id": "follow-up-issue",
+      "identifier": "W2-FOLLOW",
+      "name": "Verify the installed command",
+      "description": "",
+      "rank": 5,
+      "completed": false,
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null,
+      "due_date": "2026-10-08",
+      "follow_up_sources": [
+        {
+          "issue_id": "source-issue",
+          "identifier": "W2-SOURCE"
+        }
+      ]
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "section": "available",
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "clear",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      },
+      "unresolved_execution": false
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
+    }
+  },
+  "unrelated": {
+    "task": {
+      "id": "backlog",
+      "identifier": "W2-A5",
+      "name": "Clean backlog",
+      "description": "",
+      "rank": 5,
+      "completed": false,
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null,
+      "due_date": "2026-10-08",
+      "follow_up_sources": []
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": null
+    },
+    "runtime": null,
+    "next_move": {
+      "owner": "wave",
+      "reason": "Task is ready to start"
+    },
+    "section": "available",
+    "actions": {
+      "recommended": null,
+      "reason": "Task is ready to start"
+    },
+    "condition": {
+      "state": "clear",
+      "reason": "Task is ready to start",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": null,
+      "local_progress": {
+        "state": "not_applicable",
+        "unsettled": false,
+        "dirty": null,
+        "authored_commits": null,
+        "recovery_required": null,
+        "reason": null
+      },
+      "unresolved_execution": false
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": {
+      "state": "idle",
+      "reason": "No active execution",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
+    }
+  },
+  "conversion": {
+    "task": {
+      "id": "source-issue",
+      "identifier": "W2-SOURCE",
+      "name": "Authored commits",
+      "description": "",
+      "rank": 4,
+      "completed": false,
+      "assignee": null,
+      "state": "unstarted",
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
+    },
+    "reference": {
+      "issue_url": null,
+      "workspace": {
+        "machine_id": "home_00000000000000000000000000000001",
+        "slug": "commits",
+        "branch": "jack/commits",
+        "worktree": "/src/loopflow.commits",
+        "base_commit": "abc",
+        "local_exists": null
+      }
+    },
+    "runtime": {
+      "work_id": "ts_commits",
+      "status": "active",
+      "planning_conflict": null,
+      "reason": "ready",
+      "updated_at": "2026-07-14T22:00:00Z",
+      "provider": "codex",
+      "started": true
+    },
+    "next_move": {
+      "owner": "wave",
+      "reason": "Merged · Follow-through pending"
+    },
+    "section": "waiting",
+    "actions": {
+      "recommended": "open_pr",
+      "reason": "merge head head-commits on GitHub"
+    },
+    "condition": {
+      "state": "waiting",
+      "reason": "Merged · Follow-through pending",
+      "observed_at": "2026-07-15T00:01:00Z",
+      "evidence_age_secs": 7260,
+      "local_progress": {
+        "state": "observed",
+        "unsettled": true,
+        "dirty": false,
+        "authored_commits": true,
+        "recovery_required": false,
+        "reason": null
+      },
+      "unresolved_execution": true
+    },
+    "workflow_name": "feature",
+    "latest_flow_process": {
+      "entry": {
+        "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+        "name": "feature",
+        "state": "current",
+        "task_id": null,
+        "wave_id": null,
+        "updated_at": 1,
+        "repo": "/src/loopflow",
+        "ended_at": null
+      },
+      "graph": {
+        "name": "feature",
+        "steps": [
+          {
+            "key": 0,
+            "id": "design",
+            "label": "task-design",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": []
+          },
+          {
+            "key": 1,
+            "id": "implement",
+            "label": "implement",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 2,
+            "id": null,
+            "label": "realign",
+            "kind": "skill",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 3,
+            "id": "decide",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 4,
+            "id": "demo",
+            "label": "demo",
+            "kind": "skill",
+            "human": true,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 5,
+            "id": "decide_delivery",
+            "label": "loop-or-next",
+            "kind": "skill",
+            "human": false,
+            "returns_to": 1,
+            "sources": [
+              "feature",
+              "pursue"
+            ],
+            "paths": []
+          },
+          {
+            "key": 6,
+            "id": null,
+            "label": "xor-route",
+            "kind": "xor",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature"
+            ],
+            "paths": [
+              {
+                "name": "fix",
+                "description": "Repair the failing check",
+                "steps": [
+                  {
+                    "key": 7,
+                    "id": "patch",
+                    "label": "patch",
+                    "kind": "skill",
+                    "human": false,
+                    "returns_to": null,
+                    "sources": [],
+                    "paths": []
+                  }
+                ]
+              },
+              {
+                "name": "skip",
+                "description": "Nothing to repair",
+                "steps": []
+              }
+            ]
+          },
+          {
+            "key": 8,
+            "id": null,
+            "label": "pr land -c",
+            "kind": "op",
+            "human": false,
+            "returns_to": null,
+            "sources": [
+              "feature",
+              "queue"
+            ],
+            "paths": []
+          }
+        ],
+        "interactions": {
+          "stages": [
+            "4"
+          ],
+          "transitions": [
+            {
+              "from": "@start",
+              "to": "4",
+              "nodes": [
+                "0",
+                "1",
+                "2",
+                "3"
+              ],
+              "routes": [
+                {
+                  "from": "@start",
+                  "to": "0",
+                  "condition": null
+                },
+                {
+                  "from": "0",
+                  "to": "1",
+                  "condition": null
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "4",
+              "nodes": [
+                "1",
+                "2",
+                "3",
+                "5"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "1",
+                  "condition": "repeat"
+                },
+                {
+                  "from": "1",
+                  "to": "2",
+                  "condition": null
+                },
+                {
+                  "from": "2",
+                  "to": "3",
+                  "condition": null
+                },
+                {
+                  "from": "3",
+                  "to": "4",
+                  "condition": "advance"
+                },
+                {
+                  "from": "3",
+                  "to": "1",
+                  "condition": "repeat"
+                }
+              ]
+            },
+            {
+              "from": "4",
+              "to": "@end",
+              "nodes": [
+                "5",
+                "6",
+                "7",
+                "8"
+              ],
+              "routes": [
+                {
+                  "from": "4",
+                  "to": "5",
+                  "condition": null
+                },
+                {
+                  "from": "5",
+                  "to": "6",
+                  "condition": "advance"
+                },
+                {
+                  "from": "6",
+                  "to": "7",
+                  "condition": "fix"
+                },
+                {
+                  "from": "6",
+                  "to": "8",
+                  "condition": "skip"
+                },
+                {
+                  "from": "8",
+                  "to": "@end",
+                  "condition": null
+                },
+                {
+                  "from": "7",
+                  "to": "8",
+                  "condition": null
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "current": 2,
+      "completed": [
+        0,
+        1
+      ],
+      "returns": [
+        {
+          "decider": 3,
+          "traversals": 2
+        },
+        {
+          "decider": 5,
+          "traversals": 0
+        }
+      ],
+      "iterations": [
+        [
+          2,
+          0
+        ]
+      ],
+      "cwd": "/src/loopflow",
+      "steps": []
+    },
+    "execution": {
+      "state": "running",
+      "reason": "Worker is running realign",
+      "step": null,
+      "captured": null
+    },
+    "run_control": {
+      "unavailable": null
+    },
+    "pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "merged",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits"
+        }
+      },
+      "merge_commit": "merged-head",
+      "abandoned_at": null
+    },
+    "follow_through": {
+      "intents": [
+        {
+          "key": "installed-check",
+          "issue_id": "follow-up-issue",
+          "relation_id": "3d0bfd25-7e3c-4bd2-845c-bfbd8e4f2a26",
+          "project_id": "project-1",
+          "wave": "product",
+          "title": "Verify the installed command",
+          "notes": "Check the installed release after deployment",
+          "due": "2026-10-08",
+          "existing": false,
+          "team_id": "team-product",
+          "state_id": "state-unstarted"
+        }
+      ],
+      "links": [],
+      "reason": null,
+      "needs_conversion": true,
+      "scope_notes": [
+        "Verify the installed release. Evidence: the command succeeds on the released version."
+      ]
+    }
+  }
+}

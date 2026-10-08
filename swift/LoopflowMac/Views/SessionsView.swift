@@ -1410,8 +1410,8 @@ private struct SessionPaneView: View {
             let key = task?.runtime?.workId ?? task?.task.identifier ?? taskId
             TaskFilesView(
                 store: workspace.files(taskId: key, issue: key, cwd: workingDirectory, query: sessions.query),
-                prURL: task?.activePr?.publication?.github?.url,
-                prBase: task?.activePr?.baseCommit
+                prURL: task?.pr?.publication?.github?.url,
+                checkoutBase: task?.reference.workspace?.baseCommit
             )
             .environment(\.colorScheme, .light)
             .simultaneousGesture(TapGesture().onEnded { store.setFocusedPane(pane.id) })

@@ -1,8 +1,8 @@
 # Delivery
 
-A Task binds durable planning to one managed worktree and one active remote
-branch at a time. The current implementation retains settled PRs as a serial
-delivery history.
+A Task binds durable planning to one managed checkout and zero or one PR.
+Checkout placement owns branch and base independently of publication. Historical
+multi-PR records remain read-only; new delivery never appends a successor.
 Git owns commits and branches. GitHub owns PR heads, checks, and merge. Local
 state records enough evidence to continue delivery safely.
 
@@ -11,7 +11,9 @@ lf checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
-lf land -c
+lf land --wait
+lf task follow-up INF-123 --none 'No accepted obligations remain'
+lf task complete INF-123
 ```
 
 ## Delivery flow
@@ -27,13 +29,15 @@ Task Work ----> managed worktree ----> commits
                                           |
                                  checks / repair / merge
                                           |
-                                complete or rotate chain
+                             file follow-ups or record none
+                                          |
+                                    complete Task
 ```
 
 | Object | Authority |
 | --- | --- |
 | Task directive and Project membership | Linear Issue |
-| managed worktree placement and serial PR state | Task delivery records plus resolved Git repository |
+| managed checkout placement and optional PR state | Task delivery records plus resolved Git repository |
 | commits, branch ancestry, sync state | Git |
 | PR head, required checks, merge | GitHub |
 | landing checks and repair admission | exact recorded PR head plus landing generation |
@@ -46,7 +50,7 @@ The exact landing fence is modeled in
 ## Create or reuse the worktree
 
 `lf checkout` resolves one existing Linear Issue inside one Project and
-creates or reuses its managed worktree and first serial PR record. It starts no
+creates or reuses its managed worktree without creating a PR. It starts no
 execution. `lf task run ISSUE` uses the same substrate and additionally
 runs a fresh Flow there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
@@ -58,10 +62,16 @@ they do not edit product files in substitute worktrees.
 A dependent change that must begin before its parent merges uses another Task:
 
 ```bash
-lf task run INF-124 --stack-on INF-123
+lf checkout INF-124 --stack-on INF-123 --design scratch/child-design.md
+lf task run INF-124
 ```
 
-The child records its fork point and targets the parent's active PR branch.
+The parent must have a published PR; a draft suffices. The child can start and
+publish before that PR merges. It records its fork point and targets the parent's
+PR branch. Prepare a self-contained child-specific design and transfer it with
+`--design`; its receipt retains source Task, commit and content hash. Identical
+retries do not reset the child; changed content at an occupied destination is a
+handoff conflict, with both versions retained.
 Its first commit, `Clear inherited scratch`, removes the parent's notes. Parent
 updates keep the child's entire `scratch/` tree, including deleted files; the
 parent's notes remain on the parent branch. Even a child with only this cleanup
@@ -69,7 +79,7 @@ commit merges updates instead of resetting onto the parent's scratch.
 After the parent merges, `lf sync` merges current main using the recorded fork
 as the comparison base. Child edits and original commit identities survive squash
 landing without replay.
-The parent Task does not hold two simultaneously open PRs.
+The child retains its Task, PR, branch and Session identity and its own design.
 
 ## Commit and publish
 
@@ -83,10 +93,9 @@ lf pr reconcile                        # check recorded landings once
 lf ci watch                            # repair failed landings while it runs
 ```
 
-`publish` creates or refreshes the current PR without integration. A completed
-merge, including one made outside `lf`, advances the recorded Task base to the
-actual merge base when the old base is its ancestor. Publication, submit and
-landing share that ancestry check; unrelated or divergent bases still fail.
+`publish` creates or refreshes the Task's sole optional PR without integration.
+The publishing intent is durable before the remote call, so retries resolve the
+same PR. Reopening a Task or closed PR never grants a second PR slot.
 
 `arm` and `land` merge current main, clear merge-time scratch state, verify once,
 and push the exact head. Branch commits and merge resolutions retain their identities.
@@ -161,7 +170,7 @@ Launching the agent neither adopts the operation nor publishes the result.
 ### PR mutation
 
 `lf-pr-mutation.lock` covers only Task PR/head transitions: publication,
-repair, range healing, merge request, settlement, and serial rotation. A
+repair, range healing, merge request, and settlement. A
 second mutation fails fast while that exact section is held.
 
 ### Landing checks
@@ -286,11 +295,35 @@ A PR closed without merging ends its landing unsettled. Merge evidence is
 recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
-After verified merge, `lf land` normally completes its Task. `lf task follow-up`
-records an explicit remaining outcome, evidence condition and next check in Task
-history; reconciliation keeps it open until that work is resolved. Overdue checks
-surface the unresolved decision, never success. `lf land --next <slug>` retains
-unfinished PR work and rotates the serial chain from fetched main.
+After verified merge the Task shows **Merged · Follow-through pending**.
+`ship` runs gate, `land --wait`, then follow-through. Waited landing uses the
+existing observation path every 15 seconds for at most 30 minutes, releasing
+its lock between reads. Timeout or interruption retains intent and reports held.
+Neither ordinary reconciliation nor a manual GitHub merge manufactures a verdict.
+Keep the checkout available for the finishing step.
+
+Follow-through reads the accepted brief, merged PR copy and delivery evidence.
+It uses `lf task follow-up` to file or link actual Tasks for accepted later
+obligations, or records none needed with a reason. Filing intent retains a stable
+child UUID, destination Project and exact payload before provider mutation;
+uncertain responses and chapter rotation cannot select a replacement destination.
+Confirm the issue and related link before recording the filed disposition.
+Existing unresolved keep-open records require scope conversion, never silent
+completion or remote issue creation during migration.
+
+`lf task complete` shares `task move end` checks. A Task with a PR needs merge
+and a durable none/filed disposition; its follow-up Tasks need not be complete.
+A PR-less Task may finish with retained files and commits, without a landing
+ceremony. Completion is idempotent, including when the enclosing Flow later
+arrives at end; planning writeback remains retryable.
+
+A stopped finishing Flow is recovered by the next Task/Wave operation. Inspect
+all associated live work, then run `finish-delivery` or repeat completion if the
+disposition is already durable. Do not replay gate or re-arm a merged PR.
+Dated follow-ups return on the owning Wave's next pass, including unstarted ones;
+unattended execution needs a concrete check already authorized in the brief.
+Filing installs no schedule. Without an installed Wave schedule there is no
+automatic wake, and time passing proves no accepted outcome.
 
 Task decisions never settle Session turns or process exits. Checkout cleanup and
 process control keep their own evidence and authority. Historical uncertainty
@@ -298,21 +331,21 @@ cannot veto completion or cancellation; it can require retaining the checkout.
 
 ## Failure and recovery
 
-- An interrupted provider turn does not discard the worktree or PR chain.
+- An interrupted provider turn does not discard the worktree or PR identity.
 - A failed check is GitHub evidence, not a completed local transition.
 - A crashed sync keeps Git's sequencer state; explicit recovery adopts it
   with fresh operation identity.
 - A crashed PR mutation is retried by resolving current Git and GitHub truth
   inside the same narrow lock.
 - A Task moved to another Linear Project fails closed before automated commit,
-  push, publication, merge request, rotation, or completion.
+  push, publication, merge request, or completion.
 
 ## Boundary contracts
 
 - One Task has one active remote branch. A checkout tracking it identifies the
   Task; the stored worktree path is placement.
-- Settled PRs may remain as serial history until the one-branch Task model
-  replaces rotation.
+- A Task has zero or one PR. Migrated multi-PR history is read-only; no current
+  operation adds a successor. An open or closed-unmerged PR cannot count as done.
 - Simultaneously open dependent work belongs to another stacked Task.
 - Git and GitHub remain authority for their own objects.
 - Locks serialize exact local races, not all activity.

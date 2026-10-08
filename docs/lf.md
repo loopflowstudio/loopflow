@@ -205,43 +205,67 @@ in existing personal, repository or Wave settings.
 ## Publish and finish
 
 ```bash
-lf pr publish                         # push a ready PR
+lf pr publish                      # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
-lf --task EXP-12 land               # complete after verified merge
+lf --task EXP-12 land --wait        # wait for authoritative merge
 lf sync --plan                     # preview integration with main or stack parent
-lf wt create csv-export
-lf check                   # inspect release eligibility
 ```
 
-Choose one delivery operation for the desired endpoint. Submit, arm, and land
-own preparation and integration; publish does not sync. PR operations work
-on ordinary branches without creating a Task. Verified merge normally completes its Task. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
-it also recovers an existing PR whose GitHub identity is missing from the Task,
-without publishing or rotating the branch. Multiple PRs
-for the recorded branch remain unresolved. `lf ci watch`
-starts a ci-fix when a recorded landing fails its required checks.
+A Task has zero or one PR. Choose one delivery operation for the desired
+endpoint. Submit, arm and land own preparation and integration; publish does not
+sync. PR operations also work on ordinary branches without creating a Task.
+Arm and bare land return after recording delivery. `--wait` observes every 15
+seconds for up to 30 minutes; timeout or interruption leaves the intent intact.
+`lf pr reconcile` checks recorded landings once. In a Task checkout it can also
+recover an existing PR whose GitHub identity is missing, without publishing.
+Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
+CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z
-lf land
-lf task follow-up EXP-12 --clear 'Published v0.14: 20 samples, p95 0.8s'
+lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
+lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf task complete EXP-12
 ```
 
-Record accepted remaining work before delivery. Its outcome, evidence condition
-and next check stay visible in Task status and Desktop. An overdue check calls
-for evidence or a scope decision; time and green CI never establish production
-success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
-requests without a stated outcome surface for an explicit scope decision.
+After verified merge, file accepted remaining obligations as linked follow-up
+Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
+Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
+owner. Repeat filings before `--finish`; retries retain the original child
+identity and Project even after chapter rotation. Inspect receipts and retry
+identical input after an uncertain response. The source completes after filing,
+without waiting for those children to finish. Preserve accepted later checks in
+PR copy before landing clears scratch.
 
-`lf task complete EXP-12` (equivalently, `lf task move EXP-12 end`) records an
-explicit completion. Old Session turns, reserved inputs and unknown process exits
-cannot veto it. Execution history and live process controls remain intact;
-uncertain or occupied checkouts are retained.
-Cancellation follows the same separation. Open PRs and additional committed work
-still need delivery or explicit abandonment.
+`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
+GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
+The next Task/Wave operation checks for live work, then runs `finish-delivery`
+if needed. It does not rerun gate or re-arm the merged PR.
+
+Due follow-ups return on the owning Wave's next operation, even if unstarted.
+Their briefs carry release prerequisites, expected evidence and any timezone.
+A due date is not an alarm or proof of success. Only a concrete check already
+authorized in the brief can start unattended. Filing installs no schedule;
+without an installed Wave schedule, there is no automatic check between passes.
+
+`lf task complete EXP-12` is an alias for `lf task move EXP-12 end`. Both require
+merge and a durable none/filed disposition when the Task has a PR. A PR-less
+Task can finish with research files or commits; they do not create a PR
+requirement. Old Session turns and unknown process exits cannot veto completion.
+Live controls and execution history remain intact; unsafe or occupied checkouts
+are retained. An open or closed-unmerged PR still requires delivery or explicit
+abandonment. A different PR needs another Task, stacked if dependent:
+
+```bash
+lf checkout EXP-13 --stack-on EXP-12 --design scratch/child-design.md
+lf --task EXP-13 pr publish
+```
+
+A published parent PR, including a draft, is enough to start and publish the
+child. Prepare a child-specific design; checkout transfers it without overwriting
+newer child work. `lf sync` follows parent updates and its squash merge while
+preserving the child's identity, PR, Session and design.
 
 ## Check authorized deliveries in the background
 

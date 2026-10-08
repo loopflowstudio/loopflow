@@ -51,12 +51,12 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     runtime
         .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
-    let pr = runtime
-        .block_on(parent.store.active_task_pr(&child.id))
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
+        .execute("DELETE FROM task_prs WHERE task_id=?1", [child.id.as_str()])
         .unwrap();
     runtime
-        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
         .unwrap();
 
     let checkout = || {
@@ -69,6 +69,10 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     };
     checkout();
     assert!(!child.worktree.join("scratch").exists());
+    assert!(runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .is_none());
     assert_eq!(
         loopflow::engine::git::rev_parse(&child.worktree, "HEAD^").unwrap(),
         parent_head
@@ -204,7 +208,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event.kind, TaskEventKind::PrStarted { .. }))
+            .filter(|event| matches!(event.kind, TaskEventKind::CheckoutReady { .. }))
             .count(),
         1
     );
@@ -409,4 +413,167 @@ fn missing_worktree_status_is_actionable_and_read_only() {
             .expect("reread PRs after status"),
         before_prs
     );
+}
+
+#[test]
+fn research_checkout_restores_and_reads_files_without_a_pull_request() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut research = parent.task.clone();
+    research.id = loopflow::work::task::TaskId::new();
+    research.plan.id = loopflow::planning::LinearIssueId::new("research-issue").unwrap();
+    research.plan.identifier = "INF-124".into();
+    research.plan.title = "Recommend a storage approach".into();
+    research.workspace_slug = "research".into();
+    research.branch = "research".into();
+    research.worktree = target.path().join("research");
+    runtime
+        .block_on(
+            parent
+                .store
+                .create_task_with_worktree(&research, None, None),
+        )
+        .unwrap();
+
+    let restored = loopflow::ops::task::task_checkout(
+        repo.path(),
+        "INF-124",
+        loopflow::ops::task::TaskCheckoutOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(restored.id, research.id);
+    fs::write(
+        research.worktree.join("findings.md"),
+        "Use the existing store.\n",
+    )
+    .unwrap();
+    let result = Command::new("git")
+        .current_dir(&research.worktree)
+        .args(["add", "findings.md"])
+        .status()
+        .unwrap();
+    assert!(result.success());
+    let result = Command::new("git")
+        .current_dir(&research.worktree)
+        .args(["commit", "-m", "Record research findings"])
+        .status()
+        .unwrap();
+    assert!(result.success());
+    fs::write(research.worktree.join("draft.md"), "Keep this draft.\n").unwrap();
+    let changes = loopflow::ops::task::task_changes("INF-124", "parent").unwrap();
+    assert!(changes
+        .files
+        .iter()
+        .any(|file| file.path == "findings.md" && file.committed));
+    assert!(changes
+        .files
+        .iter()
+        .any(|file| file.path == "draft.md" && file.untracked));
+    let snapshot = loopflow::ops::task::task_snapshot(&restored).unwrap();
+    assert!(snapshot.pr.is_none());
+    assert_eq!(snapshot.branch, "research");
+    assert!(runtime
+        .block_on(parent.store.task_prs(&research.id))
+        .unwrap()
+        .is_empty());
+    let json = serde_json::to_value(snapshot).unwrap();
+    assert!(json["pr"].is_null());
+    assert!(json.get("prs").is_none());
+    assert!(json.get("active_pr").is_none());
+    let binding = runtime
+        .block_on(loopflow::ops::resolve_work_binding(
+            &std::sync::Arc::new(parent.store),
+            &research.worktree,
+            "task:INF-124",
+        ))
+        .unwrap();
+    assert!(binding.context.contains("Branch: research"));
+    assert!(!binding.context.contains("PR 1:"));
+}
+
+#[test]
+fn optional_task_pr_preserves_placement_and_freezes_prior_delivery() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    loopflow::store::migrations::apply_sqlite(&conn).unwrap();
+    conn.execute_batch(r#"
+        INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1);
+        INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','linear-p',1);
+        INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,created_at,updated_at)
+        VALUES('research','p','research-issue','R-1','/research','research',1,1),
+              ('single','p','single-issue','R-2','/single','single',1,1),
+              ('chain','p','chain-issue','R-3','/chain','chain',1,1),
+              ('continuing','p','continuing-issue','R-4','/continuing','continuing',1,1);
+        INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+        VALUES('placeholder','research',1,'research','research','research-base',1,1);
+        INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,
+          github_number,github_url,merge_commit,created_at,updated_at)
+        VALUES('single-pr','single',1,'single','single','single-base',1,1,'https://github.com/a/b/pull/1',NULL,1,1),
+              ('old-pr','chain',1,'old','old','old-base',1,2,'https://github.com/a/b/pull/2','merged',1,1),
+              ('current-pr','chain',2,'current','current','current-base',1,3,'https://github.com/a/b/pull/3',NULL,1,1);
+        INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,
+          github_number,github_url,merge_commit,after_merge,next_slug,merge_mode,merge_requested_at,merge_head_sha,github_head_sha,created_at,updated_at)
+        VALUES('continued-pr','continuing',1,'prior','prior','prior-base',1,4,'https://github.com/a/b/pull/4','merged','continue_task','continuing','auto',1,'head','head',1,1);
+        INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+        VALUES('successor-placeholder','continuing',2,'continuing','continuing','prior-base',2,2);
+        INSERT INTO task_events(task_id,kind_json,created_at) VALUES('chain',
+          '{"kind":"follow_up","remaining":{"outcome":"Check release","evidence":"Installed command works","check_at":42},"reason":"Accepted release check"}',1);
+    "#).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+    conn.execute_batch(&loopflow::store::migrations::migration_sql_for_test(
+        "optional_task_pr",
+    ))
+    .unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    let placement: (String, String) = conn
+        .query_row(
+            "SELECT branch,base_commit FROM tasks WHERE id='research'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(placement, ("research".into(), "research-base".into()));
+    let current: Vec<String> = conn
+        .prepare("SELECT id FROM task_prs WHERE historical=0 ORDER BY id")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(current, vec!["current-pr", "single-pr"]);
+    assert!(conn
+        .execute(
+            "UPDATE task_prs SET base_commit='changed' WHERE id='old-pr'",
+            []
+        )
+        .is_err());
+    assert!(conn
+        .execute("DELETE FROM task_prs WHERE id='old-pr'", [])
+        .is_err());
+    // The retained placeholder cannot block first publication on this branch.
+    conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at)
+      VALUES('research-pr','research',2,'research','research','research-base',2,2,2)").unwrap();
+    assert!(conn.execute_batch("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,publication_requested_at,created_at,updated_at)
+      VALUES('duplicate','research',3,'research','research','research-base',3,3,3)").is_err());
+    let obligation: String = conn.query_row("SELECT kind_json FROM task_events WHERE task_id='chain' AND json_extract(kind_json,'$.kind')='follow_up'", [], |row| row.get(0)).unwrap();
+    assert!(obligation.contains("Check release"));
+    let conversion: String = conn.query_row("SELECT kind_json FROM task_events WHERE task_id='continuing' AND json_extract(kind_json,'$.kind')='follow_through_conversion'", [], |row| row.get(0)).unwrap();
+    assert!(conversion.contains("continuing"));
+    let current_continuation: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM task_prs WHERE task_id='continuing' AND historical=0",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(current_continuation, 0);
+    let violations: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(violations, 0);
 }

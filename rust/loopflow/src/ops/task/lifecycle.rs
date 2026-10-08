@@ -19,6 +19,13 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
+    let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
+        eprintln!(
+            "Task {} is complete; retained its PR-less checkout and artifacts.",
+            task.plan.identifier
+        );
+        return Ok(());
+    };
     let blockers = associated_execution_blockers(store, task)?;
     if !blockers.is_empty() {
         eprintln!(
@@ -45,30 +52,24 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
             .exists()
             .then(|| super::lock_task_pr_mutation(&task.worktree))
             .transpose()?;
-        let mut deletions = Vec::new();
-        for pr in store.task_prs(&task.id).await.map_err(task_error)? {
-            let deletion = match pr.phase() {
-                PrPhase::Merged => crate::ops::wt::prepare_landed_delete(
-                    &repo,
-                    &pr.branch,
-                    pr.head_sha()
-                        .ok_or_else(|| task_error("merged PR has no recorded head"))?,
-                )?,
-                PrPhase::Abandoned if pr.publication.is_none() => {
-                    crate::ops::wt::prepare_landed_delete(&repo, &pr.branch, &pr.base_commit)?
-                }
-                PrPhase::Abandoned => crate::ops::wt::prepare_delete(&repo, &pr.branch, false)?,
-                _ => {
-                    return Err(task_error(
-                        "Task still has an unsettled PR; retained checkout",
-                    ))
-                }
-            };
-            deletions.push(deletion);
-        }
-        for deletion in deletions {
-            crate::ops::wt::apply_delete(deletion, &NullProgress)?;
-        }
+        let deletion = match pr.phase() {
+            PrPhase::Merged => crate::ops::wt::prepare_landed_delete(
+                &repo,
+                &pr.branch,
+                pr.head_sha()
+                    .ok_or_else(|| task_error("merged PR has no recorded head"))?,
+            )?,
+            PrPhase::Abandoned if pr.publication.is_none() => {
+                crate::ops::wt::prepare_landed_delete(&repo, &pr.branch, &pr.base_commit)?
+            }
+            PrPhase::Abandoned => crate::ops::wt::prepare_delete(&repo, &pr.branch, false)?,
+            _ => {
+                return Err(task_error(
+                    "Task still has an unsettled PR; retained checkout",
+                ))
+            }
+        };
+        crate::ops::wt::apply_delete(deletion, &NullProgress)?;
         if task.worktree.exists() {
             return Err(task_error(
                 "checkout is on a different branch; retained it for explicit wt delete",
@@ -132,12 +133,12 @@ pub(crate) async fn record_abandoned_pr(repo: &Path, branch: &str) -> OpsResult<
     let Some((store, task)) = branch_task(repo, branch).await? else {
         return Ok(());
     };
-    for mut pr in store.task_prs(&task.id).await.map_err(task_error)? {
+    if let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? {
         if pr.branch == branch && pr.is_active() {
             let now = time::OffsetDateTime::now_utc();
             pr.abandoned_at = Some(now);
             pr.updated_at = now;
-            store.settle_task_pr(&pr, None).await.map_err(task_error)?;
+            store.settle_task_pr(&pr).await.map_err(task_error)?;
         }
     }
     Ok(())
@@ -157,12 +158,13 @@ async fn resolve_task(store: &SharedStore, selector: &str) -> OpsResult<Option<T
 async fn historical_branch_task(store: &SharedStore, branch: &str) -> OpsResult<Option<Task>> {
     let mut found = None;
     for task in store.list_tasks(None).await.map_err(task_error)? {
-        if store
-            .task_prs(&task.id)
-            .await
-            .map_err(task_error)?
-            .iter()
-            .any(|pr| pr.branch == branch)
+        if task.branch == branch
+            || store
+                .task_prs(&task.id)
+                .await
+                .map_err(task_error)?
+                .iter()
+                .any(|pr| pr.branch == branch)
         {
             if found.is_some() {
                 return Err(task_error(format!(
@@ -269,7 +271,12 @@ async fn prepare_abandon(
     sweep: bool,
 ) -> OpsResult<Vec<BranchDeletion>> {
     let prs = match task {
-        Some(task) => store.task_prs(&task.id).await.map_err(task_error)?,
+        Some(task) => store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(task_error)?
+            .into_iter()
+            .collect(),
         None => Vec::new(),
     };
     require_known_prs(repo, &prs, issue).await?;

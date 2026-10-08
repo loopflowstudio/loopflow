@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
+use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
@@ -466,7 +467,7 @@ impl WorkflowTask {
                 ".lf/workflows/findings.yaml",
                 "nodes:\n  findings: research\nedges:\n  - {from: start, to: findings, flow: proof}\n  - {from: findings, to: end}\n",
             ),
-            // Several PRs: the landing edge returns to its node.
+            // An ordinary repeatable edge returns to its review node.
             (
                 ".lf/workflows/rounds.yaml",
                 "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: proof}\n  - {from: review, to: review, flow: land-proof}\n  - {from: review, to: end, flow: broken}\n",
@@ -479,7 +480,7 @@ impl WorkflowTask {
         // The Task's branch starts from these definitions and holds nothing.
         repo.stage_all();
         repo.commit("Define the fixture Flows and workflows");
-        let registered = support::register_task(
+        let registered = support::register_task_without_pr(
             home.path(),
             &repo.path().canonicalize().unwrap(),
             "launch-proof",
@@ -491,6 +492,27 @@ impl WorkflowTask {
             registered,
             _env: env,
         }
+    }
+
+    fn publish(&self, merged: bool) {
+        let mut pr = self.registered.pr.clone();
+        pr.publication = Some(PrPublication {
+            requested_at: time::OffsetDateTime::now_utc(),
+            presentation: None,
+            github: Some(GithubPr {
+                number: 42,
+                url: "https://github.com/fixture/repo/pull/42".into(),
+                head_sha: Some(self.repo.head_sha()),
+            }),
+            merge: None,
+        });
+        if merged {
+            pr.merge_commit = Some(self.repo.head_sha());
+        }
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(self.registered.store.insert_task_pr(&pr))
+            .unwrap();
     }
 
     fn status(&self) -> serde_json::Value {
@@ -622,15 +644,25 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     assert_eq!(history[1]["process_lfid"], history[2]["process_lfid"]);
     assert_eq!(history[1]["actor"], "person");
     assert_eq!(history[2]["actor"], "edge");
+    task.repo
+        .create_file("findings.md", "Accepted recommendation\n");
+    task.repo.stage_all();
+    task.repo.commit("Record research findings");
+    task.repo
+        .create_file("draft.md", "Retained working notes\n");
     task.ok(&["task", "run", "INF-123"]);
     let workflow = task.workflow();
     assert_eq!(workflow["position"], at("end"));
+    assert_eq!(
+        fs::read_to_string(task.repo.path().join("draft.md")).unwrap(),
+        "Retained working notes\n"
+    );
+    assert!(task.repo.path().join("findings.md").exists());
     assert_eq!(moves(&workflow).last(), Some(&chose(1)));
     assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
-    // Reaching the end is completion: the Task is done, its empty PR slot is
-    // retired, and nothing is left to run.
+    // Reaching the end completes research without creating a PR.
     assert_eq!(task.state(), "done");
-    assert!(task.status()["active_pr"].is_null());
+    assert!(task.status()["pr"].is_null());
     let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
     assert!(error.contains("is done"), "{error}");
     let status = task.run(&["task", "status", "INF-123"]);
@@ -928,9 +960,7 @@ fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
 fn end_is_refused_while_the_tasks_pr_is_unsettled() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    task.repo.create_file("notes.md", "unpublished\n");
-    task.repo.stage_all();
-    task.repo.commit("Unpublished work");
+    task.publish(false);
     // By its edge or by hand, the Task stays where it was.
     for reach in [
         &["task", "run", "INF-123"][..],
@@ -938,7 +968,7 @@ fn end_is_refused_while_the_tasks_pr_is_unsettled() {
         &["task", "complete", "INF-123"],
     ] {
         let error = refusal(task.run(reach));
-        assert!(error.contains("unpublished pull request"), "{error}");
+        assert!(error.to_lowercase().contains("pull request"), "{error}");
         assert_eq!(task.workflow()["position"], at("findings"));
         assert_eq!(task.state(), "active");
     }
@@ -1074,50 +1104,82 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
 }
 
 #[test]
-fn remaining_work_is_visible_until_an_explicit_evidence_decision() {
+fn merged_delivery_requires_a_disposition_and_follow_through_completion_is_idempotent() {
     let task = WorkflowTask::new();
-    let followup = [
-        "task",
-        "follow-up",
-        "INF-123",
-        "--outcome",
-        "Installed latency meets budget",
-        "--evidence",
-        "20 warm samples below 1s p95",
-        "--check-at",
-        "2000-01-01T00:00:00Z",
-    ];
-    task.ok(&followup);
-    task.ok(&followup);
-    let error = refusal(task.run(&["task", "move", "INF-123", "end"]));
-    assert!(error.contains("Installed latency meets budget"), "{error}");
-    assert!(error.contains("20 warm samples below 1s p95"), "{error}");
-    assert!(error.contains("overdue"), "{error}");
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let count = || {
-        db.query_row(
-            "SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='follow_up'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap()
-    };
-    assert_eq!(count(), 1);
+    task.publish(true);
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    for args in [
+        &["task", "run", "INF-123"][..],
+        &["task", "complete", "INF-123"],
+        &[
+            "task",
+            "move",
+            "INF-123",
+            "end",
+            "--force",
+            "--reason",
+            "Try bypassing",
+        ],
+    ] {
+        let error = refusal(task.run(args));
+        assert!(error.to_lowercase().contains("follow-through"), "{error}");
+        assert_eq!(task.workflow()["position"], at("findings"));
+        assert_eq!(task.state(), "active");
+    }
+    assert!(task.repo.path().exists());
     task.ok(&[
         "task",
         "follow-up",
         "INF-123",
-        "--clear",
-        "Installed measurements meet the budget",
+        "--none",
+        "Accepted checks are complete",
     ]);
     task.ok(&[
         "task",
         "follow-up",
         "INF-123",
-        "--clear",
-        "Installed measurements meet the budget",
+        "--none",
+        "Retry does not replace the reason",
     ]);
-    assert_eq!(count(), 2);
+    task.ok(&["task", "run", "INF-123"]);
+    let workflow = task.workflow();
+    task.ok(&["task", "complete", "INF-123"]);
     task.ok(&["task", "move", "INF-123", "end"]);
+    assert_eq!(task.workflow(), workflow);
+    let status = task.status();
+    assert_eq!(status["status"], "done");
+    assert_eq!(status["pr"]["publication"]["github"]["number"], 42);
+    assert_eq!(
+        status["follow_through"]["reason"],
+        "Accepted checks are complete"
+    );
+}
+
+#[test]
+fn completion_inside_the_finishing_flow_and_driver_arrival_make_one_end_transition() {
+    let task = WorkflowTask::new();
+    fs::write(task.repo.path().join(".lf/flows/finish-proof.yaml"),
+        "- cmd: task follow-up INF-123 --none Accepted-checks-complete\n- cmd: task complete INF-123\n").unwrap();
+    fs::write(
+        task.repo.path().join(".lf/workflows/delivery.yaml"),
+        "edges:\n  - {from: start, to: end, flow: finish-proof}\n",
+    )
+    .unwrap();
+    task.publish(true);
+    task.ok(&["-b", "task", "run", "INF-123", "delivery"]);
     assert_eq!(task.state(), "done");
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    let ends = workflow["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["to"] == "end" && entry["kind"] != "chose")
+        .count();
+    assert_eq!(ends, 1);
+    task.ok(&["task", "complete", "INF-123"]);
+    assert_eq!(task.workflow(), workflow);
+    let flows = support::recorded_flows(task.home.path());
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
 }

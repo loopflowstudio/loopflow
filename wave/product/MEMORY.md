@@ -7,26 +7,27 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 ## Task delivery boundary (LOO-418, 2026-10-07)
 
 Jack Heart decided: zero or one PR per Task. Every merge requires follow-ups
-filed or “none needed” recorded before completion. End means completed;
-`task complete` is locally an alias for `task move end`, with today's checks.
-Optional PRs and post-merge filing remain unbuilt. Dependent PRs use stacked Tasks.
-Jack accepted a waited landing Flow with follow-through, recovered by the next
-Task/Wave operation, without a new watcher. No schedule means no automatic wake.
-These decisions supersede older serial-chain and keep-open directions below.
-Jack rejected the agent's launch/alias-only demo stop: build the full lifecycle
-on PR #1499 before demo. No landing. The design retains implementation defaults.
+filed or “none needed” recorded before completion; end means completed.
+Dependent PRs use stacked Tasks. Jack accepted waited landing plus recovery by
+the next Task/Wave operation, without a new watcher. No schedule means no wake.
+Jack required the full lifecycle on #1499 before demo, no landing. This
+supersedes older chain/keep-open directions.
 
-Base #1488/#1495: bare land defaults to completion, while
-`TaskFollowUp` keeps an obligation on the source Task. Replace that writer as
-well as rotation; retain existing obligations and multi-PR history. LOO-385's
-no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.
+The branch moves checkout placement onto Task, makes its PR optional, and
+replaces serial rotation and keep-open obligations with linked follow-ups.
+Historical PRs and unresolved scope survive migration. LOO-385 overlaps; its
+inspected planning was unstarted, not closed. `task complete` and moving to end
+share checks; research retains files/commits without a PR. Merge alone stays
+pending. Ship waits then files; operators can run only the missing finish.
 
-Admission must record performed location after placement, retaining caller
-ancestry. The local fix makes Flow registration and Started atomic and shares
-membership predicates with inventory. Isolated mechanical CLI evidence is not
-installed or Desktop acceptance; historical rows remain unchanged. Stack sync
-preserves child code; scratch needs explicit handoff. Operator guidance and ship
-still stop at landing. The alias retains dirty-checkout/unpublished-commit checks.
+Retries need durable UUIDs and original destination/payload before mutation.
+Failed draft promotion must retain the previous confirmed copy. Handoff copies selected child designs, preserving
+later edits. Task placement owns the validated PR copy, never the reverse.
+Admission records performed location; Flow registration and Started are atomic.
+
+Proof is isolated Git/SQLite, simulated providers and headless Swift, not live
+migration, installed behavior or native acceptance. Gate and Jack's complete
+demo remain. Earlier evidence: `7add4e5f3:scratch/make-a-task-up-to.md`.
 
 ## Live Home reconciliation (2026-10-05)
 

@@ -9,7 +9,7 @@ use crate::pr_landing::{
     LandingPlacement, LandingSupervisor, PrLanding, PrLandingId, PrLandingState,
 };
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{AfterMerge, TaskId};
+use crate::work::task::TaskId;
 
 fn timestamp(value: OffsetDateTime) -> i64 {
     value.unix_timestamp()
@@ -54,11 +54,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         .get::<_, String>(11)?
         .parse()
         .map_err(|error| invalid_column(11, error))?;
-    let after_merge = row
-        .get::<_, Option<String>>(9)?
-        .map(|value| value.parse())
-        .transpose()
-        .map_err(|error| invalid_column(9, error))?;
     Ok(PrLanding {
         id: PrLandingId::from_raw(row.get::<_, String>(0)?),
         repo: row.get(1)?,
@@ -69,8 +64,6 @@ fn map_landing(row: &rusqlite::Row<'_>) -> rusqlite::Result<PrLanding> {
         requested_head_sha: row.get(6)?,
         observed_head_sha: row.get(7)?,
         merge_commit: row.get(8)?,
-        after_merge,
-        next_slug: row.get(10)?,
         state,
         generation,
         supervisor,
@@ -182,13 +175,13 @@ impl super::SqliteStore {
             // and its OS lock until it finishes. A blocked retry can relocate.
             transaction.execute(
                 "UPDATE pr_landings
-                 SET requested_head_sha=?2, after_merge=?3, next_slug=?4, updated_at=?5
+                 SET requested_head_sha=?2, after_merge=COALESCE(after_merge,?3), next_slug=COALESCE(next_slug,?4), updated_at=?5
                  WHERE id=?1 AND state IN ('watching', 'repairing')",
                 params![
                     existing.id.as_str(),
                     landing.requested_head_sha,
-                    landing.after_merge.map(AfterMerge::as_str),
-                    landing.next_slug,
+                    Option::<String>::None,
+                    Option::<String>::None,
                     timestamp(landing.updated_at),
                 ],
             )?;
@@ -239,8 +232,8 @@ impl super::SqliteStore {
                 landing.task_id.as_ref().map(TaskId::as_str),
                 landing.requested_head_sha,
                 landing.observed_head_sha,
-                landing.after_merge.map(AfterMerge::as_str),
-                landing.next_slug,
+                Option::<String>::None,
+                Option::<String>::None,
                 landing.state.as_str(),
                 landing.generation as i64,
                 timestamp(landing.created_at),
@@ -395,7 +388,7 @@ mod tests {
         LandingPlacement, LandingSupervisor, NewPrLanding, PrLanding, PrLandingState,
     };
     use crate::store::sqlite::SqliteStore;
-    use crate::work::task::{AfterMerge, TaskId};
+    use crate::work::task::TaskId;
 
     fn landing(now: OffsetDateTime) -> PrLanding {
         PrLanding::new(
@@ -406,8 +399,6 @@ mod tests {
                 branch: "jack/make-pr-landing-a-watched".to_string(),
                 task_id: None,
                 requested_head_sha: "head-a".to_string(),
-                after_merge: None,
-                next_slug: None,
             },
             now,
         )
@@ -487,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn joining_active_landing_refreshes_head_and_task_disposition() {
+    fn joining_active_landing_refreshes_head_and_preserves_task_placement() {
         let (_directory, store) = store();
         store
             .conn
@@ -498,22 +489,18 @@ mod tests {
         let now = OffsetDateTime::now_utc();
         let mut initial = landing(now);
         initial.task_id = Some(TaskId::new());
-        initial.after_merge = Some(AfterMerge::CompleteTask);
         let created = store.start_or_join_pr_landing(&initial).unwrap();
 
         let mut revised = initial;
         revised.requested_head_sha = "head-b".to_string();
         revised.observed_head_sha = "head-b".to_string();
-        revised.after_merge = Some(AfterMerge::ContinueTask);
-        revised.next_slug = Some("follow-up-proof".to_string());
         revised.worktree = PathBuf::from("/tmp/another-checkout");
         revised.branch = "another-local-branch".to_string();
         let joined = store.start_or_join_pr_landing(&revised).unwrap();
 
         assert_eq!(joined.id, created.id);
+        assert_eq!(joined.task_id, created.task_id);
         assert_eq!(joined.requested_head_sha, "head-b");
-        assert_eq!(joined.after_merge, Some(AfterMerge::ContinueTask));
-        assert_eq!(joined.next_slug.as_deref(), Some("follow-up-proof"));
         assert_eq!(joined.worktree, created.worktree);
         assert_eq!(joined.branch, created.branch);
     }

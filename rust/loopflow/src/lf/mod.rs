@@ -839,19 +839,26 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Record accepted work remaining after merge, or resolve it with evidence
+    /// File or link follow-up Tasks after merge, then record the disposition
     FollowUp {
         issue: String,
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        outcome: Option<String>,
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        evidence: Option<String>,
-        /// Next observation or decision, as an RFC 3339 timestamp
-        #[arg(long, required_unless_present = "clear", conflicts_with = "clear")]
-        check_at: Option<String>,
-        /// Evidence that the remaining work is satisfied or no longer needed
+        #[arg(long, conflicts_with_all = ["existing", "none", "finish"], requires = "notes")]
+        title: Option<String>,
+        #[arg(long, requires = "title")]
+        notes: Option<String>,
+        #[arg(long, requires = "title")]
+        due: Option<String>,
         #[arg(long)]
-        clear: Option<String>,
+        wave: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "none", "finish"])]
+        existing: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "existing", "finish"])]
+        none: Option<String>,
+        #[arg(long, conflicts_with_all = ["title", "existing", "none"])]
+        finish: Option<String>,
+        /// Stable obligation key; use a distinct key for each additional follow-up
+        #[arg(long)]
+        key: Option<String>,
     },
     /// Enable or hold CI repair for a Task without interrupting running work
     Automate {
@@ -872,6 +879,9 @@ pub enum TaskCommand {
         stack_on: Option<String>,
         #[arg(long)]
         directive: Option<String>,
+        /// Hand off a child-specific design from the caller's checkout
+        #[arg(long, value_name = "PATH")]
+        design: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -1172,13 +1182,6 @@ pub enum PrCommand {
         logs: bool,
     },
 
-    /// After an out-of-band merge, rotate this Task to its next serial PR,
-    /// carrying committed and uncommitted follow-up onto the new branch.
-    Next {
-        /// Name the next serial branch (defaults to the settled PR's next slug,
-        /// then the sequence number).
-        slug: Option<String>,
-    },
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
@@ -1206,11 +1209,6 @@ pub enum PrCommand {
         strict: bool,
         #[arg(short = 'p', long = "create-pr")]
         create_pr: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1226,11 +1224,6 @@ pub enum PrCommand {
         strict: bool,
         #[arg(long)]
         local: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -1242,15 +1235,13 @@ pub enum PrCommand {
     },
     /// Request auto-merge, retain settlement intent, and return.
     Land {
+        /// Wait up to 30 minutes for verified merge; timeout retains the request
+        #[arg(long)]
+        wait: bool,
         #[arg(long)]
         strict: bool,
         #[arg(long)]
         local: bool,
-        /// Complete after verified merge (the default unless --next is supplied)
-        #[arg(short = 'c', long)]
-        complete: bool,
-        #[arg(long = "next")]
-        next: Option<String>,
         #[arg(short = 'w', long = "worktree")]
         worktree: Option<String>,
         #[arg(short = 'm', long = "message")]
@@ -2276,6 +2267,8 @@ mod tests {
             "INF-122",
             "--directive",
             "collect both reports",
+            "--design",
+            "scratch/child.md",
             "--json",
         ])
         .expect("parse task checkout");
@@ -2286,6 +2279,7 @@ mod tests {
                     name,
                     stack_on,
                     directive,
+                    design,
                     json,
                 },
         }) = cli.command
@@ -2296,6 +2290,10 @@ mod tests {
         assert_eq!(name.as_deref(), Some("runtime-research"));
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert_eq!(directive.as_deref(), Some("collect both reports"));
+        assert_eq!(
+            design.as_deref(),
+            Some(std::path::Path::new("scratch/child.md"))
+        );
         assert!(json);
     }
 
@@ -2340,32 +2338,20 @@ mod tests {
     }
 
     #[test]
-    fn task_completion_and_pr_dispositions_parse() {
-        let land = Cli::try_parse_from(["lf", "pr", "land", "-c"]).expect("parse completing land");
+    fn landing_wait_is_explicit_and_serial_dispositions_are_rejected() {
+        let land =
+            Cli::try_parse_from(["lf", "pr", "land", "--wait"]).expect("parse waited landing");
         assert!(matches!(
             land.command,
             Some(Commands::Pr {
-                cmd: Some(PrCommand::Land {
-                    complete: true,
-                    next: None,
-                    ..
-                })
+                cmd: Some(PrCommand::Land { wait: true, .. })
             })
         ));
-
-        let submit =
-            Cli::try_parse_from(["lf", "pr", "submit", "--next", "released-upgrade-proof"])
-                .expect("parse continuation submit");
-        assert!(matches!(
-            submit.command,
-            Some(Commands::Pr{
-                cmd: Some(PrCommand::Submit {
-                    complete: false,
-                    next: Some(next),
-                    ..
-                })
-            }) if next == "released-upgrade-proof"
-        ));
+        for command in ["land", "arm", "submit"] {
+            assert!(Cli::try_parse_from(["lf", "pr", command, "-c"]).is_err());
+            assert!(Cli::try_parse_from(["lf", "pr", command, "--next", "follow-up"]).is_err());
+        }
+        assert!(Cli::try_parse_from(["lf", "pr", "next"]).is_err());
     }
 
     #[test]

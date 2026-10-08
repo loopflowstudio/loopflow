@@ -9,7 +9,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -20,7 +22,6 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "active_pr": null,
     "section": "available",
     "actions": {
       "recommended": null,
@@ -51,6 +52,14 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "completed": {
@@ -63,7 +72,9 @@
       "completed": true,
       "assignee": null,
       "state": "completed",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -71,7 +82,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "completed",
         "branch": "jack/completed",
-        "worktree": "/src/loopflow.completed"
+        "worktree": "/src/loopflow.completed",
+        "base_commit": "fixture-base",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -87,7 +100,6 @@
       "owner": "wave",
       "reason": "Linear Task is complete"
     },
-    "active_pr": null,
     "section": "later",
     "actions": {
       "recommended": "no_action",
@@ -367,6 +379,14 @@
     },
     "run_control": {
       "unavailable": "Task is complete"
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "stale": {
@@ -379,7 +399,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -387,7 +409,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "stale",
         "branch": "jack/stale",
-        "worktree": "/src/loopflow.stale"
+        "worktree": "/src/loopflow.stale",
+        "base_commit": "fixture-base",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -403,7 +427,6 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "active_pr": null,
     "section": "waiting",
     "actions": {
       "recommended": "resume",
@@ -731,6 +754,14 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "unavailable": {
@@ -743,7 +774,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -751,7 +784,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "unavailable",
         "branch": "jack/unavailable",
-        "worktree": "/missing/loopflow.unavailable"
+        "worktree": "/missing/loopflow.unavailable",
+        "base_commit": "fixture-base",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -767,7 +802,6 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "active_pr": null,
     "section": "waiting",
     "actions": {
       "recommended": "resume",
@@ -798,6 +832,14 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "user_wait": {
@@ -810,7 +852,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -818,7 +862,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "user",
         "branch": "jack/user",
-        "worktree": "/src/loopflow.user"
+        "worktree": "/src/loopflow.user",
+        "base_commit": "fixture-base",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -834,7 +880,6 @@
       "owner": "user",
       "reason": "choose the recovery boundary"
     },
-    "active_pr": null,
     "section": "waiting",
     "actions": {
       "recommended": "no_action",
@@ -1163,6 +1208,14 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "dirty": {
@@ -1175,7 +1228,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -1183,7 +1238,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "dirty",
         "branch": "jack/dirty",
-        "worktree": "/src/loopflow.dirty"
+        "worktree": "/src/loopflow.dirty",
+        "base_commit": "fixture-base",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -1199,7 +1256,6 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "active_pr": null,
     "section": "waiting",
     "actions": {
       "recommended": "resume",
@@ -1230,6 +1286,14 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": null,
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   },
   "authored_commits": {
@@ -1242,7 +1306,9 @@
       "completed": false,
       "assignee": null,
       "state": "unstarted",
-      "completed_at": null
+      "completed_at": null,
+      "due_date": null,
+      "follow_up_sources": []
     },
     "reference": {
       "issue_url": null,
@@ -1250,7 +1316,9 @@
         "machine_id": "home_00000000000000000000000000000001",
         "slug": "commits",
         "branch": "jack/commits",
-        "worktree": "/src/loopflow.commits"
+        "worktree": "/src/loopflow.commits",
+        "base_commit": "abc",
+        "local_exists": null
       }
     },
     "runtime": {
@@ -1265,36 +1333,6 @@
     "next_move": {
       "owner": "user",
       "reason": "merge pull request head head-commits on GitHub"
-    },
-    "active_pr": {
-      "id": "pr_commits",
-      "sequence": 1,
-      "slug": "commits",
-      "branch": "jack/commits",
-      "base_commit": "abc",
-      "phase": "open",
-      "empty": null,
-      "publication": {
-        "requested_at": "2026-07-14T22:00:00Z",
-        "presentation": {
-          "title": "Ship authored commits",
-          "body": "Explains the intent and proof for this head.",
-          "head_sha": "head-commits"
-        },
-        "github": {
-          "number": 123,
-          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
-        },
-        "merge": {
-          "mode": "user",
-          "requested_at": "2026-07-14T22:01:00Z",
-          "head_sha": "head-commits",
-          "after_merge": "continue_task",
-          "next_slug": null
-        }
-      },
-      "merge_commit": null,
-      "abandoned_at": null
     },
     "section": "waiting",
     "actions": {
@@ -1622,6 +1660,41 @@
     },
     "run_control": {
       "unavailable": null
+    },
+    "pr": {
+      "id": "pr_commits",
+      "sequence": 1,
+      "slug": "commits",
+      "branch": "jack/commits",
+      "base_commit": "abc",
+      "phase": "open",
+      "empty": null,
+      "publication": {
+        "requested_at": "2026-07-14T22:00:00Z",
+        "presentation": {
+          "title": "Ship authored commits",
+          "body": "Explains the intent and proof for this head.",
+          "head_sha": "head-commits"
+        },
+        "github": {
+          "number": 123,
+          "url": "https://github.com/loopflowstudio/loopflow/pull/123"
+        },
+        "merge": {
+          "mode": "user",
+          "requested_at": "2026-07-14T22:01:00Z",
+          "head_sha": "head-commits"
+        }
+      },
+      "merge_commit": null,
+      "abandoned_at": null
+    },
+    "follow_through": {
+      "intents": [],
+      "links": [],
+      "reason": null,
+      "needs_conversion": false,
+      "scope_notes": []
     }
   }
 }

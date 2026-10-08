@@ -283,8 +283,8 @@ lf submit
 lf task status INF-123 --json
 ```
 
-`prepare` creates or reuses tracked Task Work, its one worktree, and the active
-serial PR identity. It starts no Task execution. Each `--task` command
+`checkout` creates or reuses tracked Task Work and its checkout placement
+without starting execution. Publication creates its optional, sole PR. Each `--task` command
 starts an independent AgentSession in that worktree; several may overlap and write distinct
 scratch paths. Any caller may then use the ordinary Work and delivery commands.
 Those commands act on delivery facts, not on Flow-driving authority. `submit` and `land` therefore work the same whether the Task was pursued by a

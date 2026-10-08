@@ -17,5 +17,9 @@ to Jack or reasons to stop before building the full change:
 - LOO-385 overlaps. Recheck before any parallel implementation or external
   disposition; no closure or transfer is authorized by this work.
 
-Slice 1 and the completion alias are implemented. Slices 2–4 are current work,
-not deferred follow-ups. No landing or installed-Home migration is authorized.
+All four slices are implemented locally; focused checks pass. Gate and the
+complete demo remain. No landing or installed-Home migration is authorized.
+
+Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. The receipt pins the initial Team/state as well as Project and content.
+
+Wait interruption uses the existing global exit 130 handler (a stopped Flow, without retry); timeout remains held exit 3. The public CLI test exposed a conflict with a second Tokio Ctrl-C handler, so that duplicate handler was removed.

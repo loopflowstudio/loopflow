@@ -1224,12 +1224,8 @@ fn saved_flow_sync_follows_task_parent_and_skips_an_already_contained_head() {
     runtime
         .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
-    let pr = runtime
-        .block_on(parent.store.active_task_pr(&child.id))
-        .unwrap()
-        .unwrap();
     runtime
-        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
         .unwrap();
     std::fs::write(child_path.join("shared.txt"), "child\n").unwrap();
     git(&child_path, &["commit", "-am", "Child work"]);

@@ -608,8 +608,7 @@ fn format_task_pr_line(pr: &loopflow::work::task::TaskPr) -> String {
         .map(|error| format!("  Linear link degraded: {error}"))
         .unwrap_or_default();
     format!(
-        "  PR {}: {}  {}  {}{}{}",
-        pr.sequence,
+        "  Pull request: {}  {}  {}{}{}",
         pr.phase().as_str(),
         provider,
         pr.branch,
@@ -636,12 +635,7 @@ fn print_task_snapshot(
                 format!("pending: {error}")
             }
         };
-        let branch = snapshot
-            .active_pr
-            .as_ref()
-            .and_then(|active| snapshot.prs.iter().find(|pr| &pr.id == active))
-            .map(|pr| pr.branch.as_str())
-            .unwrap_or("none");
+        let branch = &snapshot.branch;
         let body = format!(
             "agent {}, provider {}",
             snapshot.agent.as_deref().unwrap_or("default"),
@@ -694,8 +688,40 @@ fn print_task_snapshot(
             );
         }
         println!("  project: {}", snapshot.project_id);
-        for pr in &snapshot.prs {
+        if let Some(pr) = &snapshot.pr {
             println!("{}", format_task_pr_line(pr));
+        }
+        let follow_through = &snapshot.follow_through;
+        if snapshot
+            .pr
+            .as_ref()
+            .is_some_and(|pr| pr.phase() == loopflow::work::task::PrPhase::Merged)
+            && !snapshot.status.is_terminal()
+        {
+            let state = if follow_through.needs_conversion {
+                "scope needs conversion"
+            } else if follow_through.resolved() {
+                "recorded; ready to complete"
+            } else {
+                "pending"
+            };
+            println!("  Merged · Follow-through {state}");
+        }
+        for link in &follow_through.links {
+            println!(
+                "  Follow-up: {}{}",
+                link.identifier,
+                link.url
+                    .as_ref()
+                    .map(|url| format!(" · {url}"))
+                    .unwrap_or_default()
+            );
+        }
+        for note in &follow_through.scope_notes {
+            println!("  Scope needs conversion: {note}");
+        }
+        if let Some(reason) = &follow_through.reason {
+            println!("  Follow-through: {reason}");
         }
         match &snapshot.observation {
             loopflow::work::task::Observation::Cached { observed_at } => {
@@ -867,33 +893,30 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::FollowUp {
             issue,
-            outcome,
-            evidence,
-            check_at,
-            clear,
+            title,
+            notes,
+            due,
+            wave,
+            existing,
+            none,
+            finish,
+            key,
         } => {
-            let remaining = match (outcome, evidence, check_at) {
-                (Some(outcome), Some(evidence), Some(at)) => {
-                    Some(loopflow::work::task::TaskFollowUp {
-                        outcome: outcome.clone(),
-                        evidence: evidence.clone(),
-                        check_at: time::OffsetDateTime::parse(
-                            at,
-                            &time::format_description::well_known::Rfc3339,
-                        )?
-                        .unix_timestamp(),
-                    })
-                }
-                _ => None,
-            };
             println!(
                 "{}",
                 loopflow::ops::task::task_follow_up(
+                    repo,
                     issue,
-                    remaining,
-                    clear
-                        .as_deref()
-                        .unwrap_or("Accepted work remains after delivery")
+                    &loopflow::ops::task::FollowUpOptions {
+                        title: title.clone(),
+                        notes: notes.clone(),
+                        due: due.clone(),
+                        wave: wave.clone(),
+                        existing: existing.clone(),
+                        none: none.clone(),
+                        finish: finish.clone(),
+                        key: key.clone(),
+                    }
                 )?
             );
             Ok(())
@@ -910,6 +933,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             name,
             stack_on,
             directive,
+            design,
             json,
         } => {
             let task = loopflow::ops::task::task_checkout(
@@ -919,6 +943,10 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     name: name.clone(),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
+                    design: design
+                        .as_ref()
+                        .map(|path| std::env::current_dir().map(|cwd| cwd.join(path)))
+                        .transpose()?,
                 },
             )?;
             print_task(&task, *json)
@@ -1013,6 +1041,9 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         },
                         planning.observed_at
                     );
+                    if let Some(due) = &planning.item.due_date {
+                        println!("Due: {due}");
+                    }
                     if planning.project.is_none() {
                         println!("No Project assigned; managed work requires ownership.");
                     }

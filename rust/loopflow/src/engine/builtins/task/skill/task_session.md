@@ -19,7 +19,8 @@ is the whole method; this section only says when to apply it.
 - Answer the user first. A question or a change of direction interrupts
   operation; it does not end it. Resume afterwards and finish before the turn
   ends.
-- End a turn only when the Task has its disposition.
+- End a turn only when the Task has its disposition. Merge alone is not done:
+  the included procedure continues through follow-through and confirmed completion.
 - Record direction the user gives in the Task's brief or scratch so later work
   receives it. An idea that is other work belongs in its own Task: read
   `lf help capture-tasks`.

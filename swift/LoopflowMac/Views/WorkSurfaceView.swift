@@ -272,13 +272,14 @@ struct WorkSurfaceView: View {
                                 .buttonStyle(.plain)
                                 .font(Typography.body(12.5))
                         }
-                        if let github = task.activePr?.publication?.github {
+                        if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
                                 .font(Typography.body(12.5))
                         }
                     }
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
+                    TaskDeliveryView(task: task)
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)

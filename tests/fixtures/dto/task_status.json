@@ -16,7 +16,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -64,7 +65,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -119,7 +121,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -167,7 +170,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",
@@ -215,7 +219,8 @@
         "state": "unstarted",
         "revision": "2026-09-29T12:00:00.123Z",
         "branch_name": "dev/fix-1-existing",
-        "completed_at": null
+        "completed_at": null,
+        "due_date": null
       },
       "project": {
         "id": "project-gmail",

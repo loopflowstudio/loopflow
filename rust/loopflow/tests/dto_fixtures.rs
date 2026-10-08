@@ -437,6 +437,8 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         "home_00000000000000000000000000000001"
     );
     assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert!(snapshot.pr.is_none());
+    assert!(!snapshot.branch.is_empty());
     assert_eq!(
         snapshot.execution.state,
         loopflow::ops::task_execution::TaskExecutionState::Idle
@@ -567,4 +569,35 @@ fn separate_workflow_catalog_preserves_invalid_sources() {
     assert!(entries[0].workflow.is_some());
     assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());
     assert_eq!(serde_json::to_value(entries).unwrap(), value);
+}
+
+#[test]
+fn task_delivery_preserves_pending_filings_links_and_due_unstarted_follow_ups() {
+    use loopflow::lf::commands::waves::RoadmapTask;
+    let json = include_str!("../../../tests/fixtures/dto/task_delivery_rows.json");
+    let rows: std::collections::BTreeMap<String, RoadmapTask> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        rows["conversion"].follow_through.scope_notes,
+        ["Verify the installed release. Evidence: the command succeeds on the released version."]
+    );
+    assert!(!rows["pending"].follow_through.resolved());
+    assert_eq!(rows["pending"].follow_through.intents.len(), 1);
+    assert!(rows["done"].follow_through.resolved());
+    assert_eq!(rows["done"].follow_through.links[0].identifier, "W2-FOLLOW");
+    assert!(rows["none"].follow_through.resolved());
+    assert!(rows["none"].follow_through.links.is_empty());
+    assert!(rows["due"].runtime.is_none());
+    assert_eq!(rows["due"].task.due_date.as_deref(), Some("2026-10-08"));
+    assert_eq!(
+        rows["due"].task.follow_up_sources[0].identifier,
+        "W2-SOURCE"
+    );
+    assert!(rows["unrelated"].task.follow_up_sources.is_empty());
+    assert_eq!(
+        serde_json::to_value(&rows).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&rows["pending"]).unwrap();
+    missing.as_object_mut().unwrap().remove("follow_through");
+    assert!(serde_json::from_value::<RoadmapTask>(missing).is_err());
 }

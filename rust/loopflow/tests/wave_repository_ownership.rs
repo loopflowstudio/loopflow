@@ -94,6 +94,9 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
         project_id: project.id.clone(),
         worktree: repo.join("task-worktree"),
         workspace_slug: "repository-owned-waves".to_string(),
+        branch: "jack/repository-owned-waves".to_string(),
+        base_commit: "deadbeef".to_string(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -377,7 +380,10 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         )
         .unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
-    store.create_task(&task, &task_pr, None).await.unwrap();
+    store
+        .create_task(&task, Some(&task_pr), None)
+        .await
+        .unwrap();
     let placement = alpha_placement;
     let overlap = relocate_wave(
         &store,
@@ -781,7 +787,7 @@ async fn relocation_refuses_meaningful_destination_history() {
         .unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
     store
-        .create_task(&owned_task, &owned_pr, None)
+        .create_task(&owned_task, Some(&owned_pr), None)
         .await
         .unwrap();
 

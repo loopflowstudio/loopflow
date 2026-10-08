@@ -28,7 +28,7 @@ use crate::session_record::SessionHistory;
 use crate::store::{open_existing_store, SharedStore};
 use crate::work::project::Project;
 use crate::work::task::{
-    AfterMerge, CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
+    CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase, Task, TaskPr,
 };
 use crate::work::wave::metrics::{
     MetricContractIssueDto, MetricEvidenceDto, MetricFreshnessDto, MetricPortfolioDto,
@@ -126,6 +126,8 @@ pub struct PmTaskSummary {
     pub completed: bool,
     pub state: Option<String>,
     pub completed_at: Option<String>,
+    pub due_date: Option<String>,
+    pub follow_up_sources: Vec<crate::work::task::follow_through::FollowThroughSource>,
     pub assignee: Option<String>,
 }
 
@@ -234,9 +236,8 @@ pub struct TaskReferenceSnapshot {
 pub struct TaskWorktreeSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
     pub slug: String,
-    /// Full branch name from the active PR, or the last recorded PR after the
-    /// Task settles. `None` is explicit for legacy Tasks with no PR record.
     pub branch: Option<String>,
+    pub base_commit: String,
     pub worktree: String,
     /// Existence on the reading Machine; unknown when the filesystem check fails.
     pub local_exists: Option<bool>,
@@ -255,8 +256,8 @@ pub struct TaskDetailSnapshot {
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
-    pub prs: Vec<PrSnapshot>,
-    pub active_pr: Option<String>,
+    pub pr: Option<PrSnapshot>,
+    pub follow_through: crate::work::task::follow_through::FollowThrough,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,8 +294,6 @@ pub struct PrMergeRequestSnapshot {
     pub mode: PrMergeMode,
     pub requested_at: String,
     pub head_sha: String,
-    pub after_merge: AfterMerge,
-    pub next_slug: Option<String>,
 }
 
 impl From<&PrMergeRequest> for PrMergeRequestSnapshot {
@@ -304,8 +303,6 @@ impl From<&PrMergeRequest> for PrMergeRequestSnapshot {
             requested_at: format_time(request.requested_at)
                 .expect("PR merge request timestamp formats as RFC 3339"),
             head_sha: request.head_sha.clone(),
-            after_merge: request.after_merge,
-            next_slug: request.next_slug.clone(),
         }
     }
 }
@@ -484,7 +481,8 @@ pub struct RoadmapTask {
     pub latest_flow_process: Option<FlowProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
-    pub active_pr: Option<PrSnapshot>,
+    pub pr: Option<PrSnapshot>,
+    pub follow_through: crate::work::task::follow_through::FollowThrough,
     pub section: RoadmapSection,
 }
 
@@ -752,6 +750,7 @@ async fn roadmap_snapshot(
 struct SharedTaskReads {
     checkouts: Vec<crate::store::sqlite::TaskCheckout>,
     local_machine: crate::durable::MachineId,
+    follow_up_sources: HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
 }
 
 impl SharedTaskReads {
@@ -761,6 +760,7 @@ impl SharedTaskReads {
         Ok(Self {
             checkouts,
             local_machine: store.local_machine().await?.id,
+            follow_up_sources: store.sqlite.follow_up_sources()?,
         })
     }
 }
@@ -867,10 +867,6 @@ async fn wave_tasks(
 
 fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
     let section = task_section(&detail);
-    let active_pr = detail
-        .active_pr
-        .as_ref()
-        .and_then(|id| detail.prs.iter().find(|pr| &pr.id == id).cloned());
     RoadmapTask {
         task: detail.task,
         reference: detail.reference,
@@ -882,7 +878,8 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         latest_flow_process: detail.latest_flow_process,
         execution: detail.execution,
         run_control: detail.run_control,
-        active_pr,
+        pr: detail.pr,
+        follow_through: detail.follow_through,
         section,
     }
 }
@@ -1116,6 +1113,7 @@ async fn snapshot_tasks(
             // Missing planning is unknown, even when local execution has settled.
             completed: false,
             completed_at: None,
+            due_date: None,
             state: None,
             project_id: Some(parent.plan.id.as_str().to_string()),
             project: Some(parent.plan.slug.clone()),
@@ -1241,12 +1239,12 @@ async fn snapshot_task_detail(
     probe_pr_empty: bool,
     shared: &SharedTaskReads,
 ) -> Result<TaskDetailSnapshot> {
-    let prs = match task {
-        Some(task) => store.task_prs(&task.id).await?,
-        None => Vec::new(),
+    let pr = match task {
+        Some(task) => store.active_task_pr(&task.id).await?,
+        None => None,
     };
-    let latest = prs.last();
-    let active = prs.iter().find(|pr| pr.is_active());
+    let latest = pr.as_ref();
+    let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
     let (runtime, execution, flow_record) = match task {
         Some(task) => {
@@ -1256,7 +1254,7 @@ async fn snapshot_task_detail(
             let conflict =
                 crate::ops::task::planning_conflict_of(status, &item, &task.plan.identifier);
             let started = store.task_started(&task.id).await?
-                || prs
+                || pr
                     .iter()
                     .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
             (
@@ -1272,7 +1270,7 @@ async fn snapshot_task_detail(
     let machine_id = task
         .and_then(|task| shared.checkouts.iter().find(|row| row.task_id == task.id))
         .and_then(|row| row.machine_id.clone());
-    let reference = task_reference(&item, task, active, &prs, machine_id, &shared.local_machine);
+    let reference = task_reference(&item, task, machine_id, &shared.local_machine);
     let worktree_blocker = match task {
         Some(task) => crate::ops::task::task_worktree_blocker(store, task).await?,
         None => None,
@@ -1280,6 +1278,10 @@ async fn snapshot_task_detail(
     let launch_refusal = match (task, worktree_blocker.as_ref()) {
         (Some(task), None) => crate::ops::task::task_process_refusal(store, task).await?,
         (Some(_), Some(_)) | (None, _) => None,
+    };
+    let follow_through = match task {
+        Some(task) => store.sqlite.task_follow_through(&task.id)?,
+        None => crate::work::task::follow_through::FollowThrough::from_events(&[]),
     };
     let next_move = task.map(|_| {
         if let Some(execution) = execution.as_ref().filter(|execution| {
@@ -1296,6 +1298,22 @@ async fn snapshot_task_detail(
                     _ => NextMoveOwner::Task,
                 },
                 reason: execution.reason.clone(),
+            };
+        }
+        if pr.as_ref().is_some_and(|pr| pr.phase() == PrPhase::Merged)
+            && runtime
+                .as_ref()
+                .is_some_and(|runtime| !runtime.status.is_terminal())
+        {
+            return NextMove {
+                owner: NextMoveOwner::Wave,
+                reason: if follow_through.needs_conversion {
+                    "Merged · Follow-through scope needs conversion".into()
+                } else if follow_through.resolved() {
+                    "Merged · Follow-through recorded; complete the Task".into()
+                } else {
+                    "Merged · Follow-through pending".into()
+                },
             };
         }
         next_move_for_task(
@@ -1323,8 +1341,12 @@ async fn snapshot_task_detail(
                 .to_string(),
         },
     };
-    let local_progress =
-        task_local_progress(task, runtime.as_ref(), active, worktree_blocker.as_ref());
+    let local_progress = task_local_progress(
+        task,
+        runtime.as_ref(),
+        pr.as_ref(),
+        worktree_blocker.as_ref(),
+    );
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if !runtime.status.is_terminal() => {
             crate::ops::task::task_completion_gate(store, task)
@@ -1335,15 +1357,10 @@ async fn snapshot_task_detail(
     };
     let resume_refusal = worktree_blocker
         .as_ref()
-        .map(|blocker| blocker.reason.clone())
-        .or_else(|| {
-            task.and_then(|task| {
-                crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
-            })
-        });
+        .map(|blocker| blocker.reason.clone());
     let action_evidence = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) => {
-            let predecessor_phase = match active.and_then(|pr| pr.parent_pr_id.as_ref()) {
+            let predecessor_phase = match task.parent_pr_id.as_ref() {
                 Some(parent_id) => store.get_task_pr(parent_id).await?.map(|pr| pr.phase()),
                 None => None,
             };
@@ -1351,9 +1368,6 @@ async fn snapshot_task_detail(
                 status: runtime.status.work_status(),
                 execution: execution.as_ref(),
                 latest_pr_phase: latest.map(TaskPr::phase),
-                latest_pr_after_merge: latest
-                    .filter(|pr| pr.phase() == PrPhase::Merged)
-                    .map(TaskPr::after_merge),
                 latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
                 latest_pr_presentation_current: latest
                     .filter(|pr| pr.phase() == PrPhase::Open)
@@ -1411,7 +1425,8 @@ async fn snapshot_task_detail(
     }
     .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
-        task: task_summary(item),
+        follow_through,
+        task: task_summary(item, &shared.follow_up_sources),
         reference,
         runtime,
         direction,
@@ -1422,29 +1437,25 @@ async fn snapshot_task_detail(
         latest_flow_process: flow_record,
         execution,
         run_control,
-        prs: prs
-            .iter()
-            .map(|pr| {
-                // PR emptiness is an execution-plane fact (`lf wave status`); it costs
-                // an additional Git comparison, so `lf roadmap` opts out. The
-                // Task condition already carries the progress evidence it needs.
-                let empty = match (task, active) {
-                    (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
-                        task_pr_empty(task, pr)
-                    }
-                    _ => None,
-                };
-                PrSnapshot::new(pr, empty)
-            })
-            .collect(),
-        active_pr: active.map(|pr| pr.id.to_string()),
+        pr: pr.as_ref().map(|pr| {
+            // PR emptiness is an execution-plane fact (`lf wave status`); it costs
+            // an additional Git comparison, so `lf roadmap` opts out. The
+            // Task condition already carries the progress evidence it needs.
+            let empty = match (task, active) {
+                (Some(task), Some(active)) if probe_pr_empty && active.id == pr.id => {
+                    task_pr_empty(task, pr)
+                }
+                _ => None,
+            };
+            PrSnapshot::new(pr, empty)
+        }),
     })
 }
 
 fn task_local_progress(
     task: Option<&Task>,
     runtime: Option<&TaskRuntimeSnapshot>,
-    active_pr: Option<&TaskPr>,
+    pr: Option<&TaskPr>,
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
     let Some(task) = task else {
@@ -1457,12 +1468,15 @@ fn task_local_progress(
             reason: None,
         };
     };
+    let status = runtime
+        .map(|runtime| runtime.status.work_status())
+        .expect("Task runtime exists when the durable Task exists");
+    let unsettled_branch =
+        pr.is_some_and(TaskPr::is_active) || (pr.is_none() && !work_status_is_terminal(&status));
     inspect_task_local_progress(
-        &runtime
-            .map(|runtime| runtime.status.work_status())
-            .expect("Task runtime exists when the durable Task exists"),
+        &status,
         &task.worktree,
-        active_pr.map(|pr| pr.base_commit.as_str()),
+        unsettled_branch.then_some(task.base_commit.as_str()),
         worktree_blocker,
     )
 }
@@ -1640,15 +1654,11 @@ fn derive_task_condition(
 fn task_reference(
     item: &PmItem,
     task: Option<&Task>,
-    active_pr: Option<&TaskPr>,
-    prs: &[TaskPr],
     machine_id: Option<crate::durable::MachineId>,
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
     let workspace = task.map(|task| {
-        let branch = active_pr
-            .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
-            .map(|pr| pr.branch.clone());
+        let branch = Some(task.branch.clone());
         let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
         let worktree = if local && task.worktree.is_dir() {
@@ -1663,6 +1673,7 @@ fn task_reference(
             machine_id,
             slug: task.workspace_slug.clone(),
             branch,
+            base_commit: task.base_commit.clone(),
             worktree: worktree.display().to_string(),
             local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
         }
@@ -1700,8 +1711,13 @@ async fn current_direction(
     Ok(Some(DirectionSnapshot { text }))
 }
 
-fn task_summary(item: PmItem) -> PmTaskSummary {
+fn task_summary(
+    item: PmItem,
+    sources: &HashMap<String, Vec<crate::work::task::follow_through::FollowThroughSource>>,
+) -> PmTaskSummary {
     PmTaskSummary {
+        follow_up_sources: sources.get(&item.id).cloned().unwrap_or_default(),
+        due_date: item.due_date,
         id: item.id,
         identifier: item.identifier,
         name: item.name,
@@ -1882,13 +1898,32 @@ fn print_status(status: &WaveDetailSnapshot) {
                     "  {}  {:<10}  {}  {}",
                     task.task.identifier, state, task.task.name, task.next_move.reason
                 );
+                if let Some(due) = &task.task.due_date {
+                    println!("    due        {due}");
+                }
+                for source in &task.task.follow_up_sources {
+                    println!("    follow-up to {}", source.identifier);
+                }
+                for note in &task.follow_through.scope_notes {
+                    println!("    scope needs conversion: {note}");
+                }
+                for link in &task.follow_through.links {
+                    println!(
+                        "    follow-up  {}{}",
+                        link.identifier,
+                        link.url
+                            .as_ref()
+                            .map(|url| format!(" · {url}"))
+                            .unwrap_or_default()
+                    );
+                }
                 if let Some(workspace) = &task.reference.workspace {
                     println!("    workspace  {}  {}", workspace.slug, workspace.worktree);
                 }
                 if let Some(url) = &task.reference.issue_url {
                     println!("    issue      {url}");
                 }
-                for pr in &task.prs {
+                if let Some(pr) = &task.pr {
                     if let Some(github) = pr
                         .publication
                         .as_ref()
@@ -2197,7 +2232,7 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .and_then(|runtime| age_secs(&runtime.updated_at, now)),
         owner: task.next_move.owner,
-        pr: task.active_pr.as_ref().map(pr_label),
+        pr: task.pr.as_ref().map(pr_label),
         workspace: task
             .reference
             .workspace
@@ -2566,6 +2601,7 @@ mod tests {
             rank: 1,
             completed: false,
             completed_at: None,
+            due_date: None,
             state: Some("unstarted".into()),
             project_id: Some("current".into()),
             project: Some("current".into()),
@@ -2757,6 +2793,7 @@ mod tests {
             rank: 0,
             completed: false,
             completed_at: None,
+            due_date: None,
             state: Some("unstarted".into()),
             project_id: Some(predecessor.into()),
             project: Some("Old ordinary plan".into()),
@@ -3147,7 +3184,6 @@ mod tests {
                 status: WorkStatus::Ready,
                 execution: Some(&execution),
                 latest_pr_phase: None,
-                latest_pr_after_merge: None,
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
                 completion_refusal: None,
@@ -3223,7 +3259,6 @@ mod tests {
             status: WorkStatus::Ready,
             execution: None,
             latest_pr_phase: Some(PrPhase::Open),
-            latest_pr_after_merge: None,
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             completion_refusal: None,
@@ -3285,8 +3320,6 @@ mod tests {
                 mode,
                 requested_at: OffsetDateTime::now_utc(),
                 head_sha: passing.head_sha.clone(),
-                after_merge: crate::work::task::AfterMerge::ContinueTask,
-                next_slug: None,
             };
             let next = next_move_for_task(
                 &WorkStatus::Ready,
@@ -3316,8 +3349,6 @@ mod tests {
             mode: PrMergeMode::User,
             requested_at: OffsetDateTime::now_utc(),
             head_sha: ci.head_sha.clone(),
-            after_merge: crate::work::task::AfterMerge::ContinueTask,
-            next_slug: None,
         };
 
         let next = next_move_for_task(

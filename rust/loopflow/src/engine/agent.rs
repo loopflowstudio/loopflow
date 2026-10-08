@@ -1734,7 +1734,7 @@ fn _run_harness_once(
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                if matches!(code.as_str(), "codex_disconnected" | "opencode_disconnected" | "provider_rate_limited") {
+                                if matches!(code.as_str(), "codex_disconnected" | "codex_dispatch_rejected" | "opencode_disconnected" | "provider_rate_limited") {
                                     exit_code = Some(1);
                                 }
                             }

@@ -1083,17 +1083,19 @@ records the caller. Native identity and historical bytes survive. Capture cwd
 cannot substitute for Process provenance.
 
 Codex 0.160.1 steers omit native expansion; repeated RPC ids duplicate input.
-`54b309ab6` proves socket recovery after dropping a `turn/start` reply, cancelling
-its waiter and reconnecting to the same engine. `clientUserMessageId` survives as
-user-message `clientId`, including restart. One receipt retains skill/path,
-arguments and context. The native terminal preserves and later submits its draft,
-then exits zero. Seven fake-API requests include two titles; historical expansions
-are not new applications. Completion and interruption stay distinct.
-Delivery receipts, terminal outcomes and external effects are separate facts;
-correlation grants neither idempotency nor authority. Missing or duplicate receipts
-remain uncertain. No resubmission, live-model or external-effect proof is claimed.
-LF resume still clears structured invocation and claims a driver; Codex sends text.
-Held-owner delivery, LF handoff, catalog/resource fidelity and Claude parity remain
-unfinished. Release's entry-point lesson applies: provider recovery cannot prove
-LF admission or custody. No automatic retry was added.
+`54b309ab6` proves socket recovery after a dropped start reply, waiter cancellation
+and reconnection without resubmission. Native identity survives restart; the terminal retains and later submits its draft.
+Completion/interruption stay distinct. Seven requests include two titles;
+historical expansion is not new application. This proves correlation, not idempotency,
+external effects or LF admission.
+
+LF retains a native message ID, capture, exact input and dispatch provenance
+before its fenced send. Capture alone is insufficient: retries can send different
+continuations under it. Reconnect reads receipts without resubmission; store proofs retain uncertain
+writes and missing/duplicate matches.
+LF’s fake-API handoff proof preserves text, capture, siblings and ancestry with a
+controlled terminal client; held-owner admission, LF dropped-ack/draft recovery
+and native expansion remain unproved.
+Resume still clears structured invocation; pending consumption, catalog/resources
+and Claude parity remain unfinished. Receipt observation grants no authority.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

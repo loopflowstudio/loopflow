@@ -331,6 +331,35 @@ No automatic retries were added. The official
 thread/read, turn/start and socket interfaces; the generated 0.160.1 schema and
 real-client receipts establish the correlation field used here.
 
+## LF dispatch receipts and reconnect
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
+  tests/e2e/codex_connect.py --codex /path/to/codex --lf target/debug/lf \
+  --launch --public-connect --output /tmp/lf-input-receipts
+```
+
+The headless LF writer retains exact outgoing input, its capture, native message
+ID, Process and provider generation before sending. `session connect` recovers
+native user messages across all turn pages without resubmitting. Missing and
+duplicate receipts remain recorded uncertainty; receipt observation grants no
+new driver, native-turn origin, completion or external-effect claim.
+
+A capture can include a retry's different continuation, so its key cannot itself
+be the identity of every native message. Each dispatch retains its own
+`clientUserMessageId` alongside the capture. A handoff must reuse the retained
+mapping; a new continuation has a distinct message ID.
+
+On October 8, the source CLI with Codex 0.160.1 passed exact-text recovery across
+two driver handoffs with unchanged active capture, sibling conversation, stale
+client rejection and nested Process ancestry. The native terminal client is a
+controlled protocol fixture. The storage test `codex_input_dispatch_survives`
+retains structured input after an uncertain socket write, refuses repeat dispatch
+under both old and new drivers, and keeps empty/duplicate receipt sets without
+settling a turn. These checks do not establish new held-owner skill admission,
+LF lost-RPC-ack recovery, LF terminal draft preservation or native skill expansion.
+The provider-only boundary probe above supplies its own narrower evidence.
+
 ## Decisions and remaining work
 
 Jack Heart selected native invocation on the skill's own harness, translated

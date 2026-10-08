@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
                 "type": "function_call",
                 "id": "fc_provenance",
                 "call_id": "call_provenance",
-                "name": "process_command",
+                "name": "exec_command",
                 "arguments": json.dumps(
                     {
                         "cmd": "printf sibling-only"
@@ -240,10 +240,14 @@ def main() -> None:
             work = root / "work"
             home.mkdir()
             work.mkdir()
+            # The outer test_network wrapper owns egress isolation; macOS
+            # cannot nest Codex sandbox-exec inside that sandbox.
             (home / "config.toml").write_text(f"""model = "gpt-5.4"
 model_provider = "fixture"
 cli_auth_credentials_store = "file"
 allow_login_shell = false
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
 [features]
 shell_snapshot = false
 [model_providers.fixture]
@@ -560,8 +564,47 @@ def _public_connection_contract(
             ]["id"]
             engine.start_turn(sibling, "held sibling")
         assert server.held.wait(10)
+        with sqlite3.connect(_database(env)) as database:
+            captured = database.execute(
+                "SELECT current_capture FROM agent_sessions WHERE id=?", (session,)
+            ).fetchone()[0]
+            dispatches = [
+                json.loads(row[0])
+                for row in database.execute(
+                    "SELECT payload FROM session_events WHERE session_id=? "
+                    "AND json_extract(payload,'$.type')='codex_input_dispatch'",
+                    (session,),
+                )
+            ]
+        assert len(dispatches) == 1, dispatches
+        dispatched = dispatches[0]
         for label in ["first", "second"]:
             _connect(label)
+            with sqlite3.connect(_database(env)) as database:
+                assert (
+                    database.execute(
+                        "SELECT current_capture FROM agent_sessions WHERE id=?", (session,)
+                    ).fetchone()[0]
+                    == captured
+                )
+                receipts = [
+                    json.loads(row[0])
+                    for row in database.execute(
+                        "SELECT payload FROM session_events WHERE session_id=? "
+                        "AND json_extract(payload,'$.type')='codex_input_receipts'",
+                        (session,),
+                    )
+                ]
+            assert len(receipts) == 1, receipts
+            receipt = receipts[0]
+            assert receipt["input_id"] == dispatched["input_id"]
+            assert receipt["client_id"] == dispatched["params"]["clientUserMessageId"]
+            assert len(receipt["receipts"]) == 1, receipt
+            native = receipt["receipts"][0]["item"]
+            assert native["clientId"] == receipt["client_id"]
+            assert [block["text"] for block in native["content"]] == [
+                block["text"] for block in dispatched["params"]["input"]
+            ]
             if label == "first":
                 call(0, 0, "thread/read", {"threadId": thread})
                 with sqlite3.connect(_database(env)) as database:
@@ -570,6 +613,7 @@ def _public_connection_contract(
                         "AND kind='started' ORDER BY seq DESC LIMIT 1",
                         (session,),
                     ).fetchone()[0]
+        results["captured_input_recovered_across_drivers"] = True
         headless.send_signal(signal.SIGINT)
         headless.communicate(timeout=10)
         assert headless.returncode == 130, headless.returncode

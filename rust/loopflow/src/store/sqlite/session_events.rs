@@ -10,6 +10,136 @@ use crate::store::{StoreError, StoreResult};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn has_codex_input_dispatch(
+        &self,
+        session: &str,
+        thread: &str,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed'
+             AND json_extract(payload,'$.type')='codex_input_dispatch'
+             AND json_extract(payload,'$.params.threadId')=?2)",
+            params![session, thread],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Commit dispatch evidence before touching the transport. A lost write or
+    /// reply is not permission to submit the same native message again.
+    pub(crate) fn dispatch_codex_input<T>(
+        &self,
+        session: &str,
+        driver: &crate::process::SessionDriver,
+        capture: &str,
+        params: &Value,
+        send: impl FnOnce() -> StoreResult<T>,
+    ) -> StoreResult<T> {
+        self.with_session_driver(session, driver, || {
+            let mut conn = self.conn.lock().expect("store mutex poisoned");
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let captured: Option<i64> = tx.query_row(
+                "SELECT seq FROM session_events WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+                params![session, capture], |row| row.get(0),
+            ).optional()?;
+            let captured = captured.ok_or(StoreError::NotFound)?;
+            let message = params["clientUserMessageId"].as_str().ok_or_else(|| {
+                StoreError::InvalidData("Codex input has no native message identity".into())
+            })?;
+            if params["threadId"].as_str().is_none()
+                || params["input"].as_array().is_none()
+            {
+                return Err(StoreError::InvalidData("Codex input has no captured correlation".into()));
+            }
+            let key = format!("{capture}:codex_dispatch:{message}");
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2)",
+                params![session, key], |row| row.get(0),
+            )?;
+            if exists {
+                return Err(StoreError::InvalidAuthority(
+                    "Native Codex input was already dispatched; inspect native history before retrying".into(),
+                ));
+            }
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                 VALUES(?1,'observed',?2,?3,?4,?5)",
+                params![session, key, crate::store::rows::now_unix(), serde_json::to_string(&serde_json::json!({
+                        "type":"codex_input_dispatch", "input_id":capture,
+                        "process_lfid":driver.process_lfid, "provider_generation":driver.provider_generation,
+                        "params":params,
+                    }))?, captured],
+            )?;
+            tx.commit()?;
+            drop(conn);
+            send()
+        })
+    }
+
+    /// Retain the complete set of native matches, including none or duplicates.
+    /// A receipt observes delivery; it neither starts nor completes an LF turn.
+    pub(crate) fn record_codex_input_receipts(
+        &self,
+        session: &str,
+        thread: &str,
+        turns: &[Value],
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let dispatches = {
+            let mut query = tx.prepare(
+                "SELECT captured_event,payload FROM session_events WHERE session_id=?1 AND kind='observed'
+                 AND json_extract(payload,'$.type')='codex_input_dispatch'
+                 AND json_extract(payload,'$.params.threadId')=?2 ORDER BY seq",
+            )?;
+            let rows = query.query_map(params![session, thread], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for (captured, dispatch) in dispatches {
+            let dispatch: Value = serde_json::from_str(&dispatch)?;
+            let capture = dispatch["input_id"]
+                .as_str()
+                .ok_or_else(|| StoreError::InvalidData("Codex dispatch has no capture".into()))?;
+            let message = dispatch["params"]["clientUserMessageId"]
+                .as_str()
+                .ok_or_else(|| {
+                    StoreError::InvalidData("Codex dispatch has no native message identity".into())
+                })?;
+            let receipts: Vec<_> = turns
+                .iter()
+                .flat_map(|turn| {
+                    turn["items"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter(|item| {
+                            item["type"] == "userMessage"
+                                && item["clientId"].as_str() == Some(message)
+                        })
+                        .map(|item| serde_json::json!({"turn_id":turn["id"],"item":item}))
+                })
+                .collect();
+            let payload = serde_json::to_string(&serde_json::json!({
+                "type":"codex_input_receipts", "input_id":capture,
+                "provider_thread":thread, "client_id":message, "receipts":receipts,
+            }))?;
+            let key = format!(
+                "{capture}:codex_receipts:{:x}",
+                Sha256::digest(payload.as_bytes())
+            );
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+                 SELECT ?1,'observed',?2,?3,?4,?5 WHERE NOT EXISTS(
+                    SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2)",
+                params![session, key, crate::store::rows::now_unix(), payload, captured],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn input_provider_session(
         &self,
         input: &str,
@@ -374,6 +504,136 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::store::sqlite::SqliteStore;
     use serde_json::json;
+
+    #[test]
+    fn codex_input_dispatch_survives_lost_write_and_driver_handoff() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let session = store.test_session("conversation", "00000000000000000000000000000001");
+        let first = crate::id::ProcessLfid::new();
+        let second = crate::id::ProcessLfid::new();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for process in [&first, &second] {
+            conn.execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        }
+        let driver = store
+            .claim_session_driver(&session.id, None, &first, false)
+            .unwrap();
+        let input = serde_json::json!([
+            {"type":"skill","name":"audit","path":"/skills/audit/SKILL.md"},
+            {"type":"text","text":"$audit exact arguments"},
+            {"type":"text","text":"separate context"},
+        ]);
+        let params = serde_json::json!({"threadId":"thread","clientUserMessageId":"message-1","input":input});
+        let result: crate::store::StoreResult<()> = store.dispatch_codex_input(
+            &session.id, &driver, &session.artifact_key, &params, || {
+                // Another connection sees the retained request before the write
+                // can fail or the invoking process can disappear.
+                let saved: String = conn.query_row(
+                    "SELECT payload FROM session_events WHERE json_extract(payload,'$.type')='codex_input_dispatch'",
+                    [], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(serde_json::from_str::<serde_json::Value>(&saved).unwrap()["params"], params);
+                Err(crate::store::StoreError::InvalidData("lost socket write".into()))
+            },
+        );
+        assert!(result.is_err());
+        let successor = store
+            .claim_session_driver(&session.id, Some(&driver), &second, false)
+            .unwrap();
+        assert_eq!(
+            store.session(&session.id).unwrap().unwrap().captured,
+            session.captured
+        );
+        assert_eq!(
+            store.session_inputs(&session.id).unwrap(),
+            std::slice::from_ref(&session.artifact_key)
+        );
+        for claimant in [&driver, &successor] {
+            assert!(store
+                .dispatch_codex_input(
+                    &session.id,
+                    claimant,
+                    &session.artifact_key,
+                    &params,
+                    || -> crate::store::StoreResult<()> {
+                        panic!("uncertain input was resubmitted")
+                    }
+                )
+                .is_err());
+        }
+        let turns = serde_json::json!([{"id":"turn","status":"interrupted","items":[
+            {"id":"native-item","type":"userMessage","clientId":"message-1","content":input},
+            {"id":"assistant","type":"agentMessage","clientId":"message-1","text":"echo"}
+        ]}]);
+        let turns = turns.as_array().unwrap();
+        store
+            .record_codex_input_receipts(&session.id, "thread", turns)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let receipt = history
+            .iter()
+            .find(|event| event.payload["type"] == "codex_input_receipts")
+            .unwrap();
+        assert_eq!(receipt.payload["receipts"].as_array().unwrap().len(), 1);
+        assert_eq!(receipt.payload["receipts"][0]["item"]["content"], input);
+        assert!(history.iter().all(|event| !matches!(
+            event.kind,
+            crate::session::SessionEventKind::Started | crate::session::SessionEventKind::Completed
+        )));
+        assert_eq!(
+            store.session_driver(&session.id).unwrap(),
+            Some(successor.clone())
+        );
+        store
+            .record_codex_input_receipts(&session.id, "thread", turns)
+            .unwrap();
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
+
+        // A new continuation can share the capture, but retains its own input.
+        let continuation = serde_json::json!({"threadId":"thread","clientUserMessageId":"message-2",
+            "input":[{"type":"text","text":"Continue after the confirmed failure."}]});
+        store
+            .dispatch_codex_input(
+                &session.id,
+                &successor,
+                &session.artifact_key,
+                &continuation,
+                || Ok(()),
+            )
+            .unwrap();
+        store
+            .record_codex_input_receipts(&session.id, "thread", turns)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let missing = history
+            .iter()
+            .find(|event| {
+                event.payload["type"] == "codex_input_receipts"
+                    && event.payload["client_id"] == "message-2"
+            })
+            .unwrap();
+        assert_eq!(missing.payload["receipts"], serde_json::json!([]));
+
+        let mut duplicate = turns.clone();
+        duplicate[0]["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(turns[0]["items"][0].clone());
+        store
+            .record_codex_input_receipts(&session.id, "thread", &duplicate)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        assert!(history.iter().any(|event| event.payload["receipts"]
+            .as_array()
+            .is_some_and(|receipts| receipts.len() == 2)));
+        assert_eq!(store.session_driver(&session.id).unwrap(), Some(successor));
+    }
 
     #[test]
     fn provider_identity_uses_original_event_order_and_fresh_publications() {

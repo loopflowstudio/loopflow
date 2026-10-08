@@ -51,6 +51,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 
 | Variable | Policy |
 |---|---|
+| `LF_AGENT_OVERRIDE` | Explicit `-a` selection for this invocation and all children, ahead of Task/Flow/skill defaults. Forwarded to remote commands; cleared for independent Session shells. Contains no credential. |
 | `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |

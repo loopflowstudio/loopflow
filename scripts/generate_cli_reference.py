@@ -24,7 +24,8 @@ def main() -> None:
         "lf monitor --json",
         "```",
         "",
-        "Generated from the compiled Clap tree. Canonical command paths are shown; unique shortcuts also resolve. See",
+        "Generated from the compiled Clap tree. Canonical command paths are shown; "
+        "unique shortcuts also resolve. See",
         "[the workflow guide](lf.md) for examples. Hidden commands",
         "are internal process boundaries and are marked below.",
         "",
@@ -69,7 +70,13 @@ def main() -> None:
         lines += ["## " + " ".join(path), "", row.get("about") or "Command namespace.", ""]
         if row["hidden"]:
             lines += ["Internal command; invoked by the owning operation.", ""]
-        arguments = [item for item in rows if item["kind"] == "argument" and item["path"] == path]
+        arguments = [
+            item
+            for item in rows
+            if item["kind"] == "argument"
+            and item["path"] == path
+            and (len(path) == 1 or not item["global"])
+        ]
         if arguments:
             lines += ["| Argument | What it does |", "|---|---|"]
             for item in arguments:
@@ -81,6 +88,8 @@ def main() -> None:
                 if item["short"] and item["long"]:
                     label += " / -" + item["short"]
                 detail = item.get("help") or item["id"].replace("_", " ")
+                if item["global"]:
+                    detail += " Applies everywhere."
                 if item["defaults"]:
                     detail += " Default: " + ", ".join(item["defaults"]) + "."
                 if item["hidden"]:

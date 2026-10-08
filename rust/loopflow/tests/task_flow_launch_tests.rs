@@ -4,7 +4,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::store::{CredentialState, ProviderAccount, ProviderAccountId, RoutingState};
 use loopflow_test_support::TestRepo;
+use sha2::{Digest, Sha256};
 
 fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -30,6 +32,225 @@ const LAUNCHES: [&[&str]; 3] = [
     &["-b", "--task", "INF-123", "run", "proof"],
     &["-b", "run", "proof"],
 ];
+
+#[test]
+fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("agent-proof");
+    let home = tempfile::tempdir().unwrap();
+    let _env = support::EnvGuard::with_home(
+        &[
+            ("open", "#!/bin/sh\nexit 0\n"),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+            (
+                "codex",
+                "#!/bin/sh\necho unexpected Codex launch >&2\nexit 99\n",
+            ),
+            (
+                "claude",
+                r#"#!/bin/sh
+set -eu
+read -r input || :
+if [ "${LF_AGENT_CHILD-}" != yes ]; then
+    LF_AGENT_CHILD=yes "$LF_BIN" -b skill child -a codex > "$LF_HOME/child-output" 2>&1
+fi
+echo '{"type":"system","subtype":"init","session_id":"agent-fixture"}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"agent-fixture"}'
+"#,
+            ),
+        ],
+        Some(home.path()),
+    );
+    let registered = support::register_task(
+        home.path(),
+        &repo.path().canonicalize().unwrap(),
+        "agent-proof",
+        &repo.head_sha(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    // A headless Task requires an account record even when the provider is a
+    // stand-in. Its synthetic credential never leaves the network sandbox.
+    let account_home = home.path().join("accounts/claude/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let credential =
+        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
+    fs::write(account_home.join(".credentials.json"), credential).unwrap();
+    runtime
+        .block_on(registered.store.upsert_provider_account(&ProviderAccount {
+            provider: "claude".into(),
+            account_id: ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: Some("fixture@example.com".into()),
+            observed_subject: Some("fixture".into()),
+            observed_credential_digest: Some(format!(
+                "{:x}",
+                Sha256::digest(credential.as_bytes())
+            )),
+            observed_plan: None,
+            credential_state: CredentialState::Connected,
+            routing_state: RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        }))
+        .unwrap();
+    runtime
+        .block_on(
+            registered
+                .store
+                .set_task_agent(&registered.task.id, "codex"),
+        )
+        .unwrap();
+    for (path, content) in [
+        (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
+        (
+            ".lf/skills/second.md",
+            "---\nagent: codex\n---\nSecond step.",
+        ),
+        (
+            ".lf/skills/child.md",
+            "---\nagent: codex\n---\nProvider-issued child.",
+        ),
+        (
+            ".lf/flows/pursue.yaml",
+            "- step: {name: first, agent: codex}\n- flow: inner\n",
+        ),
+        (
+            ".lf/flows/inner.yaml",
+            "- step: {name: second, agent: codex}\n",
+        ),
+        (
+            ".lf/workflows/feature.yaml",
+            "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: pursue}\n",
+        ),
+    ] {
+        let path = repo.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    repo.stage_all();
+    repo.commit("Define agent selection fixtures");
+    // Direct Task binding used to prefer the saved Task agent over -a.
+    for args in [
+        vec![
+            "-b",
+            "--isolate",
+            "--task",
+            "INF-123",
+            "skill",
+            "first",
+            "-a",
+            "claude",
+        ],
+        vec![
+            "-b",
+            "--isolate",
+            "-a",
+            "claude",
+            "task",
+            "run",
+            "INF-123",
+            "pursue",
+        ],
+    ] {
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{args:?}: {}\nchild: {}",
+            String::from_utf8_lossy(&output.stderr),
+            fs::read_to_string(home.path().join("child-output")).unwrap_or_default()
+        );
+    }
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let sessions = db
+        .prepare("SELECT skill, provider FROM agent_sessions ORDER BY skill")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        sessions,
+        ["child", "child", "child", "first", "first", "second"]
+            .map(|skill| (skill.to_owned(), "claude".to_owned()))
+    );
+    assert_eq!(support::recorded_flows(home.path()).len(), 1);
+    let session: String = db
+        .query_row(
+            "SELECT id FROM agent_sessions WHERE skill='first' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let refused = command(
+        repo.path(),
+        home.path(),
+        &["session", "resume", &session, "-a", "codex"],
+    )
+    .output()
+    .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("native history belongs to claude"));
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+
+    // A separate invocation with no -a keeps skill and step declarations.
+    let unbound = TestRepo::new();
+    for (path, content) in [
+        (
+            ".lf/skills/default-proof.md",
+            "---\nagent: claude:haiku\n---\nUse the declared agent.",
+        ),
+        (
+            ".lf/flows/default-proof.yaml",
+            "- step: {name: default-proof, agent: 'claude:sonnet'}\n",
+        ),
+    ] {
+        let path = unbound.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    }
+    unbound.stage_all();
+    unbound.commit("Define default agent fixtures");
+    for owner in ["skill", "run"] {
+        let output = command(
+            unbound.path(),
+            home.path(),
+            &["-b", "--isolate", owner, "default-proof"],
+        )
+        .env("LF_AGENT_CHILD", "yes")
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let models = db
+        .prepare("SELECT model FROM agent_sessions WHERE skill='default-proof' ORDER BY model")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(models, ["haiku", "sonnet"]);
+}
 
 #[test]
 fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {

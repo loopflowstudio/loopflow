@@ -51,18 +51,12 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
-        Some(PrCommand::Publish { agent, title, body }) => publish_pr(
-            title.clone(),
-            body.clone(),
-            agent.as_deref().or(cli_agent),
-            &progress,
-        ),
-        Some(PrCommand::Open { agent, title, body }) => open_pr(
-            title.clone(),
-            body.clone(),
-            agent.as_deref().or(cli_agent),
-            &progress,
-        ),
+        Some(PrCommand::Publish { title, body }) => {
+            publish_pr(title.clone(), body.clone(), cli_agent, &progress)
+        }
+        Some(PrCommand::Open { title, body }) => {
+            open_pr(title.clone(), body.clone(), cli_agent, &progress)
+        }
         Some(PrCommand::Submit {
             strict,
             create_pr,

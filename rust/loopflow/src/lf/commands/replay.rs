@@ -37,9 +37,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         ));
     }
-    if !check_cli_available(&harness) {
-        return Err(anyhow!("'{harness}' CLI is unavailable on this Machine"));
-    }
     let mut config = AgentConfig {
         system_prompt: request.system_prompt.clone(),
         task_prompt: request.task_prompt.clone(),
@@ -54,14 +51,26 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         ..AgentConfig::default()
     };
+    config.apply_agent_override();
+    let (selected_harness, model) = crate::engine::parse_agent(config.agent());
+    if selected_harness != harness {
+        config.provider_account_id = None;
+        config.provider_account_authority_home = None;
+    }
+    if !check_cli_available(&selected_harness) {
+        return Err(anyhow!(
+            "'{selected_harness}' CLI is unavailable on this Machine"
+        ));
+    }
     crate::engine::agent::pin_provider_account_id_blocking(&mut config)
         .map_err(anyhow::Error::from)?;
+    request.agent = config.agent().to_owned();
     request.account_id = config.provider_account_id.clone();
     let capabilities = AgentCapabilities {
         chrome: request.chrome,
     };
     let spec = SessionCaptureSpec {
-        harness,
+        harness: selected_harness,
         model,
         surface: "headless".to_string(),
         cwd: source.cwd,
@@ -145,7 +154,13 @@ mod tests {
             &std::env::var_os("PATH").unwrap_or_default(),
         )))
         .unwrap();
-        let keys = ["PATH", "LF_BIN", "LF_HOME", "LF_TEST_REPLAY_EVIDENCE"];
+        let keys = [
+            "PATH",
+            "LF_BIN",
+            "LF_HOME",
+            "LF_TEST_REPLAY_EVIDENCE",
+            crate::engine::config::AGENT_OVERRIDE_ENV,
+        ];
         let _environment = crate::test_ambient::EnvGuard::clear(&keys);
         std::env::set_var("PATH", path);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
@@ -211,5 +226,20 @@ mod tests {
             .query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap();
         assert_eq!(tasks, 0, "replay requires no registered planning Work");
+
+        std::env::set_var(
+            crate::engine::config::AGENT_OVERRIDE_ENV,
+            "opencode:opencode/other",
+        );
+        let overridden_id = replay_at(home.path(), &session.id).unwrap();
+        let (_, overridden) =
+            crate::session_record::resolve_manifest(home.path(), &overridden_id).unwrap();
+        assert_eq!(overridden.model.as_deref(), Some("opencode/other"));
+        let mut expected = request.clone();
+        expected.agent = "opencode:opencode/other".into();
+        assert_eq!(overridden.process, Some(expected));
+        let (_, retained) =
+            crate::session_record::resolve_manifest(home.path(), &source_id).unwrap();
+        assert_eq!(retained.process, Some(request));
     }
 }

@@ -57,10 +57,14 @@ repair or preserve them. Use a fresh directory when its schema changes.
 
 ```bash
 lf -a codex debug
-lf --agent claude:opus debug
+lf task run LOO-438 pursue -a claude:opus
 ```
 
-`--agent` / `-a` selects the harness and optional model as `harness[:model]`.
+`--agent` / `-a` is global: place it before or after any command. It selects
+`harness[:model]` for the entire invocation, overriding agents named in Tasks,
+Flows and skills, including nested Flows and child `lf` commands. Without it,
+definitions and defaults apply. Put literal skill arguments after `--`.
+Resuming native history keeps its provider; changing providers requires a new Session.
 
 ## Run a Flow interactively
 

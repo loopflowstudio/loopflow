@@ -30,6 +30,19 @@ fn fixture() -> TempDir {
     repo
 }
 
+#[test]
+fn global_agent_help_and_no_agent_diagnostic() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    let output = run(repo.path(), home.path(), &["help", "-a", "claude"]);
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert_eq!(help.matches("--agent").count(), 1);
+    assert!(help.contains("overrides agents in Tasks, Flows, skills and child commands"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("does not start an agent"));
+    assert!(!home.path().join(".lf").exists());
+}
+
 fn run(repo: &Path, home: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()

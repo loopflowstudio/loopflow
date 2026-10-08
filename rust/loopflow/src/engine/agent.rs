@@ -220,6 +220,14 @@ impl AgentConfig {
         }
     }
 
+    pub(crate) fn apply_agent_override(&mut self) {
+        if let Some(agent) = crate::engine::config::agent_override() {
+            self.agent = Some(agent.clone());
+            self.env
+                .insert(crate::engine::config::AGENT_OVERRIDE_ENV.into(), agent);
+        }
+    }
+
     /// Return the selected agent or Loopflow's compiled default.
     pub fn agent(&self) -> &str {
         match self.agent.as_deref() {
@@ -1181,6 +1189,7 @@ pub fn run_agent(
     capabilities: &AgentCapabilities,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
+    launch.apply_agent_override();
     launch.chrome = capabilities.chrome;
     if launch.resume_token.is_none() {
         if let Some(capture) = &process.capture {

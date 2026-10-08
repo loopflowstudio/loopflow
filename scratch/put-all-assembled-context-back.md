@@ -20,12 +20,23 @@ reference escaping, source order and native permission settings remain intact.
 IDE deep links retain their existing full-prompt/vendor-seed transport; they have
 no system-file option. LOO-428's flags and Flow output are untouched.
 
+## Delete — do not maintain
+
+Removed `format_claude_system_prompt`, `format_claude_task_prompt` and
+`build_claude_session_turn_args` in the earlier implementation. Queue compression
+also removes `PromptFormatMode`, `format_context_prompt`, `format_task_prompt`,
+their exclusive tests and the single-use `format_reference_sections` wrapper.
+Repository-wide caller inspection found only full rendering in production.
+`format_prompt` now takes just the components; escaping, source order and full
+rendering checks survive. No remaining deletion targets were identified.
+
 ## Reconciled evidence (2026-10-07)
 
 The split renderers, classifier claims and unused Claude turn launcher are gone.
 The active stream launcher covers large context and structured reply guidance;
-full rendering and attribution tests cover the surviving system channel. Source
-review found no remaining split, fallback or refusal-classifier implementation.
+full rendering and attribution tests cover the surviving system channel. The queue
+pass removes the unused partial-render APIs as well; no fallback or refusal
+classifier remains.
 
 Terminal fixtures exercise the real CLI with argument-limited provider scripts.
 The Codex headless fixture checks thread configuration, the short first turn and
@@ -80,8 +91,8 @@ refusal. The host and tab display “Supplied context instructions.”
 
 The agent assesses this as successful Claude interactive context readback.
 The screenshot shows “auto mode on,” so it does not establish plan-mode behavior.
-Jack Heart has not yet supplied plan-mode results or authorized landing.
-No design revision is agreed. The subsequent Codex attempt is recorded below.
+Plan mode remains unverified. Jack Heart later authorized landing despite the
+remaining observations; the landing direction below governs.
 
 ### Codex interactive blocker (2026-10-07)
 
@@ -103,7 +114,7 @@ wrapper path for the eventual retry; do not bypass it to claim cmux acceptance.
 Recommended next action: integrate LOO-428's flag repair when available, rebuild
 the candidate, and have Jack Heart rerun the Codex command below to obtain the
 marker readback and visible title. Claude plan mode can be checked independently
-now. The all-context system-file design remains unchanged; landing stays withheld.
+now. The all-context system-file design remains unchanged.
 
 The outstanding acceptance belongs to Jack Heart: a candidate build followed by
 these real-account checks from this checkout inside cmux, with its wrappers on
@@ -124,20 +135,16 @@ printed marker and observes native plan mode and host/provider titles.
 provider. Its assembled preview
 was 174,826 bytes. No installed-store migration or installation is involved.
 
-Jack Heart authorized publication for review, with landing withheld pending the
-real first-response check.
 The fixed first user message may change host/provider titles; LOO-422 owns that
 broader experience. Gate/CI owns the full affected suites. Release is the only
 immediate child with memory in this checkout. Its goal, memory headings,
 publication/acceptance, scheduled-failure and pending-version sections were read;
 the retained landing incident was not reread.
 
-Checks: `git diff --check` and `cargo fmt --check` PASS; retained compression results reused: `cargo test -p loopflow --test context_launch_tests` (2), `cargo test -p loopflow --lib claude_stream_context` (1), `cargo test -p loopflow --lib ad_hoc_batch_launch` (1), `cargo clippy --all-targets -- -D warnings` PASS; earlier assembly/attribution/probe checks at `4475ceb04:scratch/put-all-assembled-context-back.md`; full affected suites deferred to gate/CI, real-account first response to Jack Heart.
+Checks: `cargo test -p loopflow --test context_tests --test golden_prompt` PASS (17 + 1); compiled lib test `reference_rendering_preserves_live_requests_and_original_components` PASS (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` PASS. Gate owns affected suites; earlier transport/attribution results remain at `7611c2866:scratch/put-all-assembled-context-back.md`.
 
-`lf context --skill realign` reports all sources within budget; memory is
-15,963/16,000 tokens. The earlier launch
-snapshot included the workspace diff and exceeded the goal source budget; its
-complete source remains in the existing context archive. No limit was raised.
+`lf context --skill compress` reports all sources within budget; memory is
+15,998/16,000 tokens. No limit was raised.
 
 ## PR walkthrough (2026-10-07)
 
@@ -146,7 +153,7 @@ Jack Heart requested `pr-review` after discussing advancement. The local
 `35e759aaf4e79e7dc8eef2e8d30048f10172b45a` to
 `c143359f9eb76c0d75e5da0b86b3aff8d1e27714`, tracing assembly, terminal handoff,
 failure capture and persistent-provider context files. It separates the published
-source from the unpublished demo evidence above. No further implementation
+source from the later demo evidence above. No further implementation
 defect was demonstrated; the material remaining gaps are Codex's LOO-428 launch
 dependency, plan mode and native resume. No Flow was advanced or merge requested.
 
@@ -162,5 +169,8 @@ Jack Heart clarified that the Task must advance through queued preparation
 before landing. Run the existing `queue` Flow (compress → sync → realign → gate),
 then the Task’s `ship` edge (gate → `pr land -c`) only if queue succeeds. The ship
 gate should reuse still-valid checks under the repository verification cadence.
-The remaining live-account checks stay unproved; they no longer hold landing. Durable findings are retained in Infrastructure memory; this
-design and `scratch/pr-review.html` are checkpointed before scratch cleanup.
+The remaining live-account checks stay unproved; they no longer hold landing.
+Durable findings are retained in Infrastructure memory; this
+design, `scratch/pr-review.html` and its five captures are preserved at
+`7611c2866` before scratch cleanup. That checkpoint also retains the exact earlier
+demo notes and superseded landing holds.

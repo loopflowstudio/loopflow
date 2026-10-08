@@ -6,8 +6,7 @@ use crate::engine::error::CoreError;
 use crate::engine::flow::Skill;
 use crate::engine::prompt::{
     drop_duplicate_docs, format_prompt, gather_context, Document, DocumentSource,
-    GatherContextOpts, PromptComponents, PromptFormatMode, RelatedRepoContext, Surface,
-    INITIAL_TURN_PROMPT,
+    GatherContextOpts, PromptComponents, RelatedRepoContext, Surface, INITIAL_TURN_PROMPT,
 };
 use crate::engine::structured_reply::{structured_replies_for_context, ClientContext};
 
@@ -133,16 +132,16 @@ pub(crate) fn preview_process_prompt(
         });
     }
 
-    let original_system = format_prompt(PromptFormatMode::Full, &components);
+    let original_system = format_prompt(&components);
     let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
     budget_report.measure_input(
         &original_system,
         INITIAL_TURN_PROMPT,
-        &format_prompt(PromptFormatMode::Full, &components),
+        &format_prompt(&components),
         INITIAL_TURN_PROMPT,
     );
     components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
-    let prompt = format_prompt(PromptFormatMode::Full, &components);
+    let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;

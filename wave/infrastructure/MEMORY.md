@@ -1077,8 +1077,8 @@ instructions”; auto mode supplies no plan-mode proof. Codex exited 2 on duplic
 retry its configured wrapper path afterward. Plan mode, Codex readback/title and
 native resume remain unverified. LOO-422 owns broader titles.
 
-Terminal, batch and persistent harnesses share one retained context-file writer;
-stubs prove transport/retention, not native resume. IDE deep links have no file
-channel. Demo evidence remains in branch history. `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpoint,
+Terminal, batch and persistent harnesses share one context-file writer; stubs
+prove transport/retention, not native resume. IDE deep links have no file channel.
+Demo evidence remains in Git. `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpoint,
 common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
 remains unresolved. Claude success proves no repair.

@@ -2007,8 +2007,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let system =
-            crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+        let system = crate::engine::format_prompt(&components);
         let prepared = attributed_context(&components, &system, "", &[]);
         assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
@@ -2056,8 +2055,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             steers,
             ..Default::default()
         };
-        let system =
-            crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+        let system = crate::engine::format_prompt(&components);
         let prepared = attributed_context(&components, &system, "", &[]);
 
         let block = prepared

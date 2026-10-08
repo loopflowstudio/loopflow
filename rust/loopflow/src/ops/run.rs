@@ -526,8 +526,7 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-            let prompt =
-                crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+            let prompt = crate::engine::format_prompt(&components);
             let ancestor = if address.starts_with("product/") {
                 "Product memory"
             } else {

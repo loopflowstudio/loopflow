@@ -1,9 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use loopflow::engine::{
-    format_prompt, gather_context, GatherContextOpts, PromptFormatMode, Surface,
-};
+use loopflow::engine::{format_prompt, gather_context, GatherContextOpts, Surface};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +76,7 @@ fn golden_prompts_match_python() {
         };
 
         let components = gather_context(&opts).expect("gather context");
-        let prompt = format_prompt(PromptFormatMode::Full, &components);
+        let prompt = format_prompt(&components);
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");

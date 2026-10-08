@@ -6,19 +6,21 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart's LOO-421 direction: other tools should use lf; adoption grows from a
-Flow to a Task to a Wave, with Desktop optional. The trial covers Ghostty, herdr
-and cmux without Desktop. Jack permits isolated headless work and building herdr;
-his running cmux windows remain untouched. No automated logins, credential reads
-or real-account use; signed-in cells require Jack. Study behavior without lifting
-host code. Stop with findings, not landing.
+Jack Heart's LOO-421 direction: other tools use lf; adoption grows Flow → Task →
+Wave, Desktop optional. Isolated trials/builds only: no live cmux, credentials,
+accounts or lifted code. Stop at findings. Jack required continuing past the timeout.
 
-One observation, repeated three times: Jack's `claude --resume` in the
-Loopflow repo displayed **Loopflow operating guide** in cmux's sidebar/tab.
-Running, branch, directory and resume hooks worked. First-content naming is
-Jack's hypothesis; this was not an lf launch. Title repair belongs to LOO-422.
-Kickoff inspected source/interfaces only. Fixtures cannot prove agent detection,
-PTYs Ghostty rendering, or seeded Tasks adoption without Linear. No progress credit.
+Herdr built; isolated panes and PTYs passed skill, input/return and taskless Flow
+fixtures. Fresh Tasks need Linear team configuration; seeded Tasks need managed
+accounts. Synthetic Claude state stayed unknown; no real-agent, GUI, signed-in
+or external-progress proof.
+
+Jack reported cmux Task Flow success, absent status, noisy output, duplicate Codex
+flags and oversized Claude argv. Native resume's **Loopflow operating guide** title
+is one observation repeated three times; first-content naming remains his hypothesis.
+Titles: LOO-422; startup/status/polish mapping unresolved.
+[Findings](../../docs/reviews/terminal-host-trial.md) retain receipts, keyboard checks
+and unfiled follow-ups.
 
 ## Live Home reconciliation (2026-10-05)
 

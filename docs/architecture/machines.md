@@ -171,7 +171,9 @@ Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the
 installation promotion lock. The snapshot is validation input, never a second live
 Machine. Published switch receipts support interrupted release installation;
-they do not choose ordinary command data directories.
+they do not choose ordinary command data directories. A settled install retains
+its published fallback and the one it replaced; superseded content-addressed
+binaries and app bundles are removed unless a live process executes them.
 
 `lf self` owns published updates and skill exports; `lf install`
 remains the short update command. Its directory retains the stored

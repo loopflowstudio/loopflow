@@ -505,7 +505,13 @@ pub enum ProjectWorkflowCommand {
         json: bool,
     },
     /// Select the Workflow future Tasks take up; captured Tasks stay unchanged
-    Set { project: String, name: String },
+    Set {
+        project: String,
+        name: String,
+        /// Store this definition in the personal Wave; use a personal:<name> selector
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
     /// Copy a builtin Workflow when needed and print its local path
     Customize { name: String },
 }

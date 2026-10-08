@@ -328,7 +328,7 @@ fn register_task_fixture(
         created_at: now,
         updated_at: now,
     };
-    let task = Task {
+    let mut task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
             revision: 0,
@@ -351,7 +351,7 @@ fn register_task_fixture(
         updated_at: now,
         observation: loopflow::work::task::Observation::NotRequired,
     };
-    let pr = TaskPr {
+    let mut pr = TaskPr {
         id: TaskPrId::new(),
         task_id: task.id.clone(),
         sequence: 1,
@@ -423,6 +423,13 @@ fn register_task_fixture(
             )
             .await
             .expect("cache Task PR context");
+        task.id = store
+            .get_task_by_issue(task.plan.linear_id.as_ref().unwrap().as_str())
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        pr.task_id = task.id.clone();
         store
             .create_task(&task, &pr, None)
             .await

@@ -274,7 +274,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
                 .await
                 .map_err(task_error)?
                 .is_some();
-            if !deleted {
+            if !deleted && task.worktree.is_some() {
                 if super::task_work_status(&store, &task).await? == WorkStatus::Done {
                     cleanup_completed_task(&store, &task).await?;
                 } else {

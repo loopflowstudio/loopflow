@@ -294,9 +294,11 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let task = store
         .task_by_issue(task_id.as_str())?
         .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
-    if store
-        .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())?
-        .is_some()
+    if store.project_planning_authority(&task.project_id)?
+        == crate::planning::PlanningAuthority::Linear
+        && store
+            .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())?
+            .is_some()
     {
         bail!(
             "Task {} was deleted and cannot resume execution",

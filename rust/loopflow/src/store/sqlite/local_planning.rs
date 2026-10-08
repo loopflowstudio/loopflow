@@ -29,6 +29,17 @@ pub(super) fn project_authority_on(
 }
 
 impl SqliteStore {
+    pub fn personal_workflow(&self, wave: &WaveId, name: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT content FROM personal_workflows WHERE wave_id=?1 AND name=?2",
+            params![wave, name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
     pub(crate) fn rotate_local_projects(
         &self,
         name: &str,
@@ -209,6 +220,7 @@ impl SqliteStore {
         &self,
         project: &ProjectId,
         content: &crate::pm::ProjectContent,
+        workflow_definition: Option<&str>,
     ) -> StoreResult<()> {
         content
             .validate()
@@ -219,6 +231,21 @@ impl SqliteStore {
             return Err(StoreError::InvalidAuthority(
                 "this Project's planning is owned by Linear".into(),
             ));
+        }
+        if let Some(definition) = workflow_definition {
+            let name = content
+                .workflow
+                .strip_prefix("personal:")
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    StoreError::InvalidData("a stored Workflow uses personal:<name>".into())
+                })?;
+            tx.execute(
+                "INSERT INTO personal_workflows(wave_id,name,content)
+                SELECT wave_id,?2,?3 FROM projects WHERE id=?1
+                ON CONFLICT(wave_id,name) DO UPDATE SET content=excluded.content",
+                params![project.as_str(), name, definition],
+            )?;
         }
         tx.execute(
             "UPDATE projects SET project_prompt_context=?2,workflow=?3,updated_at=?4 WHERE id=?1",
@@ -357,7 +384,9 @@ impl SqliteStore {
 
     /// Explicit creation is the only provisioning boundary; reads never call this.
     pub fn ensure_personal_project(&self, repo: &str, name: &str) -> StoreResult<Project> {
-        if name.trim().is_empty() || name.contains(['/', ':', '\\']) || matches!(name, "." | "..") {
+        if name.split('/').any(|part| {
+            part.trim().is_empty() || part.contains([':', '\\']) || matches!(part, "." | "..")
+        }) {
             return Err(StoreError::InvalidData("invalid personal Wave name".into()));
         }
         let project = {
@@ -373,33 +402,36 @@ impl SqliteStore {
                 [repo],
                 |row| row.get(0),
             )?;
-            let existing: Option<(WaveId, Option<String>)> = tx
-                .query_row(
-                    "SELECT id,current_project_id FROM waves WHERE personal_plan_id=?1
-                 AND name=?2 AND parent_wave_id IS NULL AND retired_at IS NULL",
-                    params![plan, name],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .optional()?;
             let now = now_unix();
-            let (wave, selected) = match existing {
-                Some(existing) => existing,
-                None => {
-                    let wave = WaveId::new();
-                    tx.execute(
-                        "INSERT INTO waves(id,name,repo,created_at,personal_plan_id)
-                        VALUES(?1,?2,?3,?4,?5)",
-                        params![wave, name, repo, now, plan],
-                    )?;
-                    tx.execute(
-                        "INSERT INTO personal_wave_definitions(wave_id,goal,memory)
-                        VALUES(?1,'','')",
-                        [&wave],
-                    )?;
-                    durable::create_wave_work(&tx, &wave, now)?;
-                    (wave, None)
-                }
-            };
+            let mut parent: Option<WaveId> = None;
+            let mut selected = None;
+            for part in name.split('/') {
+                let existing: Option<(WaveId, Option<String>)> = tx
+                    .query_row(
+                        "SELECT id,current_project_id FROM waves WHERE personal_plan_id=?1
+                     AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
+                        params![plan, part, parent],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                let (wave, project) = match existing {
+                    Some(existing) => existing,
+                    None => {
+                        let wave = WaveId::new();
+                        tx.execute(
+                            "INSERT INTO waves(id,name,repo,created_at,personal_plan_id,parent_wave_id)
+                             VALUES(?1,?2,?3,?4,?5,?6)",
+                            params![wave, part, repo, now, plan, parent],
+                        )?;
+                        tx.execute("INSERT INTO personal_wave_definitions(wave_id,goal,memory) VALUES(?1,'','')", [&wave])?;
+                        durable::create_wave_work(&tx, &wave, now)?;
+                        (wave, None)
+                    }
+                };
+                parent = Some(wave);
+                selected = project;
+            }
+            let wave = parent.expect("validated personal Wave has at least one component");
             let project = if let Some(selected) = selected {
                 ProjectId::parse(&selected)
                     .map_err(|error| StoreError::InvalidData(error.to_string()))?

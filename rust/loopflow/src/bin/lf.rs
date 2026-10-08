@@ -1790,7 +1790,7 @@ fn execute_command(
                 }
                 loopflow::lf::ProjectWorkflowCommand::Show { project, json } => {
                     let selected = tokio::runtime::Runtime::new()?
-                        .block_on(loopflow::ops::project::workflow(&repo, project, None))?;
+                        .block_on(loopflow::ops::project::workflow(&repo, project, None, None))?;
                     if *json {
                         println!("{}", serde_json::to_string_pretty(&selected)?);
                     } else {
@@ -1798,15 +1798,20 @@ fn execute_command(
                     }
                     Ok(())
                 }
-                loopflow::lf::ProjectWorkflowCommand::Set { project, name } => {
-                    with_runtime(&repo, args, || {
-                        tokio::runtime::Runtime::new()?.block_on(
-                            loopflow::ops::project::workflow(&repo, project, Some(name)),
-                        )?;
-                        println!("Project {project}: Workflow {name}");
-                        Ok(())
-                    })
-                }
+                loopflow::lf::ProjectWorkflowCommand::Set {
+                    project,
+                    name,
+                    file,
+                } => with_runtime(&repo, args, || {
+                    tokio::runtime::Runtime::new()?.block_on(loopflow::ops::project::workflow(
+                        &repo,
+                        project,
+                        Some(name),
+                        file.as_deref(),
+                    ))?;
+                    println!("Project {project}: Workflow {name}");
+                    Ok(())
+                }),
             }
         }
         Some(Commands::Task { cmd }) => {

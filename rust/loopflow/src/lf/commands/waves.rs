@@ -1372,9 +1372,14 @@ async fn snapshot_task_detail(
         .as_ref()
         .map(|blocker| blocker.reason.clone())
         .or_else(|| {
-            task.and_then(|task| {
-                crate::ops::task::no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
-            })
+            task.filter(|task| task.worktree.is_some())
+                .and_then(|task| {
+                    crate::ops::task::no_active_pr_resume_refusal(
+                        &task.plan.identifier,
+                        active,
+                        latest,
+                    )
+                })
         });
     let action_evidence = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) => {
@@ -1595,7 +1600,7 @@ fn derive_task_condition(
 ) -> TaskConditionSnapshot {
     // A removed historical checkout does not reopen settled work.
     let unresolved_execution = runtime.is_some_and(|runtime| {
-        !runtime.status.is_terminal()
+        (runtime.started && !runtime.status.is_terminal())
             || execution.is_some_and(|execution| execution.state != TaskExecutionState::Idle)
             || (local_progress.state == LocalProgressEvidenceState::Observed
                 && local_progress.unsettled == Some(true))

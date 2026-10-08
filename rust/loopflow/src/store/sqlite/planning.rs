@@ -546,6 +546,46 @@ fn project_accepted_planning(
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND i.provider='linear' AND c.removed=1)"),
         params![repo, provider, item_ids, confirmed_wave, confirmed_initiative],
     )?;
+    let mut query = tx.prepare(&format!(
+        "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
+         SELECT i.body,i.observed_at,p.id FROM pm_items i
+         JOIN projects p ON p.external_project_id=i.project_id
+         JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
+         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         AND i.id IN (SELECT value FROM json_each(?3))
+         AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.external_issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=i.id)
+         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1)"
+    ))?;
+    let imported = query
+        .query_map(
+            params![
+                repo,
+                provider,
+                item_ids,
+                confirmed_wave,
+                confirmed_initiative
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(query);
+    for (body, observed_at, project) in imported {
+        let item: PmItem = serde_json::from_str(&body)?;
+        tx.execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
+             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,pm_writeback_json)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'','{\"state\":\"current\"}')",
+            params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank],
+        )?;
+    }
     Ok(())
 }
 
@@ -799,6 +839,71 @@ mod tests {
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
     use crate::store::{FrontierAdvance, PlanningState, Store};
+
+    #[test]
+    fn owned_issue_import_retains_identity_across_alias_changes_without_placement() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let wave = crate::work::wave::Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        let initiative = snapshot.projects[0].initiative_ids[0].clone();
+        snapshot.projects.truncate(1);
+        snapshot
+            .items
+            .retain(|item| item.project_id.as_deref() == Some(&snapshot.projects[0].id));
+        snapshot.items.truncate(1);
+        let mut row = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative,
+            synced_at: 42,
+            snapshot,
+        };
+        store.put_pm_snapshot(&row).unwrap();
+        let item = &row.snapshot.items[0];
+        let task = store.task_by_issue(&item.id).unwrap().unwrap();
+        assert!(task.worktree.is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        assert_eq!(task.plan.title, item.name);
+        assert_eq!(task.plan.pm_snapshot_synced_at, Some(42));
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
+        row.synced_at = 43;
+        row.snapshot.items[0].identifier = "MOVED-42".into();
+        row.snapshot.items[0].revision = Some("2099-01-01T00:00:00Z".into());
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(
+            store.task_by_issue("MOVED-42").unwrap().unwrap().id,
+            task.id
+        );
+        store
+            .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
+            .unwrap();
+        store.put_pm_snapshot(&row).unwrap();
+        assert_eq!(
+            store.task_by_issue("MOVED-42").unwrap().unwrap().id,
+            task.id
+        );
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM tasks WHERE started_at IS NOT NULL",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn project_name_cutover_retains_both_histories_and_rejects_later_conflicts() {

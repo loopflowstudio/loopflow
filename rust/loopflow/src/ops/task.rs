@@ -33,7 +33,6 @@ use crate::engine::{compile_flow, load_flow, ConcreteStep};
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
-use crate::planning::{LinearIssueId, TaskPlan};
 use crate::store::sqlite::EndMove;
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
@@ -542,7 +541,9 @@ async fn traverse_workflow(
         })
     };
     let named = match requested {
-        Some(name) if !names_edge(name) => load_workflow_definition(task.worktree()?, name)?,
+        Some(name) if !names_edge(name) => {
+            super::project::load_workflow(store, &task.wave_id, name, task.worktree()?)?
+        }
         _ => None,
     };
     // Naming a workflow names no edge of it.
@@ -556,7 +557,12 @@ async fn traverse_workflow(
             None
         }
         (_, Some(named)) => Some(named),
-        (_, None) => match load_workflow_definition(task.worktree()?, project_workflow)? {
+        (_, None) => match super::project::load_workflow(
+            store,
+            &task.wave_id,
+            project_workflow,
+            task.worktree()?,
+        )? {
             Some(definition) => Some(definition),
             None => {
                 let Some(flow) = requested else {
@@ -909,6 +915,36 @@ async fn place_unplaced_task(
     stack_on: Option<&str>,
 ) -> OpsResult<Task> {
     let store = task_store().await?;
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        == crate::planning::PlanningAuthority::Linear
+    {
+        let main = crate::engine::worktrees::main_repo_root(repo)?;
+        let resolved = super::task_pm::resolve_task_async(
+            &main,
+            task.plan.linear_id()?.as_str(),
+            super::pm::PmRefresh::Auto,
+        )
+        .await?;
+        require_startable_issue(&resolved.item)?;
+        let prepared = prepare_new_task(
+            &main,
+            &resolved.item.name,
+            Some(&resolved.item),
+            &TaskProcessOptions {
+                name: name.map(str::to_string),
+                stack_on: stack_on.map(str::to_string),
+                agent: task.agent.clone(),
+                ..Default::default()
+            },
+        )
+        .await?;
+        return tokio::task::spawn_blocking(move || create_prepared_task(main, resolved, prepared))
+            .await
+            .map_err(task_error)?;
+    }
     let wave = owning_wave(&store, task).await?;
     let _acquisition = super::pm::lock_wave_planning(&wave).await?;
     let main = crate::engine::worktrees::main_repo_root(repo)?;
@@ -1285,52 +1321,28 @@ fn create_prepared_task(
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
-        if let Some(mut existing) = store
+        let mut task = store
             .get_task_by_issue(&resolved.item.id)
             .await
-            .map_err(|error| task_error(format!("failed to read task registry: {error}")))?
-        {
-            match task_work_status(&store, &existing).await? {
-                WorkStatus::Done => {
-                    return Err(task_error(format!(
-                        "Task {} is completed; start a new Linear task",
-                        existing.plan.identifier
-                    )))
-                }
-                WorkStatus::Abandoned => {
-                    return Err(task_error(format!(
-                    "Task {} is abandoned; inspect its retained history with `lf task status {}`",
-                    existing.plan.identifier, existing.plan.identifier
-                )))
-                }
-                WorkStatus::Ready => {
-                    select_task_agent(&store, &mut existing, requested_agent.as_deref()).await?;
-                    return Ok(existing);
-                }
-            }
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("accepted planning did not retain the Task identity"))?;
+        if matches!(
+            task_work_status(&store, &task).await?,
+            WorkStatus::Done | WorkStatus::Abandoned
+        ) {
+            return Err(task_error(format!(
+                "Task {} is terminal; inspect its retained history",
+                task.plan.identifier
+            )));
+        }
+        if task.worktree.is_some() {
+            select_task_agent(&store, &mut task, requested_agent.as_deref()).await?;
+            return Ok(task);
         }
         let now = time::OffsetDateTime::now_utc();
-        let mut task = Task {
-            id: crate::work::task::TaskId::new(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: Some(LinearIssueId::new(resolved.item.id.clone()).map_err(task_error)?),
-                identifier: resolved.item.identifier.clone(),
-                title: resolved.item.name.clone(),
-                description: resolved.item.description.clone(),
-                pm_snapshot_synced_at: Some(resolved.observed_at),
-            },
-            wave_id: project.wave_id,
-            project_id: project.id,
-            pm_writeback: PmWritebackState::Current,
-            worktree: Some(plan.worktree_path.clone()),
-            workspace_slug: workspace_slug.clone(),
-            agent: requested_agent,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
-        };
+        task.worktree = Some(plan.worktree_path.clone());
+        task.workspace_slug = workspace_slug.clone();
+        task.agent = requested_agent;
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
@@ -1724,10 +1736,7 @@ async fn select_task_agent(
 }
 
 fn task_configuration_refusal(task: &Task, skill: Option<&crate::engine::Skill>) -> Option<String> {
-    let worktree = match task.worktree() {
-        Ok(path) => path,
-        Err(error) => return Some(error.to_string()),
-    };
+    let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
         &resolve_task_agent(worktree, task.agent.as_deref(), skill),
@@ -4687,7 +4696,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             let resume_refusal = worktree_blocker
                 .as_ref()
                 .map(|blocker| blocker.reason.clone())
-                .or_else(|| no_active_pr_resume_refusal(&task.plan.identifier, active, latest));
+                .or_else(|| {
+                    task.worktree.as_ref().and_then(|_| {
+                        no_active_pr_resume_refusal(&task.plan.identifier, active, latest)
+                    })
+                });
             let launch_refusal = if worktree_blocker.is_some() {
                 None
             } else {

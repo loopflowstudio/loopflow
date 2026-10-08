@@ -17,7 +17,7 @@ use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
     PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
-    TaskEventKind, TaskId, TaskPr, TaskPrId,
+    TaskEventKind, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -414,7 +414,13 @@ async fn task_creation_refusal_preserves_inventory_and_marker_retry_reuses_provi
             assert_eq!(retried, created);
             assert_eq!(title, "Persisted edited title");
             assert_eq!(state.lock().await.issues[0]["description"], description);
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            assert!(fixture
+                .store
+                .list_tasks(None)
+                .await
+                .unwrap()
+                .iter()
+                .all(|task| task.worktree.is_none()));
             // Lookup is valid for terminal planning items; launch owns eligibility.
             state.lock().await.issues[0]["state"]["type"] = json!("completed");
             mark_issue_updated(&mut state.lock().await.issues[0]);
@@ -509,7 +515,8 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
         assert!(runtime
             .block_on(fixture.store.list_tasks(None))
             .unwrap()
-            .is_empty());
+            .iter()
+            .all(|task| task.worktree.is_none()));
     });
     server.abort();
 }
@@ -598,7 +605,8 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
     assert!(runtime
         .block_on(fixture.store.list_tasks(None))
         .unwrap()
-        .is_empty());
+        .iter()
+        .all(|task| task.worktree.is_none()));
     assert_eq!(
         crate::engine::worktrees::list_worktrees(&repo)
             .unwrap()
@@ -778,6 +786,14 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
                 .unwrap();
         }
         if lost || fail_local {
+            // Reproduce retained pre-import recovery evidence: no Task ever owned
+            // execution, and only the deletion intent survives the response loss.
+            connection
+                .execute(
+                    "DELETE FROM tasks WHERE external_issue_id='issue-1' AND worktree IS NULL",
+                    [],
+                )
+                .unwrap();
             // Ordinary refresh and replacement of the chapter both lose membership,
             // while the provider still retains the original issue in trash.
             runtime.block_on(async { state.lock().await.omit_trashed_issues = true });
@@ -882,7 +898,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
         connection
             .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        0
+        if lost || fail_local { 0 } else { 1 }
     );
     server.abort();
 }
@@ -891,35 +907,106 @@ struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>
 
 #[test]
 fn task_completion_preserves_planning_identity_and_summary_on_retry() {
-    assert_task_completion_retry(false, false, None);
+    assert_unplaced_completion_retry(false);
 }
 
 #[test]
 fn task_completion_retries_pending_writeback_after_local_done() {
-    assert_task_completion_retry(true, false, None);
+    assert_task_completion_retry(false, None);
 }
 
 #[test]
 fn task_completion_reconciles_lost_planning_response() {
-    assert_task_completion_retry(false, true, None);
+    assert_unplaced_completion_retry(true);
 }
 
 #[test]
 fn task_completion_reconciles_lost_registered_response() {
-    assert_task_completion_retry(true, true, None);
+    assert_task_completion_retry(true, None);
 }
 
 #[test]
 fn task_completion_reconciles_provider_outcome_after_user_merge() {
-    assert_task_completion_retry(true, false, Some(PrMergeMode::User));
+    assert_task_completion_retry(false, Some(PrMergeMode::User));
 }
 
 #[test]
 fn task_completion_reconciles_provider_outcome_after_landing() {
-    assert_task_completion_retry(true, true, Some(PrMergeMode::Auto));
+    assert_task_completion_retry(true, Some(PrMergeMode::Auto));
 }
 
-fn assert_task_completion_retry(registered: bool, lose_response: bool, merge: Option<PrMergeMode>) {
+fn assert_unplaced_completion_retry(lose_response: bool) {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, _) = runtime.block_on(planning_repo(&fixture));
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        let item = crate::ops::task::task_create(
+            &repo,
+            Some("product"),
+            Some("Finish without checkout".into()),
+            Some("Retain the completion".into()),
+        )
+        .unwrap();
+        let task = runtime
+            .block_on(fixture.store.get_task_by_issue(&item.id))
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.fail_completion = !lose_response;
+            provider.lose_completion = lose_response;
+        });
+        let complete = || {
+            crate::ops::task::workflow_set(
+                &repo,
+                &item.identifier,
+                "end",
+                Some("Delivered the requested outcome"),
+                &Default::default(),
+            )
+        };
+        complete().unwrap();
+        let pending = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            pending.pm_writeback,
+            PmWritebackState::Pending { .. }
+        ));
+        assert!(pending.worktree.is_none());
+        complete().unwrap();
+        let retained = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.pm_writeback, PmWritebackState::Current);
+        assert!(retained.worktree.is_none());
+        let events = runtime
+            .block_on(fixture.store.task_events_after(&task.id, 0))
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.kind, TaskEventKind::Completed { .. }))
+                .count(),
+            1
+        );
+        assert!(runtime
+            .block_on(fixture.store.task_prs(&task.id))
+            .unwrap()
+            .is_empty());
+    });
+    server.abort();
+}
+
+fn assert_task_completion_retry(lose_response: bool, merge: Option<PrMergeMode>) {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -953,7 +1040,7 @@ fi
             Some("A directive".into()),
 )
         .unwrap();
-        let task = registered.then(|| {
+        let task = {
             for args in [
                 vec!["add", "."],
                 vec![
@@ -979,7 +1066,7 @@ fi
                 .unwrap()
                 .unwrap();
             let task = Task {
-                id: TaskId::new(),
+                id: runtime.block_on(fixture.store.get_task_by_issue(&item.id)).unwrap().unwrap().id,
                 plan: crate::planning::TaskPlan {
             revision: 0,
                     linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
@@ -1048,14 +1135,12 @@ fi
             });
             runtime.block_on(fixture.store.update_task_pr(&pr)).unwrap();
             task
-        });
-        let selector = task
-            .as_ref()
-            .map_or(item.identifier.as_str(), |task| task.id.as_str());
+        };
+        let selector = task.id.as_str();
         let complete = |summary: &str| match merge {
             None | Some(PrMergeMode::User) => crate::ops::task::task_end(&repo, selector, Some(summary), &Default::default()),
             Some(PrMergeMode::Auto) => runtime.block_on(async {
-                let task = task.as_ref().unwrap();
+                let task = &task;
                 let pr = fixture.store.task_prs(&task.id).await.unwrap().remove(0);
                 let landing = crate::pr_landing::PrLanding::new(
                     crate::pr_landing::NewPrLanding {
@@ -1084,7 +1169,7 @@ fi
                 Ok(Some(retained))
             }),
         };
-        if let Some(task) = &task {
+
             let original_prs = runtime.block_on(fixture.store.task_prs(&task.id)).unwrap();
             for terminal in ["canceled", "duplicate"] {
                 runtime.block_on(async {
@@ -1167,15 +1252,15 @@ fi
                 state.lock().await.issues[0]["state"] = json!({"type":"unstarted"});
                 mark_issue_updated(&mut state.lock().await.issues[0]);
             });
-        }
+
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.fail_completion = !lose_response;
             provider.lose_completion = lose_response;
         });
         let first = complete("Delivered the requested outcome");
-        let mut before = None;
-        if let Some(task) = &task {
+
+
             let first = first.unwrap().unwrap();
             if merge.is_none() {
                 assert!(matches!(first.observation, Observation::Cached { .. }));
@@ -1204,24 +1289,9 @@ fi
                     |row| row.get(0),
                 )
                 .unwrap();
-            before = Some((events, terminal));
-        } else {
-            assert!(first.unwrap_err().to_string().contains(if lose_response {
-                "lost completion response"
-            } else {
-                "completion unavailable"
-            }));
-            runtime.block_on(async {
-                let mut provider = state.lock().await;
-                provider.fail_issue_read_after = Some(2);
-                provider.lose_comment = true;
-            });
-            assert!(complete("Delivered the requested outcome")
-                .unwrap_err()
-                .to_string()
-                .contains("local refresh failed"));
-        }
-        if registered {
+            let before = (events, terminal);
+
+
             runtime.block_on(async {
                 let mut provider = state.lock().await;
                 provider.fail_issue_read_after = Some(2);
@@ -1237,9 +1307,9 @@ fi
                 PmWritebackState::Pending { ref error, .. }
                     if error.contains("local refresh failed")
             ));
-        }
+
         let result = complete("Delivered the requested outcome").unwrap();
-        if let Some(task) = &task {
+
             let result = result.unwrap();
             assert_eq!(result.pm_writeback, PmWritebackState::Current);
             assert_eq!(result.plan.title, "Updated before completion retry");
@@ -1277,7 +1347,7 @@ fi
                     assert_eq!(fixture.store.work_status(&work).await.unwrap(), WorkStatus::Done);
                 });
             }
-            let (events, terminal) = before.unwrap();
+            let (events, terminal) = before;
             assert_eq!(
                 runtime
                     .block_on(fixture.store.task_events_after(&task.id, 0))
@@ -1294,37 +1364,10 @@ fi
                 .unwrap(),
                 terminal
             );
-        } else {
-            assert!(result.is_none());
-            complete("Must not replace the first completion").unwrap();
-            assert!(runtime
-                .block_on(fixture.store.list_tasks(None))
-                .unwrap()
-                .is_empty());
-            let comments = runtime.block_on(async { state.lock().await.comments.clone() });
-            assert_eq!(comments.len(), 1);
-            assert!(comments[0]["body"]
-                .as_str()
-                .unwrap()
-                .contains("Delivered the requested outcome"));
-            assert!(!crate::ops::linear_observe::is_direction_comment(
-                comments[0]["body"].as_str().unwrap(),
-                Some("person-1"),
-            ));
-            for terminal in ["canceled", "duplicate"] {
-                runtime.block_on(async {
-                    state.lock().await.issues[0]["state"] = json!({"type":terminal});
-                    mark_issue_updated(&mut state.lock().await.issues[0]);
-                });
-                assert!(complete("Cannot change the outcome")
-                    .unwrap_err()
-                    .to_string()
-                    .contains("cannot be completed"));
-            }
-        }
+
         assert_eq!(
             runtime.block_on(async { state.lock().await.completion_writes }),
-            if registered { 3 } else { 1 }
+             3
         );
         assert_eq!(
             crate::engine::worktrees::list_worktrees(&repo)
@@ -1441,7 +1484,11 @@ esac
                 .find(|project| project.plan.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
-                id: TaskId::new(),
+                id: runtime
+                    .block_on(fixture.store.get_task_by_issue(&item.id))
+                    .unwrap()
+                    .unwrap()
+                    .id,
                 plan: crate::planning::TaskPlan {
                     revision: 0,
                     linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),

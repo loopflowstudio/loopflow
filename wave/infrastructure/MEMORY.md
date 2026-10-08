@@ -20,13 +20,15 @@ planning, unplaced completion, placement and rotation. `--creation-id` replaces
 content hashing; receipts retain original input/Project across edits and rotation.
 Aliases grant no authority. Personal goal/memory stay in SQLite. One draft preserves
 IDs, serialized provider payloads and deletion recovery; redundant routing is removed.
-Operation-only Flow proof does not establish native execution: launch/resume still
-requires a Linear mapping below local admission. Owned issue import, paired fields,
-private definitions and full CLI/Desktop/hosted acceptance remain unfinished.
-Release's child memory reinforces public-entry proofs and strict stubs. Desktop's
-existing native comments proof requires a display; shared CLI reads alone establish
-no headless view outcome. The full one-PR scope remains, without installation or
-landing authority; no product decision blocks implementation.
+Native launch/resume and skill-Flow execution now pass public CLI fixtures with
+contained Codex stubs. Owned accepted Linear issues import once, unplaced; the
+released-frontier proof preserves orphan recovery evidence. Nested personal Waves
+and imported workflow definitions stay in SQLite. A CLI-generated fixture passes
+headless Desktop comment rendering. Unplaced Tasks remain runnable; no-remote
+landing refuses before GitHub access. These prove source boundaries, not installed
+or live-provider continuity. Paired fields, private catalog, hosted delivery and
+concurrency remain. Release's child memory reinforces public-entry proofs and
+strict stubs. The complete one-PR scope remains; no product decision blocks it.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

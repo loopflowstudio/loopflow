@@ -78,6 +78,11 @@ fn prepare_pr(
         AfterMerge::CompleteTask
     };
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
+    if !options.local && !crate::engine::git::has_origin(&repo_root)? {
+        return Err(OpsError::Message(
+            "hosted delivery requires an origin remote".to_string(),
+        ));
+    }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     crate::ops::commit::prepare_persistent_publication(&repo_root)?;
     if after_merge == AfterMerge::CompleteTask && (!options.strict || is_clean(&repo_root)?) {

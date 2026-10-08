@@ -214,7 +214,11 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
         .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
 }
 
-fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefinition, String> {
+pub fn parse_workflow(
+    name: &str,
+    content: &str,
+    repo: &Path,
+) -> Result<WorkflowDefinition, String> {
     let authored: AuthoredWorkflow =
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
     let mut nodes = Vec::new();

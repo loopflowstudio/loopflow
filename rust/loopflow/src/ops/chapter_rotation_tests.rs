@@ -790,7 +790,7 @@ async fn changing_the_workflow_keeps_the_projects_krs() {
     PM_TEST_CONTEXT
         .scope(copy_context(&context), async {
             let selected = plan(&context, &repo, &["a"]).await;
-            let result = crate::ops::project::workflow(&repo, old_id("a"), Some("research"))
+            let result = crate::ops::project::workflow(&repo, old_id("a"), Some("research"), None)
                 .await
                 .unwrap();
             assert_eq!(result.workflow, "research");

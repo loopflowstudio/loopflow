@@ -51,8 +51,8 @@ plan material to the code remote.
 ## First showable slice
 
 Accepted target behavior. Local CLI planning, placement, operation-only workflow
-execution and rotation have source proofs. Native agent execution still encounters
-a mandatory Linear mapping; hosted delivery and headless Desktop acceptance remain open.
+execution and rotation have source proofs. Native launch, resume and skill-Flow execution now pass contained public fixtures;
+hosted delivery remains open. A shared CLI fixture passes headless Desktop rendering.
 
 In a repository with no Linear configuration or credentials, run
 `lf task create --title "Fix the parser"`. It creates a durable Task immediately. With no
@@ -90,7 +90,7 @@ headless Desktop readers, without restoring that launcher.
   into durable rows. The `local_planning` draft makes external mappings nullable
   while retaining uniqueness. Local create/edit/read use the existing Task rows;
   local operations and public projections now select explicit personal authority;
-  owned Linear issue import and the remaining consumers still need the cutover. `store/sqlite.rs::task_issue_identity` separately reads
+  owned Linear issues now import; remaining field consumers still need the cutover. `store/sqlite.rs::task_issue_identity` separately reads
   deletion-recovery evidence; its only operation caller is `ops/pm.rs::delete_task`.
 - `ops/task_pm.rs` resolves Team/Initiative ownership and delegates creation and
   completion to `ops/pm.rs`. `pm_create_task_idempotent` searches UUID operation
@@ -374,9 +374,8 @@ with a new identity. Local identity survives connection; Linear IDs are aliases.
 The core types now permit absent Linear mappings and checkout placement. Public
 personal creation already commits without placement; Task preparation resolves
 existing durable Tasks before entering `ops/task_pm.rs`'s connected resolver.
-That resolver still requires Initiative/Team ownership. Remaining cutover targets
-include native launch's unconditional mapping lookup and connected registration's
-placement requirement. Task rows own ordinary external-ID alias resolution.
+That resolver still requires Initiative/Team ownership. Native launch now selects planning authority; connected registration places the
+already-imported Task and retains provider branch identity. Task rows own ordinary external-ID alias resolution.
 **Preservation correction (2026-10-07):** retain `task_issue_identities` solely as
 Linear deletion-recovery evidence, with its existing reader limited to that
 operation. It is not a second Task resolver or current ownership authority.
@@ -494,31 +493,28 @@ Implemented local boundaries (2026-10-08):
 
 Remaining work is the complete accepted lifecycle, in this same PR:
 
-- Finish native agent execution through public Task dispatch and workflow skill
-  steps. `lf/commands/util.rs::require_provider_session_process` unconditionally
-  calls `TaskPlan::linear_id()` for a Task-bound Session; `human_session.rs` calls
-  it at native launch and resume. Flow admission already selects local authority,
-  so removing provider access only there cannot fix this boundary. Retain connected
-  deletion refusal and exact Session/process authority; exercise launch and resume
-  with contained native-provider stubs, including terminal/deleted work.
-- Import owned planning-only Linear issues into durable Tasks transactionally;
-  accepted ingestion currently updates existing Tasks but inserts no missing Task.
-  Reuse mappings and preserve revisions/removal evidence. Cut provider registration
-  over to optional placement without losing existing branches. Retain orphan
-  deletion evidence; do not infer ownership from it.
+- Extend native-provider fixtures for connected deletion refusal alongside the passing
+  local terminal launch/resume and headless skill-Flow proof. Exact Session/process
+  authority remains unchanged. Native terminal identity is event evidence, not the
+  headless `provider_thread` column.
+- Owned issue import and connected placement are implemented. Repeat imports and alias
+  changes reuse identity; the released-frontier migration imports accepted owned issues
+  without checkout/PR/Started. Orphan deletion recovery remains separate. Broader
+  connected suites belong to gate; first-placement failure and concurrency remain.
 - Finish paired supported-field semantics (including rank edits, assignee and
-  Project summary), personal workflow customization, nested personal definitions,
+  Project summary), personal workflow catalog/customization,
   scope resolution across every operation, and shortest-unique display selectors.
-  Personal rename/move/delete and mixed-authority operations still need inspection.
+  Nested personal definitions and `project workflow set ID personal:NAME --file FILE`
+  now persist without repository files. Personal rename/move/delete and mixed-authority
+  operations still need inspection.
 - Prove public GitHub publication and verified `land -c`/reconciliation with strict
   stubs, plus refusal of hosted success without a code remote. Local link/copy and
   completion paths select authority, but no hosted-delivery acceptance is claimed.
-- Add shared Rust/Swift fixtures and headless Desktop reading/view proofs for
-  unplaced Tasks and comments. `RegistryQuery.taskComments` already calls the shared
-  CLI, and `TaskReferenceSnapshot.workspace` is optional; neither requires another
-  reader. `TaskCommentsProofTests` uses `.requiresDisplay`, so it cannot supply
-  this headless proof. Existing DTO tests use a connected thread, not a local CLI
-  payload. Finish user/architecture documentation and the concrete local fixtures.
+- Shared `local_task.json` is checked against public CLI roadmap/comments and decoded
+  by Rust and Swift. A headless production `TaskCommentsView` proof renders its author
+  and thread for an unplaced Task. The shared reader now keeps unplaced Tasks runnable
+  instead of reporting a missing checkout as a failure. Finish documentation and
+  broader Desktop scope/workflow reading; this proof uses no native window.
 - Extend preservation/concurrency proofs: first-placement filesystem failure,
   creation/rotation races, multiple personal Waves committing together, conflicting
   rotation retry input and late completion. Continue the same draft; run the full
@@ -529,8 +525,8 @@ Project content renders once per destination. The obsolete DTO test requiring
 every Task to have a Team now checks explicit null preservation. Connected
 ownership assertions remain. The local execution fixture runs `flow show proof`,
 then uses an explicit `task move end`; it proves neither a native skill step nor
-verified hosted delivery. The no-remote fixture proves local placement/execution,
-not rejection of a hosted landing attempt. Those acceptance conditions remain above.
+verified hosted delivery. The no-remote fixture now attempts `land -c`, verifies explicit refusal and
+retained Task/PR state before any GitHub call. Those acceptance conditions remain above.
 
 Review corrections: provider mapping never selects authority; creation and rotation
 receipts retain original input; a public retry follows its creation Project even
@@ -586,4 +582,4 @@ nullable Linear IDs without planning-only Tasks; namespace separation mistaken f
 privacy; a write-once mapping mistaken for duplicate-safe export; remote completion
 mistaken for local workflow arrival. Remaining choices are in `questions.md`.
 
-Check (2026-10-08): `git diff --check` and `lf context --skill realign --json` pass; prose-only reconciliation reuses compression's reported PM (71 passed, 2 ignored), local store (5 passed), CLI/DTO (23 passed), formatting and Clippy results at `149f47c0e`; complete lifecycle and headless Desktop acceptance remain for implementation and gate.
+Check (2026-10-08): network-isolated local CLI (4), native lifecycle (1), released-frontier migration (1), focused PM lifecycle (17; 1 fixture ignored), `scripts/test_desktop.sh --filter personalTaskComments` (1), formatting and Clippy pass; full acceptance/gate remains after the cutover.

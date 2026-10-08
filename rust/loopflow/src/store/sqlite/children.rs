@@ -1171,7 +1171,30 @@ fn insert_initial_task(
     require_task_not_deleted(conn, task)?;
     super::durable::require_selected_project(conn, &task.project_id)?;
 
-    insert_task_row(conn, task)?;
+    match task_on(conn, &task.id)? {
+        Some(existing)
+            if existing.worktree.is_none()
+                && existing.project_id == task.project_id
+                && existing.plan.linear_id == task.plan.linear_id =>
+        {
+            conn.execute(
+                "UPDATE tasks SET worktree=?2,workspace_slug=?3,agent=?4,updated_at=?5 WHERE id=?1",
+                params![
+                    task.id.as_str(),
+                    task.worktree()?.display().to_string(),
+                    task.workspace_slug,
+                    task.agent,
+                    now_unix()
+                ],
+            )?;
+        }
+        Some(_) => {
+            return Err(StoreError::InvalidAuthority(
+                "Task already has placement or changed ownership".into(),
+            ))
+        }
+        None => insert_task_row(conn, task)?,
+    }
     inherit_task_placement(conn, task)?;
     insert_task_pr(conn, pr)?;
     seed_task_linear_observation(conn, task)
@@ -2193,6 +2216,14 @@ mod local_planning_tests {
             conn.execute_batch(&current_draft_sql("process_names"))
                 .unwrap();
         }
+        let imported_project = ProjectId::new();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'current',1,'current','Current','',7,7)",params![imported_project.as_str(),wave]).unwrap();
+        conn.execute("INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,'linear',?2,7)",params![wave,payload["projects"][0]["initiative_ids"][0].as_str().unwrap()]).unwrap();
+        conn.execute(
+            "INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES(?1,'current',0)",
+            [&wave],
+        )
+        .unwrap();
         let tables = [
             "task_prs",
             "agent_sessions",
@@ -2248,6 +2279,14 @@ mod local_planning_tests {
             payload["projects"][0]
         );
         assert_eq!(observation.observed_at, 7);
+        let imported = store.task_by_issue("LOO-318").unwrap().unwrap();
+        assert_eq!(imported.project_id, imported_project);
+        assert!(imported.worktree.is_none());
+        assert!(store.task_prs(&imported.id).unwrap().is_empty());
+        assert_eq!(imported.plan.pm_snapshot_synced_at, Some(7));
+        let uuid = uuid::Uuid::parse_str(imported.id.as_str().trim_start_matches("task_")).unwrap();
+        assert_eq!(uuid.get_version_num(), 4);
+        assert_eq!(uuid.get_variant(), uuid::Variant::RFC4122);
         let retained = store.task(&task).unwrap().unwrap();
         assert_eq!(retained.id, task);
         assert_eq!(retained.project_id, project);

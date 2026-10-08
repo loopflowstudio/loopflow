@@ -1,6 +1,6 @@
 import Foundation
 
-/// One planning Task's complete Linear comment thread (`lf task comment ISSUE --json`).
+/// One planning Task's complete comment thread (`lf task comment ISSUE --json`).
 /// A partial provider read is an error, never a shorter thread, so the count is
 /// `comments.count`. Optional fields must be present as `null`.
 public struct TaskComments: Decodable, Sendable, Hashable {

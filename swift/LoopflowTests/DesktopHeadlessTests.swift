@@ -38,6 +38,38 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("An unplaced personal Task and its CLI comment thread render without a display")
+    func personalTaskComments() async throws {
+        struct Proof: Decodable {
+            let task: RoadmapTask
+            let comments: TaskComments
+        }
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("local_task.json"))
+        let proof = try JSONDecoder().decode(Proof.self, from: data)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let thread = String(decoding: try JSONSerialization.data(withJSONObject: #require(object["comments"])), as: UTF8.self)
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first).wave
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.prefix(2) == ["task", "comment"] else {
+                throw RegistryQueryError("Unexpected command: \(args)")
+            }
+            return thread
+        })
+        #expect(proof.task.reference.workspace == nil)
+        #expect(proof.task.task.id == "task_0123456789ab40008000000000000001")
+        #expect(proof.task.runControl.unavailable == nil)
+        await model.loadComments(task: proof.task, wave: wave)
+        #expect(model.comments[proof.task.id].value == proof.comments)
+        model.navigation.expandedComments.insert(proof.task.id)
+        let view = TaskCommentsView(model: model, task: proof.task, wave: wave)
+        _ = try view.inspect().find(text: "Fixture Person")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier:
+            "task-comment-00000000-0000-4000-8000-000000000001")
+        #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
+    }
+
     @Test("A Task's work, a Workflow move and a new Flow process arrive from the stream, with no lf read")
     func taskWorkFollowsTheStream() async throws {
         func object(_ name: String) throws -> [String: Any] {

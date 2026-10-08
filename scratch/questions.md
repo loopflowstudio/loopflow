@@ -24,7 +24,7 @@ do not block the single-machine lifecycle.
   store-owned definitions; no selected Wave creates `personal:inbox` only on an
   explicit mutation. Shared names remain distinct. A provider alias does not
   change authority. Root provisioning and goal/memory editing are implemented;
-  nested definitions and private workflow customization remain implementation work.
+  nested definitions and workflow import now persist in SQLite; private catalog/customization remain.
 - **Local selector:** the resolver accepts `lf-<12 UUID hex digits>` and longer
   prefixes, rejecting ambiguity. Stored display labels currently use the full UUID;
   shortest-unique display remains part of the CLI/reader cutover. Full IDs remain

@@ -12,6 +12,12 @@ CREATE TABLE personal_wave_definitions (
     goal TEXT NOT NULL,
     memory TEXT NOT NULL
 );
+CREATE TABLE personal_workflows (
+    wave_id TEXT NOT NULL REFERENCES personal_wave_definitions(wave_id) ON DELETE RESTRICT,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    PRIMARY KEY(wave_id,name)
+);
 CREATE TRIGGER store_revision_personal_wave_definition AFTER UPDATE ON personal_wave_definitions
 BEGIN
     UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
@@ -211,5 +217,28 @@ CREATE TABLE task_comments (
 CREATE INDEX idx_task_comments_task ON task_comments(task_id,created_at,id);
 CREATE TRIGGER store_revision_task_comments_insert AFTER INSERT ON task_comments
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- Import only accepted, owned issues. UUID v4 identity is independent of provider
+-- IDs; existing mappings and orphan deletion-recovery evidence stay untouched.
+INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
+    issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,pm_writeback_json)
+SELECT 'task_' || lower(hex(randomblob(6))) || '4' || substr(lower(hex(randomblob(2))),2) ||
+    substr('89ab',(random() & 3)+1,1) || substr(lower(hex(randomblob(2))),2) || lower(hex(randomblob(6))),
+    p.id,i.id,json_extract(i.body,'$.identifier'),json_extract(i.body,'$.name'),
+    json_extract(i.body,'$.description'),i.observed_at,i.observed_at,i.observed_at,
+    json_extract(i.body,'$.rank'),'','{"state":"current"}'
+FROM pm_items i
+JOIN projects p ON p.external_project_id=i.project_id
+JOIN waves w ON w.id=p.wave_id AND w.repo=i.repo
+JOIN pm_projects observed ON observed.id=i.project_id AND observed.repo=i.repo AND observed.provider=i.provider
+JOIN pm_wave_projects membership ON membership.wave_id=w.id AND membership.project_id=i.project_id
+JOIN pm_wave_sync sync ON sync.wave_id=w.id AND sync.provider=i.provider
+WHERE i.provider='linear' AND i.needs_refresh=0
+    AND observed.archived=0 AND observed.membership_unresolved=0
+    AND json_array_length(observed.body,'$.initiative_ids')=1
+    AND json_extract(observed.body,'$.initiative_ids[0]')=sync.initiative
+    AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.external_issue_id=i.id)
+    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=w.id AND d.issue_id=i.id)
+    AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1);
 
 PRAGMA legacy_alter_table = OFF;

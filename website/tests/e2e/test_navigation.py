@@ -21,7 +21,7 @@ def test_flows_navigation(page: Page, base_url: str, path: str, label: str) -> N
         "link", name=label, exact=True
     ).click()
     expect(page).to_have_url(f"{base_url}/#flows")
-    heading = page.locator("#flows h1")
+    heading = page.locator("#flows h2")
     expect(heading).to_be_in_viewport()
     heading_box = heading.bounding_box()
     nav_box = page.get_by_role("navigation", name="Main navigation").bounding_box()

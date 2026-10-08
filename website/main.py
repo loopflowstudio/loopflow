@@ -123,10 +123,26 @@ def CopyButton(text: str):
 SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
+HERO_CONTENT = HOME_CONTENT["hero"]
+SURFACE_CONTENT = HOME_CONTENT["surface"]
 AGENTS_CONTENT = HOME_CONTENT["agents"]
-OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
 YOU_CONTENT = HOME_CONTENT["you"]
+FAQ_CONTENT = HOME_CONTENT["faq"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
+
+# Copy buttons name the element whose text they copy.
+COPY_SCRIPT = """
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+  var label = button.textContent;
+  button.addEventListener('click', function () {
+    var text = document.getElementById(button.dataset.copy).textContent;
+    navigator.clipboard.writeText(text).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1600);
+    });
+  });
+});
+"""
 
 # Markdown rendering
 
@@ -736,54 +752,9 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _loopflow_diagram(example) -> FT:
-    """Steps down a rail, one edge looping back, one exiting."""
-    steps = example["steps"]
-    rows = [(12 + 50 * index, step) for index, step in enumerate(steps)]
-    last_y = rows[-1][0]
-    loop_y = next(y for y, step in rows if step["name"] == example["loop_to"])
-
-    def _name_end(name: str) -> int:
-        return 26 + round(len(name) * 7.9) + 12
-
-    parts = [
-        '<defs><marker id="loopflow-arrow" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        '<path d="M0 0L10 5L0 10z"/></marker></defs>'
-    ]
-    for y, step in rows:
-        you = " you" if step["you"] else ""
-        if y != last_y:
-            parts.append(f'<line class="rail" x1="8" y1="{y + 8}" x2="8" y2="{y + 42}"/>')
-        parts.append(
-            f'<circle class="dot{you}" cx="8" cy="{y}" r="5.5"/>'
-            f'<text class="name{you}" x="26" y="{y + 4}">{step["name"]}</text>'
-            f'<text class="detail" x="26" y="{y + 21}">{step["detail"]}</text>'
-        )
-    parts.append(
-        f'<path class="edge" d="M{_name_end(steps[-1]["name"])} {last_y}H250V{loop_y}'
-        f'H{_name_end(example["loop_to"])}" marker-end="url(#loopflow-arrow)"/>'
-        f'<text class="edge-label" transform="translate(266 {(last_y + loop_y) // 2}) rotate(90)" '
-        f'text-anchor="middle">{example["loop_label"]}</text>'
-        f'<path class="edge" d="M8 {last_y + 8}V{last_y + 50}" marker-end="url(#loopflow-arrow)"/>'
-        f'<text class="edge-label" x="20" y="{last_y + 40}">{example["exit_label"]}</text>'
-        f'<rect class="end" x="2.5" y="{last_y + 54.5}" width="11" height="11"/>'
-        f'<text class="name" x="26" y="{last_y + 64}">{example["exit_to"]}</text>'
-    )
-    names = ", ".join(step["name"] for step in steps)
-    label = (
-        f"A loopflow: {names}. From {steps[-1]['name']}, one arrow returns to "
-        f"{example['loop_to']} for {example['loop_label']} and one exits to {example['exit_to']}."
-    )
-    return NotStr(
-        f'<svg class="home-loopflow" viewBox="0 0 280 {last_y + 78}" role="img" '
-        f'aria-label="{label}">{"".join(parts)}</svg>'
-    )
-
-
-def _inline_command(text: str) -> list:
-    """Set the command name in monospace without treating copy as HTML."""
-    return [Code(part) if part == "lf" else part for part in re.split(r"\b(lf)\b", text)]
+def _inline_code(text: str) -> list:
+    """Set backticked spans in monospace without treating copy as HTML."""
+    return [Code(part) if index % 2 else part for index, part in enumerate(text.split("`"))]
 
 
 def _terminal(content: str, label: str) -> FT:
@@ -804,110 +775,144 @@ def _terminal(content: str, label: str) -> FT:
     return Pre(*lines, cls="term", tabindex="0", aria_label=label)
 
 
-def _capture(content: dict) -> tuple:
-    return (
+def _hero_section() -> FT:
+    return Section(
+        P(HERO_CONTENT["label"], cls="eyebrow kicker"),
+        H1(HERO_CONTENT["heading"]),
+        P(HERO_CONTENT["introduction"], cls="intro"),
         Div(
-            Img(
-                src=content["image"],
-                alt=content["image_alt"],
-                width=content["width"],
-                height=content["height"],
-                loading="lazy",
+            Pre(
+                Span("$", cls="p"),
+                " ",
+                Span(HERO_CONTENT["install_command"], id="install-command"),
+                cls="term",
+                tabindex="0",
+                aria_label="Install Loopflow",
             ),
-            cls="window",
+            Button("Copy", type="button", cls="copy", data_copy="install-command", aria_live="polite"),
+            cls="install-row",
         ),
-        P(content["caption"], cls="capture-label"),
+        P(
+            HERO_CONTENT["cost"],
+            " ",
+            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"]),
+            cls="cost",
+        ),
+        cls="home-hero",
     )
 
 
-def _work_rows(content: dict) -> FT:
-    return Div(
-        *[
-            Article(
-                Div(item["label"], Span(item["title"]), cls="tag"),
+def _surface_section() -> FT:
+    capture = SURFACE_CONTENT["capture"]
+    return Section(
+        Div(
+            Div(
+                P(SURFACE_CONTENT["agents_label"], cls="pane-label"),
+                Div(_terminal(SURFACE_CONTENT["commands"], "lf commands"), cls="commands"),
+                cls="pane agents",
+            ),
+            Div(
+                P(SURFACE_CONTENT["you_label"], cls="pane-label"),
                 Div(
-                    P(*_inline_command(item["text"])),
-                    P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
-                    if "link" in item
-                    else None,
+                    Div(
+                        Img(
+                            src=capture["image"],
+                            alt=capture["image_alt"],
+                            width=capture["width"],
+                            height=capture["height"],
+                        ),
+                        cls="window",
+                    ),
+                    cls="shot",
                 ),
-                _terminal(item["commands"], item["label"] + " example"),
-                cls="work-row",
-            )
-            for item in content["rows"]
-        ],
-        cls="work-rows",
+                cls="pane you",
+            ),
+            cls="surface",
+        ),
+        Div(*[P(note, cls="capture-label") for note in SURFACE_CONTENT["notes"]], cls="surface-notes"),
+        aria_label="Both sides of the work",
     )
 
 
-def _agents_section() -> FT:
-    example = AGENTS_CONTENT["example"]
-    return Section(
-        Div(
-            P(AGENTS_CONTENT["label"], cls="eyebrow kicker"),
-            H1(AGENTS_CONTENT["heading"]),
-            P(AGENTS_CONTENT["claim"], cls="claim"),
-            *[P(*_inline_command(line), cls="intro") for line in AGENTS_CONTENT["introduction"]],
+def _claims_section(content: dict, section_id: str, first_number: int) -> FT:
+    """One group of numbered claims; numbers run on across groups."""
+
+    def claim(number: int, item: dict) -> FT:
+        return Article(
+            Div(f"{number:02}", cls="number"),
             Div(
-                *[
-                    A(link["label"], href=link["href"], cls="button solid" if index == 0 else "button")
-                    for index, link in enumerate(AGENTS_CONTENT["actions"])
-                ],
-                cls="actions",
-            ),
-            cls="home-hero",
-        ),
-        Div(
-            Div(
-                P(example["label"], cls="eyebrow"),
-                _loopflow_diagram(example),
-                P(example["caption"], " ", Span(example["file"], cls="folio"), cls="capture-label"),
-            ),
-            _terminal(AGENTS_CONTENT["commands"], "lf commands"),
-            cls="pair",
-        ),
-        Div(
-            *[
-                Div(B(item["title"]), *_inline_command(item["text"]))
-                for item in OWNERSHIP_CONTENT["items"]
-            ],
-            cls="strip",
-            role="group",
-            aria_label="Ownership",
-        ),
-        Div(
-            *[
-                Article(
-                    H3(part["title"]),
-                    P(*_inline_command(part["description"])),
-                    A(part["link"]["label"], href=part["link"]["href"]),
+                H3(item["title"]),
+                P(*_inline_code(item["text"])) if "text" in item else None,
+                Div(
+                    *[Article(H4(kind["title"]), P(kind["text"])) for kind in item["kinds"]],
+                    cls="kinds",
                 )
-                for part in AGENTS_CONTENT["parts"]
-            ],
-            cls="parts",
+                if "kinds" in item
+                else None,
+                P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
+                if "link" in item
+                else None,
+            ),
+            _terminal(item["commands"], item["title"]) if "commands" in item else None,
+            cls="claim" if "commands" in item else "claim wide",
+        )
+
+    return Section(
+        P(content["label"], cls="eyebrow"),
+        H2(content["heading"]),
+        P(content["introduction"], cls="lede") if "introduction" in content else None,
+        Div(
+            *[claim(first_number + index, item) for index, item in enumerate(content["claims"])],
+            cls="claims",
         ),
-        P(AGENTS_CONTENT["rows_label"], cls="eyebrow rows-label"),
-        _work_rows(AGENTS_CONTENT),
-        id="flows",
-        cls="block lead",
+        id=section_id,
+        cls="group",
     )
 
 
-def _you_section() -> FT:
+def _faq_section() -> FT:
     return Section(
-        P(YOU_CONTENT["label"], cls="eyebrow"),
-        H2(YOU_CONTENT["heading"]),
-        *[P(line, cls="lede") for line in YOU_CONTENT["introduction"]],
-        *_capture(YOU_CONTENT["capture"]),
-        Div(
-            *[Article(H3(kind["title"]), P(kind["text"])) for kind in YOU_CONTENT["kinds"]],
-            cls="parts kinds",
+        H2(FAQ_CONTENT["heading"]),
+        Dl(
+            *[
+                Div(
+                    Dt(item["question"]),
+                    Dd(
+                        *_inline_code(item["answer"]),
+                        *((" ", A(item["link"]["label"], href=item["link"]["href"])) if "link" in item else ()),
+                    ),
+                )
+                for item in FAQ_CONTENT["items"]
+            ],
+            cls="faq",
         ),
-        P(YOU_CONTENT["rows_label"], cls="eyebrow rows-label"),
-        P(YOU_CONTENT["rows_introduction"], cls="lede"),
-        _work_rows(YOU_CONTENT),
-        id="mac",
+        id="faq",
         cls="block",
+    )
+
+
+def _install_section() -> FT:
+    return Section(
+        P(INSTALL_CONTENT["label"], cls="eyebrow"),
+        H2(INSTALL_CONTENT["heading"]),
+        _terminal(INSTALL_CONTENT["commands"], "Install Loopflow"),
+        Div(
+            Button(
+                INSTALL_CONTENT["copy_label"],
+                type="button",
+                cls="button solid",
+                data_copy="install-command",
+                aria_live="polite",
+            ),
+            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button"),
+            cls="actions",
+        ),
+        P(
+            *[A(link["label"], href=link["href"]) for link in INSTALL_CONTENT["links"]],
+            cls="capture-label install-links",
+        ),
+        id="start",
+        cls="start",
     )
 
 
@@ -1013,32 +1018,17 @@ def build_effort_page(slug: str) -> tuple:
 
 def build_homepage() -> tuple:
     return (
-        Title("Loopflow — " + AGENTS_CONTENT["heading"]),
+        Title("Loopflow — " + HERO_CONTENT["heading"]),
         SkipLink(),
         Div(
             _topbar("/"),
             Main(
-                _agents_section(),
-                _you_section(),
-                Section(
-                    Div(P(INSTALL_CONTENT["label"], cls="eyebrow"), H2(INSTALL_CONTENT["heading"])),
-                    Div(
-                        _terminal(INSTALL_CONTENT["commands"], "Install Loopflow"),
-                        P(
-                            *[
-                                A(link["label"], href=link["href"])
-                                for link in INSTALL_CONTENT["links"]
-                            ],
-                            A(
-                                INSTALL_CONTENT["download_label"],
-                                href=INSTALL_CONTENT["download_url"],
-                            ),
-                            cls="capture-label install-links",
-                        ),
-                    ),
-                    id="start",
-                    cls="start",
-                ),
+                _hero_section(),
+                _surface_section(),
+                _claims_section(AGENTS_CONTENT, "flows", 1),
+                _claims_section(YOU_CONTENT, "mac", 1 + len(AGENTS_CONTENT["claims"])),
+                _faq_section(),
+                _install_section(),
                 id="main-content",
                 cls="home",
             ),
@@ -1051,6 +1041,7 @@ def build_homepage() -> tuple:
                     ]
                 ),
             ),
+            Script(COPY_SCRIPT),
             cls="home-page",
         ),
     )

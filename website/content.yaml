@@ -84,48 +84,22 @@ studio:
     label: About · Loopflow Studio
     heading: Jack Heart
     lede: Founder of Loopflow Studio.
-# Two sections, named by their user. Structure set by Jack Heart on 2026-10-08.
+# Blend A, chosen by Jack Heart on 2026-10-08: install in the hero, both surfaces
+# side by side, eight numbered claims in two groups, questions, install. Claim
+# titles and answers beyond his quoted lines are draft. Backticks set code.
 homepage:
-  agents:
-    label: Loopflow is a software instrument · for your agents
+  hero:
+    label: Loopflow is a software instrument
     heading: A software engineering CLI for your agents.
-    claim: Give your agents the tools to do things the right way.
-    introduction:
-    - Ask your agents to build software and they can do it through this one command, breaking the
+    introduction: >-
+      Ask your agents to build software and they can do it through this one command, breaking the
       work into concrete steps you can trace and pick back up.
-    - 'lf covers each part of building software: planning, designing, prototyping, implementing, testing,
-      optimizing, researching, landing. A Flow is a file that puts those parts in order. Each step
-      is its own session, with a commit between them, so the work arrives planned, checked and reviewable
-      whether or not you watched it happen.'
-    actions:
-    - label: Install ↓
-      href: '#start'
-    - label: For you ↓
-      href: '#mac'
-    example:
-      label: 'Example loopflow:'
-      steps:
-      - name: kickoff
-        detail: writes a design note
-        you: false
-      - name: review-design
-        detail: a conversation with you
-        you: true
-      - name: implement
-        detail: builds it
-        you: false
-      - name: gate
-        detail: runs the checks
-        you: false
-      - name: demo
-        detail: a conversation with you
-        you: true
-      loop_to: implement
-      loop_label: another pass
-      exit_label: done
-      exit_to: land
-      caption: The filled steps are conversations with you.
-      file: .lf/flows/feature.yaml
+    install_command: curl -fsSL https://loopflow.studio/install.sh | sh
+    cost: >-
+      Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
+      your own account and has its own cost.
+  surface:
+    agents_label: For your agents · the terminal
     commands: |-
       $ lf skill design "Add CSV export"  # one session
       $ lf run ship-api                   # a Flow: sessions in order
@@ -136,42 +110,60 @@ homepage:
       $ lf session list                   # every conversation
       $ lf wave status exports            # the plan
       $ lf pr land                        # merge it
-    parts:
-    - title: Checked before it reaches you
-      description: Checks run on each change. After a task’s pull request is handed off for landing,
-        a failed required check can start a repair in the same task.
-      link:
-        label: Review workflows ↗
-        href: /docs/authoring#loopflows
-    - title: Your way of working, written down
-      description: Instructions are Markdown and sequences are YAML, kept in your repository, or use
-        the built-ins. Your agents follow the same steps every time.
-      link:
-        label: Skills and workflows ↗
-        href: /docs/authoring
-    - title: As much or as little of you
-      description: Stay in one session and steer as you go, come in at design and demo, or let it
-        run. Choose per task or per project.
+    you_label: For you · the Mac app
+    capture:
+      image: /static/wave-surface.png
+      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their status
+      width: 2880
+      height: 1800
+    notes:
+    - 'Two views of the same work: the commands your agents run, and the tasks you follow.'
+    - Actual capture, unedited. The Mac app includes the command line tool; the command line tool
+      does not need the Mac app.
+  agents:
+    label: For your agents
+    heading: Give your agents the tools to do things the right way.
+    claims:
+    - title: One command covers the whole job.
+      text: >-
+        `lf` covers each part of building software: planning, designing, prototyping, implementing,
+        testing, optimizing, researching, landing. A Flow is a file that puts those parts in order.
+        Each step is its own session, with a commit between them.
       link:
         label: Write your own Flow ↗
         href: /docs/authoring#flows
-    rows_label: One task, start to finish
-    rows:
-    - label: Task
-      title: One outcome
-      text: Each task gets its own working copy, branch, and pull request. Its sessions stay with
-        it. Return to a task and its work is where you left it.
       commands: |-
-        $ lf task run EXP-12
-        $ lf task status EXP-12
+        $ lf skill design "Add CSV export"  # one session
+        $ lf run ship-api                   # a Flow: sessions in order
+        $ lf flow list                      # the Flows you have
+    - title: Each task gets its own branch.
+      text: >-
+        Each task gets its own working copy, branch, and pull request. Its sessions stay with it.
+        Return to a task and its work is where you left it.
       link:
         label: Worktrees and delivery ↗
         href: /architecture/delivery
-    - label: Workflow
-      title: Your part in it
-      text: A workflow joins them. It names the points where you take part in a task’s conversation
-        and the Flow that runs between each. A Flow is a file, so a team can review how it works with
-        agents the way it reviews code.
+      commands: |-
+        $ lf task create --title "Add CSV export"
+        $ lf task run EXP-12                # a task's next step
+        $ lf task status EXP-12
+    - title: The work is checked before it reaches you.
+      text: >-
+        Checks run on each change. After a task’s pull request is handed off for landing, a failed
+        required check can start a repair in the same task.
+      link:
+        label: Review workflows ↗
+        href: /docs/authoring#loopflows
+      commands: |-
+        $ lf pr land                        # merge it
+    - title: Your way of working is a file.
+      text: >-
+        Instructions are Markdown and sequences are YAML, kept in your repository, or use the
+        built-ins. Your agents follow the same steps every time. A Flow is a file, so a team can
+        review how it works with agents the way it reviews code.
+      link:
+        label: Skills and workflows ↗
+        href: /docs/authoring
       commands: |-
         # .lf/workflows/feature.yaml
         nodes:
@@ -182,61 +174,90 @@ homepage:
           - { from: design, to: demo,   flow: pursue }
           - { from: demo,   to: demo,   flow: pursue }
           - { from: demo,   to: end,    flow: ship }
-      link:
-        label: Write a workflow ↗
-        href: /docs/authoring#workflows
-  ownership:
-    items:
-    - title: Your models
-      text: Claude Code, Codex, or OpenCode, on your own accounts.
-    - title: Your machines
-      text: Runs locally, and over SSH where you choose.
-    - title: Your methods
-      text: Skills and workflows are files in your repo (or use the built-ins). MIT licensed.
-    - title: Your terminal
-      text: lf is a command. Run it in the terminal you already use.
   you:
     label: For you · on your Mac, or in cmux or herdr
     heading: Stay in flow while you work with agents.
-    introduction:
-    - Loopflow is a free, open-source podium for conducting your software orchestra, with native macOS
-      and terminal interfaces.
-    - What needs your attention is on screen, and the rest is not. Loopflow for Mac is laid out around
-      your work, with each conversation filed under the task it belongs to, so you follow the work
-      and not a trail of chats.
-    capture:
-      image: /static/wave-surface.png
-      image_alt: Loopflow for Mac showing a goal, its key results, and ten tasks with their status
-      width: 2880
-      height: 1800
-      caption: Actual capture, unedited. The Mac app includes the command line tool; the command line
-        tool does not need the Mac app.
-    kinds:
-    - title: Long-lived sessions
-      text: A session stays with a workstream and its results. Come back to it and the work is where
-        you left it.
-    - title: Isolated jobs
-      text: Routine process and autonomous development run as separate jobs, each in its own working
-        copy.
-    rows_label: Your work, kept in order
-    rows_introduction: Have as many Waves as you like.
-    rows:
-    - label: Wave
-      title: A goal
-      text: A lasting objective, with its plan and its memory. Reviewed notes carry goals and lessons
-        into later sessions, so you do not rebuild context by hand.
+    introduction: >-
+      Loopflow is a free, open-source podium for conducting your software orchestra, with native
+      macOS and terminal interfaces.
+    claims:
+    - title: What needs you is on screen.
+      text: >-
+        What needs your attention is on screen, and the rest is not. Loopflow for Mac is laid out
+        around your work, with each conversation filed under the task it belongs to, so you follow
+        the work and not a trail of chats.
+    - title: You choose where you step in.
+      text: >-
+        Stay in one session and steer as you go, come in at design and demo, or let it run. Choose
+        per task or per project. A workflow names the points where you take part in a task’s
+        conversation and the Flow that runs between each.
+      link:
+        label: Write a workflow ↗
+        href: /docs/authoring#workflows
       commands: |-
-        $ lf --wave exports : "Review the goal"
-        $ lf wave status exports
+        # .lf/workflows/feature.yaml
+        nodes:
+          design: review-design
+          demo: demo
+    - title: Sessions stay with the work.
+      kinds:
+      - title: Long-lived sessions
+        text: A session stays with a workstream and its results. Come back to it and the work is
+          where you left it.
+      - title: Isolated jobs
+        text: Routine process and autonomous development run as separate jobs, each in its own
+          working copy.
+    - title: A goal keeps its plan and its memory.
+      text: >-
+        A Wave is a lasting objective, with its plan and its memory. Reviewed notes carry goals and
+        lessons into later sessions, so you do not rebuild context by hand. Its Project is what the
+        Wave is doing now: its tasks, its key results, and the workflow its tasks follow. Have as
+        many Waves as you like.
       link:
         label: Tasks and Waves ↗
         href: /docs/waves
-    - label: Project
-      title: The plan
-      text: 'What the Wave is doing now: its tasks, its key results, and the workflow its tasks follow.'
       commands: |-
+        $ lf --wave exports : "Review the goal"
+        $ lf wave status exports
         $ lf task create --wave exports \
              --title "Add CSV export"
+  faq:
+    heading: FAQ
+    items:
+    - question: Is Loopflow a terminal?
+      answer: No. `lf` is a command, so it runs in the terminal you already use, cmux and herdr
+        included.
+    - question: Which coding agents does it work with?
+      answer: Claude Code, Codex, or OpenCode, on your own accounts. Loopflow uses the one you have
+        installed and signed in.
+    - question: What does my agent actually do with it?
+      answer: >-
+        It runs `lf` commands. There is one for each part of building software: planning, designing,
+        prototyping, implementing, testing, optimizing, researching, landing. Each step is its own
+        session, with a commit between them.
+    - question: What is a Flow?
+      answer: A file that puts those parts in order. `lf flow list` shows the Flows you have and
+        `lf run` starts one. Flows are YAML, kept in your repository, or you can use the built-ins.
+    - question: How much do I have to be involved?
+      answer: Stay in one session and steer as you go, come in at design and demo, or let it run.
+        Choose per task or per project.
+    - question: Do I need the Mac app?
+      answer: No. The command line tool does not need the Mac app. The Mac app includes the command
+        line tool.
+    - question: Is it free?
+      answer: Yes. Loopflow is free and open source, MIT licensed. Claude Code, Codex, and OpenCode
+        have their own cost.
+    - question: Where does it run?
+      answer: On macOS or Linux. It runs locally, and over SSH where you choose. The Mac app is for
+        macOS.
+    - question: What are Waves, Projects, Tasks and Workflows?
+      answer: Names for how the work is kept in order. A Wave is a lasting objective, with its plan
+        and its memory. A Project is what the Wave is doing now. A Task is one outcome, with its
+        own working copy, branch, and pull request. A Workflow names the points where you take
+        part in a task.
+      link:
+        label: Tasks and Waves ↗
+        href: /docs/waves
   install:
     label: Install
     heading: Start playing.
@@ -244,6 +265,7 @@ homepage:
       # macOS or Linux, with Claude Code, Codex, or OpenCode installed
       $ curl -fsSL https://loopflow.studio/install.sh | sh
       $ lf init
+    copy_label: Copy install command
     links:
     - label: Getting started ↗
       href: /docs/getting-started

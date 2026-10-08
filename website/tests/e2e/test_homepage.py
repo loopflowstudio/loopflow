@@ -8,28 +8,27 @@ from playwright.sync_api import Page, expect
 
 def test_approved_homepage_sections(homepage: Page) -> None:
     expect(homepage.locator("h1")).to_have_text("A software engineering CLI for your agents.")
-    assert homepage.locator("main > section").evaluate_all(
+    assert homepage.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["flows", "mac", "start"]
-    expect(homepage.locator(".strip > div")).to_have_count(4)
-    expect(homepage.locator("#flows .parts article")).to_have_count(3)
-    assert homepage.locator(".work-row .tag").evaluate_all(
-        "tags => tags.map(tag => tag.firstChild.textContent.trim())"
-    ) == ["Task", "Workflow", "Wave", "Project"]
+    ) == ["flows", "mac", "faq", "start"]
+    assert homepage.locator(".claim .number").all_text_contents() == [
+        f"{number:02}" for number in range(1, 9)
+    ]
+    expect(homepage.locator(".faq dt")).to_have_count(9)
 
 
-def test_hero_actions_reach_the_flow_and_install(homepage: Page) -> None:
-    for label, target in [("For you ↓", "#mac"), ("Install ↓", "#start")]:
-        homepage.locator(".home-hero").get_by_role("link", name=label).click()
-        expect(homepage.locator(target + " h2")).to_be_in_viewport()
+def test_hero_carries_the_install_command_and_its_cost(homepage: Page) -> None:
+    hero = homepage.locator(".home-hero")
+    assert "loopflow.studio/install.sh" in hero.locator("pre").text_content()
+    expect(hero.get_by_role("button", name="Copy")).to_be_visible()
+    expect(hero.locator(".cost")).to_contain_text("has its own cost")
 
 
-def test_example_loopflow_names_its_steps(homepage: Page) -> None:
-    diagram = homepage.locator("#flows svg[role=img]")
-    expect(diagram).to_be_visible()
-    expect(diagram.locator("circle.you")).to_have_count(2)
-    assert "returns to implement" in diagram.get_attribute("aria-label")
-    assert "exits to land" in diagram.get_attribute("aria-label")
+def test_both_surfaces_sit_side_by_side(homepage: Page) -> None:
+    agents = homepage.locator(".pane.agents").bounding_box()
+    you = homepage.locator(".pane.you").bounding_box()
+    assert agents["y"] == you["y"]
+    assert agents["x"] + agents["width"] <= you["x"] + 1
 
 
 def test_guide_links_resolve(homepage: Page, base_url: str) -> None:
@@ -92,10 +91,10 @@ def test_page_fits_and_terminals_scroll_within_their_cells(
 
 
 def test_body_command_names_use_monospace(homepage: Page) -> None:
-    names = homepage.locator(".strip code, .intro code")
-    expect(names).to_have_count(2)
+    names = homepage.locator(".claim p code, .faq code")
+    assert names.count() >= 4
     for name in names.all():
-        expect(name).to_have_text("lf")
+        assert name.text_content().startswith("lf")
         assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 

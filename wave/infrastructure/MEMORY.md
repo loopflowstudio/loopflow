@@ -7,12 +7,13 @@ step, skill and child-command agents; omission preserves defaults. Work stops at
 demo, without landing, logins or real provider accounts. Main already parsed the
 reported forms; installed 0.13.9's failure is historical.
 
-Explicit selection travels as invocation context; saved defaults never become
-inherited overrides. Replay preserves its source. Native history keeps its provider;
-a conflicting resume explains how to start anew. Six fixture Sessions record Claude
-across Task/Flow/provider children; no-flag launches retain declared models. Fixtures
-require isolated synthetic accounts: shared macOS activation attempted a Keychain
-write and failed. Installed/live-provider acceptance remains unproved.
+Explicit selection reaches prepared and direct launches as invocation context;
+defaults never become overrides. Six fixture Sessions record Claude across
+Task/Flow/provider children, even when a child requests Codex; no-flag launches
+retain declared models. Replay preserves its source; native history keeps its
+provider and conflicting resume explains how to start anew. Synthetic accounts
+need isolation: shared macOS activation attempted a Keychain write and failed.
+Remote and installed/live-provider acceptance remain unproved.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

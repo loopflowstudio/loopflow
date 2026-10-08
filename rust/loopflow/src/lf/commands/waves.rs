@@ -852,18 +852,23 @@ async fn wave_tasks(
         ),
     };
     if let Some(identifier) = identifier {
-        tasks.retain(|task| {
-            task.plan.identifier == identifier
-                || task.id.as_str() == identifier
-                || task
-                    .plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == identifier)
+        let selected = store
+            .sqlite
+            .resolve_task_id(identifier, Some(wave.repo()))?;
+        tasks.retain(|task| selected.as_ref() == Some(&task.id));
+        let selected = tasks.first();
+        planning.items.retain(|item| {
+            item.identifier == identifier
+                || item.id == identifier
+                || selected.as_ref().is_some_and(|task| {
+                    item.id == task.id.as_str()
+                        || task
+                            .plan
+                            .linear_id
+                            .as_ref()
+                            .is_some_and(|id| item.id == id.as_str())
+                })
         });
-        planning
-            .items
-            .retain(|item| item.identifier == identifier || item.id == identifier);
         // A failed read cannot establish that an unregistered planning Task is absent.
         if let Some(reason) = unavailable.as_ref().filter(|_| tasks.is_empty()) {
             return Ok(WaveTasks {

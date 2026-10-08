@@ -256,23 +256,16 @@ fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
 
 fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
     let store = file_store()?;
-    let mut checkouts = store
+    let task_id = store
+        .resolve_task_id(issue, None)
+        .map_err(task_error)?
+        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    let checkout = store
         .task_checkouts()
         .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
         .into_iter()
-        .filter(|row| {
-            row.task_id.as_str() == issue
-                || row.issue_id.as_deref() == Some(issue)
-                || row.issue_identifier == issue
-        });
-    let checkout = checkouts
-        .next()
-        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
-    if checkouts.next().is_some() {
-        return Err(task_error(format!(
-            "multiple stable Tasks resolve to {issue:?}"
-        )));
-    }
+        .find(|row| row.task_id == task_id)
+        .ok_or_else(|| task_error(format!("Task {issue:?} has no checkout")))?;
     if let Some(home) = &checkout.machine_id {
         if *home != store.local_machine().map_err(task_error)?.id {
             return Err(task_error(format!(
@@ -6286,6 +6279,8 @@ mod tests {
                 for issue in [
                     "FILES-1",
                     fixture.task.id.as_str(),
+                    &fixture.task.id.as_str()[5..9],
+                    &fixture.task.id.as_str()[..9],
                     fixture.task.plan.linear_id.as_ref().unwrap().as_str(),
                 ] {
                     let file = super::task_file(issue, "scratch/note.md", false).unwrap();

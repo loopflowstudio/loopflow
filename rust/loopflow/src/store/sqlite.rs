@@ -95,7 +95,6 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
-    pub issue_id: Option<String>,
     pub issue_identifier: String,
     pub worktree: PathBuf,
     pub machine_id: Option<crate::durable::MachineId>,

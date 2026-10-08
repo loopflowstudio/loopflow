@@ -146,9 +146,12 @@ lf task create --wave personal:parser --title "Retain escaped quotes"
 Creation prints its retry identity before attempting the write. Repeat the original
 options with `--creation-id <task-id>` to recover an interrupted creation. A new
 creation without that identity creates a distinct Task, even with the same title.
-Full Task IDs and unambiguous `lf-` UUID prefixes select local Tasks. Existing
-Linear ticket aliases continue to select connected Tasks. Displayed local selectors
-start at twelve UUID digits and extend when needed; retain full IDs in automation.
+Task references accept unique UUID prefixes of at least four hex digits, bare or
+prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
+Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
+add digits to select one. Full IDs and exact Linear ticket aliases still work.
+Displayed local selectors start at seven digits and extend when needed; retain
+full IDs in automation.
 
 ```bash
 lf task edit <id> --rank 0 --assignee <person-id>

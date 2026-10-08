@@ -11,7 +11,7 @@
         "id": "00000000-0000-4000-8000-000000000001"
       }
     ],
-    "identifier": "lf-0123456789ab"
+    "identifier": "lf-0123456"
   },
   "task": {
     "actions": {
@@ -68,7 +68,7 @@
       "completed_at": null,
       "description": "Keep the escaped quote",
       "id": "task_0123456789ab40008000000000000001",
-      "identifier": "lf-0123456789ab",
+      "identifier": "lf-0123456",
       "name": "Retain quoted input",
       "rank": 0,
       "state": "unstarted"

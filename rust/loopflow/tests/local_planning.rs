@@ -593,6 +593,66 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
 }
 
 #[test]
+fn public_task_prefixes_resolve_and_report_ambiguity() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let first = "task_abcd1234400080000000000000000001";
+    let second = "task_abcd1235400080000000000000000002";
+    for (id, title) in [(first, "First"), (second, "Second")] {
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "create",
+                "--title",
+                title,
+                "--creation-id",
+                id,
+                "--json",
+            ],
+        );
+    }
+    for selector in ["abcd1234", "ABCD1234", "lf-abcd1234", "task_abcd1234"] {
+        let status = lf(
+            repo.path(),
+            home.path(),
+            &["task", "status", selector, "--json"],
+        );
+        assert_eq!(status["execution"]["task_id"], first);
+        assert_eq!(status["planning"]["item"]["identifier"], "lf-abcd1234");
+    }
+    let failed = command(
+        repo.path(),
+        home.path(),
+        &["task", "edit", "abcd", "--title", "Wrong target"],
+    )
+    .output()
+    .unwrap();
+    assert!(!failed.status.success());
+    let error = String::from_utf8_lossy(&failed.stderr);
+    assert!(error.contains(first));
+    assert!(error.contains(second));
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "edit", "abcd1234", "--title", "Chosen target"],
+    );
+    let status = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", first, "--json"],
+    );
+    assert_eq!(status["planning"]["item"]["name"], "Chosen target");
+    let other = lf(
+        repo.path(),
+        home.path(),
+        &["task", "status", second, "--json"],
+    );
+    assert_eq!(other["planning"]["item"]["name"], "Second");
+}
+
+#[test]
 fn public_local_planning_survives_creation_reply_loss_and_restart() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

@@ -226,20 +226,19 @@ impl SqliteStore {
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.machine_id
+            "SELECT t.id, t.issue_identifier, t.worktree, p.machine_id
              FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id WHERE t.worktree IS NOT NULL",
         )?;
         let rows = statement.query_map([], |row| {
-            let home: Option<String> = row.get(4)?;
+            let home: Option<String> = row.get(3)?;
             Ok(super::TaskCheckout {
                 task_id: TaskId::from_raw(row.get::<_, String>(0)?),
-                issue_id: row.get(1)?,
-                issue_identifier: row.get(2)?,
-                worktree: PathBuf::from(row.get::<_, String>(3)?),
+                issue_identifier: row.get(1)?,
+                worktree: PathBuf::from(row.get::<_, String>(2)?),
                 machine_id: home
                     .map(|id| crate::durable::MachineId::parse(&id))
                     .transpose()
-                    .map_err(|error| invalid_column(4, error))?,
+                    .map_err(|error| invalid_column(3, error))?,
             })
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
@@ -370,17 +369,52 @@ impl SqliteStore {
     }
 
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
-        let local_prefix = issue.strip_prefix("lf-");
+        match self.resolve_task_id(issue, None)? {
+            Some(id) => self.task(&id),
+            None => Ok(None),
+        }
+    }
+
+    /// Resolve identity without requiring Project metadata or checkout placement.
+    pub(crate) fn resolve_task_id(
+        &self,
+        issue: &str,
+        repo: Option<&str>,
+    ) -> StoreResult<Option<TaskId>> {
+        let prefix = issue
+            .strip_prefix("lf-")
+            .or_else(|| issue.strip_prefix("task_"))
+            .unwrap_or(issue);
+        let local_prefix = ((4..=32).contains(&prefix.len())
+            && prefix.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| prefix.to_ascii_lowercase());
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let query = format!(
-            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR (length(?2)>=12 AND substr(t.id, 6, length(?2))=?2)"
-        );
-        let mut statement = conn.prepare(&query)?;
-        let tasks = statement
-            .query_map(params![issue, local_prefix], map_task_row)?
+        let mut statement = conn.prepare(
+            "SELECT t.id, t.issue_title FROM tasks t
+             LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
+             WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
+                OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
+             ORDER BY t.id",
+        )?;
+        let mut tasks = statement
+            .query_map(params![issue, local_prefix, repo], |row| {
+                Ok((
+                    TaskId::from_raw(row.get::<_, String>(0)?),
+                    row.get::<_, String>(1)?,
+                ))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        resolve_current_task(issue, tasks)
+        if tasks.len() > 1 {
+            let candidates = tasks
+                .iter()
+                .map(|(id, title)| format!("  {id} ({title})"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(StoreError::InvalidData(format!(
+                "multiple stable Tasks resolve to {issue:?}; use a longer Task ID:\n{candidates}"
+            )));
+        }
+        Ok(tasks.pop().map(|(id, _)| id))
     }
 
     pub fn task_by_branch(&self, branch: &str) -> StoreResult<Option<Task>> {
@@ -1327,7 +1361,7 @@ const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL AND (
     OR NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)
 )";
 const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
-    SELECT 12 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
+    SELECT 7 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
 ) SELECT
     t.id, t.external_issue_id,
     CASE WHEN t.issue_identifier='lf-' || substr(t.id,6) THEN
@@ -2197,8 +2231,20 @@ mod local_planning_tests {
             description: String::new(),
         };
         let first = store.create_local_task(&input).unwrap();
-        assert_eq!(first.plan.identifier, "lf-0123456789ab");
-        assert!(store.task_by_issue("lf-0123456789a").unwrap().is_none());
+        assert_eq!(first.plan.identifier, "lf-0123456");
+        for selector in ["0123", "0123456789A", "lf-0123", "task_0123"] {
+            assert_eq!(store.task_by_issue(selector).unwrap().unwrap().id, first.id);
+        }
+        for selector in [
+            "012",
+            "lf-012",
+            "task_012",
+            "012z",
+            "0123%",
+            "fffffffffffffffffffffffffffffffff",
+        ] {
+            assert!(store.task_by_issue(selector).unwrap().is_none());
+        }
         assert_eq!(
             store.task_by_issue("lf-0123456789ab").unwrap().unwrap().id,
             first.id
@@ -2209,7 +2255,12 @@ mod local_planning_tests {
                 ..input
             })
             .unwrap();
-        assert!(store.task_by_issue("lf-0123456789ab").is_err());
+        for selector in ["0123", "lf-0123", "task_0123", "lf-0123456789ab"] {
+            let error = store.task_by_issue(selector).unwrap_err().to_string();
+            assert!(error.contains(first.id.as_str()));
+            assert!(error.contains(second.id.as_str()));
+            assert!(error.contains("use a longer Task ID"));
+        }
         let first = store.task(&first.id).unwrap().unwrap();
         assert_eq!(first.plan.identifier.len(), 35);
         assert_eq!(second.plan.identifier.len(), 35);

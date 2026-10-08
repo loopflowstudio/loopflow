@@ -187,7 +187,6 @@ mod tests {
         let id = TaskId::new();
         let checkout = TaskCheckout {
             task_id: id.clone(),
-            issue_id: Some("issue".into()),
             issue_identifier: "TEST-1".into(),
             worktree: repo.path().to_path_buf(),
             machine_id: Some(home.clone()),

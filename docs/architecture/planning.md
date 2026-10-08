@@ -46,7 +46,9 @@ the original Project and input through later edits and rotation. Independent req
 with identical titles remain distinct. The same transaction owns local field edits,
 assignment, Project ordering and comments. Revisions are local write concurrency,
 not fabricated provider observation times. Local Task selection displays the shortest
-unique UUID prefix of at least twelve digits; full IDs remain stable.
+unique UUID prefix of at least seven digits; full IDs remain stable. References
+accept four or more case-insensitive hex digits, bare or after `lf-`/`task_`;
+ambiguous references return candidates instead of selecting a Task.
 
 Checkout allocation records the Task's first PR and placement before filesystem
 creation, so retry repairs the same allocation. Native launch and resume retain the

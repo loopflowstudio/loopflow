@@ -2,7 +2,7 @@
 //! Providers retain ownership of native history and terminal output.
 
 use std::fs;
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
         return Ok(None);
     }
     let event = input["hook_event_name"].as_str().unwrap_or_default();
-    if event != "UserPromptSubmit" && !(event == "SessionStart" && input["source"] == "resume") {
+    if event != "UserPromptSubmit" {
         return Ok(None);
     }
     // lf's assembled context has its own attributed name and title transport.
@@ -49,12 +49,7 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
             {
                 return Ok(None);
             }
-            let request = if event == "UserPromptSubmit" {
-                input["prompt"].as_str().map(str::to_owned)
-            } else {
-                claude_first_request(input)?
-            };
-            Ok(request.as_deref().and_then(crate::engine::naming::request_title).map(|title| {
+            Ok(input["prompt"].as_str().and_then(crate::engine::naming::request_title).map(|title| {
                 json!({"hookSpecificOutput": {"hookEventName": event, "sessionTitle": title}})
             }))
         }
@@ -71,37 +66,6 @@ pub(crate) fn name_native_session(provider: &str, input: &Value) -> anyhow::Resu
         }
         _ => Err(anyhow!("unsupported title provider {provider}")),
     }
-}
-
-fn claude_first_request(input: &Value) -> anyhow::Result<Option<String>> {
-    let Some(path) = input["transcript_path"].as_str() else {
-        return Ok(None);
-    };
-    let file = fs::File::open(path)?;
-    for line in std::io::BufReader::new(file).lines() {
-        let entry: Value = serde_json::from_str(&line?)?;
-        if entry["type"] != "user" || entry["isMeta"] == true {
-            continue;
-        }
-        if let Some(request) = message_text(&entry["message"]["content"]) {
-            return Ok(Some(request));
-        }
-    }
-    Ok(None)
-}
-
-fn message_text(content: &Value) -> Option<String> {
-    if let Some(text) = content.as_str() {
-        return Some(text.to_owned());
-    }
-    let text = content
-        .as_array()?
-        .iter()
-        .filter(|item| item["type"] == "text")
-        .filter_map(|item| item["text"].as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
-    (!text.is_empty()).then_some(text)
 }
 
 async fn name_codex_session(input: &Value) -> anyhow::Result<()> {
@@ -128,26 +92,15 @@ async fn name_codex_session(input: &Value) -> anyhow::Result<()> {
     let detail = rpc_request(
         &mut connection,
         "thread/read",
-        json!({
-            "threadId": id, "includeTurns": input["hook_event_name"] == "SessionStart"
-        }),
+        json!({"threadId": id, "includeTurns": false}),
     )
     .await?;
     let thread = &detail["thread"];
     if thread["name"].as_str().is_some_and(|name| !name.is_empty()) {
         return Ok(());
     }
-    let request = input["prompt"].as_str().map(str::to_owned).or_else(|| {
-        thread["turns"]
-            .as_array()?
-            .iter()
-            .filter_map(|turn| turn["items"].as_array())
-            .flatten()
-            .filter(|item| item["type"] == "userMessage")
-            .find_map(|item| message_text(&item["content"]))
-    });
-    if let Some(title) = request
-        .as_deref()
+    if let Some(title) = input["prompt"]
+        .as_str()
         .and_then(crate::engine::naming::request_title)
     {
         rpc_request(
@@ -187,25 +140,17 @@ pub(crate) fn install_native_hooks(home: &Path) -> anyhow::Result<()> {
             .as_object_mut()
             .ok_or_else(|| anyhow!("{} hooks must be an object", path.display()))?;
         let command = format!("lf __session-title {provider}");
-        for event in ["SessionStart", "UserPromptSubmit"] {
-            let entries = hooks
-                .entry(event)
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-                .ok_or_else(|| anyhow!("{event} hooks must be an array"))?;
-            if entries.iter().any(|entry| {
-                (event != "SessionStart" || entry["matcher"] == "resume")
-                    && entry["hooks"].as_array().is_some_and(|handlers| {
-                        handlers.iter().any(|handler| handler["command"] == command)
-                    })
-            }) {
-                continue;
-            }
-            let mut entry = json!({"hooks": [{"type":"command", "command":command, "timeout":5}]});
-            if event == "SessionStart" {
-                entry["matcher"] = json!("resume");
-            }
-            entries.push(entry);
+        let entries = hooks
+            .entry("UserPromptSubmit")
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .ok_or_else(|| anyhow!("UserPromptSubmit hooks must be an array"))?;
+        if !entries.iter().any(|entry| {
+            entry["hooks"].as_array().is_some_and(|handlers| {
+                handlers.iter().any(|handler| handler["command"] == command)
+            })
+        }) {
+            entries.push(json!({"hooks": [{"type":"command", "command":command, "timeout":5}]}));
         }
         if document == original {
             continue;
@@ -231,7 +176,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn native_claude_names_requests_and_unnamed_resumes_preserving_custom_names() {
+    fn native_claude_names_requests_preserving_custom_names() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".lf")).unwrap();
         let mut input = json!({"cwd":root.path(), "hook_event_name":"UserPromptSubmit",
@@ -246,20 +191,6 @@ mod tests {
         input.as_object_mut().unwrap().remove("session_title");
         input["prompt"] = json!(crate::engine::prompt::INITIAL_TURN_PROMPT);
         assert!(name_native_session("claude", &input).unwrap().is_none());
-        let transcript = root.path().join("transcript.jsonl");
-        std::fs::write(&transcript, concat!(
-            "{\"type\":\"user\",\"isMeta\":true,\"message\":{\"content\":\"Loopflow operating guide\"}}\n",
-            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Repair native titles today\"}]}}\n"
-        )).unwrap();
-        input.as_object_mut().unwrap().remove("prompt");
-        input["hook_event_name"] = json!("SessionStart");
-        input["source"] = json!("resume");
-        input["transcript_path"] = json!(transcript);
-        assert_eq!(
-            name_native_session("claude", &input).unwrap().unwrap()["hookSpecificOutput"]
-                ["sessionTitle"],
-            "Repair native titles"
-        );
         std::fs::remove_dir(root.path().join(".lf")).unwrap();
         assert!(name_native_session("claude", &input).unwrap().is_none());
     }
@@ -297,7 +228,12 @@ mod tests {
         let codex: serde_json::Value =
             serde_json::from_slice(&std::fs::read(home.path().join(".codex/hooks.json")).unwrap())
                 .unwrap();
-        assert_eq!(codex["hooks"]["SessionStart"][0]["matcher"], "resume");
+        assert!(codex["hooks"].get("SessionStart").is_none());
+        assert_eq!(
+            codex["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            "lf __session-title codex"
+        );
+        assert!(installed["hooks"].get("SessionStart").is_none());
         assert!(home.path().join(".codex/hooks.json").is_symlink());
         assert_eq!(
             std::fs::read(shared).unwrap(),

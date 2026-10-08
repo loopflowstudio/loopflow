@@ -3,13 +3,13 @@
 ## Session titles (LOO-439, 2026-10-08)
 
 Jack Heart authorized account-free demo, preserving windows; no landing.
-Native TUIs prove first-request naming and named resume with Codex defaults;
-Claude names unnamed resumes. Inspected 0.161.0 interfaces lack embedded naming,
-per-attach hooks, provenance and conditional writes. Instruction titles survive;
-concurrent renames remain unproved. Provider work or Jack's scope decision
-remains unselected. TUI success proves no shim,
-installation or host agreement. cmux denied creation; settings/windows unchanged.
-Plan: `scratch/every-lf-session-in-cmux.md`.
+October 8 correction `283fa7b5-3fdd-4457-9170-0de821534803` selects maximum
+supported future coverage: lf/plain, interactive/headless, Task/taskless. Existing
+conversations are out; resume hooks/readers/probes removed. No provider work.
+Claude TUI/headless and shared-server Codex TUI name new requests. Embedded Codex
+and plain exec lack the inspected naming endpoint; demo table records gaps.
+cmux denied unfocused creation. No host/shim/installation acceptance; settings
+and windows unchanged. Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 
@@ -383,11 +383,10 @@ supersede older Run-owner, historical-import, pinned-development-Home and
 demo-before-landing directions for this cutover. Earlier incident observations
 remain evidence of their own versions, not instructions to restore those owners.
 
-## Installed worker recovery (curated 2026-10-08)
+## Installed worker recovery
 
-October 2 evidence: `6448e3c9e7:wave/infrastructure/MEMORY.md`, this heading.
-LOO-295/292 closed above; LOO-373 retains placement repair. Manual releases prove
-no scheduled settlements; the operator's batching proposal remains unapproved.
+LOO-295/292 closed; LOO-373 retains placement repair. Evidence and unapproved
+batching: `10ca6bd39:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Optional chapters and Task workflows (2026-10-02)
 

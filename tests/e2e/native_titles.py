@@ -2,7 +2,7 @@
 # requires-python = ">=3.10"
 # dependencies = ["websockets>=15,<16", "pyte>=0.8,<0.9"]
 # ///
-"""Probe native title hooks in real TUIs, private homes, and a local fake API."""
+"""Probe titles of new native sessions with private homes and a local fake API."""
 
 import argparse
 import fcntl
@@ -184,7 +184,7 @@ def _probe(
     lf: Path,
     executable: Path,
     provider: str,
-    unnamed: bool,
+    headless: bool,
     output: Path,
 ) -> None:
     # Short paths are required by AF_UNIX. Retain only synthetic evidence on failure.
@@ -192,8 +192,7 @@ def _probe(
     home, work = root / "home", root / "work"
     home.mkdir()
     work.mkdir()
-    if not unnamed:
-        (work / ".lf").mkdir()
+    (work / ".lf").mkdir()
     (work / "AGENTS.md").write_text(
         "# Loopflow operating guide\nName conversations for the requested work.\n"
     )
@@ -210,7 +209,6 @@ def _probe(
     hooks = {
         "hooks": {
             "UserPromptSubmit": [{"hooks": [handler]}],
-            "SessionStart": [{"matcher": "resume", "hooks": [handler]}],
         }
     }
     (native / ("settings.json" if provider == "claude" else "hooks.json")).write_text(
@@ -258,10 +256,55 @@ enabled=false
 trust_level="trusted"
 ''')
         command = [str(executable), "--no-alt-screen"]
-    tui = _Tui(command, work, env)
+    tui = None
     connection = None
     passed = False
     try:
+        if headless:
+            if provider == "claude":
+                command += ["-p", "--output-format", "json"]
+            else:
+                command = [
+                    str(executable),
+                    "exec",
+                    "--skip-git-repo-check",
+                    "--dangerously-bypass-hook-trust",
+                    "--json",
+                ]
+            result = subprocess.run(
+                [*command, "Plan store migration for archived tasks"],
+                cwd=work,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=45,
+            )
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "stdout.jsonl").write_bytes(result.stdout)
+            (output / "stderr.txt").write_bytes(result.stderr)
+            assert result.returncode == 0, result.stderr.decode(errors="replace")
+            assert b"fixture response" in result.stdout, result.stdout
+            records = [
+                json.loads(line)
+                for path in native.rglob("*.jsonl")
+                for line in path.read_text().splitlines()
+            ]
+            names = [entry.get("customTitle") or entry.get("thread_name") for entry in records]
+            names = [name for name in names if name]
+            evidence = {
+                "provider": provider,
+                "headless": True,
+                "titled": "Plan store migration" in names,
+                "names": names,
+                "shared_socket": (native / "app-server-control/app-server-control.sock").exists(),
+            }
+            (output / "naming.json").write_text(json.dumps(evidence, indent=2))
+            if provider == "claude":
+                assert evidence["titled"], "headless Claude did not save the request title"
+            print(json.dumps(evidence), flush=True)
+            passed = True
+            return
+        tui = _Tui(command, work, env)
         tui.ready()
         tui.enter("Plan store migration for archived tasks")
         tui.drain(5)
@@ -280,47 +323,18 @@ trust_level="trusted"
                 for item in threads
                 if item["preview"] == "Plan store migration for archived tasks"
             )
-            session = thread["id"]
-            assert thread["name"] == (None if unnamed else "Plan store migration"), thread["name"]
-        else:
-            entries = [
-                json.loads(line)
-                for path in (native / "projects").rglob("*.jsonl")
-                for line in path.read_text().splitlines()
-            ]
-            session = next(entry["sessionId"] for entry in entries if entry.get("type") == "user")
-        if not unnamed:
-            assert tui.has_title("Plan store migration"), "first request did not reach OSC"
-            tui.enter("/rename Manual release notes")
-            tui.drain(2)
-            tui.enter("Other work entirely")
-            tui.drain(3)
-            assert tui.has_title("Manual release notes"), "native rename did not reach OSC"
+            assert thread["name"] == "Plan store migration", thread["name"]
+        assert tui.has_title("Plan store migration"), "first request did not reach OSC"
+        tui.enter("/rename Manual release notes")
+        tui.drain(2)
+        tui.enter("Other work entirely")
+        tui.drain(3)
+        assert tui.has_title("Manual release notes"), "native rename did not reach OSC"
         output.mkdir(parents=True, exist_ok=True)
         (output / "initial.ansi").write_bytes(tui.raw)
-        tui.close()
-        tui = None
-        if unnamed:
-            (work / ".lf").mkdir()
-        resume = [*command, "resume" if provider == "codex" else "--resume", session]
-        tui = _Tui(resume, work, env)
-        tui.ready()
-        tui.drain(5)
-        expected = "Plan store migration" if unnamed else "Manual release notes"
-        (output / "resume.ansi").write_bytes(tui.raw)
-        assert tui.has_title(expected), f"resume did not preserve {expected}"
-        if connection:
-            assert (
-                _rpc(connection, "thread/read", {"threadId": session})["thread"]["name"] == expected
-            )
         print(
             json.dumps(
-                {
-                    "provider": provider,
-                    "unnamed_resume": unnamed,
-                    "passed": True,
-                    "evidence": str(output),
-                }
+                {"provider": provider, "headless": False, "passed": True, "evidence": str(output)}
             ),
             flush=True,
         )
@@ -331,7 +345,7 @@ trust_level="trusted"
             tui.close()
         if connection:
             connection.close()
-        if provider == "codex":
+        if provider == "codex" and not headless:
             subprocess.run(
                 [str(executable), "app-server", "daemon", "stop"],
                 cwd=work,
@@ -354,14 +368,14 @@ def main() -> None:
         "--native", type=Path, required=True, help="Provider binary, without a host shim"
     )
     parser.add_argument("--provider", choices=["claude", "codex"], required=True)
-    parser.add_argument("--unnamed-resume", action="store_true")
+    parser.add_argument("--headless", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     _probe(
         args.lf.resolve(),
         args.native.resolve(),
         args.provider,
-        args.unnamed_resume,
+        args.headless,
         args.output,
     )
 

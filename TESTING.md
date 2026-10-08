@@ -108,9 +108,10 @@ to reproduce a matrix failure or when release guidance requires it.
 API with fresh provider and Loopflow homes. Pass `--lf`, `--native`, `--provider`
 and `--output`; prepare its inline dependencies with `uv run ... --help`, then run
 it through `scripts/test_network.py` with `uv run --offline`. It checks first-request
-OSC titles, native manual rename and resume. `--unnamed-resume` checks an older
-unnamed conversation: Claude passes; Codex currently reproduces the missing
-SessionStart callback when its daemon still has the thread loaded. No installed
+OSC titles and native manual rename. `--headless` checks new `claude -p` and
+`codex exec` conversations, saving naming readback beside stdout/stderr. Claude
+saves the name; Codex currently records the missing embedded naming endpoint.
+Old conversations and resume repair are out of scope. No installed
 accounts, host shims, or cmux windows participate.
 The probe uses native terminal-title defaults and checks the latest OSC title,
 so an earlier correct title cannot hide a later overwrite. This does not cover

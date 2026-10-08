@@ -179,9 +179,9 @@ repositories with `.lf`, plain Claude and Codex use the first request as a short
 name when unnamed. Existing names stay, including instruction-derived titles;
 preservation during concurrent renames remains unproved. Review the installed
 hooks with Codex's `/hooks`.
-Codex naming requires its shared app-server; embedded launches and reconnecting
-to already-loaded unnamed threads are not covered. Claude can name an unnamed
-resume from its original request. Native providers own their terminal output.
+Claude naming also works with `claude -p`. Codex naming requires its shared
+app-server; embedded launches and `codex exec` lack that naming endpoint.
+No resume hooks repair old conversations. Native providers own their terminal output.
 
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists

@@ -74,7 +74,7 @@ boundary executors remain domain-specific because their settlement rules differ.
                                       |
                         +-------------v------------+
                         | multi-Machine placement     |
-                        | MachineId / lf ssh          |
+                        | MachineId / lf --machine          |
                         +-------------+------------+
                                       |
                         +-------------v------------+
@@ -108,7 +108,7 @@ boundary executors remain domain-specific because their settlement rules differ.
   each Task Flow is a fresh driver process and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
 - **Multi-Machine placement:** run the same commands on a selected machine through
-  explicit `lf ssh`.
+  explicit `lf --machine`.
 - **Surfaces:** derive CLI and Mac views from planning facts, provider truth,
   local process observation, and command/conversation history.
 
@@ -131,7 +131,7 @@ user / automation -> lf -------- domain APIs ----+
           v
  repository + Git worktrees
 
-exact local races use OS locks; remote execution uses lf ssh
+exact local races use OS locks; remote execution uses lf --machine
 ```
 
 - **Tracked Work** records purpose, input and convergence; each Flow's driver
@@ -484,7 +484,7 @@ provider, and literal subprocess edge must appear exactly once.
 | **Steer** — correction to Task advancement | Linear comment id/revision; Task identity selects its Runs | [`Steer`](../rust/loopflow/src/durable.rs), [`TaskEventKind`](../rust/loopflow/src/work/task/mod.rs) | Linear Task comments; local Task events cache delivery | Task Runs refresh comments into their starting context | `lf comment`, Linear issue comments | Linear |
 | **Tool response** — one idempotent response to a Work-scoped tool request | Stable Work identity plus request id names the response slot; a second, different answer is rejected. | [`ToolResponseWrite`](../rust/loopflow/src/durable.rs), [`ToolResponseReceipt`](../rust/loopflow/src/durable.rs) | `tool_responses` | Store transaction | Internal Work store API | — |
 | **AgentSession** — one conversation | Session row owns name, ancestry, readiness, completion and publication. Its current capture references an immutable history event written at reservation. Earlier events retain caller and Work attribution. Complete returns saved feedback; the following typed decision chooses navigation. | `SessionRecord`, `SessionId` | `agent_sessions`, `session_events`; `session_activity` holds driver stream readings and terminal-reported status | Native turn observation retains start/usage/completion; `lf __provider-session` records native identity; Session operations own state | `lf session`, interactive `lf` | — |
-| **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf installation`, `lf ssh`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
+| **Machine / Placement / Promotion** — stable machine identity, Work placement, and artifact selection | `MachineId` is identity; SSH route is mutable. Placement is planning state and never process ownership. Promotion owns immutable artifact selection, isolated schema proof, app replacement, and rollback only. Install selects the latest published release independently of caller Git state; the laptop schedule invokes that same command. Checkout updates belong to sync. | [`Machine`](../rust/loopflow/src/durable.rs), [`Placement`](../rust/loopflow/src/durable.rs), [`SwitchReceipt`](../rust/loopflow/src/installation.rs), [`published installation`](../rust/loopflow/src/lf/commands/install/published.rs) | `machines`, `work_placements`; Machine-local SQLite; installation selection and switch receipts; laptop refresh LaunchAgent | The promotion command owns its OS-locked switch transaction | `lf machine`, `lf installation`, `lf --machine`, `lf install`, `lf schedule` | `process:ssh`, `process:launchctl`, `process:systemctl`, `process:/usr/bin/open`, `process:/usr/bin/osascript`, `process:brew`, `process:/bin/sh`, `process:tmux` |
 | **Session history projections** — captured events and exact provider evidence | AgentSession owns provider outcomes and Process owns command outcomes; original payload and exact process receipts confer no Flow authority. | `SessionCaptureSpec`, `SessionCaptureManifest`, `SessionHistory`, `ProviderHistory`, `SessionUsage` | Projects AgentSession-owned input/history; Machine-local `runs/<prefix>/<run-id>/` immutable payload and process receipts | shared conversation admission and history | `lf mon show`, `lf replay`, `lf usage`, `lf activity`; Work/status history | `process:lf`, provider harnesses |
 | **Browser capture** — one isolated, bounded screenshot transaction | The requested source, viewport, and output name the transaction; only a validated PNG replaces the output. The standalone shell identity and fresh process group keep capture separate from the user's browser and bound to its owner. | [`ScreenshotArgs`](../rust/loopflow/src/lf/mod.rs), [`ProcessGroupGuard`](../rust/loopflow/src/engine/process.rs) | Output PNG only; no control-store state | `lf __screenshot-supervisor` owns one `chrome-headless-shell` process group and observes the public command through a control pipe | `lf screenshot` | `process:chrome-headless-shell` |
 | **Process** — one actual lf process | The journal transaction records command completion and fixes each child's causal parent at admission. Agent provenance grants no control authority. | [`ProcessLfid`](../rust/loopflow/src/id.rs), [`AgentCaller`](../rust/loopflow/src/process.rs) | `processes` | Outermost foreground command; installation/bootstrap coverage remains a cutover obligation | `lf monitor`, `lf mon list`; ordinary parsed CLI commands | — |
@@ -590,10 +590,10 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | Worktree and delivery operations | Exact repository/Task/GitHub object |
 | `lf monitor`, `usage`, `ps`, `top`, `mon prune`, `doctor` | Execution and process observation | Current Machine only |
 | `lf machine`, `lf wave place` | Machine identity and Work placement | Current Machine unless routed explicitly |
-| `lf ssh <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |
+| `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |
 | Loopflow.app | Swift projections and user interaction | Queries the same DTOs and remote routes; owns no lifecycle |
 
-Most commands are local by default. `lf ssh` is transport, not a second API:
+Most commands are local by default. `lf --machine` is transport, not a second API:
 the inner `lf` and separator are implicit, the target re-resolves its own Machine
 state, and durable processes scrub foreground-forwarded secrets before
 detaching.
@@ -898,7 +898,7 @@ Loopflow.app / shell / external harness
 ```
 
 Wave operations are finite conversations. Tasks drive their selected invocation; finite
-`lf pr reconcile` checks observe delivery. Crossing Machines is an explicit `lf ssh` hop
+`lf pr reconcile` checks observe delivery. Crossing Machines is an explicit `lf --machine` hop
 whose target proves its Machine identity.
 
 ### Multi-Machine placement and execution
@@ -907,9 +907,10 @@ whose target proves its Machine identity.
 Work to a Machine and stores eligibility, never liveness or signal authority.
 
 ```bash
-lf observe <machine-id> ssh://jack@mini.local
+lf machine add jack@mini.local --label mini
+lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf ssh <machine-id> --wave product wave/operate
+lf --machine <machine-id> --wave product wave/operate
 ```
 
 The target uses its own store, repository, provider homes, OS locks and payload
@@ -984,7 +985,7 @@ attribution store.
 | Area | Safe extension | Architectural constraint |
 | --- | --- | --- |
 | Execution queries | Add an index for a measured Process or AgentSession query | Filter before payload IO; identity/ancestry come from the owning row, never fallback files |
-| Multi-Machine views | Fan out read-only commands through `lf ssh` | Do not centralize Machine-local execution ownership or silently mix local and remote scope |
+| Multi-Machine views | Fan out read-only commands through `lf --machine` | Do not centralize Machine-local execution ownership or silently mix local and remote scope |
 | Process control | Publish birth-validated ownership at the launcher spawn seam | No PID/tmux/Work/telemetry inference |
 | Planning input | Add a naturally keyed fact or provider observation | Do not create a global input revision protocol |
 | Provider support | Add a provider adapter, account route, and normalized stream mapping | Provider credentials/finality remain provider-authored |
@@ -1072,7 +1073,7 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
   recovery child; causal identity does not bypass Git or PR mutation authority.
 - Store copies preserve evidence without acquiring process authority. Promotion
   and historical-writer continuity remain separate proof obligations.
-- Reads are Machine-local unless explicitly routed by `lf ssh`. Indexed summaries
+- Reads are Machine-local unless explicitly routed by `lf --machine`. Indexed summaries
   precede payload IO; retired files are never identity fallback.
 - DTO fields are required unless explicitly optional; Rust/Swift consumers and
   fixtures migrate together.

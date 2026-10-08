@@ -101,6 +101,8 @@ fn pm_show_requires_team_identity_even_without_project_ownership() {
 #[test]
 fn wave_detail_preserves_flow_and_requires_machine() {
     let snapshot: WaveDetailSnapshot = serde_json::from_str(WAVE_DETAIL).unwrap();
+    assert_eq!(snapshot.wave.machine.label.as_deref(), Some("mini"));
+    assert_eq!(snapshot.wave.machine.repo.as_deref(), Some("src/project"));
     assert_eq!(
         snapshot.project_readiness.state,
         loopflow::store::sqlite::ProjectReadinessState::Ready

@@ -315,10 +315,11 @@ to bring relevant findings into the parent's memory.
 
 ```bash
 lf id
-lf observe <machine-id> ssh://jack@mini.local
+lf machine add jack@mini.local --label mini
+lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf ssh <machine-id> --wave shipper wave/operate
-lf ssh <machine-id> wave status shipper --json
+lf --machine <machine-id> --wave shipper wave/operate
+lf --machine <machine-id> wave status shipper --json
 ```
 
 A Machine is a stable machine identity with a replaceable route. Placement records

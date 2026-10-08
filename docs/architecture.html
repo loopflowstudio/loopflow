@@ -1758,7 +1758,7 @@ user / agent --&gt; lf CLI --------+----------+-----------+
                               v
                   status / roadmap / usage / app
 
-another machine is another Machine; cross it explicitly with `lf ssh`
+another machine is another Machine; cross it explicitly with `lf --machine`
 </code></pre>
 <p>There is no central Loopflow server. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
@@ -1925,8 +1925,8 @@ questions and helpers use attributed AgentSessions without gaining Flow
 authority. Flows hold autonomous steps only; review happens in the Task
 conversation.</p>
 <h3 id="another-machine">Another machine<a class="anchor-link" href="#another-machine" title="Link to this section">#</a></h3>
-<pre tabindex="0"><code class="language-bash">lf ssh build-home session list --json
-lf ssh build-home --wave product wave/operate
+<pre tabindex="0"><code class="language-bash">lf --machine build-home session list --json
+lf --machine build-home --wave product wave/operate
 </code></pre>
 <p>The origin transports one command. The target resolves its own Machine state and
 runs the same <code>lf</code>. Reads are local unless this hop is explicit.</p>

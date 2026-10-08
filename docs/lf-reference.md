@@ -12,6 +12,8 @@ are internal process boundaries and are marked below.
 
 ## Selection and output
 
+`--machine <label-or-id>` runs the command in the saved remote repository.
+`--secret` and `--forward-agent` require `--machine`.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
@@ -65,6 +67,9 @@ Open Loopflow or run its CLI
 | `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--max-turns` | Maximum agent turns for this invocation |
+| `--machine` | Run the command on this saved machine in its repository |
+| `--secret` | Resolve a named Doppler secret locally and forward its value (repeatable) |
+| `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
 | `--steers-after` | Give the agent only Task direction newer than this steer |
@@ -932,7 +937,7 @@ Internal command; invoked by the owning operation.
 
 ## lf machine
 
-Inspect this Machine and observe routes to other Machines
+Name and connect to machines
 
 | Argument | What it does |
 |---|---|
@@ -968,21 +973,6 @@ Diagnose installation, storage, Process integrity and scheduled receipts
 | `--json` | Emit the audit as JSON Default: false. |
 | `--help / -h` | Print help |
 
-## lf machine ssh
-
-Run lf on a Machine or SSH host carrying your local credentials
-
-| Argument | What it does |
-|---|---|
-| `--account` | Prefer this origin account when the remote lf chooses a provider |
-| `--only-account` | Restrict remote provider launches to these origin accounts |
-| `<target>` | MachineId (preferred), SSH alias, or user@host |
-| `--repo` | Repository path on the remote, relative to $HOME |
-| `--secret` | Doppler secret to resolve locally and forward as an env var (repeatable). The Doppler token itself is never forwarded |
-| `--forward-agent` | Forward the ssh-agent (`ssh -A`). Off by default: git pushes use the forwarded GH_TOKEN over HTTPS, so agent forwarding is unneeded risk Default: false. |
-| `<lf_args>` | Arguments for the remote lf. The target is the boundary: every argument after it belongs to the remote invocation |
-| `--help / -h` | Print help (see more with '--help') |
-
 ## lf machine user
 
 Print the configured participant display name
@@ -1001,15 +991,55 @@ Print this machine's stable local Machine identity
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf machine observe
+## lf machine add
 
-Record the current route for a known Machine identity
+Discover a remote machine and save its SSH destination
 
 | Argument | What it does |
 |---|---|
-| `<machine_id>` | machine id |
-| `<route>` | route |
+| `<target>` | target |
+| `--label` | label |
+| `--repo` | Remote repository path; defaults to this checkout's home-relative path |
 | `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine list
+
+List saved machines without connecting
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine status
+
+Check reachability and version without prompting
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
+## lf machine rename
+
+Change a saved machine's label
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
+| `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf machine remove
+
+Forget a connection without touching remote work
+
+| Argument | What it does |
+|---|---|
+| `<label>` | label |
 | `--help / -h` | Print help |
 
 ## lf discord

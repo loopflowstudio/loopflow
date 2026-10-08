@@ -1511,7 +1511,7 @@ fn ensure_cron_placement(wave: &str, authority: &CronAuthority) -> Result<()> {
         return Ok(());
     }
     Err(anyhow!(
-        "Wave {wave} is placed on Machine {}, not local Machine {}; run `lf machine ssh {} cron sync --wave {wave}`",
+        "Wave {wave} is placed on Machine {}, not local Machine {}; run `lf --machine {} cron sync --wave {wave}`",
         authority.placed_machine,
         authority.local_machine,
         authority.placed_machine,

@@ -300,7 +300,7 @@ Loopflow runs one Skill through a provider and records that launch in an
 immutable Machine-local Run record. Stable Wave, Project, and Task Work preserves
 purpose across provider processes. Authored behavior lives in the repository;
 bounded planning state lives on its Machine; shared planning and delivery truth
-lives in Linear and GitHub. Reach another Machine explicitly with `lf ssh`.
+lives in Linear and GitHub. Reach another Machine explicitly with `lf --machine`.
 Install: `curl -fsSL
 https://loopflow.studio/install.sh | sh && lf init`. Every docs page below is
 raw markdown at its `.md` URL (or request the canonical URL with `Accept:

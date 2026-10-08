@@ -14,10 +14,10 @@ lf implement
 Put unattended or untrusted work behind an OS boundary you control:
 
 ```bash
-lf ssh build-vm implement
+lf --machine build-vm implement
 ```
 
-`lf ssh` connects to an existing environment. It does not copy the repository
+`lf --machine` connects to an existing environment. It does not copy the repository
 or create a sandbox around the target. The remote OS user, container, or VM
 defines which files, processes, networks, and credentials the work can reach.
 
@@ -83,22 +83,20 @@ configured publisher workflow and credentials.
 
 ### Do I have to be logged in on the remote machine?
 
-No—not for foreground work. The machine where you type `lf ssh` is the
+No—not for foreground work. The machine where you type `lf --machine` is the
 **origin**; the named machine is the **target**. The target `lf` can choose from
 subscription accounts installed on either one:
 
 ```bash
 # Offer the origin's accounts and include accounts installed on the target.
-lf ssh my-company implement
+lf --machine my-company implement
 
 # Prefer an account installed on the origin.
-lf ssh --account jack@personal my-company implement
+lf --machine my-company --account jack@personal implement
 
-# Select from the target lf's combined local and forwarded catalog.
-lf ssh my-company --account jack@company implement
 ```
 
-The target does not need its own Claude or Codex login for the first two
+The target does not need its own Claude or Codex login for these
 commands. The account can exist only on your laptop and still run an agent on a
 credential-free build box.
 
@@ -129,7 +127,7 @@ stored identity at a time, and launches there.
 |---|---|---|
 | Shared (default) | the provider's ordinary home | no home and no credential variable; inherited ones are removed, except a home the caller chose |
 | `--isolate` | the identity's own home | `CLAUDE_CONFIG_DIR` or `CODEX_HOME`; credential variables removed |
-| Forwarded over `lf ssh` | shared or isolated, as the target launch chooses; an isolated one runs in a home for that identity under the target's `~/.lf/accounts` | the leased access token (Claude: environment; Codex: handed to its engine in memory), and the home when isolated; no login is written to disk |
+| Forwarded over `lf --machine` | shared or isolated, as the target launch chooses; an isolated one runs in a home for that identity under the target's `~/.lf/accounts` | the leased access token (Claude: environment; Codex: handed to its engine in memory), and the home when isolated; no login is written to disk |
 
 Switching the shared identity writes one login into the provider's own store:
 Codex's `auth.json`, replaced by atomic rename, or Claude's Keychain item on
@@ -155,7 +153,7 @@ account service.
 
 ### What crosses SSH for a subscription account
 
-`lf ssh` does not copy an account home, refresh credential, browser profile,
+`lf --machine` does not copy an account home, refresh credential, browser profile,
 or database row. The origin runs a short-lived broker for the foreground SSH
 process:
 
@@ -189,8 +187,8 @@ temporary sockets are removed, and a surviving child cannot request another
 token. Broker failure, an expired handle, a missing credential, an incompatible
 remote `lf`, and a failed Machine identity check all fail closed.
 
-Nested `lf ssh` is rejected so borrowed authority cannot cross a second SSH
-hop. Obvious detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
+An inherited account lease cannot be forwarded through a second SSH hop. Obvious
+detached forms such as `tmux`, `screen`, `nohup`, `systemd-run`,
 and `--detach` are rejected when they would retain borrowed authority. Durable
 Loopflow spawns scrub forwarded handles and singleton credentials before the
 child starts.
@@ -198,7 +196,7 @@ child starts.
 ### What crosses SSH for other credentials
 
 GitHub, Linear, and OpenCode Zen each have one effective credential for an
-launch rather than a routable catalog. `lf ssh` forwards the origin
+launch rather than a routable catalog. `lf --machine` forwards the origin
 credential automatically when one is available. If the origin does not provide
 one, the target can use its native credential.
 
@@ -212,13 +210,13 @@ local file fallback.
 SSH agent forwarding remains off unless requested:
 
 ```bash
-lf ssh --forward-agent build-vm implement
+lf --machine build-vm --forward-agent implement
 ```
 
 Forward one Doppler secret by name:
 
 ```bash
-lf ssh --secret SENTRY_AUTH_TOKEN build-vm release check
+lf --machine build-vm --secret SENTRY_AUTH_TOKEN release check
 ```
 
 The Doppler CLI resolves the value on the origin. Only the requested value
@@ -236,14 +234,14 @@ provider evidence under `$LF_HOME/runs/`. Bundle directories are owner-only
 (`0700`) and artifact files are `0600`. Provider or tool output can contain
 sensitive material, so treat the Machine store and payloads as sensitive even though it is
 local. The bundles are not uploaded to Linear, GitHub, or another Loopflow
-Machine. Reading another Machine with `lf ssh <machine-id> monitor list` executes the read on
+Machine. Reading another Machine with `lf --machine <machine-id> monitor list` executes the read on
 that machine.
 
 ## Keep bridge credentials private
 
 `lf discord serve` makes outbound requests and launches bounded conversations. Inject
 `LF_DISCORD_TOKEN` through Doppler; provider children do not inherit it. No Wave
-or Machine HTTP service is required. Use `lf ssh` for remote operation.
+or Machine HTTP service is required. Use `lf --machine` for remote operation.
 
 Repository instructions, skills, plugins, MCP servers, browser connections,
 hooks, and installers can all extend what an agent can reach. Review their

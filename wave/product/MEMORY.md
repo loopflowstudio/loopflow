@@ -425,31 +425,30 @@ continuity to Flows, not separate execution semantics. See
 and [research](../../docs/reviews/independent-operations.md). These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
-## CI watcher decisions (2026-10-01)
+## CI repair and waited landing (2026-10-01, reconciled 2026-10-08)
 
-Jack Heart's decisions on [LOO-365](https://linear.app/loopflow/issue/LOO-365),
-in the order he revised them:
+On LOO-365, Jack Heart chose one optional repository watcher, runnable from a
+terminal, launchd or Desktop per open repository; never a required resident.
+Repair needs no owning conversation and deduplicates per failing PR/head.
+A PR without a Task is reported, not repaired. Jack preferred this helper to the
+minute cron and wanted that cron removed. October 4 retired Flow resumption.
+Unreviewed exceptions—taskless landing, unarmed reporting, Desktop view—and proof
+limits remain at `53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
 
-- The watcher is an optional helper Desktop owns, or a command a person runs.
-  "not this always on 24 7 server that we expect to always be running."
-  Correctness never depends on it.
-- CI repair needs no owning conversation: the clock starts one ci-fix run,
-  deduplicated per PR and failing head. TaskSessions stay conversations with Jack.
-- It is repo-wide and does one job. "A PR with no Task is reported, not
-  repaired." Any future watcher is its own program, not a plug-in to this one.
-- One command, three ways to run it: a terminal, a launchd service, and Desktop
-  per open repository. A second copy never repeats a fix.
-- "i would prefer this watcher service to the one minute cron." The branch
-  retires the cron's repair path only; the cron still resumes Flows and settles
-  merges. Deleting the cron outright remains Jack's stated preference.
+October 8, LOO-418: Jack confirmed `land --wait` must repair its own PR with
+Desktop closed, sharing existing landing claims. Default waiting was not accepted.
+Repeated land on a merged Task PR succeeds without preparation,
+preserving finishing work. A busy checkout must not let one observer mark another
+waiter's delivery failed. Recorded waiting Flow/Task controllers do not compete
+with their child's repair; unrelated work and unresolved provider turns still do.
 
-`lf ci watch` implements this on the LOO-365 branch: REST polling with ETags
-detects, and the existing landing check confirms and admits the repair, so the
-landing lock, generation and incident reservation are the only claim. Not yet
-proven against a real failing landing. Open choices the branch made without
-Jack's confirmation: a standalone `lf land` PR with no Task is still repaired;
-a failing Task PR nobody armed is only reported; watcher state has no Desktop
-view yet (LOO-353).
+Finite landing (#1382) provided continuation after caller exit; #1384 moved
+repair to the watcher. #1287 fixed repair permissions and locks retained across
+canceled waits. No inspected record establishes a particular land crash as the
+cause of the switch. Task run retries whole failed Flows three times while its
+carrier survives; held exit 3 now stays held. Jack requested failed-step retry
+as Infrastructure LOO-435. Local CLI/provider fixtures pass; live repair and
+crashed-runner recovery remain unproven. Evidence: `53be55c70:scratch/`.
 
 ## Skill reduction decisions (2026-09-28)
 

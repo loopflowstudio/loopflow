@@ -615,7 +615,14 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     assert_eq!(
         machine_commands,
         [
-            "add", "connect", "credentials", "id", "list", "remove", "rename", "status"
+            "add",
+            "connect",
+            "credentials",
+            "id",
+            "list",
+            "remove",
+            "rename",
+            "status"
         ]
     );
     let help =

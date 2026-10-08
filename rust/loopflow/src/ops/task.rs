@@ -34,7 +34,7 @@ use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::ops::workflow::WorkflowPosition;
 use crate::planning::{LinearIssueId, TaskPlan};
-use crate::store::sqlite::EndMove;
+use crate::store::sqlite::{EndMove, SqliteStore, TaskCheckout};
 use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
     StoreError,
@@ -192,8 +192,8 @@ struct TaskWorkspace<'a> {
     worktree: &'a Path,
 }
 
-impl<'a> From<&'a crate::store::sqlite::TaskCheckout> for TaskWorkspace<'a> {
-    fn from(checkout: &'a crate::store::sqlite::TaskCheckout) -> Self {
+impl<'a> From<&'a TaskCheckout> for TaskWorkspace<'a> {
+    fn from(checkout: &'a TaskCheckout) -> Self {
         Self {
             issue_identifier: &checkout.issue_identifier,
             task_id: &checkout.task_id,
@@ -206,19 +206,6 @@ impl<'a> From<&'a crate::store::sqlite::TaskCheckout> for TaskWorkspace<'a> {
 struct TaskComparison<'a> {
     checkout: TaskWorkspace<'a>,
     base_commit: &'a str,
-}
-
-impl<'a> TaskComparison<'a> {
-    fn new(task: &'a Task, pr: &'a TaskPr) -> Self {
-        Self {
-            checkout: TaskWorkspace {
-                issue_identifier: &task.plan.identifier,
-                task_id: &task.id,
-                worktree: &task.worktree,
-            },
-            base_commit: &pr.base_commit,
-        }
-    }
 }
 
 fn active_pr(task: &Task) -> OpsResult<TaskPr> {
@@ -234,7 +221,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
 }
 
 // File access reads recorded checkout location without reconciling PR or execution state.
-fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
+fn file_store() -> OpsResult<SqliteStore> {
     #[cfg(test)]
     let test_path = super::pm::PM_TEST_CONTEXT
         .try_with(|context| context.path.clone())
@@ -251,12 +238,11 @@ fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
             path
         }
     };
-    crate::store::sqlite::SqliteStore::open_read_only(&path)
+    SqliteStore::open_read_only(&path)
         .map_err(|error| task_error(format!("cannot read Task registry: {error}")))
 }
 
-fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
-    let store = file_store()?;
+fn file_context(store: &SqliteStore, issue: &str) -> OpsResult<TaskCheckout> {
     let mut checkouts = store
         .task_checkouts()
         .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
@@ -283,18 +269,14 @@ fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
     Ok(checkout)
 }
 
-fn comparison_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
-    file_context(issue)?;
+fn comparison_context(issue: &str) -> OpsResult<(TaskCheckout, TaskPr)> {
     let store = file_store()?;
-    let task = store
-        .task_by_issue(issue)
-        .map_err(|error| task_error(format!("failed to read Task: {error}")))?
-        .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))?;
+    let checkout = file_context(&store, issue)?;
     let pr = store
-        .active_task_pr(&task.id)
+        .active_task_pr(&checkout.task_id)
         .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
         .ok_or_else(|| task_error("Task has no active PR"))?;
-    Ok((task, pr))
+    Ok((checkout, pr))
 }
 
 fn task_error(message: impl std::fmt::Display) -> OpsError {
@@ -4376,8 +4358,11 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub const MAX_FILE_BYTES: usize = 1_000_000;
 
 pub fn task_changes(issue: &str, base: &str) -> OpsResult<TaskChangesSnapshot> {
-    let (task, pr) = comparison_context(issue)?;
-    let workspace = TaskComparison::new(&task, &pr);
+    let (checkout, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison {
+        checkout: TaskWorkspace::from(&checkout),
+        base_commit: &pr.base_commit,
+    };
     let base = resolve_file_base(workspace, base)?;
     changes_snapshot(TaskComparison {
         base_commit: &base,
@@ -4446,8 +4431,11 @@ pub fn task_diff(
     base: &str,
     draft: Option<&str>,
 ) -> OpsResult<TaskDiffSnapshot> {
-    let (task, pr) = comparison_context(issue)?;
-    let workspace = TaskComparison::new(&task, &pr);
+    let (checkout, pr) = comparison_context(issue)?;
+    let workspace = TaskComparison {
+        checkout: TaskWorkspace::from(&checkout),
+        base_commit: &pr.base_commit,
+    };
     let base = resolve_file_base(workspace, base)?;
     let workspace = TaskComparison {
         base_commit: &base,
@@ -4521,7 +4509,14 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
         content_sha256: Option<String>,
     }
 
-    let workspace = TaskComparison::new(task, pr);
+    let workspace = TaskComparison {
+        checkout: TaskWorkspace {
+            issue_identifier: &task.plan.identifier,
+            task_id: &task.id,
+            worktree: &task.worktree,
+        },
+        base_commit: &pr.base_commit,
+    };
     let changes = changes_snapshot(workspace)?;
     let diff = diff_snapshot(workspace, None)?;
     let files = changes
@@ -4559,7 +4554,7 @@ pub(crate) fn task_workspace_context(task: &Task, pr: &TaskPr) -> OpsResult<Stri
 }
 
 pub fn task_file(issue: &str, path: &str, inspect_recovery: bool) -> OpsResult<TaskFileSnapshot> {
-    let checkout = file_context(issue)?;
+    let checkout = file_context(&file_store()?, issue)?;
     let workspace = TaskWorkspace::from(&checkout);
     let mut file = file_snapshot(workspace, path)?;
     if inspect_recovery {

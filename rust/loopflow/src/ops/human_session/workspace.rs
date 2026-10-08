@@ -58,12 +58,7 @@ impl WorkspaceResolver {
             .clone()
     }
 
-    fn resolve(
-        &mut self,
-        cwd: &Path,
-        recorded_root: Option<&Path>,
-        work: Option<&WorkRef>,
-    ) -> Option<SessionWorkspace> {
+    fn resolve(&mut self, cwd: &Path, work: Option<&WorkRef>) -> Option<SessionWorkspace> {
         if let Some(root) = self.root(cwd) {
             let tasks = self
                 .tasks_by_root
@@ -95,7 +90,6 @@ impl WorkspaceResolver {
                 .as_ref()
                 .is_none_or(|home| home == &self.home)
                 && (checkout.worktree == cwd
-                    || recorded_root == Some(checkout.worktree.as_path())
                     || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id))
         });
         let checkout = candidates.next()?;
@@ -145,7 +139,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         {
             continue;
         }
-        session.workspace = resolver.resolve(Path::new(&session.cwd), None, session.work.as_ref());
+        session.workspace = resolver.resolve(Path::new(&session.cwd), session.work.as_ref());
         if let Some(workspace) = &session.workspace {
             session.task_ids = workspace.task_id.iter().cloned().collect();
         }
@@ -204,13 +198,13 @@ mod tests {
         std::os::unix::fs::symlink(repo.path(), aliases.path().join("alias")).unwrap();
         let other_work = WorkRef::Task(TaskId::new());
         for path in [repo.path().join("sub"), aliases.path().join("alias/sub")] {
-            let workspace = resolver.resolve(&path, None, Some(&other_work)).unwrap();
+            let workspace = resolver.resolve(&path, Some(&other_work)).unwrap();
             assert_eq!(workspace.task_id, Some(id.clone()));
             assert_eq!(workspace.machine_id, home);
             assert_eq!(workspace.worktree, repo.path().canonicalize().unwrap());
         }
         assert!(resolver
-            .resolve(sibling.path(), None, Some(&WorkRef::Task(id.clone())))
+            .resolve(sibling.path(), Some(&WorkRef::Task(id.clone())))
             .unwrap()
             .task_id
             .is_none());
@@ -222,36 +216,27 @@ mod tests {
             .success());
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![checkout.clone()]);
         assert!(resolver
-            .resolve(&repo.path().join("sub"), None, None)
+            .resolve(&repo.path().join("sub"), None)
             .unwrap()
             .task_id
             .is_none());
         assert!(resolver
-            .resolve(&repo.path().join("missing"), None, None)
+            .resolve(&repo.path().join("missing"), None)
             .is_none());
-        let retained = resolver
-            .resolve(&repo.path().join("missing"), Some(repo.path()), None)
-            .unwrap();
-        assert_eq!(retained.task_id, Some(id.clone()));
-        assert!(retained.unavailable.is_some());
         let mut missing = checkout.clone();
         missing.worktree = repo.path().join("gone");
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![missing.clone()]);
         assert_eq!(
-            resolver
-                .resolve(&missing.worktree, None, None)
-                .unwrap()
-                .task_id,
+            resolver.resolve(&missing.worktree, None).unwrap().task_id,
             Some(id.clone())
         );
         assert!(resolver
-            .resolve(&missing.worktree.join("unbound"), None, None)
+            .resolve(&missing.worktree.join("unbound"), None)
             .is_none());
         assert_eq!(
             resolver
                 .resolve(
                     &missing.worktree.join("bound"),
-                    None,
                     Some(&WorkRef::Task(id.clone()))
                 )
                 .unwrap()
@@ -261,22 +246,22 @@ mod tests {
         let mut unplaced = checkout.clone();
         unplaced.machine_id = None;
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![unplaced]);
-        let unplaced = resolver.resolve(repo.path(), None, None).unwrap();
+        let unplaced = resolver.resolve(repo.path(), None).unwrap();
         assert!(unplaced.task_id.is_none());
         assert!(unplaced.unavailable.is_some());
         missing.machine_id = None;
         let mut resolver = WorkspaceResolver::new(home.clone(), vec![missing.clone()]);
-        let unknown = resolver.resolve(&missing.worktree, None, None).unwrap();
+        let unknown = resolver.resolve(&missing.worktree, None).unwrap();
         assert!(unknown.task_id.is_none());
         assert!(unknown.unavailable.is_some());
         let bound = resolver
-            .resolve(&missing.worktree, None, Some(&WorkRef::Task(id.clone())))
+            .resolve(&missing.worktree, Some(&WorkRef::Task(id.clone())))
             .unwrap();
         assert_eq!(bound.task_id, Some(id));
         let mut duplicate = checkout.clone();
         duplicate.task_id = TaskId::new();
         let mut resolver = WorkspaceResolver::new(home, vec![checkout, duplicate]);
-        let ambiguous = resolver.resolve(repo.path(), None, None).unwrap();
+        let ambiguous = resolver.resolve(repo.path(), None).unwrap();
         assert!(ambiguous.task_id.is_none());
         assert!(ambiguous.unavailable.is_some());
     }

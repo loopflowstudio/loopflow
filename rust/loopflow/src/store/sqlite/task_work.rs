@@ -874,13 +874,7 @@ mod tests {
             .unwrap();
         store
             .sqlite
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE work_placements SET machine_id=?1 WHERE task_id=?2",
-                params![remote.as_str(), task.as_str()],
-            )
+            .place_work(&crate::durable::WorkRef::Task(task.clone()), &remote)
             .unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),

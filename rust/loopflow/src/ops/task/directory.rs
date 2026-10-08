@@ -5,7 +5,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-use super::{file_context, task_error, validate_task_relative_path};
+use super::{file_context, file_store, task_error, validate_task_relative_path};
 use crate::ops::error::OpsResult;
 
 const PAGE_SIZE: usize = 500;
@@ -50,7 +50,7 @@ pub fn task_files(
     cursor: Option<&str>,
     show_ignored: bool,
 ) -> OpsResult<TaskDirectory> {
-    let checkout = file_context(issue)?;
+    let checkout = file_context(&file_store()?, issue)?;
     directory_snapshot(&checkout.worktree, directory, cursor, show_ignored)
 }
 

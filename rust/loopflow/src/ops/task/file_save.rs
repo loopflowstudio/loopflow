@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use super::{
-    file_context, file_snapshot, git_output, task_error, validate_task_relative_path,
+    file_context, file_snapshot, file_store, git_output, task_error, validate_task_relative_path,
     TaskFileSnapshot, TaskFileState, TaskWorkspace, MAX_FILE_BYTES,
 };
 use crate::ops::error::OpsResult;
@@ -40,7 +40,7 @@ pub fn task_save(
     revision: &str,
     content: &str,
 ) -> OpsResult<TaskFileSave> {
-    let checkout = file_context(issue)?;
+    let checkout = file_context(&file_store()?, issue)?;
     save(TaskWorkspace::from(&checkout), path, revision, content)
 }
 

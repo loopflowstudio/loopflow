@@ -150,7 +150,16 @@ The sync checkpoint `752e2bc5a` records a passing terminal fixture for both
 providers against main `873f40e30`. The final sync to `812d8cc55` succeeded at
 `2d333d18c`; no new product checks are claimed for that later merge.
 
-Checks (realign): `git diff --check` PASS; `lf context --skill realign` PASS (memory 15,985/16,000 tokens, all sources within limits); prose-only edits, product suites deferred to gate.
+## Gate findings (2026-10-08)
+
+The affected gate found eight stale fixture assumptions: bare-session and Codex
+Flow checks inspected argv/user turns, and the OpenCode stand-in ignored its
+system field. Fixtures now consume the supplied system context while retaining
+Task direction, preceding-step evidence, steer freshness, structured decision,
+retry and history assertions. No production repair was needed. Review found
+no remaining split renderer or new operational abstraction.
+
+Checks (gate): `uv run python scripts/test.py --base 812d8cc55 --reuse-passing` — architecture PASS, website 76 PASS, Rust 2,262 PASS/8 fixture failures/17 skipped, Python 406 PASS/1 nested-sandbox denial; materialized network-isolated `cargo nextest run -p loopflow --test default_conversation_tests --test flow_tests --test session_lifecycle_tests --no-fail-fast --build-jobs 4 --test-threads 4` after fixture repairs — 47 PASS/1 skipped; direct `uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes -q` using its own network-denying sandbox — PASS. `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings`, `git diff --check`, and `lf context --skill gate` — PASS (all context sources within budget). Original gate receipt: `.lf/tmp/gate/run-17487`; full final-tree matrix remains CI-owned.
 
 ## PR walkthrough (2026-10-07)
 

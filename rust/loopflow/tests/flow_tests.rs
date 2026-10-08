@@ -1409,7 +1409,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(
@@ -1437,8 +1437,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
             "{args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
-        let prompts: Vec<_> = prompts.lines().collect();
+        let prompts = received_contexts(home.path());
         assert_eq!(
             prompts.len(),
             2,
@@ -1755,6 +1754,20 @@ fn labels(graph: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+fn received_contexts(home: &Path) -> Vec<String> {
+    fs::read_to_string(home.join("prompts"))
+        .unwrap()
+        .lines()
+        .map(|line| {
+            let thread: serde_json::Value = serde_json::from_str(line).unwrap();
+            let path = thread["params"]["config"]["model_instructions_file"]
+                .as_str()
+                .unwrap();
+            fs::read_to_string(path).unwrap()
+        })
+        .collect()
+}
+
 const WORK: &str = "done";
 const ITERATE: &str = r#"{"decision":"iterate","summary":"More to do","reason":null}"#;
 const ADVANCE: &str = r#"{"decision":"advance","summary":"Proof observed","reason":null}"#;
@@ -1773,7 +1786,7 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
     let provider = codex_app_server_script("@answer@", "if [ \"$1\" = --version ]; then exit 0; fi")
         .replace(
             "read -r turn_start",
-            "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
+            "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\necho turn >> \"$LF_HOME/turns\"\nanswer=$(sed -n \"$(grep -c turn \"$LF_HOME/turns\")p\" \"$LF_HOME/answers\")",
         )
         .replace("\"@answer@\"", "'\"$answer\"'");
     assert!(
@@ -2124,9 +2137,8 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
             "{args:?}: {}",
             String::from_utf8_lossy(&ran.stderr)
         );
-        fs::read_to_string(home.path().join("prompts"))
-            .unwrap()
-            .lines()
+        received_contexts(home.path())
+            .iter()
             .map(|prompt| prompt.contains("Keep the parser strict."))
             .collect::<Vec<_>>()
     };
@@ -2148,9 +2160,8 @@ fn a_repeated_node_receives_only_task_direction_newer_than_its_last_run() {
         "work-proof",
     ]);
     assert_eq!(given.last(), Some(&false));
-    let prompts = fs::read_to_string(home.path().join("prompts")).unwrap();
+    let prompts = received_contexts(home.path());
     assert!(prompts
-        .lines()
         .last()
         .unwrap()
         .contains("Report the first error only."));

@@ -15,18 +15,18 @@ retains execution on X and routes Linear through the online host; disconnect/dir
 fallback remain open. No resident or automatic work retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-October 8 source extends `3615ac424`/`444d16b00` with explicit personal authority,
-CLI create/edit/comment/status, unplaced completion, first placement, workflow and
-local rotation. `--creation-id` replaces content hashing; receipts retain original
-input/Project across edits and rotation. Provider aliases grant no authority.
-Personal goal/memory stay in SQLite, including prompt curation. Local subprocess
-proofs and retained serialized provider-payload readback pass against one draft;
-these establish no installation, hosted delivery or Desktop outcome. Owned Linear
-issue import, paired fields, remaining private-definition operations, complete
-CLI/Desktop/hosted acceptance remain unfinished. Single-variant provider routing
-and unused personal-definition APIs are removed; plan IDs and recovery evidence remain.
-Release's inspected child memory reinforces public-entry recovery and strict stubs.
-The full one-PR scope remains; no product decision blocks its implementation.
+October 8 checkpoints `b094fc2d4`/`149f47c0e` add personal authority, local CLI
+planning, unplaced completion, placement and rotation. `--creation-id` replaces
+content hashing; receipts retain original input/Project across edits and rotation.
+Aliases grant no authority. Personal goal/memory stay in SQLite. One draft preserves
+IDs, serialized provider payloads and deletion recovery; redundant routing is removed.
+Operation-only Flow proof does not establish native execution: launch/resume still
+requires a Linear mapping below local admission. Owned issue import, paired fields,
+private definitions and full CLI/Desktop/hosted acceptance remain unfinished.
+Release's child memory reinforces public-entry proofs and strict stubs. Desktop's
+existing native comments proof requires a display; shared CLI reads alone establish
+no headless view outcome. The full one-PR scope remains, without installation or
+landing authority; no product decision blocks implementation.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

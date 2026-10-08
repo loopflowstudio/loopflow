@@ -3,7 +3,7 @@ import Loopflow
 import SwiftUI
 
 /// Collapsed Comments below a Task's Description. The count and thread come
-/// from the selected Task's own Linear read; a failed read keeps any earlier
+/// from the selected Task's planning reader; a failed read keeps any earlier
 /// thread visible and says it may be out of date. Comments are never derived
 /// from the Description.
 struct TaskCommentsView: View {

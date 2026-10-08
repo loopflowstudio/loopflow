@@ -1441,10 +1441,9 @@ fn run() -> anyhow::Result<()> {
 
     // Resolve existing placement before recording where this Process performs
     // work. A failed resolution is still observed at the directory it reached.
-    let mut direct_binding = None;
     let mut _work_declaration = None;
     let mut _bound_cwd = None;
-    let placement = (|| -> anyhow::Result<()> {
+    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
         if let Some(name) = &cli.wt {
             _bound_cwd = Some(CwdGuard::enter(
                 &loopflow::lf::commands::ops::resolve_worktree(name)?,
@@ -1466,13 +1465,13 @@ fn run() -> anyhow::Result<()> {
                 loopflow::lf::WORK_DECLARATION_ENV,
                 format!("task:{}", binding.work.id()),
             ));
-            direct_binding = Some(binding);
+            return Ok(Some(binding));
         }
-        Ok(())
+        Ok(None)
     })();
     let directory = std::env::current_dir()?;
     journal::admit_process(&directory, &args);
-    placement?;
+    let direct_binding = placement?;
     {
         let _account_isolation = cli
             .isolate

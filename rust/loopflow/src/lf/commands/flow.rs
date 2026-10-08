@@ -170,10 +170,6 @@ fn execute(
         &cli.account,
         &cli.only_account,
     )?;
-    let task = binding.and_then(|binding| match &binding.work {
-        WorkRef::Task(id) => Some(id.clone()),
-        _ => None,
-    });
     report_outcome(block_on(async {
         let driver = Driver {
             store: open_flow_store().await?,
@@ -185,7 +181,10 @@ fn execute(
             cwd: repo,
             launcher: cli,
             position: Mutex::new(ExecutionCursor::default()),
-            task: task.clone(),
+            task: binding.and_then(|binding| match &binding.work {
+                WorkRef::Task(id) => Some(id.clone()),
+                _ => None,
+            }),
             steers: Mutex::default(),
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -199,16 +198,15 @@ fn execute(
             .sqlite
             .record_flow_process(
                 &driver.process,
-                flow_name,
                 &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
-                task.as_ref(),
+                driver.task.as_ref(),
             )
             .context("could not record the Flow and start its Task; no steps launched")?;
         drop(admission);
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
-        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &task) {
+        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &driver.task) {
             let task = driver
                 .store
                 .get_task(task)

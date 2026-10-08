@@ -207,7 +207,6 @@ impl SqliteStore {
     pub(crate) fn record_flow_process(
         &self,
         driver: &ProcessLfid,
-        flow: &str,
         graph: &FlowGraph,
         task: Option<&TaskId>,
     ) -> StoreResult<()> {
@@ -215,7 +214,7 @@ impl SqliteStore {
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)",
-            params![driver, flow, serde_json::to_string(graph)?],
+            params![driver, graph.name, serde_json::to_string(graph)?],
         )?;
         if let Some(task) = task {
             tx.execute(
@@ -343,7 +342,7 @@ impl SqliteStore {
                 })
             })
             .collect();
-        self.record_flow_process(&driver, name, &FlowGraph::new(name, &compiled), None)
+        self.record_flow_process(&driver, &FlowGraph::new(name, &compiled), None)
             .unwrap();
         for (index, (label, outcome)) in steps.iter().enumerate() {
             let step = ProcessLfid::new();
@@ -386,7 +385,7 @@ mod tests {
         }
         let graph = crate::engine::flow_graph::FlowGraph::new("proof", &[]);
         let error = store
-            .record_flow_process(&driver, "proof", &graph, Some(&task))
+            .record_flow_process(&driver, &graph, Some(&task))
             .unwrap_err();
         assert!(
             error

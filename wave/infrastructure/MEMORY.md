@@ -1071,9 +1071,9 @@ proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-Jack Heart authorized optimization and a credential-free CI smoke through review
-publication, without landing or Task completion. PR #1505
-was published; later cleanup and the directory-pass-through gain await delivery.
+Jack Heart authorized landing PR #1505 on October 8, superseding review-only
+publication. The Task stays open for cold-cache verification. Delivery includes
+the directory-pass-through gain, evidence and credential-free CI smoke.
 [The report](../../scripts/benchmarks/agent-startup/README.md) owns numbers,
 release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and

@@ -1,5 +1,7 @@
 # Agent startup
 
+Open the [interactive flamegraph viewer](index.html) to compare all three changes.
+
 ```sh
 mkdir -p /private/benchmark
 CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p loopflow --bin lf

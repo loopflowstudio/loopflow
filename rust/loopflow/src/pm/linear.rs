@@ -245,14 +245,6 @@ const PROJECT_OWNERSHIP_QUERY: &str = r#"query ProjectOwnership($id: String!) {
   }
 }"#;
 
-const MOVE_ITEM_MUTATION: &str = r#"mutation MoveIssueToProject($id: String!, $projectId: String!) {
-  issueUpdate(id: $id, input: { projectId: $projectId }) {
-    issue {
-      id
-    }
-  }
-}"#;
-
 const SET_ITEM_STATE_MUTATION: &str = r#"mutation SetIssueState($id: String!, $stateId: String!) {
   issueUpdate(id: $id, input: { stateId: $stateId }) {
     issue {
@@ -1044,19 +1036,6 @@ impl LinearClient {
 
             after = page.page_info.end_cursor;
         }
-    }
-
-    pub async fn move_item_to_project(&self, item_id: &str, project_id: &str) -> PmResult<()> {
-        let _: Value = self
-            .graphql(
-                MOVE_ITEM_MUTATION,
-                json!({
-                    "id": item_id,
-                    "projectId": project_id,
-                }),
-            )
-            .await?;
-        Ok(())
     }
 
     /// Move an issue into another team and return its **new** identifier. The
@@ -2303,14 +2282,9 @@ mod tests {
 
     #[test]
     fn issue_mutations_use_linear_string_ids() {
-        for query in [
-            MOVE_ITEM_MUTATION,
-            SET_ITEM_STATE_MUTATION,
-            CREATE_COMMENT_MUTATION,
-        ] {
+        for query in [SET_ITEM_STATE_MUTATION, CREATE_COMMENT_MUTATION] {
             assert!(!query.contains(": ID!"));
         }
-        assert!(MOVE_ITEM_MUTATION.contains("$projectId: String!"));
         assert!(SET_ITEM_STATE_MUTATION.contains("$stateId: String!"));
         assert!(CREATE_COMMENT_MUTATION.contains("$issueId: String!"));
     }

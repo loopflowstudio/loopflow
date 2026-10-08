@@ -3,7 +3,7 @@
 use rusqlite::{params, TransactionBehavior};
 use serde_json::Value;
 
-use crate::durable::TaskId;
+use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
 use crate::pm::PmItemUpdate;
 use crate::store::rows::now_unix;
@@ -17,6 +17,54 @@ impl SqliteStore {
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         PlanningChanges::Task(task).pending(&conn)
+    }
+
+    /// Refile only unallocated work; membership and its pending effect commit together.
+    pub(crate) fn refile_unplaced_task(
+        &self,
+        id: &TaskId,
+        expected_project: &ProjectId,
+        destination: &ProjectId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&tx, &current)?;
+        if current.project_id == *destination {
+            return Ok(());
+        }
+        if current.project_id != *expected_project {
+            return Err(StoreError::InvalidAuthority(
+                "Task membership changed before refiling".into(),
+            ));
+        }
+        super::durable::require_selected_project(&tx, destination)?;
+        let changed = tx.execute(
+            &format!("UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
+             WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
+             AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
+             AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
+             AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
+             AND NOT EXISTS({})", super::task_work::process_lfids("?1")),
+            params![id.as_str(), destination.as_str(), now_unix()],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "a Task with recorded work retains its owning Wave".into(),
+            ));
+        }
+        PlanningChanges::Task(id).record(
+            &tx,
+            "project_id",
+            serde_json::json!(current.project_id),
+            serde_json::json!(destination),
+        )?;
+        super::durable::inherit_task_placement(
+            &tx,
+            &super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?,
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn edit_task(

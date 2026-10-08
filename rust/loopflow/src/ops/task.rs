@@ -1340,53 +1340,6 @@ pub(crate) fn task_planning_item(store: &Store, task: &Task) -> OpsResult<crate:
         .ok_or_else(|| task_error("Task planning is missing"))
 }
 
-async fn resolve_local_task(
-    repo: &Path,
-    issue: &str,
-    expected_wave: Option<&str>,
-) -> OpsResult<Option<(SharedStore, Task)>> {
-    let store = Arc::new(super::pm::pm_store().await?);
-    let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
-        return Ok(None);
-    };
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        != crate::planning::PlanningAuthority::Local
-    {
-        return Ok(None);
-    }
-    let wave = owning_wave(&store, &task).await?;
-    let canonical = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
-    let expected_wave = match expected_wave {
-        Some(selector) => Some(
-            crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                Some(repo),
-                Some(selector),
-                None,
-            )
-            .await
-            .map_err(task_error)?,
-        ),
-        None => None,
-    };
-    if wave.repo() != canonical.to_string()
-        || expected_wave
-            .as_ref()
-            .is_some_and(|expected| expected.id() != wave.id())
-    {
-        return Err(task_error(format!(
-            "Task {} belongs to {} in {}",
-            task.plan.identifier,
-            wave.slug(),
-            wave.repo()
-        )));
-    }
-    Ok(Some((store, task)))
-}
-
 pub fn resolve_task_create_input(
     explicit_title: Option<&str>,
     piped_report: Option<&str>,
@@ -4928,57 +4881,50 @@ pub fn task_edit(
 }
 
 pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {
-    if let Some((store, task)) = block_on_task(resolve_local_task(repo, issue, None))? {
-        let target = if wave.starts_with("personal:") {
-            wave.to_string()
-        } else {
-            crate::work::wave::context::resolve_managed_wave_sync(Some(repo), Some(wave))
-                .map_err(task_error)?
-                .slug()
-                .to_string()
-        };
-        let name = target
-            .strip_prefix("personal:")
-            .ok_or_else(|| task_error("refiling cannot transfer personal planning to Linear"))?;
-        let repo = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
-        let destination = store
+    block_on_task(async {
+        let (store, task) = super::pm::resolve_saved_task(repo, None, issue).await?;
+        // Provisioning remains with Project ensure until the Wave definition cutover.
+        if wave.starts_with("personal:") {
+            super::project::ensure(repo, wave).await?;
+        }
+        let destination = crate::work::wave::context::resolve_managed_wave(
+            Some(&store),
+            Some(repo),
+            Some(wave),
+            None,
+        )
+        .await
+        .map_err(task_error)?;
+        let mut waves = vec![owning_wave(&store, &task).await?, destination.clone()];
+        waves.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
+        waves.dedup_by(|a, b| a.id() == b.id());
+        let mut guards = Vec::new();
+        for wave in &waves {
+            super::pm::require_planning_home(&store, wave).await?;
+            guards.push(super::pm::lock_wave_planning(wave).await?);
+        }
+        let current = super::project::current_project(&store, &destination)?;
+        let project = store
+            .get_project_by_project(&current.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("destination Project is unavailable"))?;
+        store
             .sqlite
-            .ensure_personal_project(&repo.to_string(), name)
+            .refile_unplaced_task(&task.id, &task.project_id, &project.id)
             .map_err(task_error)?;
-        block_on_task(async {
-            let mut waves = vec![
-                owning_wave(&store, &task).await?,
-                store
-                    .get_wave(&destination.wave_id)
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| task_error("destination Wave is missing"))?,
-            ];
-            waves.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
-            waves.dedup_by(|a, b| a.id() == b.id());
-            let mut guards = Vec::new();
-            for wave in &waves {
-                guards.push(super::pm::lock_wave_planning(wave).await?);
-            }
-            let wave = waves
-                .iter()
-                .find(|wave| wave.id() == &destination.wave_id)
-                .expect("destination is locked");
-            let current = super::project::current_project(&store, wave)?;
-            store
-                .sqlite
-                .refile_unplaced_task(
-                    &task.id,
-                    &crate::durable::ProjectId::parse(&current.id).map_err(task_error)?,
-                )
-                .map_err(task_error)
-        })?;
-        return Ok(super::pm::PmUpdateResult {
-            wave: wave.into(),
+        if load_config_or_default(Some(repo))
+            .pm
+            .and_then(|pm| pm.linear_team)
+            .is_some()
+        {
+            eprintln!("Saved locally; pending Linear sync.");
+        }
+        Ok(super::pm::PmUpdateResult {
+            wave: destination.slug().into(),
             id: task.id.to_string(),
-        });
-    }
-    super::pm::pm_refile(repo, issue, wave)
+        })
+    })
 }
 
 pub fn task_comment(

@@ -550,9 +550,13 @@ fn project_accepted_planning(
     // Pending fields keep their saved value; unrelated accepted facts advance.
     let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id
          JOIN projects p ON p.external_project_id=i.project_id
-         JOIN projects current ON current.wave_id=p.wave_id
+         JOIN projects current ON current.id=target.project_id
          JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
-         WHERE target.external_issue_id=i.id AND target.project_id=current.id
+         WHERE target.external_issue_id=i.id
+         AND (current.wave_id=p.wave_id OR EXISTS(
+             SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
+             AND c.acknowledged=0 AND json_extract(c.value_json,'$')=current.id
+             AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
          AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=current.wave_id AND d.issue_id=i.id)

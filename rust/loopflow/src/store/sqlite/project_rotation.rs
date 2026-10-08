@@ -60,7 +60,6 @@ impl SqliteStore {
                 ));
             }
             let now = now_unix();
-            let content = crate::pm::render_project_content(&input.content);
             let successor = ProjectId::parse(&input.successor_id)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             if input.create {
@@ -73,7 +72,7 @@ impl SqliteStore {
                         input.wave_id,
                         now,
                         input.project_name,
-                        content,
+                        crate::pm::render_project_content(&input.content),
                         input.content.workflow
                     ],
                 )?;
@@ -95,17 +94,9 @@ impl SqliteStore {
                 )?;
                 super::project_content::write_content(&tx, &successor, &previous, &input.content)?;
                 let changed = tx.execute(
-                    "UPDATE projects SET project_name=?3,project_prompt_context=?4,workflow=?5,
-                         status='started',updated_at=?6
+                    "UPDATE projects SET project_name=?3,status='started',updated_at=?4
                      WHERE id=?1 AND wave_id=?2 AND status IN ('backlog','planned','started')",
-                    params![
-                        successor.as_str(),
-                        input.wave_id,
-                        input.project_name,
-                        content,
-                        input.content.workflow,
-                        now
-                    ],
+                    params![successor.as_str(), input.wave_id, input.project_name, now],
                 )?;
                 if changed != 1 {
                     return Err(StoreError::InvalidAuthority(
@@ -138,12 +129,11 @@ impl SqliteStore {
                     .record
                     .ok_or(StoreError::NotFound)?
                     .item;
-                let destination = super::plan_read::project_in(&tx, &successor)?;
                 PlanningChanges::Task(&task_id).record(
                     &tx,
                     "project_id",
                     serde_json::to_value(previous.project_id)?,
-                    serde_json::json!(destination.id),
+                    serde_json::json!(successor),
                 )?;
                 let changed = tx.execute(
                     "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3

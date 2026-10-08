@@ -221,6 +221,14 @@ report pending sync. Field receipts preserve pending titles, notes, assignment a
 ordering through inbound refreshes. Task export and field delivery remain unfinished;
 the saved Task's local ID works before it receives a Linear alias.
 
+```bash
+lf task refile <task-id> --wave exports
+```
+
+Move unplaced work to the Wave's selected Project. Membership saves locally during
+an outage and retains pending sync; recorded work keeps its owner. Linear delivery
+of the move remains unfinished.
+
 ## Inspect and continue
 
 ```bash

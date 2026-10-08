@@ -2047,3 +2047,189 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         assert!(!repo.path().join("wave").exists());
     }
 }
+
+#[test]
+fn refiling_saves_membership_offline_and_retains_inbound_changes() {
+    use loopflow::durable::TaskId;
+    use loopflow::planning::NewTask;
+
+    for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            repo.create_file(".lf/config.yaml", "pm:\n  linear_team: fixture-team\n");
+        }
+        let path = home.path().join("loopflow.db");
+        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let db = rusqlite::Connection::open(&path).unwrap();
+        let mut projects = Vec::new();
+        for name in ["source", "destination", "competing"] {
+            let wave = loopflow::work::wave::Wave::new(
+                loopflow::id::WaveId::new(),
+                name.into(),
+                canonical.to_string(),
+            );
+            store.create_wave(&wave).unwrap();
+            lf(
+                repo.path(),
+                home.path(),
+                &["wave", "ensure", name, "--json"],
+            );
+            let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+            if mapped {
+                db.execute("UPDATE projects SET external_project_id=?2,planning_teams='[\"fixture-team\"]',planning_initiatives=?3 WHERE id=?1",
+                    rusqlite::params![project.id.as_str(), name, serde_json::json!([name]).to_string()]).unwrap();
+            }
+            projects.push(project);
+        }
+        let task = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                project_id: projects[0].id.clone(),
+                title: "Refile me".into(),
+                description: "Original".into(),
+            })
+            .unwrap();
+        if mapped {
+            db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [task.id.as_str()]).unwrap();
+        }
+        let original = store.planning_task(&task.id).unwrap().record.unwrap();
+        if mapped {
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &original,
+                    Some((&projects[0].wave_id, "source")),
+                )
+                .unwrap();
+        }
+        let args = ["task", "refile", task.id.as_str(), "--wave", "destination"];
+        let revision = || {
+            db.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='planning'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let before = revision();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON task_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        assert!(!command(repo.path(), home.path(), &args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        db.execute_batch("DROP TRIGGER fail_refile").unwrap();
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().project_id,
+            projects[0].id
+        );
+        assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
+        assert_eq!(revision(), before);
+        let output = command(repo.path(), home.path(), &args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).contains("pending Linear sync"),
+            connected
+        );
+        let moved = store.task(&task.id).unwrap().unwrap();
+        assert_eq!(moved.project_id, projects[1].id);
+        assert_eq!(moved.wave_id, projects[1].wave_id);
+        assert_eq!(moved.plan.revision, task.plan.revision + 1);
+        assert!(moved.worktree.is_none());
+        let changes = store.pending_task_changes(&task.id).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "project_id");
+        assert_eq!(changes[0].value, projects[1].id.as_str());
+        let before = revision();
+        assert!(command(repo.path(), home.path(), &args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert_eq!(revision(), before);
+        assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
+        if mapped {
+            let mut incoming = original.clone();
+            incoming.item.description = "Incoming after refiling".into();
+            incoming.item.revision = Some("2026-10-08T14:00:00Z".into());
+            incoming.observed_at += 1;
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &incoming,
+                    Some((&projects[0].wave_id, "source")),
+                )
+                .unwrap();
+            let retained = store.task(&task.id).unwrap().unwrap();
+            assert_eq!(retained.project_id, projects[1].id);
+            assert_eq!(retained.plan.description, "Incoming after refiling");
+            assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
+            let mut other = incoming.project.clone().unwrap();
+            other.id = "competing".into();
+            other.initiative_ids = vec!["competing".into()];
+            incoming.project = Some(other);
+            incoming.item.project_id = Some("competing".into());
+            incoming.observed_at += 1;
+            incoming.item.revision = Some("2026-10-08T14:01:00Z".into());
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &incoming,
+                    Some((&projects[2].wave_id, "competing")),
+                )
+                .unwrap();
+            let conflict = store.pending_task_changes(&task.id).unwrap();
+            assert_eq!(conflict[0].id, changes[0].id);
+            assert_eq!(conflict[0].value, projects[1].id.as_str());
+            assert_eq!(
+                conflict[0].conflict.as_ref().unwrap()["value"],
+                projects[2].id.as_str()
+            );
+            assert_eq!(
+                store.planning_task(&task.id).unwrap().state,
+                loopflow::store::PlanningState::Invalid
+            );
+        }
+        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        assert_eq!(
+            reopened.task(&task.id).unwrap().unwrap().project_id,
+            projects[1].id
+        );
+        assert_eq!(
+            reopened.pending_task_changes(&task.id).unwrap(),
+            store.pending_task_changes(&task.id).unwrap()
+        );
+        // A retained start cannot be moved by refiling, even without a checkout.
+        db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [task.id.as_str()]).unwrap();
+        db.execute(
+            "UPDATE tasks SET started_at=17 WHERE id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
+        let pending = store.pending_task_changes(&task.id).unwrap();
+        assert!(!command(
+            repo.path(),
+            home.path(),
+            &["task", "refile", task.id.as_str(), "--wave", "source"]
+        )
+        .output()
+        .unwrap()
+        .status
+        .success());
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().project_id,
+            projects[1].id
+        );
+        assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
+        assert!(!repo.path().join("wave").exists());
+    }
+}

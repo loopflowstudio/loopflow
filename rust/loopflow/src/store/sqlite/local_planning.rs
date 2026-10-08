@@ -46,45 +46,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn refile_unplaced_task(
-        &self,
-        task: &crate::durable::TaskId,
-        destination: &ProjectId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
-        super::children::require_task_not_deleted(&tx, &current)?;
-        if current.project_id == *destination {
-            return Ok(());
-        }
-        if project_authority_on(&tx, &current.project_id)?
-            != project_authority_on(&tx, destination)?
-        {
-            return Err(StoreError::InvalidAuthority(
-                "refiling cannot transfer planning authority".into(),
-            ));
-        }
-        let changed = tx.execute(
-            "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
-            WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
-            AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
-            AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)",
-            params![task.as_str(), destination.as_str(), now_unix()],
-        )?;
-        if changed != 1 {
-            return Err(StoreError::InvalidAuthority(
-                "a Task with recorded work retains its owning Wave".into(),
-            ));
-        }
-        super::durable::inherit_task_placement(
-            &tx,
-            &super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?,
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub(crate) fn update_personal_wave_document(
         &self,
         wave: &WaveId,

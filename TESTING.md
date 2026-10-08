@@ -1049,6 +1049,12 @@ must retain Wave placement before projecting accepted Projects.
 
 ### Shared identity fixtures
 
+When changing Session activity or Waiting, run `session_cli_tests` and
+`work_watch` together. Direct SQL fixtures must carry both driver and provider
+generations, matching the production activity writer. Rebuild both SwiftPM and
+the Xcode test targets after shared model renames; Foundation types such as
+`Foundation.Process` need explicit qualification where names overlap.
+
 Exercise Session fixtures through Rust as well as Swift after ancestry changes.
 `wave_id` uses WaveId's UUID encoding; prefixed Task/Project Work IDs are different
 types. A Swift String round trip alone cannot prove that a Rust producer accepts

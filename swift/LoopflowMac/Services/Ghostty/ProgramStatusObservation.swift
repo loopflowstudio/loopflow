@@ -84,7 +84,7 @@ private final class ProgramStatusWriter: @unchecked Sendable {
     private let terminalId: String
     private let generation: Int64
     private let failure: @Sendable (String) -> Void
-    private var process: Process?
+    private var process: Foundation.Process?
     private var input: FileHandle?
     private var pending: Data?
     private var frame = Data()

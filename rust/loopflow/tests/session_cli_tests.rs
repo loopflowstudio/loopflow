@@ -502,8 +502,8 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
         db.execute(
-            "INSERT INTO session_activity(session_id,driver_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,driver_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+            "INSERT INTO session_activity(session_id,driver_generation,provider_generation,observed_at,open_tools,pending_input,yielded)
+             SELECT id,driver_generation,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();

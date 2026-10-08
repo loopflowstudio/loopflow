@@ -53,7 +53,7 @@ fn explicit_agent_wins_through_task_nested_flows_and_provider_children() {
 set -eu
 read -r input || :
 if [ "${LF_AGENT_CHILD-}" != yes ]; then
-    LF_AGENT_CHILD=yes "$LF_BIN" -b skill child > "$LF_HOME/child-output" 2>&1
+    LF_AGENT_CHILD=yes "$LF_BIN" -b skill child -a codex > "$LF_HOME/child-output" 2>&1
 fi
 echo '{"type":"system","subtype":"init","session_id":"agent-fixture"}'
 echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"agent-fixture"}'
@@ -180,17 +180,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"done","ses
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
-    assert_eq!(sessions.len(), 6, "{sessions:?}");
-    assert!(
-        sessions.iter().all(|(_, provider)| provider == "claude"),
-        "{sessions:?}"
-    );
     assert_eq!(
-        sessions
-            .iter()
-            .filter(|(skill, _)| skill == "child")
-            .count(),
-        3
+        sessions,
+        ["child", "child", "child", "first", "first", "second"]
+            .map(|skill| (skill.to_owned(), "claude".to_owned()))
     );
     assert_eq!(support::recorded_flows(home.path()).len(), 1);
     let session: String = db

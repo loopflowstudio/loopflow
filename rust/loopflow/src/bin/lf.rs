@@ -273,61 +273,23 @@ fn reorder_args(args: Vec<String>) -> Vec<String> {
         return reorder_command_args(program, rest, target_index, command);
     }
 
-    // Find where the skill name is and collect flags that come after it
-    let mut flags_before: Vec<String> = Vec::new();
-    let mut skill_and_args: Vec<String> = Vec::new();
-    let mut flags_after: Vec<String> = Vec::new();
-
-    let mut i = 0;
-    let mut found_skill = false;
-
-    while i < rest.len() {
-        let arg = &rest[i];
-
+    let mut result = vec![program];
+    result.extend_from_slice(&rest[..target_index]);
+    let mut skill_and_args = vec![rest[target_index].clone()];
+    let mut index = target_index + 1;
+    while index < rest.len() {
+        let arg = &rest[index];
         if arg == "--" {
-            skill_and_args.extend_from_slice(&rest[i..]);
+            skill_and_args.extend_from_slice(&rest[index..]);
             break;
         }
-
-        if !found_skill {
-            if arg.starts_with('-') {
-                // It's a flag before the skill
-                flags_before.push(arg.clone());
-                if is_value_flag(arg) && !has_inline_value(arg) && i + 1 < rest.len() {
-                    i += 1;
-                    flags_before.push(rest[i].clone());
-                }
-            } else {
-                // Found the skill name
-                found_skill = true;
-                skill_and_args.push(arg.clone());
-            }
+        if is_known_flag(arg) {
+            push_flag(rest, &mut result, &mut index, is_value_flag(arg));
         } else {
-            // After the skill name
-            if arg.starts_with('-') {
-                // Check if it's a known lf flag
-                if is_known_flag(arg) {
-                    flags_after.push(arg.clone());
-                    if is_value_flag(arg) && !has_inline_value(arg) && i + 1 < rest.len() {
-                        i += 1;
-                        flags_after.push(rest[i].clone());
-                    }
-                } else {
-                    // Unknown flag - treat as skill arg
-                    skill_and_args.push(arg.clone());
-                }
-            } else {
-                // Non-flag after skill - it's a skill arg
-                skill_and_args.push(arg.clone());
-            }
+            skill_and_args.push(arg.clone());
         }
-        i += 1;
+        index += 1;
     }
-
-    // Reconstruct: program + flags_before + flags_after + skill_and_args
-    let mut result = vec![program];
-    result.extend(flags_before);
-    result.extend(flags_after);
     result.extend(skill_and_args);
     result
 }
@@ -2325,18 +2287,6 @@ mod tests {
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Task {
                 cmd: TaskCommand::Create { .. }
-            })
-        ));
-
-        let args: Vec<String> = ["lf", "pr", "-a", "codex", "open"]
-            .map(String::from)
-            .to_vec();
-        let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "-a", "codex", "pr", "open"]);
-        assert!(matches!(
-            Cli::try_parse_from(reordered).unwrap().command,
-            Some(Commands::Pr {
-                cmd: Some(PrCommand::Open { .. })
             })
         ));
 

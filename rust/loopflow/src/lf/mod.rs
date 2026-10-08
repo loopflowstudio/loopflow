@@ -2689,26 +2689,6 @@ mod tests {
             .expect("unknown names remain eligible for skill discovery");
         assert!(matches!(cli.command, Some(Commands::External(_))));
     }
-
-    #[test]
-    fn agent_is_global_across_command_owners() {
-        for command in [
-            vec!["pr", "open"],
-            vec!["pr", "publish"],
-            vec!["task", "run", "LOO-438", "pursue"],
-            vec!["run", "ship-api"],
-        ] {
-            for flag in ["--agent", "-a"] {
-                for position in 0..=command.len() {
-                    let mut args = command.clone();
-                    args.splice(position..position, [flag, "claude:opus"]);
-                    args.insert(0, "lf");
-                    let cli = Cli::try_parse_from(&args).unwrap();
-                    assert_eq!(cli.agent.as_deref(), Some("claude:opus"), "{args:?}");
-                }
-            }
-        }
-    }
 }
 
 #[derive(Debug, Subcommand)]

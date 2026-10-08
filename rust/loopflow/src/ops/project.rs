@@ -42,26 +42,21 @@ pub(crate) fn select_project<'a>(
 }
 
 pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
-    if store
+    let project = store
         .sqlite
-        .personal_wave_definition(wave.id())
+        .selected_planning_project(wave.id())
         .map_err(project_error)?
-        .is_some()
-    {
-        let projects = store
-            .sqlite
-            .list_projects(Some(wave.id()))
-            .map_err(project_error)?
-            .into_iter()
-            .map(|project| super::task::project_planning_item(store, project))
-            .collect::<OpsResult<Vec<_>>>()?;
-        return select_project(store, wave, &projects).cloned();
+        .ok_or_else(|| project_error(format!("Wave {} has no configured Project", wave.slug())))?;
+    if matches!(
+        project.status,
+        ProjectStatus::Completed | ProjectStatus::Canceled
+    ) {
+        return Err(project_error(format!(
+            "configured Project {} is terminal; its history is unchanged",
+            project.id
+        )));
     }
-    let projects = store
-        .sqlite
-        .accepted_projects(wave.id())
-        .map_err(project_error)?;
-    select_project(store, wave, &projects).cloned()
+    Ok(project)
 }
 
 /// Explicitly seed a Wave's shared selection with an existing Project UUID.
@@ -127,13 +122,14 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     let store = super::pm::pm_store().await?;
     if let Some(name) = name.strip_prefix("personal:") {
         let repo = crate::repository::CanonicalRepo::discover(repo).map_err(project_error)?;
-        return super::task::project_planning_item(
-            &store,
-            store
-                .sqlite
-                .ensure_personal_project(&repo.to_string(), name)
-                .map_err(project_error)?,
-        );
+        let project = store
+            .sqlite
+            .ensure_personal_project(&repo.to_string(), name)
+            .map_err(project_error)?;
+        return store
+            .sqlite
+            .planning_project(&project.id)
+            .map_err(project_error);
     }
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
@@ -144,13 +140,14 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     .await
     .map_err(project_error)?;
     if let Some(name) = wave.slug().strip_prefix("personal:") {
-        return super::task::project_planning_item(
-            &store,
-            store
-                .sqlite
-                .ensure_personal_project(wave.repo(), name)
-                .map_err(project_error)?,
-        );
+        let project = store
+            .sqlite
+            .ensure_personal_project(wave.repo(), name)
+            .map_err(project_error)?;
+        return store
+            .sqlite
+            .planning_project(&project.id)
+            .map_err(project_error);
     }
     super::pm::require_planning_home(&store, &wave).await?;
     store
@@ -616,14 +613,10 @@ pub async fn workflow(
         None => None,
     };
     let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let mut current = super::task::project_planning_item(
-        &store,
-        store
-            .sqlite
-            .project(&project.id)
-            .map_err(project_error)?
-            .ok_or_else(|| project_error("Project disappeared"))?,
-    )?;
+    let mut current = store
+        .sqlite
+        .planning_project(&project.id)
+        .map_err(project_error)?;
     if let Some(name) = selection {
         if let Some(id) = &project.plan.linear_id {
             super::pm::require_planning_home(&store, &wave).await?;
@@ -640,14 +633,10 @@ pub async fn workflow(
                 .map_err(project_error)?;
             super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition.clone())
                 .await?;
-            current = super::task::project_planning_item(
-                &store,
-                store
-                    .sqlite
-                    .project(&project.id)
-                    .map_err(project_error)?
-                    .ok_or_else(|| project_error("Project disappeared"))?,
-            )?;
+            current = store
+                .sqlite
+                .planning_project(&project.id)
+                .map_err(project_error)?;
             if current.workflow != name {
                 return Err(project_error("Workflow selection was sent but readback differs; inspect the Project before retrying"));
             }

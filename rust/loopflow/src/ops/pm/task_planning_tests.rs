@@ -473,9 +473,9 @@ async fn connected_fields_match_personal_order_assignment_and_summary() {
             let project = fixture
                 .store
                 .sqlite
-                .accepted_projects(wave.id())
+                .selected_planning_project(wave.id())
                 .unwrap()
-                .remove(0);
+                .unwrap();
             assert_eq!(project.summary, fields["summary"]);
             assert_eq!(project.name, "Current");
             super::pm_update_async(

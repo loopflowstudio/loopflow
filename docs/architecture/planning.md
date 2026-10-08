@@ -88,7 +88,11 @@ from Workflow position. Missing provider inventory cannot erase saved planning;
 malformed observations retain fields and invalidation diagnostics. Pending local
 state decisions survive inbound completion while other fields advance. Ingestion
 and the released-frontier migration retain editable Project content, including KRs
-and targets. These local guarantees do not fix Linear's unconditional update race.
+and targets. Current Project selection and readiness also read saved fields and
+observation age without personal/Linear dispatch. Missing provider inventory keeps
+that selection readable; retained archival, invalidation or membership conflicts
+still make it unavailable. These local guarantees do not fix Linear's unconditional
+update race.
 
 ## Connected Project selection
 

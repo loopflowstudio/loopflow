@@ -474,8 +474,9 @@ Every top-level CLI family, live SQLite table, process entrypoint, HTTP route,
 provider, and literal subprocess edge must appear exactly once.
 
 LOO-406's saved planning projection lives in `store/sqlite/plan_read.rs`: Task
-status and Wave/Desktop lists read Task/Project fields independently of Workflow
-position and provider inventory. Local state decisions and delivery receipts commit
+status, current Project selection/readiness and Wave/Desktop lists read Task/Project
+fields independently of Workflow position and provider inventory, retaining known
+provider conflicts. Local state decisions and delivery receipts commit
 together; pending decisions survive inbound completion. Project ingestion stores
 editable content so KRs and targets survive the shared reader. Creation, editing,
 Wave definitions and rotation still retain the earlier ownership split; this reader

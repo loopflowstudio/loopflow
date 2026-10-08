@@ -421,24 +421,10 @@ pub(crate) async fn rotate(
         .map_err(error)?;
     for (input, result) in &mut personal {
         let id = crate::durable::ProjectId::parse(&input.successor_id).map_err(error)?;
-        result.successor = Some(super::task::project_planning_item(
-            &store,
-            store
-                .sqlite
-                .project(&id)
-                .map_err(error)?
-                .ok_or_else(|| error("rotation destination disappeared"))?,
-        )?);
+        result.successor = Some(store.sqlite.planning_project(&id).map_err(error)?);
         if let Some(predecessor) = &mut result.predecessor {
             let id = crate::durable::ProjectId::parse(&predecessor.id).map_err(error)?;
-            *predecessor = super::task::project_planning_item(
-                &store,
-                store
-                    .sqlite
-                    .project(&id)
-                    .map_err(error)?
-                    .ok_or_else(|| error("rotation predecessor disappeared"))?,
-            )?;
+            *predecessor = store.sqlite.planning_project(&id).map_err(error)?;
         }
         for task in &mut result.tasks {
             let id = crate::durable::TaskId::parse(&task.task.id).map_err(error)?;
@@ -515,13 +501,7 @@ async fn prepare_local_rotation(
         .as_ref()
         .map(|r| r.predecessor_id.clone())
         .unwrap_or(binding);
-    let projects = store
-        .list_projects(Some(wave.id()))
-        .await
-        .map_err(error)?
-        .into_iter()
-        .map(|project| super::task::project_planning_item(store, project))
-        .collect::<OpsResult<Vec<_>>>()?;
+    let projects = store.sqlite.planning_projects(wave.id()).map_err(error)?;
     let predecessor = predecessor_id
         .as_ref()
         .and_then(|id| projects.iter().find(|p| &p.id == id))

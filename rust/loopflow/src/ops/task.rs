@@ -1345,16 +1345,6 @@ pub(crate) fn task_planning_item(store: &Store, task: &Task) -> OpsResult<crate:
         .ok_or_else(|| task_error("Task planning is missing"))
 }
 
-pub(crate) fn project_planning_item(
-    store: &Store,
-    project: crate::work::project::Project,
-) -> OpsResult<crate::pm::PmProject> {
-    store
-        .sqlite
-        .planning_project(&project.id)
-        .map_err(task_error)
-}
-
 async fn resolve_local_task(
     repo: &Path,
     issue: &str,

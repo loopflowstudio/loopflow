@@ -2,12 +2,14 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
+use crate::durable::ProjectId;
 use crate::id::WaveId;
+use crate::pm::PmProject;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
-        "SELECT CASE WHEN w.personal_plan_id IS NOT NULL THEN p.id ELSE p.external_project_id END FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
+        "SELECT COALESCE(p.external_project_id,p.id) FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
         [wave], |row| row.get(0),
     )?)
 }
@@ -189,18 +191,49 @@ impl SqliteStore {
         rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
     }
 
+    pub(crate) fn selected_planning_project(
+        &self,
+        wave: &WaveId,
+    ) -> StoreResult<Option<PmProject>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.unchecked_transaction()?;
+        let readiness = readiness_in(&tx, wave)?;
+        match readiness.state {
+            ProjectReadinessState::Unconfigured => return Ok(None),
+            ProjectReadinessState::Unavailable => {
+                return Err(StoreError::InvalidData(format!(
+                    "Wave {wave} selected Project is unavailable; inspect its saved fields and retained provider evidence"
+                )));
+            }
+            _ => {}
+        }
+        let id: String = tx.query_row(
+            "SELECT current_project_id FROM waves WHERE id=?1",
+            [wave],
+            |row| row.get(0),
+        )?;
+        let project = super::plan_read::project_in(&tx, &ProjectId::from_raw(id))?;
+        tx.commit()?;
+        Ok(Some(project))
+    }
+
     pub(crate) fn project_readiness(&self, wave: &WaveId) -> StoreResult<ProjectReadiness> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT CASE WHEN w.personal_plan_id IS NOT NULL THEN p.id ELSE p.external_project_id END, f.observed_at,
+        readiness_in(&conn, wave)
+    }
+}
+
+// Saved planning supplies values and age; retained provider evidence can invalidate
+// selection, but absent inventory does not erase an owned Project.
+fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+    Ok(conn.query_row(
+            "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
-                  WHEN w.personal_plan_id IS NOT NULL THEN
-                    CASE WHEN p.status IN ('completed','canceled') THEN 'terminal'
-                         WHEN p.status='started' THEN 'ready' ELSE 'inactive' END
-                  WHEN NOT json_valid(f.body) THEN 'unavailable'
-                  WHEN f.id IS NULL OR f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at!=f.observed_at
+                  WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.project_prompt_context IS NULL THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
                     OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
-                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative))
+                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
@@ -229,7 +262,6 @@ impl SqliteStore {
                 })
             },
         )?)
-    }
 }
 
 #[cfg(test)]

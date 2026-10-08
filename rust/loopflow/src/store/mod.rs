@@ -1820,6 +1820,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selected_project_reads_saved_plan_without_provider_inventory() {
+        for mapped in [false, true] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let task = make_task(&wave, &project);
+            let mut snapshot = task_planning_snapshot(&wave, &project, &task);
+            snapshot.synced_at = 17;
+            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            let content = crate::pm::ProjectContent {
+                workflow: "saved-workflow".into(),
+                krs: vec![crate::pm::PmKr {
+                    text: "Saved plan survives an outage".into(),
+                    holds: false,
+                }],
+                metric_targets: Vec::new(),
+            };
+            store
+                .sqlite
+                .update_project_content(&project.id, &content, None)
+                .unwrap();
+            let mut expected = snapshot.snapshot.projects[0].clone();
+            expected.workflow = content.workflow;
+            expected.krs = content.krs;
+            // The provider body still contains the previous content.
+            assert_eq!(
+                crate::ops::project::current_project(&store, &wave).unwrap(),
+                expected
+            );
+            let conn = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
+            conn.execute("DELETE FROM pm_projects", []).unwrap();
+            if !mapped {
+                conn.execute(
+                    "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                    [project.id.as_str()],
+                )
+                .unwrap();
+                expected.id = project.id.to_string();
+            }
+            for (status, readiness) in [
+                (
+                    crate::pm::ProjectStatus::Started,
+                    crate::store::sqlite::ProjectReadinessState::Ready,
+                ),
+                (
+                    crate::pm::ProjectStatus::Paused,
+                    crate::store::sqlite::ProjectReadinessState::Inactive,
+                ),
+                (
+                    crate::pm::ProjectStatus::Completed,
+                    crate::store::sqlite::ProjectReadinessState::Terminal,
+                ),
+            ] {
+                conn.execute(
+                    "UPDATE projects SET status=?2 WHERE id=?1",
+                    rusqlite::params![project.id.as_str(), status.as_str()],
+                )
+                .unwrap();
+                expected.status = status;
+                assert_eq!(
+                    store.sqlite.selected_planning_project(wave.id()).unwrap(),
+                    Some(expected.clone())
+                );
+                let observed = store.sqlite.project_readiness(wave.id()).unwrap();
+                assert_eq!(observed.state, readiness);
+                assert_eq!(observed.project_id.as_deref(), Some(expected.id.as_str()));
+                assert_eq!(observed.observed_at, Some(17));
+                assert_eq!(
+                    crate::ops::project::current_project(&store, &wave).is_err(),
+                    status == crate::pm::ProjectStatus::Completed
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn selected_project_retains_provider_invalidation() {
+        for change in [
+            "UPDATE pm_projects SET archived=1",
+            "UPDATE pm_projects SET membership_unresolved=1",
+            "UPDATE pm_projects SET body='malformed'",
+            "UPDATE pm_projects SET observed_at=18",
+            "DELETE FROM pm_wave_projects",
+            "UPDATE pm_wave_sync SET initiative='different-initiative'",
+        ] {
+            let (directory, store, wave) = planning_store().await;
+            let project = make_project(&wave);
+            store.create_project(&project).await.unwrap();
+            select_project(&store, &project);
+            let task = make_task(&wave, &project);
+            let snapshot = task_planning_snapshot(&wave, &project, &task);
+            store.put_pm_snapshot(snapshot.clone(), None).await.unwrap();
+            rusqlite::Connection::open(directory.path().join("registry.db"))
+                .unwrap()
+                .execute_batch(change)
+                .unwrap();
+            assert!(
+                crate::ops::project::current_project(&store, &wave).is_err(),
+                "{change}"
+            );
+            assert_eq!(
+                store.sqlite.project_readiness(wave.id()).unwrap().state,
+                crate::store::sqlite::ProjectReadinessState::Unavailable,
+                "{change}"
+            );
+            assert_eq!(
+                store.sqlite.planning_projects(wave.id()).unwrap(),
+                snapshot.snapshot.projects
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn incoming_terminal_planning_prevents_placement_without_moving_workflow() {
         for (state, completed) in [
             (Some("completed"), true),

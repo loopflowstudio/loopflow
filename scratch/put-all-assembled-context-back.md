@@ -13,20 +13,26 @@ launches pass Claude's append-system-prompt-file or Codex's model_instructions_f
 Persistent Claude and Codex harnesses use the same file-backed placement; Codex
 thread start/resume receives the file through its existing config object.
 
-The review found that changing only assembly would leave the actual terminal
-launcher passing the full prompt as an argument, and changing only terminal
-launch would move large headless Claude context into another argument. Both
-paths are covered. Context files remain in the existing prompt-log directory so
-native resume can still read them after the driver ends. Capture attribution,
+Terminal, batch and persistent launches share `write_system_prompt_file` in
+`engine/agent.rs`, including structured reply guidance and empty-context handling.
+Files stay in the prompt-log directory for native resume. Capture attribution,
 reference escaping, source order and native permission settings remain intact.
 IDE deep links retain their existing full-prompt/vendor-seed transport; they have
 no system-file option. LOO-428's flags and Flow output are untouched.
 
-## Delete — do not maintain
+## Reconciled evidence (2026-10-07)
 
-Deleted the Claude-specific system-safe/content split formatters and classifier
-claims. Full rendering and source attribution tests cover the surviving system
-channel. No layout flag, provider retry or refusal classifier was added.
+The split renderers, classifier claims and unused Claude turn launcher are gone.
+The active stream launcher covers large context and structured reply guidance;
+full rendering and attribution tests cover the surviving system channel. Source
+review found no remaining split, fallback or refusal-classifier implementation.
+
+Terminal fixtures exercise the real CLI with argument-limited provider scripts.
+The Codex headless fixture checks thread configuration, the short first turn and
+the retained file after exit. It does not resume a native provider. Claude's
+stream test checks file contents and arguments, not provider acceptance. These
+boundaries follow Release's entry-point lesson: a helper proof cannot establish
+the composed user experience. No additional code repair was identified.
 
 ## Measurements
 
@@ -47,10 +53,12 @@ file. Native first-response acceptance and generated titles remain unobserved.
 
 ## Remaining acceptance
 
-Jack Heart runs or approves these commands from this checkout inside cmux, with
-its wrappers still on PATH:
+The outstanding acceptance belongs to Jack Heart: a candidate build followed by
+these real-account checks from this checkout inside cmux, with its wrappers on
+PATH. Only Jack Heart's execution or approval authorizes the provider calls.
 
 ```sh
+cargo build -p loopflow --bin lf
 uv run --no-project python scripts/check_context_launch.py --agent claude
 uv run --no-project python scripts/check_context_launch.py --agent claude --plan
 uv run --no-project python scripts/check_context_launch.py --agent codex
@@ -58,20 +66,23 @@ uv run --no-project python scripts/check_context_launch.py --agent codex
 
 The script preserves native account/host configuration and creates a disposable
 Loopflow Machine and Git fixture containing the real Infrastructure memory,
-goal and a large reference. It prints the expected marker; compare the first
-response, native plan mode and host/provider titles. `--prepare-only` writes the
-fixture and prints the command without invoking a provider. Its assembled preview
+goal and a large reference. Acceptance compares the first response against the
+printed marker and observes native plan mode and host/provider titles.
+`--prepare-only` writes the fixture and prints the command without invoking a
+provider. Its assembled preview
 was 174,826 bytes. No installed-store migration or installation is involved.
 
-Publish for review and stop. Landing requires the real first-response check.
+Jack Heart authorized publication for review, with landing withheld pending the
+real first-response check.
 The fixed first user message may change host/provider titles; LOO-422 owns that
-broader experience. Gate/CI owns the full affected suites. Release child memory
-was reviewed by headings and its publication/acceptance sections; unrelated
-release-incident sections were not reread.
+broader experience. Gate/CI owns the full affected suites. Release is the only
+immediate child with memory in this checkout. Its goal, memory headings,
+publication/acceptance, scheduled-failure and pending-version sections were read;
+the retained landing incident was not reread.
 
-Checks: `cargo test -p loopflow` focused context-launch (2), assembly/budget (103), launch/attribution (41) and Wave-goal (1) tests PASS; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and docs alignment (4) PASS; manual probe preparation/preview PASS; real-account first response deferred to Jack Heart.
+Checks: `git diff --check` and `cargo fmt --check` PASS; retained compression results reused: `cargo test -p loopflow --test context_launch_tests` (2), `cargo test -p loopflow --lib claude_stream_context` (1), `cargo test -p loopflow --lib ad_hoc_batch_launch` (1), `cargo clippy --all-targets -- -D warnings` PASS; earlier assembly/attribution/probe checks at `4475ceb04:scratch/put-all-assembled-context-back.md`; full affected suites deferred to gate/CI, real-account first response to Jack Heart.
 
-Authored context is within budget (memory 15,947/16,000 tokens, scratch under
-1,000/12,000 at reconciliation). `lf context` also reports the generated Task
-seed above its 16,000-token source budget while it includes this PR's workspace
-diff; the existing bounding path retains its complete source. No limit was raised.
+`lf context --skill realign` reports all sources within budget; memory is
+15,963/16,000 tokens. The earlier launch
+snapshot included the workspace diff and exceeded the goal source budget; its
+complete source remains in the existing context archive. No limit was raised.

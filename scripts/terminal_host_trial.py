@@ -27,15 +27,6 @@ import time
 from pathlib import Path
 
 LIMIT = 512 * 1024
-SCENARIOS = (
-    "skill",
-    "conversation",
-    "flow",
-    "fresh-checkout",
-    "task-checkout",
-    "task-flow",
-    "publish",
-)
 
 
 def _write(path: Path, text: str, executable: bool = False) -> None:
@@ -59,9 +50,9 @@ def _tty() -> None:
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-def _process_table() -> dict[int, tuple[int, int, str]]:
+def _process_table() -> dict[int, tuple[int, str]]:
     result = subprocess.run(
-        ["/bin/ps", "-axo", "pid=,ppid=,pgid=,lstart="],
+        ["/bin/ps", "-axo", "pid=,ppid=,lstart="],
         capture_output=True,
         text=True,
         timeout=5,
@@ -69,25 +60,25 @@ def _process_table() -> dict[int, tuple[int, int, str]]:
     )
     rows = {}
     for line in result.stdout.splitlines():
-        parts = line.split(maxsplit=3)
-        if len(parts) == 4:
-            rows[int(parts[0])] = (int(parts[1]), int(parts[2]), parts[3])
+        parts = line.split(maxsplit=2)
+        if len(parts) == 3:
+            rows[int(parts[0])] = (int(parts[1]), parts[2])
     return rows
 
 
 def _track_children(owned: dict[int, str], leader: int) -> None:
     rows = _process_table()
     if leader in rows and leader not in owned:
-        owned[leader] = rows[leader][2]
+        owned[leader] = rows[leader][1]
     changed = True
     while changed:
         changed = False
-        for pid, (parent, _, birth) in rows.items():
+        for pid, (parent, birth) in rows.items():
             if (
                 pid not in owned
                 and parent in owned
                 and parent in rows
-                and rows[parent][2] == owned[parent]
+                and rows[parent][1] == owned[parent]
             ):
                 owned[pid] = birth
                 changed = True
@@ -96,7 +87,7 @@ def _track_children(owned: dict[int, str], leader: int) -> None:
 def _clean_children(owned: dict[int, str]) -> list[int]:
     rows = _process_table()
     for pid, birth in owned.items():
-        if pid in rows and rows[pid][2] == birth:
+        if pid in rows and rows[pid][1] == birth:
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -104,7 +95,7 @@ def _clean_children(owned: dict[int, str]) -> list[int]:
     deadline = time.monotonic() + 3
     while time.monotonic() < deadline:
         rows = _process_table()
-        remaining = [pid for pid, birth in owned.items() if pid in rows and rows[pid][2] == birth]
+        remaining = [pid for pid, birth in owned.items() if pid in rows and rows[pid][1] == birth]
         if not remaining:
             return []
         time.sleep(0.05)
@@ -196,6 +187,30 @@ class _Trial:
     def _command(self, argv: list[str]) -> list[str]:
         return ["/usr/bin/sandbox-exec", "-f", str(self.profile), *argv]
 
+    def _record(
+        self, name: str, argv: list[str], cwd: Path | None, reply: bool, **observations: object
+    ) -> dict:
+        receipt = {
+            "id": name,
+            "evidence": "fixture",
+            "observer": "terminal_host_trial.py",
+            "argv": argv,
+            "cwd": str(cwd or self.repo),
+            "launch_mode": "headless" if "-b" in argv else "interactive" if reply else "command",
+            "task_binding": "TRIAL-1 (seeded)"
+            if name.startswith("task-") or name == "checkout-publish"
+            else None,
+            "provider": "local synthetic Claude protocol substitute",
+            "shims": False,
+            "attention_list": None,
+            "notifications": None,
+            "colors_rendered": None,
+            **observations,
+        }
+        self.receipts.append(receipt)
+        _json(self.output / f"{name}.json", receipt)
+        return receipt
+
     def _run(
         self,
         name: str,
@@ -269,44 +284,31 @@ class _Trial:
         except PermissionError:
             cleaned = False
         raw = bytes(data)
-        receipt = {
-            "id": name,
-            "evidence": "fixture",
-            "observer": "terminal_host_trial.py",
-            "argv": argv,
-            "cwd": str(cwd or self.repo),
-            "host": "pty",
-            "pane_id": None,
-            "launch_mode": "headless" if "-b" in argv else "interactive" if reply else "command",
-            "task_binding": "TRIAL-1 (seeded)"
-            if name.startswith("task-") or name == "checkout-publish"
-            else None,
-            "provider": "local synthetic Claude protocol substitute",
-            "shims": False,
-            "returncode": process.returncode,
-            "problem": problem,
-            "elapsed_seconds": round(time.monotonic() - start, 3),
-            "first_useful_fixture_seconds": first,
-            "input_return_sent": sent,
-            "process_group": process.pid,
-            "process_group_cleaned": cleaned and not survivors,
-            "owned_processes": sorted(owned),
-            "surviving_owned_processes": survivors,
-            "host_recognition": None,
-            "host_state": None,
-            "attention_list": None,
-            "notifications": None,
-            "title": None,
-            "colors_rendered": None,
-            "resize": "PTY 100x28 to 120x36" if sent else None,
-            "scrollback": None,
-            "output_bytes": len(raw),
-            "pty_base64": base64.b64encode(raw).decode(),
-            "text": raw.decode("utf-8", errors="replace"),
-        }
-        self.receipts.append(receipt)
-        _json(self.output / f"{name}.json", receipt)
-        return receipt
+        return self._record(
+            name,
+            argv,
+            cwd,
+            reply,
+            host="pty",
+            pane_id=None,
+            returncode=process.returncode,
+            problem=problem,
+            elapsed_seconds=round(time.monotonic() - start, 3),
+            first_useful_fixture_seconds=first,
+            input_return_sent=sent,
+            process_group=process.pid,
+            process_group_cleaned=cleaned and not survivors,
+            owned_processes=sorted(owned),
+            surviving_owned_processes=survivors,
+            host_recognition=None,
+            host_state=None,
+            title=None,
+            resize="PTY 100x28 to 120x36" if sent else None,
+            scrollback=None,
+            output_bytes=len(raw),
+            pty_base64=base64.b64encode(raw).decode(),
+            text=raw.decode("utf-8", errors="replace"),
+        )
 
     def _api(self, method: str, params: dict | None = None) -> dict:
         with socket.socket(socket.AF_UNIX) as client:
@@ -427,27 +429,33 @@ class _Trial:
         _json(self.output / "herdr-cleanup.json", receipt)
         return receipt
 
-    def _run_in_herdr(self, name: str, argv: list[str], **kwargs: object) -> dict:
+    def _scenario(
+        self, host: str, name: str, args: list[str], *, cwd: Path | None = None, reply: bool = False
+    ) -> dict:
+        argv = [str(self.bin / "lf"), *args]
+        run = self._run_in_herdr if host == "herdr" else self._run
         try:
-            return self._execute_in_herdr(name, argv, **kwargs)
-        except (OSError, RuntimeError, KeyError, ValueError) as error:
-            receipt = {
-                "id": name,
-                "host": "herdr",
-                "evidence": "fixture",
-                "outcome": "failure",
-                "argv": argv,
-                "returncode": None,
-                "problem": str(error),
-                "text": "",
-                "process_group_cleaned": None,
-                "cleanup_receipt": "herdr-cleanup.json",
-            }
-            self.receipts.append(receipt)
-            _json(self.output / f"{name}.json", receipt)
+            receipt = run(name, argv, cwd=cwd, reply=reply)
+        except (OSError, RuntimeError, KeyError, ValueError, subprocess.SubprocessError) as error:
+            self._record(
+                name,
+                argv,
+                cwd,
+                reply,
+                host=host,
+                outcome="failure",
+                returncode=None,
+                problem=str(error),
+                text="",
+                process_group_cleaned=None,
+                cleanup_receipt="herdr-cleanup.json" if host == "herdr" else None,
+            )
             raise
+        receipt["outcome"] = _outcome(receipt)
+        _json(self.output / f"{name}.json", receipt)
+        return receipt
 
-    def _execute_in_herdr(
+    def _run_in_herdr(
         self, name: str, argv: list[str], *, cwd: Path | None = None, reply: bool = False
     ) -> dict:
         start = time.monotonic()
@@ -523,51 +531,36 @@ class _Trial:
         final = stages[-1]["snapshot"]["snapshot"]
         pane = next(p for p in final["panes"] if p["pane_id"] == pane_id)
         shown_workspace = next(w for w in final["workspaces"] if w["workspace_id"] == workspace_id)
-        receipt = {
-            "id": name,
-            "host": "herdr",
-            "pane_id": pane_id,
-            "workspace_id": workspace_id,
-            "evidence": "fixture",
-            "observer": "terminal_host_trial.py",
-            "argv": argv,
-            "cwd": str(cwd or self.repo),
-            "launch_mode": "headless" if "-b" in argv else "interactive" if reply else "command",
-            "task_binding": "TRIAL-1 (seeded)"
-            if name.startswith("task-") or name == "checkout-publish"
-            else None,
-            "provider": "local synthetic Claude protocol substitute",
-            "shims": False,
-            "returncode": code,
-            "problem": problem,
-            "elapsed_seconds": round(time.monotonic() - start, 3),
-            "first_useful_fixture_seconds": first,
-            "input_return_sent": sent,
-            "process_group_cleaned": None,
-            "cleanup_receipt": "herdr-cleanup.json",
-            "host_recognition": [a for a in final["agents"] if a.get("pane_id") == pane_id],
-            "host_state": pane["agent_status"],
-            "attention_list": None,
-            "notifications": None,
-            "title": shown_workspace["label"],
-            "terminal_title": pane.get("terminal_title"),
-            "colors_rendered": None,
-            "resize": "client PTY 100x28 to 120x36" if sent else None,
-            "scrollback": "pane.read recent-unwrapped",
-            "output_bytes": len(text.encode()),
-            "text": text,
-            "host_states_receipt": f"{name}-host-states.json",
-        }
-        self.receipts.append(receipt)
-        _json(self.output / f"{name}.json", receipt)
+        receipt = self._record(
+            name,
+            argv,
+            cwd,
+            reply,
+            host="herdr",
+            pane_id=pane_id,
+            workspace_id=workspace_id,
+            returncode=code,
+            problem=problem,
+            elapsed_seconds=round(time.monotonic() - start, 3),
+            first_useful_fixture_seconds=first,
+            input_return_sent=sent,
+            process_group_cleaned=None,
+            cleanup_receipt="herdr-cleanup.json",
+            host_recognition=[a for a in final["agents"] if a.get("pane_id") == pane_id],
+            host_state=pane["agent_status"],
+            title=shown_workspace["label"],
+            terminal_title=pane.get("terminal_title"),
+            resize="client PTY 100x28 to 120x36" if sent else None,
+            scrollback="pane.read recent-unwrapped",
+            output_bytes=len(text.encode()),
+            text=text,
+            host_states_receipt=f"{name}-host-states.json",
+        )
         self._api("workspace.close", {"workspace_id": workspace_id})
         return receipt
 
-    def _lf(self, name: str, args: list[str], **kwargs: object) -> dict:
-        argv = [str(self.bin / "lf"), *args]
-        if hasattr(self, "server") and name in (*SCENARIOS, "checkout-publish"):
-            return self._run_in_herdr(name, argv, **kwargs)
-        return self._run(name, argv, **kwargs)
+    def _lf(self, name: str, args: list[str]) -> dict:
+        return self._run(name, [str(self.bin / "lf"), *args])
 
     def _confine(self, sentinel: Path) -> bool:
         probe = self.root / "probe.py"
@@ -923,27 +916,23 @@ def _ordered_steps(text: str) -> bool:
     return 0 <= first < second
 
 
-def _judge(receipt: dict) -> bool:
+def _outcome(receipt: dict) -> str:
     name, text = receipt["id"], receipt["text"]
-    good = receipt["returncode"] == 0 and receipt["problem"] is None
-    if name in ("skill", "conversation"):
-        good &= "SYNTHETIC_RETURN:fixture-return" in text
-    if name in ("flow", "task-flow"):
-        good &= _ordered_steps(text)
+    if receipt["problem"] is not None or receipt["returncode"] is None:
+        return "failure"
     boundaries = {
         "fresh-checkout": "pm.linear_team",
         "publish": "default branch cannot open a PR",
         "checkout-publish": "gh CLI not found",
         "task-flow": "a connected managed account is required",
     }
-    blocked = (
-        receipt["returncode"] not in (None, 0)
-        and receipt["problem"] is None
-        and name in boundaries
-        and boundaries[name] in text
-    )
-    receipt["outcome"] = "blocked" if blocked else "success" if good else "failure"
-    return good or blocked
+    if receipt["returncode"] != 0:
+        return "blocked" if name in boundaries and boundaries[name] in text else "failure"
+    if name in ("skill", "conversation") and "SYNTHETIC_RETURN:fixture-return" not in text:
+        return "failure"
+    if name in ("flow", "task-flow") and not _ordered_steps(text):
+        return "failure"
+    return "success"
 
 
 def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
@@ -1024,7 +1013,7 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                 ):
                     if name == "skill":
                         summary["first_command_seconds"] = round(time.monotonic() - started, 3)
-                    receipt = trial._lf(name, argv, reply=reply)
+                    receipt = trial._scenario(host, name, argv, reply=reply)
                     if name == "skill" and receipt["first_useful_fixture_seconds"] is not None:
                         summary["first_useful_fixture_seconds"] = round(
                             summary["first_command_seconds"]
@@ -1035,9 +1024,8 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                         summary["planning_stall_observed_seconds"] = round(
                             time.monotonic() - started, 3
                         )
-                    if not _judge(receipt):
+                    if receipt["outcome"] == "failure":
                         summary["errors"].append(name + ": unexpected CLI result")
-                    _json(output / f"{name}.json", receipt)
                     trial._inspect(name)
                 checkout = trial._register_task()
                 for name, argv in (
@@ -1045,10 +1033,9 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                     ("task-flow", ["-b", "-m", "claude", "task", "run", "TRIAL-1", "trial"]),
                     ("checkout-publish", ["pr", "publish", "--title", "Synthetic trial"]),
                 ):
-                    receipt = trial._lf(name, argv, cwd=checkout)
-                    if not _judge(receipt):
+                    receipt = trial._scenario(host, name, argv, cwd=checkout)
+                    if receipt["outcome"] == "failure":
                         summary["errors"].append(name + ": unexpected CLI result")
-                    _json(output / f"{name}.json", receipt)
                     trial._inspect(name)
             finally:
                 if hasattr(trial, "server"):

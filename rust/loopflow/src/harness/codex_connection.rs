@@ -171,10 +171,6 @@ impl CodexConnection {
     /// Read all native turn pages before displaying the conversation. This
     /// connection never subscribes, answers approvals, or acquires a driver.
     pub async fn recover_history(&self, engine: &Path) -> Result<()> {
-        let recover_inputs = super::dispatch::off_reactor(|| {
-            self.store
-                .has_codex_input_dispatch(&self.session_id, &self.thread_id)
-        })?;
         let (mut upstream, _) =
             client_async("ws://localhost", UnixStream::connect(engine).await?).await?;
         read_rpc(
@@ -193,14 +189,13 @@ impl CodexConnection {
             .await?;
         let mut history = super::codex_history::History::default();
         let mut cursor = Value::Null;
-        let mut turns = Vec::new();
         loop {
             let result = read_rpc(
                 &mut upstream,
                 "thread/turns/list",
                 json!({
                     "threadId":self.thread_id, "cursor":cursor, "limit":100,
-                    "sortDirection":"asc", "itemsView": if recover_inputs { "full" } else { "notLoaded" }
+                    "sortDirection":"asc", "itemsView":"notLoaded"
                 }),
             )
             .await?;
@@ -213,15 +208,6 @@ impl CodexConnection {
                     &json!({"result":result}),
                 )
             })?;
-            if recover_inputs {
-                turns.extend(
-                    result["data"]
-                        .as_array()
-                        .ok_or_else(|| anyhow!("Native history response has no turns"))?
-                        .iter()
-                        .cloned(),
-                );
-            }
             let next = result.get("nextCursor").cloned().unwrap_or(Value::Null);
             if next.is_null() {
                 break;
@@ -230,12 +216,6 @@ impl CodexConnection {
                 return Err(anyhow!("Native history returned a repeated cursor"));
             }
             cursor = next;
-        }
-        if recover_inputs {
-            super::dispatch::off_reactor(|| {
-                self.store
-                    .record_codex_input_receipts(&self.session_id, &self.thread_id, &turns)
-            })?;
         }
         upstream.close(None).await?;
         Ok(())

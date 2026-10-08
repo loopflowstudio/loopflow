@@ -1,37 +1,7 @@
-import sys
 from pathlib import Path
 
 import pytest
-from request_mapping import _assess, _Terminal
-
-
-def test_terminal_answers_each_cursor_query_once(tmp_path: Path) -> None:
-    terminal = _Terminal(
-        [
-            sys.executable,
-            "-c",
-            """
-import os
-import select
-import tty
-
-tty.setraw(0)
-os.write(1, b"\x1b[6n")
-assert os.read(0, 6) == b"\x1b[1;1R"
-os.write(1, b"x")
-assert not select.select([0], [], [], 0.1)[0], "duplicate cursor report"
-os.write(1, b"\x1b[6n" + b"x" * 100)
-assert os.read(0, 6) == b"\x1b[1;1R"
-""",
-        ],
-        tmp_path,
-        {},
-    )
-    try:
-        terminal.pump(5)
-        assert terminal.process.wait(timeout=1) == 0
-    finally:
-        terminal.close()
+from request_mapping import _assess
 
 
 @pytest.mark.parametrize("role", ["system", "assistant", "user", None])

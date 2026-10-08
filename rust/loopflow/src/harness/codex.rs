@@ -1190,16 +1190,12 @@ impl CodexHarness {
 
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<OutboundRpc>(128);
         let authority = self.session_driver.clone();
-        let mut seed_capture = launch
-            .env
-            .get(crate::session_record::CAPTURE_KEY_ENV)
-            .cloned();
         let writer_events = self.events.clone();
         let native_history = Arc::new(Mutex::new(super::codex_history::History::default()));
         let writer_history = native_history.clone();
         let writer_task = tokio::spawn(async move {
             while let Some(message) = outbound_rx.recv().await {
-                let mut payload = match message {
+                let payload = match message {
                     OutboundRpc::Request { id, method, params } => {
                         json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
                     }
@@ -1214,16 +1210,6 @@ impl CodexHarness {
                         "error": { "code": -32000, "message": message },
                     }),
                 };
-                let capture = (payload["method"] == "turn/start" && authority.is_some())
-                    .then(|| seed_capture.take())
-                    .flatten();
-                if capture.is_some() {
-                    // Retries can send a continuation under the same capture.
-                    // Native message identity belongs to this dispatch, retained
-                    // with the capture before its bytes cross the socket.
-                    payload["params"]["clientUserMessageId"] =
-                        json!(uuid::Uuid::new_v4().to_string());
-                }
                 writer_history
                     .lock()
                     .expect("codex history lock poisoned")
@@ -1231,17 +1217,9 @@ impl CodexHarness {
                 let message = Message::Text(payload.to_string().into());
                 let outcome = if let Some((store, session, expected)) = authority.clone() {
                     let dispatched = tokio::task::spawn_blocking(move || {
-                        let send = || super::dispatch::send_fenced(&mut writer, message);
-                        let outcome = match capture {
-                            Some(capture) => store.dispatch_codex_input(
-                                &session,
-                                &expected,
-                                &capture,
-                                &payload["params"],
-                                send,
-                            ),
-                            None => store.with_session_driver(&session, &expected, send),
-                        };
+                        let outcome = store.with_session_driver(&session, &expected, || {
+                            super::dispatch::send_fenced(&mut writer, message)
+                        });
                         (writer, outcome)
                     })
                     .await;

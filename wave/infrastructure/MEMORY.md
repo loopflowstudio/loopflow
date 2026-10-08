@@ -1038,62 +1038,35 @@ Prior probes: `470382987`; large inputs: `44fe36620`, this file. Preserve caller
 checkpointing, common invocation loading and Claude file-backed stdin. Rejected
 Codex starts remaining waiting are unresolved.
 
-LOO-420: Jack Heart selected native same-harness invocation, translated ports,
-inlined builtins, `--agent`/`-a`, terminal/headless and same-conversation use through
-review, without landing. Missing transport/admission cannot narrow scope. One
-catalog replaces external/npx/rams and Flow resolvers; `920ada7b6` removes the
-CLI discovery layer. Retain source, declarations
-and arguments together; later rediscovery can change execution and attribution.
-Export preserves third-party files; `agent: Explore` never selects lf's harness.
-Jack removed `--ide` after installed
-0.13.9 launches lacked native identity and both reconnects failed. Preserve history;
-launcher success proves no engine exit.
+LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
+and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:
+ordinary installed-skill invocation through `lf audit` / `lf audit -a codex`,
+matching help/list, native same-harness execution, translated ports, exact arguments,
+assets and declarations. Builtins stay inline; `--agent/-a` remains. Busy-terminal
+injection, competing writers, queues and generic engine recovery are not
+prerequisites. Jack requested radical compression through review, without landing
+or completing the Task.
 
-Claude's local headless LF/Flow fake-API proofs cover native expansion, exact
-arguments and user-only context after source removal/collision. Private plugins
-retain provenance but link current siblings; deleted bundles, parent-relative
-paths, plugin variables and full controls remain unresolved. Context acknowledgement
-cannot settle the skill. Builtins stay inline; ports' unenforced declarations are
-not accepted fidelity losses. Intelligence's ablation found omitted context returning
-via reads; repeated cost baselines, resumed history and live fidelity remain unproved.
+One engine catalog replaces external/npx/rams and Flow resolvers. Retain source,
+declarations and arguments together; export preserves third-party files. Claude
+subagent names do not select lf's harness. Independent fixes preserve saved Session
+placement, active captures on refused continuation and unpublished reservations on
+publication failure. Launcher success proves no provider exit.
 
-Codex 0.160.1 ignores unregistered explicit paths despite success. Its per-cwd
-extra-root field is ignored; the working replacement changes engine-global roots.
-The unsafe prototype remains removed. October 8's additive-catalog probe expands
-a captured path while preserving sibling roots and fresh plain `$audit` selection
-only after assigning the snapshot a unique native name. Keeping `name: audit`
-makes fresh plain invocation expand neither source; reused history hid that failure.
-This candidate proves no LF dispatch, placement/lifetime, native-name fidelity or
-complete controls/resources. Earlier receipts prove resume with context resupply,
-not recall.
+Earlier native queue, custody, alias/catalog and PTY observations remain at
+`1e4ae02a5:wave/infrastructure/MEMORY.md` under this heading and its probe README.
+They establish neither ordinary LF launch fidelity nor a requirement to expand
+scope. Complete native terminal/Codex dispatch, declaration translation and
+unchanged third-party entry proofs remain. Claude headless source/argument/context
+proofs are local fake-API evidence; resource links do not preserve deleted bundles.
+Release's operation-entry lesson applies: provider probes alone cannot establish
+`lf audit` acceptance. Ordinary Session continuity and historical bytes survive
+removing speculative dispatch machinery.
 
-Claude's hook sends system context on tested Sonnet/Opus; queued user context
-survives resume without resupply/leakage. PTY injection submits drafts; inbox slash
-text stays unexpanded. Replacement terminals remain unapproved. Atomic capture/driver
-admission preserves held owners, losing claims, handoff and failed publication;
-it proves no current-owner delivery or installed continuity. `cbb402869` preserves
-native identity/history and uses Session cwd for context/provider/replay, caller cwd
-for Process provenance.
-
-Codex 0.160.1 steers omit expansion; duplicate RPC ids repeat input. Sequential
-lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
-`c91648d63`. Exact receipts can belong to another active turn without expansion.
-Historical expansion proves no new application.
-
-October 8: `02a073349` proves queue admission despite dropped reply, cancellation
-and handoff; `ed9ad8a61` covers terminal-free consumption and two pending inputs
-across engine death. `34e77951d` requires each input's unique receipt and own
-outcome. Queue absence before history appears never authorizes resend. Provider
-proofs establish no LF admission, idempotency or external effects.
-
-LF still maps only its writer's first start; native starts borrow current capture,
-and first completion ends the driver. Admission, attribution and settlement remain
-one repair. Resume clears structured invocation. `--queued-exit` adds public LF
-relay settlement acceptance, not skill admission. Engine retention preserved native
-queued work but failed plain Codex resume (`already has an active writer`);
-unsubscribe from a new subscriber or the original LF connection did not repair it.
-The production candidate was removed. Writer-custody release must preserve
-concurrent admissions; an idle snapshot grants no engine-wide kill authority.
-No candidate was adopted. Held-owner delivery, LF
-lost-ack/draft recovery, distinct captures across pending restart, catalog/resources,
-Claude parity and cost acceptance remain. Prior detail: `4e5afeb10`, this heading. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).
+The October 8 compression removes per-dispatch identities/receipt recovery and
+exclusive queue, engine-restart and PTY/inbox probes. Codex harness/connection/event
+store return to the active PR base; baseline reconnect still passes with stale
+clients rejected and native/sibling history retained. The reduced Claude LF/Flow
+fake-API checks pass with one request, exact arguments and separate user context.
+These checks establish no native Codex skill, terminal fidelity or unchanged
+third-party acceptance. No landing or Task completion occurred.

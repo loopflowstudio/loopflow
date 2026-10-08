@@ -3,27 +3,21 @@
 The [plan](compare-cmux-s-command-line.md) owns implementation; [findings](findings.md)
 own evidence. Jack Heart has already selected one shared Work tree, subtree
 delegation, one repository window across machines, macOS-only view control and
-one PR. Those are not questions to re-derive. Slice 1 is implemented locally; slices 2–5 still depend on these decisions.
+one PR. Those are not questions to re-derive. Slice 1 is implemented locally; slices 2–5 remain. The former shared-source selection blocker is resolved.
 
-## Q1 — Shared source availability and writes (blocks slice 2)
+## Q1 — Selected: local operations and custom Git-ref Task sync (October 8)
 
-Where does the authoritative Work tree live, where do planning writes go, and
-what remains possible when that source cannot be reached?
+Jack Heart superseded the designated-planning-machine experiment: everything in
+an invocation runs against the execution Machine's ordinary local store. A custom
+Git planning ref synchronizes Task planning between machines. LOO-406 owns the
+common local writer/Linear sync; LOO-412 owns exchange/merge and active sync scope.
+No planning callbacks or centralized Workflow writes remain in this plan.
 
-Two mechanisms still fit the accepted one-source direction but have different
-product consequences:
-
-- A designated planning machine owns the existing store; other machines address
-  it for planning reads/writes, keeping caches observational. This requires the
-  source to be reachable for writes and an explicit recovery/backup policy.
-- A durable published plan is authoritative, and execution machines consume its
-  exact identities. This requires a publication/write-conflict protocol and a
-  decision about local-only/private plans; it cannot silently publish to the code
-  remote. Jack's earlier Git leaning is not approval of this protocol.
-
-These are alternatives, not selected implementations. LOO-406 supplies local
-planning operations; its current scope deliberately leaves synchronization out.
-Q1 must include existing connected plans and repositories with no Tasks.
+`lf task run` stays local, including Workflow take-up, edge selection and arrival.
+Only portable planning changes synchronize. Imported completion changes planning
+presentation, never the receiving Machine's Workflow, Processes or checkout.
+Unavailable Git retains local work and visible pending sync. Q1 is resolved;
+protocol/hosting proof is LOO-412 implementation work, not a renewed transport vote.
 
 ## Q2 — Changing delegation (needed in slice 2)
 

@@ -51,33 +51,40 @@ only Wave, Project and Task. The current local import mints Project IDs in
 `store/sqlite/planning.rs` and Task IDs in `ops/task.rs`. Shared Linear records
 alone do not establish shared Loopflow identities.
 
-The related Tasks do not close this gap:
+## Latest LOO-406/412 direction — October 8
 
-- LOO-412 at `0cd8e7f14a6bffecd9323541e7689570316b892a` carries issue/branch/
-  commit/planning input through SSH, never source Task IDs or authority. It
-  preserves existing target IDs, Workflows and Project selection. Two existing
-  Machines can therefore retain different Task IDs for one issue. Its checkout
-  transport is reusable; its independent planning adoption cannot implement
-  LOO-427's shared-tree contract unchanged. PR #1491 was published for review,
-  not evidence of an integrated shared source.
-- LOO-406's current brief selects a complete single-machine local lifecycle and
-  explicitly excludes host callbacks, Git synchronization and multi-person
-  authority changes. Its October 7 design, inspected beside source
-  `510977d11a38b818e1d89da1be09e79d4215ce3c`, preserves established identity and
-  leaves independent-machine import convergence to synchronization. Its local
-  storage work must not be duplicated here.
-- Jack Heart's LOO-406 comments `fc82810b-d506-4d02-a6da-c46ea79ea924`,
-  `f929c7f5-c063-454e-93a8-7a6d7374402d` and
-  `25b3eede-7d52-4c48-9fb1-8e21e0050590` distinguish disposable execution
-  machines, a leaning toward Git as the official copy, and Linear-owned shared
-  plans. They do not select an always-on SQLite master or a publication protocol.
+LOO-412 comment `f883b34b-1195-4fc5-bfc7-1ac7d4c29be6` and LOO-406 comments
+`8b45e82d-6765-490a-a3d6-44b44611cedd` / `b5402659-b825-4c12-b278-5d56ae1aa518`
+select one custom Git planning ref, local operations and bidirectional planning
+sync. Jack confirmed this directly in LOO-427. These supersede the earlier callback
+comment `e9ef3396` and LOO-427's proposed host-owned Workflow transitions.
 
+The current LOO-412 design was read in its checkout. Each process uses its local
+store. Portable planning includes Task identity/brief/membership/comments/completion;
+Workflow progression, Sessions, Processes, checkout paths and execution authority
+are expressly excluded. `refs/loopflow/planning` is a provisional ref name, not a
+published protocol. Stable mutation IDs, causal reopening protection, conflicts,
+explicit deletion and semi-live exchange remain required. No real planning-data
+publication is authorized by selecting the prototype.
+
+LOO-406 owns ordinary local planning operations and pending effects, with optional
+Linear synchronization. LOO-412 owns custom-ref transport and machine integration;
+its independent isolated transport tests need not await all Linear work. End-to-end
+integration consumes coherent committed writer APIs, not another planner or dirty
+code copied between checkouts. Source comments/earlier briefs retain superseded
+callback wording; the later accepted comments and current design govern.
+
+Current `traverse_workflow` and `workflow_arrive` write through the local store.
+That location agrees with the latest decision: preserve this local execution
+boundary instead of adding central Workflow callbacks. Mixed-operation proof must
+show that exported planning completion cannot replay Workflow or cleanup effects
+on the importing Machine.
 
 ## Decisions these findings do not establish
 
 - Missing shared-source implementation does not reopen Jack Heart's accepted
-  one-tree/delegated-subtree direction. It prevents slice 2 from choosing its
-  physical authority contract, not slice 1 from separating recorded location.
+  one-tree/delegated-subtree direction. Jack selected local planning with Git-ref exchange on October 8; implementation
+  and integration are still required.
 - Removing the former SSH `--repo` option did not ban Work-directed routing.
 - Matching a parent's Machine is not evidence that a historical assignment was
   inherited. Migration must preserve the observed meaning rather than invent it.
@@ -105,3 +112,17 @@ The first focused run failed on fixture setup (missing required `input_published
 and a nonexistent PR branch); both fixtures were corrected. Gate still owns
 materialized/installation migration and complete Session lifecycle verification.
 This is slice-1 evidence, not shared-source or native Desktop proof.
+
+Reconciled October 8 against `f8d3386da`: compression removed comparisons'
+second store/Task lookup and `TaskComparison::new`; the validated checkout now
+supplies comparison identity and path. Session resolution lost the unused
+`recorded_root` argument and its exclusive test. Prior focused checks still
+apply; this reconciliation changes no Rust.
+
+The integrated upstream `812d8cc55` changes installation retention, not shared
+Work authority. Current `WorkRef` still has only Wave/Project/Task;
+`inherit_placement` still copies its parent's assignment. `WorkLinkRouter` still
+overwrites a single pending URL and falls back to an unrelated window. These
+findings preserve the remaining work in slices 2–5, rather than establishing any Desktop control
+as complete. Product has no child directories or child memories in this checkout;
+Infrastructure's Machine/reporting notes retain the existing integration owners.

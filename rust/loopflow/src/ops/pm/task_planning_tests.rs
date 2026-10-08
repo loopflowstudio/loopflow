@@ -56,6 +56,12 @@ async fn serve(
 // Stateful provider evidence for planning fields, state, membership, and comments.
 #[derive(Default)]
 struct PlanningState {
+    export_mode: bool,
+    creation_writes: usize,
+    attachment_writes: usize,
+    lose_creation_reply: bool,
+    lose_attachment_reply: bool,
+    hide_exports: bool,
     deletion_writes: usize,
     lose_deletion_reply: bool,
     deletion_unconfirmed: bool,
@@ -146,7 +152,9 @@ async fn planning_graphql(
             state.fail_snapshot = false;
             return axum::Json(json!({"errors":[{"message":"snapshot unavailable"}]}));
         }
-        let mut projects = if project_id == "prior-project" {
+        let mut projects = if state.export_mode {
+            vec![]
+        } else if project_id == "prior-project" {
             vec![project, planning_project(&initial_project_id, &project_id)]
         } else {
             vec![project]
@@ -154,10 +162,11 @@ async fn planning_graphql(
         projects.extend(state.extra_projects.clone());
         json!({"initiative":{"projects":page(projects)}})
     } else if query.contains("query ListProjectIssues") {
-        if state
-            .extra_projects
-            .iter()
-            .any(|project| project["id"] == vars["projectId"])
+        if !state.export_mode
+            && state
+                .extra_projects
+                .iter()
+                .any(|project| project["id"] == vars["projectId"])
         {
             return axum::Json(
                 json!({"errors":[{"message":"foreign Project issues are unavailable"}]}),
@@ -171,8 +180,21 @@ async fn planning_graphql(
             .collect::<Vec<_>>();
         json!({"project":{"issues":page(issues)}})
     } else if query.contains("query FindProject") {
-        let owned = planning_project(vars["id"].as_str().unwrap(), &project_id);
-        json!({"projects":page(vec![owned])})
+        let projects = if state.export_mode {
+            if state.hide_exports {
+                vec![]
+            } else {
+                state
+                    .extra_projects
+                    .iter()
+                    .filter(|p| p["id"] == vars["id"])
+                    .cloned()
+                    .collect()
+            }
+        } else {
+            vec![planning_project(vars["id"].as_str().unwrap(), &project_id)]
+        };
+        json!({"projects":page(projects)})
     } else if query.contains("query ProjectOwnership") {
         let owned = state
             .extra_projects
@@ -185,6 +207,63 @@ async fn planning_graphql(
     } else if query.contains("query ProjectStatuses") {
         json!({"projectStatuses":page(["planned","started","completed","paused","canceled"].iter()
             .map(|status| json!({"id":status,"type":status,"position":0,"teamId":"team-1"})).collect::<Vec<_>>())})
+    } else if query.contains("query FindExportIssue") {
+        json!({"issues":{"nodes":if state.hide_exports { vec![] } else {
+            state.issues.iter().filter(|i| i["id"]==vars["id"]).map(|i| json!({"id":i["id"]})).collect::<Vec<_>>()
+        }}})
+    } else if query.contains("mutation DeliverProjectCreation")
+        || query.contains("mutation DeliverTaskCreation")
+    {
+        state.creation_writes += 1;
+        let input = &vars["input"];
+        let is_project = query.contains("DeliverProjectCreation");
+        if is_project {
+            let mut project = planning_project(input["id"].as_str().unwrap(), "project-1");
+            project["name"] = input["name"].clone();
+            project["description"] = input["description"].clone();
+            project["content"] = input["content"].clone();
+            project["status"] = json!({"type":input["statusId"]});
+            project["initiatives"] = json!({"nodes":[]});
+            mark_issue_updated(&mut project);
+            state.extra_projects.push(project);
+        } else {
+            let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
+                "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
+                "branchName":null,"completedAt":null,"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
+                "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local chapter"}});
+            mark_issue_updated(&mut issue);
+            state.issues.push(issue);
+        }
+        let lost = std::mem::take(&mut state.lose_creation_reply);
+        let arrived = state.field_arrived.take();
+        let release = state.field_release.take();
+        drop(state);
+        if let Some(arrived) = arrived {
+            arrived.notify_one();
+        }
+        if let Some(release) = release {
+            release.notified().await;
+        }
+        return axum::Json(if lost {
+            json!({"errors":[{"message":"creation reply lost"}]})
+        } else if is_project {
+            json!({"data":{"projectCreate":{"success":true,"project":{"id":input["id"]}}}})
+        } else {
+            json!({"data":{"issueCreate":{"success":true,"issue":{"id":input["id"]}}}})
+        });
+    } else if query.contains("mutation DeliverProjectAttachment") {
+        state.attachment_writes += 1;
+        let project = state
+            .extra_projects
+            .iter_mut()
+            .find(|p| p["id"] == vars["input"]["projectId"])
+            .unwrap();
+        project["initiatives"] = json!({"nodes":[{"id":vars["input"]["initiativeId"]}]});
+        mark_issue_updated(project);
+        if std::mem::take(&mut state.lose_attachment_reply) {
+            return axum::Json(json!({"errors":[{"message":"attachment reply lost"}]}));
+        }
+        json!({"initiativeToProjectCreate":{"success":true}})
     } else if query.contains("mutation DeliverTaskField")
         || query.contains("mutation DeliverProjectField")
     {
@@ -438,7 +517,7 @@ fn seed_provider_task(
     })
 }
 
-fn with_completion_task(
+fn with_planning_task(
     test: impl FnOnce(
         &tokio::runtime::Runtime,
         &Fixture,
@@ -476,7 +555,7 @@ fn with_completion_task(
 
 #[test]
 fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
         conn.execute(
@@ -595,7 +674,7 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
 
 #[test]
 fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         let receipt = fixture
             .store
@@ -642,7 +721,7 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
 
 #[test]
 fn task_deletion_concurrent_delivery_has_one_effect() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         let work = crate::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
@@ -665,7 +744,7 @@ fn task_deletion_concurrent_delivery_has_one_effect() {
 
 #[test]
 fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         let receipt = fixture
             .store
@@ -696,7 +775,7 @@ fn task_deletion_old_trash_observation_cannot_settle_newer_removal() {
 
 #[test]
 fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         let work = crate::durable::WorkRef::Task(task.id.clone());
         runtime.block_on(async {
@@ -726,7 +805,7 @@ fn task_deletion_unconfirmed_write_stays_uncertain_without_replay() {
 
 #[test]
 fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_delete(repo, task.id.as_str()).unwrap();
         let receipt = fixture
             .store
@@ -777,7 +856,7 @@ fn task_deletion_adopts_newer_linear_edit_and_retains_losing_removal() {
 #[test]
 fn task_abandonment_saves_offline_in_both_connection_modes() {
     for connected in [false, true] {
-        with_completion_task(|runtime, fixture, repo, task, _provider| {
+        with_planning_task(|runtime, fixture, repo, task, _provider| {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             if !connected {
                 std::fs::write(repo.join(".lf/config.yaml"), "{}\n").unwrap();
@@ -836,7 +915,7 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
 
 #[test]
 fn task_abandonment_active_sync_delivers_after_reconnect() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async { state.lock().await.field_outage = true });
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
         let receipt = fixture
@@ -909,7 +988,7 @@ fn task_abandonment_active_sync_delivers_after_reconnect() {
 
 #[test]
 fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
         let receipt = fixture
             .store
@@ -947,7 +1026,7 @@ fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
 
 #[test]
 fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
         let receipt = fixture
             .store
@@ -1007,7 +1086,7 @@ fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
 
 #[test]
 fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
         let receipt = fixture
             .store
@@ -1046,7 +1125,7 @@ fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
 
 #[test]
 fn task_abandonment_rolls_back_if_delivery_cannot_commit() {
-    with_completion_task(|_runtime, fixture, repo, task, _state| {
+    with_planning_task(|_runtime, fixture, repo, task, _state| {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute_batch(
             "CREATE TRIGGER fail_delivery BEFORE INSERT ON task_state_deliveries
@@ -1086,7 +1165,7 @@ fn task_abandonment_rolls_back_if_delivery_cannot_commit() {
 
 #[test]
 fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         conn.execute_batch(
             "CREATE TRIGGER fail_delivery BEFORE INSERT ON task_state_deliveries
@@ -1138,7 +1217,7 @@ fn task_completion_rolls_back_reason_and_decision_if_delivery_cannot_commit() {
 
 #[test]
 fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
-    with_completion_task(|runtime, fixture, repo, task, _state| {
+    with_planning_task(|runtime, fixture, repo, task, _state| {
         let mut remote = fixture
             .store
             .sqlite
@@ -1279,7 +1358,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
 
 #[test]
 fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
-    with_completion_task(|runtime, fixture, repo, task, _state| {
+    with_planning_task(|runtime, fixture, repo, task, _state| {
         crate::ops::task::task_end(
             repo,
             task.id.as_str(),
@@ -1407,7 +1486,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
 
 #[test]
 fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_end(
             repo,
             task.id.as_str(),
@@ -1480,7 +1559,7 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
 
 #[test]
 fn task_completion_preserves_linear_reopening_during_delivery() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_end(
             repo,
             task.id.as_str(),
@@ -1507,7 +1586,7 @@ fn task_completion_preserves_linear_reopening_during_delivery() {
 
 #[test]
 fn task_completion_lost_reply_adopts_linear_reopening() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_end(
             repo,
             task.id.as_str(),
@@ -2487,7 +2566,7 @@ impl crate::ops::Progress for LifecycleMessages {
 
 #[test]
 fn planning_fields_active_connection_delivers_offline_saves_after_recovery() {
-    with_completion_task(|runtime, fixture, _repo, task, state| {
+    with_planning_task(|runtime, fixture, _repo, task, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
             let sync = crate::ops::linear_observe::PlanningSync::start(
@@ -2609,7 +2688,7 @@ fn planning_fields_active_connection_delivers_offline_saves_after_recovery() {
 #[test]
 fn planning_fields_lost_reply_retains_identity_and_readback_settles_without_rewrite() {
     for project in [false, true] {
-        with_completion_task(|runtime, fixture, repo, task, state| {
+        with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = save_field_name(fixture, task, project, "Saved once");
                 let receipts = field_receipts(fixture, task, project);
@@ -2675,7 +2754,7 @@ fn planning_fields_lost_reply_retains_identity_and_readback_settles_without_rewr
 #[test]
 fn planning_fields_older_acknowledgement_preserves_and_delivers_newer_save() {
     for project in [false, true] {
-        with_completion_task(|runtime, fixture, repo, task, state| {
+        with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = save_field_name(fixture, task, project, "First save");
                 let first = field_receipts(fixture, task, project)[0].clone();
@@ -2802,7 +2881,7 @@ fn field_receipts(
 #[test]
 fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_workflow() {
     for project in [false, true] {
-        with_completion_task(|runtime, fixture, repo, task, state| {
+        with_planning_task(|runtime, fixture, repo, task, state| {
             runtime.block_on(async {
                 let work = save_field_name(fixture, task, project, "Losing local name");
                 let receipt = field_receipts(fixture, task, project)[0].clone();
@@ -2860,7 +2939,7 @@ fn planning_fields_observed_conflicts_adopt_linear_without_writing_or_moving_wor
 
 #[test]
 fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_cleared() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let mut provider = planning_project("project-1", "project-1");
             provider["content"] = json!(
@@ -2944,7 +3023,7 @@ fn planning_fields_project_content_preserves_prose_and_task_assignee_can_be_clea
 
 #[test]
 fn planning_fields_uncertain_attempt_does_not_rewrite_an_unchanged_provider() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let work = save_field_name(fixture, task, false, "Unconfirmed save");
             let receipt = field_receipts(fixture, task, false)[0].clone();
@@ -2976,7 +3055,7 @@ fn planning_fields_uncertain_attempt_does_not_rewrite_an_unchanged_provider() {
 
 #[test]
 fn planning_fields_deliver_project_activation_and_task_membership_without_execution() {
-    with_completion_task(|runtime, fixture, repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             let project_work = crate::durable::WorkRef::Project(task.project_id.clone());
             let mut provider = planning_project("project-1", "project-1");
@@ -3078,5 +3157,444 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
             assert!(retained.worktree.is_none());
             assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
         });
+    });
+}
+
+fn with_export_plan(
+    test: impl FnOnce(
+        &tokio::runtime::Runtime,
+        &Fixture,
+        &Path,
+        &Task,
+        Arc<tokio::sync::Mutex<PlanningState>>,
+    ),
+) {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let fixture = runtime.block_on(Fixture::new());
+    std::env::set_var("LF_HOME", fixture.directory.path());
+    let (repo, wave) = runtime.block_on(fixture.planning_repo());
+    let project = fixture
+        .store
+        .sqlite
+        .ensure_project(wave.id(), "Local chapter")
+        .unwrap();
+    let task = fixture
+        .store
+        .sqlite
+        .create_task(&crate::planning::NewTask {
+            id: crate::durable::TaskId::new(),
+            project_id: project,
+            title: "Same title".into(),
+            description: "Saved offline".into(),
+        })
+        .unwrap();
+    runtime.block_on(fixture.seed(now() + 86_400));
+    let state = Arc::new(tokio::sync::Mutex::new(PlanningState {
+        export_mode: true,
+        ..Default::default()
+    }));
+    let (url, server) = runtime.block_on(serve(state.clone()));
+    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        test(&runtime, &fixture, &repo, &task, state)
+    });
+    server.abort();
+}
+
+#[test]
+fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let second = fixture
+            .store
+            .sqlite
+            .create_task(&crate::planning::NewTask {
+                id: crate::durable::TaskId::new(),
+                project_id: task.project_id.clone(),
+                title: task.plan.title.clone(),
+                description: task.plan.description.clone(),
+            })
+            .unwrap();
+        state.blocking_lock().field_outage = true;
+        let sync =
+            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
+                .unwrap();
+        runtime.block_on(async {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(state.lock().await.creation_writes, 0);
+            state.lock().await.field_outage = false;
+            tokio::time::timeout(std::time::Duration::from_secs(12), async {
+                loop {
+                    if fixture
+                        .store
+                        .get_task(&second.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .plan
+                        .linear_id
+                        .is_some()
+                        && fixture
+                            .store
+                            .get_task(&task.id)
+                            .await
+                            .unwrap()
+                            .unwrap()
+                            .plan
+                            .linear_id
+                            .is_some()
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap();
+        });
+        drop(sync);
+        let tasks = runtime.block_on(fixture.store.list_tasks(None)).unwrap();
+        assert_eq!(tasks.len(), 2);
+        for saved in tasks {
+            assert!(saved.worktree.is_none());
+            assert_eq!(saved.plan.title, "Same title");
+            assert_eq!(
+                saved.plan.linear_id.unwrap().as_str(),
+                uuid::Uuid::parse_str(saved.id.as_str().trim_start_matches("task_"))
+                    .unwrap()
+                    .to_string()
+            );
+        }
+        assert_eq!(state.blocking_lock().creation_writes, 3);
+        assert_eq!(state.blocking_lock().attachment_writes, 1);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .planning_export_owners(&repo.to_string_lossy())
+                .unwrap(),
+            vec![]
+        );
+        let reopened = runtime
+            .block_on(crate::store::open_ephemeral_store(
+                &crate::store::StorageConfig::sqlite(fixture.database.clone()),
+            ))
+            .unwrap();
+        assert_eq!(
+            runtime.block_on(reopened.list_tasks(None)).unwrap().len(),
+            2
+        );
+    });
+}
+
+#[test]
+fn planning_export_lost_creation_and_attachment_recover_without_duplicate_effects() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let project = crate::durable::WorkRef::Project(task.project_id.clone());
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        for owner in [&project, &work] {
+            state.blocking_lock().lose_creation_reply = true;
+            assert!(runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &fixture.store,
+                    repo,
+                    owner
+                ))
+                .is_err());
+            let writes = state.blocking_lock().creation_writes;
+            state.blocking_lock().hide_exports = true;
+            assert!(runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &fixture.store,
+                    repo,
+                    owner
+                ))
+                .is_err());
+            assert_eq!(state.blocking_lock().creation_writes, writes);
+            state.blocking_lock().hide_exports = false;
+            let reopened = runtime
+                .block_on(crate::store::open_ephemeral_store(
+                    &crate::store::StorageConfig::sqlite(fixture.database.clone()),
+                ))
+                .unwrap();
+            if owner == &project {
+                state.blocking_lock().lose_attachment_reply = true;
+                assert!(runtime
+                    .block_on(crate::ops::planning_export::sync_export(
+                        &reopened, repo, owner
+                    ))
+                    .is_err());
+            }
+            runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &reopened, repo, owner,
+                ))
+                .unwrap();
+            runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &reopened, repo, owner,
+                ))
+                .unwrap();
+        }
+        assert_eq!(state.blocking_lock().creation_writes, 2);
+        assert_eq!(state.blocking_lock().attachment_writes, 1);
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.list_tasks(None))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap()
+            .plan
+            .linear_id
+            .is_some());
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .edit_task(
+                &task.id,
+                saved.plan.revision,
+                &crate::pm::PmItemUpdate {
+                    name: Some("After export".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        runtime
+            .block_on(crate::ops::planning_delivery::sync_fields(
+                &fixture.store,
+                repo,
+                &work,
+            ))
+            .unwrap();
+        assert_eq!(state.blocking_lock().issues[0]["title"], "After export");
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+    });
+}
+
+#[test]
+fn planning_export_late_readback_preserves_newer_edits_and_inventory_identity() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let project = crate::durable::WorkRef::Project(task.project_id.clone());
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        for owner in [&project, &work] {
+            let arrived = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Notify::new());
+            {
+                let mut state = state.blocking_lock();
+                state.field_arrived = Some(arrived.clone());
+                state.field_release = Some(release.clone());
+            }
+            runtime.block_on(async {
+                let save = async {
+                    arrived.notified().await;
+                    match owner {
+                        crate::durable::WorkRef::Project(id) => fixture
+                            .store
+                            .sqlite
+                            .edit_project(id, Some("Later chapter"), None)
+                            .unwrap(),
+                        crate::durable::WorkRef::Task(id) => {
+                            let saved = fixture.store.get_task(id).await.unwrap().unwrap();
+                            fixture
+                                .store
+                                .sqlite
+                                .edit_task(
+                                    id,
+                                    saved.plan.revision,
+                                    &crate::pm::PmItemUpdate {
+                                        name: Some("Later task".into()),
+                                        ..Default::default()
+                                    },
+                                )
+                                .unwrap();
+                            // Inventory observes the committed creation before its response returns.
+                            super::load_show_snapshot(
+                                repo,
+                                "product",
+                                PmRefresh::Force,
+                                &NullProgress,
+                            )
+                            .await
+                            .unwrap();
+                        }
+                        _ => unreachable!(),
+                    }
+                    release.notify_one();
+                };
+                let (result, ()) = tokio::join!(
+                    crate::ops::planning_export::sync_export(&fixture.store, repo, owner),
+                    save
+                );
+                result.unwrap();
+            });
+        }
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .planning_project(&task.project_id)
+                .unwrap()
+                .name,
+            "Later chapter"
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .name,
+            "Later task"
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.list_tasks(None))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_project_changes(&task.project_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .pending_task_changes(&task.id)
+                .unwrap()
+                .len(),
+            1
+        );
+        // A later Linear edit conflicts with the captured baseline and wins.
+        runtime.block_on(async {
+            {
+                let mut state = state.lock().await;
+                state.issues[0]["title"] = json!("Linear decision");
+                mark_issue_updated(&mut state.issues[0]);
+            }
+            crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
+                .await
+                .unwrap();
+        });
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .name,
+            "Linear decision"
+        );
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(state.blocking_lock().creation_writes, 2);
+    });
+}
+
+#[test]
+fn planning_export_removal_during_uncertain_creation_retains_identity() {
+    with_export_plan(|runtime, fixture, repo, task, state| {
+        let project = crate::durable::WorkRef::Project(task.project_id.clone());
+        let work = crate::durable::WorkRef::Task(task.id.clone());
+        runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &project,
+            ))
+            .unwrap();
+        state.blocking_lock().lose_creation_reply = true;
+        assert!(runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &work
+            ))
+            .is_err());
+        fixture.store.sqlite.delete_task(&task.id).unwrap();
+        assert!(fixture
+            .store
+            .sqlite
+            .planning_export_owners(&repo.to_string_lossy())
+            .unwrap()
+            .contains(&work));
+        runtime
+            .block_on(crate::ops::planning_export::sync_export(
+                &fixture.store,
+                repo,
+                &work,
+            ))
+            .unwrap();
+        assert_eq!(
+            fixture.store.sqlite.planning_task(&task.id).unwrap().state,
+            crate::store::PlanningState::Removed
+        );
+        runtime
+            .block_on(crate::ops::planning_delivery::sync_fields(
+                &fixture.store,
+                repo,
+                &work,
+            ))
+            .unwrap();
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_changes(&task.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(state.blocking_lock().issues[0]["trashed"], true);
+        assert_eq!(state.blocking_lock().creation_writes, 2);
+        assert_eq!(state.blocking_lock().deletion_writes, 1);
+        let never_exported = fixture
+            .store
+            .sqlite
+            .create_task(&crate::planning::NewTask {
+                id: crate::durable::TaskId::new(),
+                project_id: task.project_id.clone(),
+                title: "Remove offline".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .delete_task(&never_exported.id)
+            .unwrap();
+        assert!(fixture
+            .store
+            .sqlite
+            .planning_export_owners(&repo.to_string_lossy())
+            .unwrap()
+            .is_empty());
     });
 }

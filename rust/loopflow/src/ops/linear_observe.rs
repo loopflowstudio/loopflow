@@ -106,6 +106,9 @@ impl PlanningSync {
                         _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
                             sync_repository_deliveries(&store, &task, false)
                         }) => {},
+                        _ = repeat_sync("planning export", Duration::from_secs(1), || {
+                            super::planning_export::sync_repository_exports(&store, &task)
+                        }) => {},
                         _ = repeat_sync("field delivery", Duration::from_secs(1), || {
                             super::planning_delivery::sync_repository_fields(&store, &task)
                         }) => {},

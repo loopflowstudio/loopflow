@@ -132,8 +132,8 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Task/Project export, relative-order
-delivery, complete Desktop pending presentation and composed reconnect remain
+CLI edits report pending sync. Relative-order delivery, complete Desktop
+pending presentation and composed reconnect remain
 unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
@@ -166,7 +166,10 @@ Terminal, archived, paused or foreign Projects retain their history. Names, cont
 and an empty workflow remain intact. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
-Project export remains unfinished. Mapped status receipts use foreground delivery;
+Project export uses the original transition receipt on the foreground connection.
+Creation and Initiative attachment retain separate attempted effects and exact
+readback; a missing response never permits another create or attachment.
+Mapped status receipts use foreground delivery;
 a locally active Project alone is not proof of Linear activation. Ensure never searches for candidates or rotates
 Projects; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
@@ -420,7 +423,15 @@ unknown or live execution prevents cleanup before provider inspection. Cancellat
 uses the same state delivery path as completion and reopening. Resolve the issue
 team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
-Delivery and pending-state projection currently require an existing mapping; pending export of unmapped connected Tasks remains unfinished.
+An independent foreground export loop selects unmapped local Projects and Tasks,
+using their saved UUIDs. Project transitions and Task creation receipts retain the
+captured payload, attempted effects and errors; no second creation owner exists.
+Exact observations attach mappings in the common ingestion transaction before
+inventory can allocate another local identity. The creation snapshot establishes
+field baselines without acknowledging later edits. Observed Linear conflicts still
+win and retain the losing receipt. Removed Tasks export only when an attempted
+creation needs reconciliation, then their existing deletion receipt owns removal.
+Complete pending-state presentation and composed CLI/Desktop reconnect remain unfinished.
 
 ## Read each step's result
 

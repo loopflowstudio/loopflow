@@ -60,19 +60,23 @@ issue update. More reads cannot prove atomic preservation; Linear-wins selects
 precedence, not atomicity. The design retains exact race and schema evidence.
 
 Comments adopt provider body/author/time, retaining the loser without echo.
-`67ee4024a` delivers cancellation. Resolve Team/state before marking attempted;
-failed discovery stays retryable. Select the issue Team's lowest position.
-Mapped deletion reuses field receipts: positive trash/acknowledgement settles;
-absence never permits replay. A newer explicitly active Linear revision restores
-planning visibility and retires the retained loser. Inventory cannot prove trash
-or restoration. Execution stays local; composed/installed acceptance remains unproved.
+`67ee4024a` delivers cancellation. Resolve the issue Team's lowest-position state
+before marking attempted; failed discovery stays retryable.
+`fc056bb6b` delivers deletion: trash/acknowledgement settles; absence permits no replay.
+A newer explicitly active Linear revision
+restores visibility, retaining the loser. Inventory proves neither trash nor
+restoration. Fixtures preserve execution/history; composed/installed acceptance is unproved.
 
 Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundary:
 `84664e661`. SQLite owns Wave documents/relocation; ingestion preserves IDs/files.
 Personal owners and provider-first deletion are removed; execution, PRs, checkouts
 and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
 attempt errors and acknowledged revisions.
-Installed conversion, historical uncertainty, export, relative-order delivery, pending presentation and composed reconnect remain unfinished.
+Task/Project export now uses saved UUIDs and existing creation receipts. Separate
+Project creation/Initiative attachment attempts retain uncertainty without replay.
+Exact ingestion attaches identities before inventory can duplicate them, preserving
+later saves against captured baselines. Installed conversion, historical uncertainty,
+relative ordering, complete pending presentation and composed reconnect remain unfinished.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -661,23 +665,15 @@ Database isolation never isolates provider or checkout effects. Preserve saved
 Task/PR/checkout identity; explicit replacement owns new definitions. Current
 mechanics and ownership replace the archived store-routing and command names.
 
-## Managed account identity (LOO-339, branch evidence 2026-09-30)
+## Managed account identity (LOO-339, curated 2026-10-08)
 
-Jack Heart selected LOO-339's identity core and authorized landing plus a patch
-release without review; shipment remains unproved. LOO-340 owns shared account
-state, default current status, browser suppression, Claude identity/routing, Flow
-account bundles and reset credits; LOO-338 owns renaming. Historical branch
-proofs and four findings: `32607f1d2:wave/infrastructure/MEMORY.md` under this
-heading, including its design and gate references. Current mechanics:
+Jack Heart authorized landing and a patch release; shipment remains unproved.
+LOO-340 owns account state/routing and LOO-338 naming. Compare email and per-user
+subject, not workspace identity; usage proves no login. Unavailable identity is not
+rejection. Native refresh, sole browser ownership and installed acceptance remain
+unproved; no installed repair is authorized. Exact decisions, isolation requirements
+and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../docs/subscriptions.md).
-
-Usage does not establish the intended login: compare email and per-user subject,
-not workspace identity. Reconnect stages before identity/duplicate checks; native
-refresh coordination and sole browser ownership remain unproved. Unavailable
-identity service is not rejection; plan is not quota. Clear inherited LF_*
-authority and pin the compiled CLI in fixtures. Synthetic passes prove no live
-OAuth or installed outcome. State remains Home-local; no installed repair is
-authorized.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-08)
 

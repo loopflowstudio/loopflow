@@ -150,14 +150,14 @@ async fn sync_deletion(
         .base
         .as_ref()
         .and_then(|base| base["revision"].as_str());
-    if baseline.is_none() || revision.is_none() {
+    if baseline.is_none() {
         return Err(message(
             "Deletion has no provider baseline; saved removal retained",
         ));
     }
     if !store
         .sqlite
-        .attempt_planning_field(owner, change, revision.as_deref())
+        .attempt_planning_field(owner, change, Some(&trash_revision))
         .map_err(message)?
     {
         return Err(message(
@@ -260,19 +260,16 @@ async fn observe(
                 .map_err(message)?
                 .ok_or_else(|| message("Linked Linear issue is unavailable"))?;
             let revision = item.revision.clone();
-            store
-                .sqlite
-                .put_pm_task(
-                    &repo.to_string_lossy(),
-                    "linear",
-                    &PmTaskRecord {
-                        item,
-                        project,
-                        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    },
-                    None,
-                )
-                .map_err(message)?;
+            ingest_task(
+                store,
+                repo,
+                &PmTaskRecord {
+                    item,
+                    project,
+                    observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                },
+            )
+            .await?;
             let accepted = store
                 .sqlite
                 .planning_task(id)
@@ -349,4 +346,47 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
             change.field
         ))),
     }
+}
+
+// Exact detail can establish the saved Project's association without claiming a
+// complete inventory refresh. Export and later field reads use this same path.
+pub(super) async fn ingest_task(
+    store: &Store,
+    repo: &Path,
+    record: &PmTaskRecord,
+) -> OpsResult<()> {
+    let mut confirmed = None;
+    if let Some(project) = &record.project {
+        if let Some(local) = store
+            .get_project_by_project(&project.id)
+            .await
+            .map_err(message)?
+            .filter(|p| {
+                p.plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == project.id)
+            })
+        {
+            let wave = store
+                .get_wave(&local.wave_id)
+                .await
+                .map_err(message)?
+                .ok_or_else(|| message("Project Wave is missing"))?;
+            if let Some(initiative) = super::pm::read_initiative(repo, wave.slug()) {
+                confirmed = Some((local.wave_id, initiative));
+            }
+        }
+    }
+    store
+        .sqlite
+        .put_pm_task(
+            &repo.to_string_lossy(),
+            "linear",
+            record,
+            confirmed
+                .as_ref()
+                .map(|(wave, initiative)| (wave, initiative.as_str())),
+        )
+        .map_err(message)
 }

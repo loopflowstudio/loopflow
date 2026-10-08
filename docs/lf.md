@@ -188,7 +188,8 @@ locally, including during a Linear outage. Connected repositories report pending
 `lf project workflow show <project-id> --json` includes pending field changes.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
 Linear edits, retaining losing intentions in delivery history. An active Task Session
-or Desktop connection delivers mapped Project fields; Project export remains unfinished.
+or Desktop connection exports saved Projects and delivers their fields. Lost creation
+or Initiative-attachment replies retain uncertainty until exact readback.
 Readback cannot protect against unseen concurrent provider writes.
 
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
@@ -228,8 +229,10 @@ with their provider baselines; observed conflicts adopt Linear and retire the lo
 intention. An active Task connection delivers mapped titles, notes, assignment,
 membership, deletion and Project fields after recovery. Deletion retains execution
 and checkout history. Missing provider evidence keeps deletion pending; newer
-observed Linear edits retire removal and restore planning visibility. Task export
-and relative-order delivery remain unfinished; the saved Task's local ID works before it receives a Linear alias.
+observed Linear edits retire removal and restore planning visibility. The active
+connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies
+never allocate replacement identities. Later local edits survive creation readback.
+Relative-order delivery remains unfinished. The local ID works before a Linear alias arrives.
 
 ```bash
 lf task refile <task-id> --wave exports
@@ -238,7 +241,7 @@ lf task refile <task-id> --wave exports
 Move unplaced work to the Wave's selected Project. Membership saves locally during
 an outage and retains pending sync; recorded work keeps its owner. An active Task
 Session or Desktop connection delivers the move when both Task and destination
-Project have Linear mappings. Unmapped records still await export.
+Project have Linear mappings. The same active connection exports unmapped records.
 
 ## Inspect and continue
 

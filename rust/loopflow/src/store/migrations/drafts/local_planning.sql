@@ -2,6 +2,10 @@
 PRAGMA legacy_alter_table = ON;
 
 ALTER TABLE project_transitions ADD COLUMN local_plan_json TEXT;
+ALTER TABLE project_transitions ADD COLUMN export_json TEXT CHECK(export_json IS NULL OR json_valid(export_json));
+ALTER TABLE project_transitions ADD COLUMN export_attempted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE project_transitions ADD COLUMN export_link_attempted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE project_transitions ADD COLUMN export_error TEXT;
 CREATE TABLE wave_documents (
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
@@ -218,7 +222,10 @@ CREATE TABLE task_creation_intents (
     task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE RESTRICT,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     title TEXT NOT NULL,
-    description TEXT NOT NULL
+    description TEXT NOT NULL,
+    export_json TEXT CHECK(export_json IS NULL OR json_valid(export_json)),
+    export_attempted INTEGER NOT NULL DEFAULT 0,
+    export_error TEXT
 );
 
 CREATE TABLE task_comments (

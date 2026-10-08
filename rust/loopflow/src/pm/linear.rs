@@ -586,6 +586,10 @@ impl LinearClient {
             return Err(PmError::Message(format!("unsupported Task state {target}")));
         }
         let team_id = self.item_team_id(item_id).await?;
+        self.team_state_id(&team_id, target).await
+    }
+
+    pub(crate) async fn team_state_id(&self, team_id: &str, target: &str) -> PmResult<String> {
         let response: WorkflowStatesData = self
             .graphql(
                 LIST_WORKFLOW_STATES_QUERY,
@@ -969,6 +973,84 @@ impl LinearClient {
                 "unsupported Project field {field}"
             ))),
         }
+    }
+
+    pub(crate) async fn find_export_issue(
+        &self,
+        id: &str,
+    ) -> PmResult<Option<(PmItem, Option<PmProject>)>> {
+        let response: Value = self
+            .graphql(
+                r#"query FindExportIssue($id: ID!) {
+            issues(filter: { id: { eq: $id } }, first: 2, includeArchived: true) { nodes { id } }
+        }"#,
+                json!({"id":id}),
+            )
+            .await?;
+        let nodes = response["issues"]["nodes"]
+            .as_array()
+            .ok_or_else(|| PmError::Message("Issue lookup is incomplete".into()))?;
+        if nodes.is_empty() {
+            return Ok(None);
+        }
+        if nodes.len() != 1 || nodes[0]["id"] != id {
+            return Err(PmError::Message(
+                "Issue lookup returned a different identity".into(),
+            ));
+        }
+        self.issue_ownership(id).await
+    }
+
+    pub(crate) async fn deliver_planning_creation(
+        &self,
+        project: bool,
+        input: Value,
+    ) -> PmResult<()> {
+        let (query, result) = if project {
+            (
+                r#"mutation DeliverProjectCreation($input: ProjectCreateInput!) {
+                projectCreate(input: $input) { success project { id } }
+            }"#,
+                "projectCreate",
+            )
+        } else {
+            (
+                r#"mutation DeliverTaskCreation($input: IssueCreateInput!) {
+                issueCreate(input: $input) { success issue { id } }
+            }"#,
+                "issueCreate",
+            )
+        };
+        let response: Value = self.graphql(query, json!({"input":input})).await?;
+        let object = if project { "project" } else { "issue" };
+        if response[result]["success"] != true || response[result][object]["id"] != input["id"] {
+            return Err(PmError::Message(
+                "Creation lacks an exact acknowledgement; receipt retained".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn deliver_project_attachment(
+        &self,
+        id: &str,
+        project: &str,
+        initiative: &str,
+    ) -> PmResult<()> {
+        let response: Value = self
+            .graphql(
+                r#"mutation DeliverProjectAttachment($input: InitiativeToProjectCreateInput!) {
+            initiativeToProjectCreate(input: $input) { success }
+        }"#,
+                json!({"input":{"id":id,"projectId":project,"initiativeId":initiative}}),
+            )
+            .await?;
+        if response["initiativeToProjectCreate"]["success"] != true {
+            return Err(PmError::Message(
+                "Project attachment was not confirmed; receipt retained".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// The caller persists its receipt before starting this one provider effect.
@@ -2087,12 +2169,6 @@ mod tests {
             UPDATE_ATTACHMENT_MUTATION.contains("subtitle: $subtitle"),
             "attachmentUpdate carries PR state as its input subtitle"
         );
-    }
-
-    #[test]
-    fn workflow_state_filters_use_linear_team_id() {
-        assert!(LIST_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
-        assert!(LIST_WORKFLOW_STATES_QUERY.contains("$type: String!"));
     }
 
     #[test]

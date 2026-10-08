@@ -506,6 +506,7 @@ fn project_accepted_planning(
     for project in projects {
         let (body, observed_at, wave_id) = project?;
         let project: PmProject = serde_json::from_str(&body)?;
+        super::planning_export::attach_in(tx, repo, true, &serde_json::to_value(&project)?)?;
         let existing: Option<(String, WaveId)> = tx
             .query_row(
                 "SELECT id,wave_id FROM projects WHERE external_project_id=?1",
@@ -546,6 +547,12 @@ fn project_accepted_planning(
             params![id.as_str(), wave_id, project.id],
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
+    }
+    for item in items {
+        if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",
+            params![repo,provider,item.id], |row| row.get::<_,String>(0)).optional()? {
+            super::planning_export::attach_in(tx, repo, false, &serde_json::from_str(&body)?)?;
+        }
     }
     // Reconcile pending fields against their provider baselines in the same transaction.
     let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id

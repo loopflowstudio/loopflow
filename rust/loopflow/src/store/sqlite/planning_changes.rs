@@ -182,23 +182,20 @@ impl<'a> PlanningChanges<'a> {
             "SELECT id,field,value_json,base_json FROM {owner}_changes
              WHERE {owner}_id=?1 AND attempted=1 AND acknowledged=0 AND conflict_json IS NULL ORDER BY seq"
         ))?;
-        let rows = query
-            .query_map([id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        for (receipt, field, value, base) in rows {
+        let changes = query
+            .query_and_then([id], read_change)?
+            .collect::<StoreResult<Vec<_>>>()?;
+        for PlanningChange {
+            id: receipt,
+            field,
+            value,
+            base,
+        } in changes
+        {
             let Some(remote) = observed.get(&field) else {
                 continue;
             };
             let remote = self.normalize(conn, &field, remote.clone())?;
-            let value: Value = serde_json::from_str(&value)?;
-            let base: Option<Value> = base.map(|v| serde_json::from_str(&v)).transpose()?;
             if super::planning::revision_nanos(observed["revision"].as_str())?
                 < super::planning::revision_nanos(
                     base.as_ref().and_then(|b| b["revision"].as_str()),
@@ -304,7 +301,12 @@ impl<'a> PlanningChanges<'a> {
     }
 
     // Membership receipts retain durable identity even when a provider mapping arrives later.
-    fn normalize(self, conn: &Connection, field: &str, value: Value) -> StoreResult<Value> {
+    pub(super) fn normalize(
+        self,
+        conn: &Connection,
+        field: &str,
+        value: Value,
+    ) -> StoreResult<Value> {
         if matches!(self, Self::Task(_)) && field == "project_id" {
             if let Some(selector) = value.as_str() {
                 let id: Option<String> = conn
@@ -329,24 +331,8 @@ impl<'a> PlanningChanges<'a> {
              WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
                  WHERE {owner}_id=c.{owner}_id AND field=c.field) ORDER BY seq"
         ))?;
-        let rows = query.query_map([id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-            ))
-        })?;
-        rows.map(|row| {
-            let (id, field, value, base) = row?;
-            Ok(PlanningChange {
-                id,
-                field,
-                value: serde_json::from_str(&value)?,
-                base: base.map(|v| serde_json::from_str(&v)).transpose()?,
-            })
-        })
-        .collect()
+        let changes = query.query_and_then([id], read_change)?;
+        changes.collect()
     }
 
     /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
@@ -381,4 +367,15 @@ impl<'a> PlanningChanges<'a> {
         }
         Ok(serde_json::from_value(saved)?)
     }
+}
+
+fn read_change(row: &rusqlite::Row<'_>) -> StoreResult<PlanningChange> {
+    let value: String = row.get(2)?;
+    let base: Option<String> = row.get(3)?;
+    Ok(PlanningChange {
+        id: row.get(0)?,
+        field: row.get(1)?,
+        value: serde_json::from_str(&value)?,
+        base: base.map(|value| serde_json::from_str(&value)).transpose()?,
+    })
 }

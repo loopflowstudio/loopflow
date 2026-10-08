@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · four slices implemented; gate repairs checked; combined lifecycle proof and demo remain · reconciled 2026-10-08
+LOO-418 · completion-trigger revision accepted; implementation remains · reconciled 2026-10-08
 
 ## Decision and intended experience
 
@@ -11,16 +11,17 @@ its parent merges. A recommendation can finish without a PR.
 
 Jack Heart confirmed the completion rule during design review on October 7:
 `PR merges → file follow-ups or record “none needed” → Task completes`.
-Jack then clarified that no Task at `end` may remain incomplete. Restore
-`lf task complete ISSUE` as an alias for `lf task move ISSUE end`, sharing one
-transition and its checks. Jack requested continued advancement, then challenged
-the premature demo stop before the larger lifecycle changes were built. The
-launch/alias milestone was the agent's scope reduction, not Jack's requested
-boundary. The full remaining lifecycle is implementation scope on the same
-PR #1499. Demo follows the complete change; landing remains unauthorized.
+On October 8, Jack Heart revised the earlier end/completion equivalence:
+“end -> complete should be like a trigger though then, not state.” Reaching
+Workflow end requests completion; Task completion, Workflow position and Process
+liveness are independent facts. `task complete` is a distinct operation again.
+Linear completion changes Task status without moving the Workflow or inventing
+Process exits. Jack requested updating this design and continuing implementation.
+This supersedes October 7's alias decision and the corresponding implementation
+at `5876a8692`. The full change remains on PR #1499; landing is unauthorized.
 
 The experience: a Task has one outcome, an optional PR link, and one Workflow
-position. After delivery, its page says either **Done · Follow-up LOO-…**, or
+position, independent of its completion status. After normal delivery, its page says either **Done · Follow-up LOO-…**, or
 **Merged · Follow-through pending**, with the reason and next action. It never
 says “PR 2,” retains an unexplained open state, or waits for production evidence
 that belongs to another Task. Research reaches `end` without a phantom PR slot.
@@ -68,10 +69,10 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The four lifecycle slices and October 8 landing corrections are implemented
-locally. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
+The four lifecycle slices and landing corrections are implemented locally under
+the superseded completion alias. The October 8 trigger revision is not yet built. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
 repeated landing preserves finishing notes for pending and completed Tasks.
-The complete lifecycle proof and Jack's demo review remain.
+The trigger revision, complete lifecycle proof and Jack's demo review remain.
 
 ## Inventory and findings
 
@@ -148,7 +149,7 @@ recovery depends on an installed operator schedule. The polling limits and filin
 interface below are implemented defaults, not separately approved decisions.
 
 `lf land` and `lf arm` remain prepare/request/return operations. Land supports
-`--wait` for callers that own a blocking Flow. It uses the existing finite
+`--wait-and-fix` for callers that own a blocking Flow. It uses the existing finite
 landing observation operation and shared CI repair admission, releasing its
 lock between checks. Poll every 15 seconds for at most 30 minutes;
 timeout returns held (exit 3), leaving merge intent and evidence intact.
@@ -176,8 +177,10 @@ the Flow instead of converting it to failure and replaying gate.
 Change `ship` to `gate → cmd: land --wait-and-fix → follow-through`. The `follow-through`
 skill files or links the remaining Tasks, records the disposition, then calls
 `lf task complete ISSUE`. The command itself runs no skill and files no Tasks.
-The enclosing Workflow's subsequent arrival at end is idempotent: one completion,
-one history transition and retryable provider writeback. No new Workflow review
+The skill completes the Task without moving its Workflow. The enclosing driver
+then records its actual arrival at end; its completion trigger is idempotent.
+Completion failure after a successful edge preserves arrival and retries only
+completion, never the edge or gate. No new Workflow review
 node is needed: routine filing is autonomous,
 while an unresolved scope decision is a reported blocker in the existing Task
 conversation. A bare land, reviewer merge, or out-of-band merge records
@@ -204,7 +207,7 @@ copy and the brief; deleted scratch is never a required input.
 
 Keep the checkout available while follow-through is pending. Merge observation
 must not complete the Task or retire the checkout before the next Flow step can
-run. After the disposition reaches end, existing cleanup may retain a checkout
+run. After Task completion, existing cleanup may retain a checkout
 for its live Flow or Session without keeping the Task unfinished. Prove this
 ordering with reconciliation running between merge and the follow-through step.
 
@@ -275,49 +278,68 @@ handling; preserve the child's Task/PR/branch/Session identity and scratch.
 Missing or abandoned parent evidence stays an explicit dependency problem,
 never an implicit reparent to unrelated code.
 
-### 3. End means completed delivery; a PR is optional
+### 3. End triggers completion; it does not define Task state
 
-Keep one Task status derived from Workflow position: start/ready,
-between/active, end/done; abandoned remains its separate mark. No new “landed
-Task” state or stored `done` flag. Merge and follow-through are delivery facts
-shown alongside that position.
+**Accepted by Jack Heart, 2026-10-08.** Task completion records the disposition of
+the work. Workflow position records where its execution got to. Processes record
+their own liveness and outcome. None is an alias for another. A completed Task can
+have a running Process or an unfinished Workflow, and a Workflow can reach end
+while its requested completion is pending.
 
-**Jack Heart's clarification, 2026-10-07:** `end` and completed are the same fact.
-Restore `lf task complete ISSUE` solely as an alias for `lf task move ISSUE end`.
-Both enter the existing `task_end`/`reach_end` operation, as does automatic
-arrival at end; neither spelling can bypass the completion checks. If a check
-fails, preserve the current Workflow position. A repeated completion succeeds
-without another move or duplicated filings. No completion flag, intermediate
-"at end but incomplete" state, or Session ready/complete API is added.
+`lf task complete ISSUE` calls the one completion operation without moving,
+creating or restarting a Workflow. `lf task move ISSUE end`, an empty final edge,
+and a successful final Flow record the real Workflow movement, then trigger that
+operation. An already completed Task makes that trigger a harmless success. A
+finishing skill's completion followed by driver arrival produces one completion
+and the actual arrival history, never a fabricated earlier arrival.
 
-For a Task that has a PR, end requires authoritative merge plus a durable
-none/filed disposition. An open or closed-unmerged PR cannot become successful
-delivery. Explicitly abandoning the Task remains available. Reopening a closed
-PR reuses the same PR; a different PR requires a different Task. Reopening the
-Task for a correction never grants another PR slot.
+Completion uses the shared Task/planning status owner, aligned with LOO-406's
+local planning API; TaskSnapshot projects it alongside the existing Workflow and
+Process reads. Do not add a second Task type, execution-derived completion flag,
+or separate local/Linear completion implementation. Migrate the current
+Workflow-derived state to independent durable completion while preserving
+historical successful completions and their identities.
 
-For a Task with no PR, an accepted empty edge or explicit `lf task complete ISSUE`
-completes it. Commits and files can be research artifacts; their presence does
-not manufacture a PR requirement. Preserve its checkout whenever deletion would
-lose work. Completion and physical cleanup remain separate, as in #1488.
-Inspection, process liveness uncertainty, or retained Sessions do not veto a
-valid completion. Findings that need later verification can themselves file
-follow-ups, but no-PR Tasks do not acquire a mandatory landing ceremony.
+The end trigger must survive a crash after arrival but before completion. Record
+its pending intent with the move, using the existing operation/event ownership,
+and settle it idempotently. On refusal or write failure, retain end and show
+**Completion pending** with the reason and `lf task complete ISSUE` as the retry.
+The Task/Wave operator retries that operation, not `task run`, gate, land or the
+already successful Flow. A delivery refusal still names its missing merge or
+filing evidence. This is separate from LOO-435's retry of a failed Flow step.
+Ordinary reads neither execute the trigger nor start workers; no new watcher or
+per-Task scheduler is introduced.
 
-Move branch, base commit and stack placement from the always-created `TaskPr`
-onto Task's checkout placement. File browsing and checkout restoration use that
-placement even without a PR. Create the one optional PR record on first publish,
-with its publishing intent durable before the remote call. Publication retries
-find the same PR. Keep GitHub number/head/merge/checks in that PR record, not
-copied onto Task. Shared status replaces `prs`/`active_pr` with `pr: Option<…>`;
-normal screens and launch context say “Pull request” and omit it when absent.
+For Loopflow-requested completion of a Task with a PR, preserve authoritative
+merge and confirmed none/filed follow-through requirements. For a Task with no
+PR, completion needs no landing ceremony. Committed findings, dirty files and
+open Sessions do not manufacture a PR or stop valid completion. Cleanup is a
+separate safe operation: retain live work and unpublished files.
 
-Delete `land -c` and `--next` (also arm/submit variants). Bare land has one
-meaning; `--wait` changes waiting, not completion policy. Taskless PR delivery
-continues without inventing a Task or follow-up. `task complete` and `task move end`
-use the same delivery facts as automatic arrival; `--force` must not bypass merge or required
-filing. An early Linear auto-completion is reported as provider conflict, then
-reconciled to the actual Workflow state, never adopted as local completion.
+When a fresh accepted Linear observation marks a Task complete, reflect that
+Task status even if its Workflow is on an edge and a Process remains open.
+Preserve the exact Workflow position, captured graph, Process outcomes, Sessions
+and checkout. Remove the current planning conflict and its forced-end workaround.
+Do not cancel an already running Flow or prevent its successful driver from
+recording the real arrival merely because completion arrived first. Completion
+alone authorizes no new work. Do not hide running work or pending delivery facts
+just because ordinary Task navigation filters completed Tasks.
+
+Linear's completion mark does not prove GitHub merged or follow-ups were filed.
+Keep those facts and remaining obligations visible; do not fabricate a “none”
+disposition, erase them, or reverse the authored completion to make Workflow and
+Task status match. A newer reopening likewise changes Task status without moving
+the Workflow or granting a second PR. Do not immediately re-complete a reopened
+Task from its old end position or replay a superseded completion request; retries
+must respect newer authored status changes. Stale/equal provider observations
+retain the existing revision/conflict rules.
+
+Task owns branch/base/stack placement and one optional PR. Preserve research file
+browsing/restoration, publication intent/retry, historical PRs and `pr: null`.
+Reopening a closed PR reuses the same PR; a different PR requires a different
+Task. Delete `land -c` and serial `--next` as already implemented.
+`--wait-and-fix` changes waiting and repair, not completion policy. Taskless
+PR delivery still creates neither a Task nor follow-through obligations.
 
 ### 4. The owning Wave returns to a dated follow-up
 
@@ -377,7 +399,10 @@ all runtime traversal/rotation of the historical chain. Explicit history reads
 may return those rows; normal Task DTOs do not. This is a bounded production-data
 exception, not a parallel lifecycle: only migration can mark/create historical
 rows, and no current operation appends a successor. Preserve landing and stack
-foreign keys to old PR IDs. Completed historical Tasks remain complete.
+foreign keys to old PR IDs. Completed historical Tasks remain complete. Seed independent completion from
+released evidence during migration only; runtime reads must not keep deriving
+completion from the Workflow node. Preserve open execution and pending provider
+writebacks without inventing an exit or starting any operation.
 
 For old `ContinueTask`/next-slug or unresolved `TaskFollowUp` decisions, retain
 the original evidence and expose **scope needs conversion**. Do not infer that
@@ -392,8 +417,19 @@ commands must use the new command contract.
 
 ### Delete — do not maintain
 
-These cuts are implemented together in slices 2–4; retained historical readers
-are the explicit migration exception:
+Slices 2–4 implemented the serial-PR cuts below. The completion-trigger revision
+adds a new deletion cut on the same PR; historical readers remain the explicit
+migration exception:
+
+- Delete Workflow-derived done in `store/sqlite/durable.rs::task_state_sql`,
+  the Move/Complete alias in `bin/lf.rs`, and completion moving Workflow in
+  `store/sqlite/children.rs::complete_task` and `ops/task.rs::task_end/reach_end`.
+- Delete `planning_conflict_of`'s Linear-completed/Workflow-active refusal and
+  its forced-end recovery instructions. Preserve provider revision validation.
+- Replace exclusive alias/end-equivalence fixtures with independent completion,
+  crash-safe trigger, and live-Process tests. Update AGENTS.md, architecture,
+  CLI/help, skills/operators, Rust/Swift DTOs and Desktop together. No mirrored
+  status or second completion controller may remain.
 
 - `PrCommand::Next`, next-slug CLI fields, `AfterMerge` runtime branching,
   rotation-only helpers listed above, and serial-only tests/copy/fixtures.
@@ -409,12 +445,13 @@ are the explicit migration exception:
 The compression review also removed the surviving Swift `startNextPr` action,
 keep-open summary/reader, and disposition-aware repair-command helper. Writers
 leave retired disposition columns untouched; historical events still feed the
-shared follow-through projection. No further deletion target is currently known.
+shared follow-through projection. The new completion deletion targets above
+supersede the earlier alias implementation.
 
 Retain exact-head landing generations, CI repair deduplication, Git mutation
 locks, safe cleanup, Task history, shared status/monitor reads, symlink-safe file
 access, and existing stacked sync. No new Flow primary selector, resume
-controller, Session approval API, second Task completion flag, or source Task
+controller, Session approval API, duplicate Task status store, or source Task
 “wait until production is proven” field may survive this cut.
 
 ## Alternatives and review findings
@@ -447,12 +484,15 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. All four slices and the completion alias are implemented locally. The combined
-lifecycle proof and complete demo remain; the internal slices are not separate delivery boundaries.
+its own Task and child-specific design. The original four slices and superseded completion alias are implemented locally.
+The trigger revision below, combined proof and complete demo remain; these are
+internal slices of the same delivery boundary.
 
-**Remaining work:** the unified lifecycle acceptance population below, LOO-406
+**Remaining work:** implement independent completion and the end trigger, then
+the unified lifecycle acceptance population below, LOO-406
 integration once its active work is ready, then Jack's complete demo. The affected
-gate ran; its failures have passing focused repairs.
+gate ran against the earlier model; its failures have passing focused repairs.
+Those results do not verify the newly accepted completion contract.
 No-PR research now retains dirty files and committed findings; merged Tasks need
 the filing disposition. The implementation defaults below are reversible choices,
 not additional decisions attributed to Jack. Disposable Docker installation checks
@@ -465,8 +505,8 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    caller ancestry, and finish successfully. Passive inspection leaves Started
    absent; failed placement remains an observed failed Process. Store tests
    prove atomic refusal and explicit Session membership after checkout removal.
-   `task complete` shares `workflow_set(..., end)` with move; tests cover
-   refusal without movement, force/reason, retained input and idempotent retry.
+   The original completion-alias tests describe superseded behavior; replace
+   their coupling assertions while preserving retained input and idempotent retry.
    No provider or native Desktop acceptance follows from these fixtures.
 2. **Optional PR and Task-owned placement.** Rotation and placeholders are
    removed; CLI/Swift expose one optional PR and migration retains historical
@@ -474,12 +514,18 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    open published PR still blocks successful completion.
 3. **Linked follow-through.** Durable filing/retry, dates, waited landing,
    finishing Flows and pending/done projections replace keep-open obligations.
-   The skill and operators use the shared completion alias. Separate fixtures
+   The skill and operators must use the independent completion operation. Separate fixtures
    cover filing and completion; the unified lifecycle proof below remains.
 4. **Selected design handoff.** Checkout transfers an explicit child design;
    retries preserve edited/deleted child notes and conflicts retain both inputs.
    `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
    parent changes and squash integration. The complete stacked demo remains.
+
+5. **Independent completion and end trigger — remaining.** Separate status from
+   position at its shared owner, accept provider completion without rewriting
+   execution, and make end request completion durably. Retry failed completion
+   without rerunning successful work; preserve newer reopen decisions. Update
+   migration, CLI/monitor/Desktop, instructions and the affected behavior tests.
 
 Gate runs the changed-aware headless plan once:
 
@@ -497,8 +543,11 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 
 | Observable result | Headless proof owner |
 | --- | --- |
-| One merged Task becomes end/done only after its zero-or-more follow-ups are durably resolved; CLI, work monitor and Desktop agree on PR, state and links | Extend `task_flow_launch_tests`, `land_tests`, DTO fixtures and `TaskFlowProofTests`/`RegistryQueryTests` with the same lifecycle population |
-| `task complete`, `task move end` and automatic arrival produce the same end/done result; refusal leaves position unchanged; completion within follow-through followed by driver arrival or retry produces one transition | Task launch integration, Task authority tests and command-tree coverage; operator prompt scenarios include merged but unfinished Tasks |
+| Normal delivery completes a merged Task only after follow-through is resolved; CLI, work monitor and Desktop show independent status, Workflow position, PR and links | Extend `task_flow_launch_tests`, `land_tests`, DTO fixtures and `TaskFlowProofTests`/`RegistryQueryTests` with the same lifecycle population |
+| `task complete` changes status without moving Workflow; move/arrival at end triggers the same operation; completion inside follow-through followed by driver arrival records one completion and actual movement | Task launch, authority and command-tree tests; shared Rust/Swift DTO/view population |
+| Accepted Linear completion while a real held Process is running preserves its Process identity, liveness, Workflow edge, Session and checkout; later driver exit records its true result | Public Task/Flow case plus PM observation tests and CLI/monitor/Desktop projection |
+| End is durable before a failed completion; crash/retry finishes only completion, keeps successful Flow history, and exposes the reason; repeated completion is harmless | Task launch, store transactions and operator guidance; verify gate/Flow invocation counts |
+| Newer Linear reopening changes status without Workflow movement; old end and pending retries cannot re-complete it; stale provider observations do not undo newer state | PM revision/writeback and completion trigger tests |
 | Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | New lifecycle case in existing Task launch suite; serialize its resulting wire fixture for both Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
 | Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
@@ -555,11 +604,11 @@ incorrect `--ignored` selection exposed and passed the actual test.
 
 ## Implementation defaults and delivery boundary
 
-Jack's zero-or-one PR and post-merge follow-through check are accepted: file
-follow-ups or record none needed before completing every merged Task. Jack also
-accepted the landing Flow/operator recovery approach and clarified that end is
-completion, with `task complete` an alias for moving to end. Jack's correction
-keeps the full lifecycle under implementation before demo, on the existing PR.
+Jack's zero-or-one PR and normal post-merge follow-through contract remain
+accepted. October 8 supersedes the alias: end triggers independent completion,
+and Linear completion preserves Workflow and Process state. The current code
+still implements the old equivalence; the revision needs implementation before
+the complete demo on the existing PR.
 
 The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
@@ -575,7 +624,7 @@ are recorded below; the Docker installation ran in isolation.
 
 Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
 rows and shared membership predicates, avoiding a scan of all Process history
-for each Task. Completion adds no authority or state. The suspected combined
+for each Task. That earlier alias added no independent state; October 8 supersedes it. The suspected combined
 `--wt`/`--task` cwd-guard issue is unreachable because Clap rejects the pair;
 no extra guard remains. Fixture corrections selected an authored workflow edge,
 used `flow list --processes`, and decoded the actual flattened inventory DTO.
@@ -634,4 +683,4 @@ placement writers and command inventories, and expecting confirmed presentation
 from a failed publication. The populated-upgrade test now starts before the Task's
 draft instead of applying the draft twice. No production invariant was relaxed.
 
-Check (2026-10-08, inherited execution variables cleared): `scripts/test.py --reuse-passing` initially reported 2,229/2,295 Rust and 401/402 Swift passing; all 66 Rust failures recovered in focused materialized reruns (the upgrade case moved to the migration suite), the Swift regression passed, and 49 affected Flow/Task-launch tests passed. Architecture, website, Swift CLI build and multiplatform checks passed; Docker installation ran all seven named proofs plus planning upgrade after correcting one zero-test invocation. Final two landing regressions, `cargo fmt`, all-target Clippy and diff checks passed. Unified lifecycle population, LOO-406 integration and configured demo remain; no live migration or landing.
+Check (2026-10-08, before the completion-trigger revision; inherited execution variables cleared): `scripts/test.py --reuse-passing` initially reported 2,229/2,295 Rust and 401/402 Swift passing; all 66 Rust failures recovered in focused materialized reruns (the upgrade case moved to the migration suite), the Swift regression passed, and 49 affected Flow/Task-launch tests passed. Architecture, website, Swift CLI build and multiplatform checks passed; Docker installation ran all seven named proofs plus planning upgrade after correcting one zero-test invocation. Final two landing regressions, `cargo fmt`, all-target Clippy and diff checks passed. Unified lifecycle population, LOO-406 integration and configured demo remain; no live migration or landing.

@@ -3,6 +3,12 @@
 Reconciled 2026-10-08. Jack Heart required the full lifecycle on PR #1499 before
 demo on October 7. The launch/alias-only milestone was the agent's scope reduction. Accepted decisions live in [the design](make-a-task-up-to.md).
 
+Jack Heart revised completion on October 8: end triggers `task complete`; it does
+not define Task status. Linear completion changes status without moving Workflow
+or stopping Processes. This supersedes the earlier alias. Implementation must
+preserve durable failed-trigger retries, newer reopen decisions, and unresolved
+delivery facts. The prior gate verifies the earlier model, not this revision.
+
 Implemented defaults below remain unreviewed by Jack:
 
 - Waited landing polls every 15 seconds for 30 minutes; the real waiting loop
@@ -16,8 +22,8 @@ Implemented defaults below remain unreviewed by Jack:
 - LOO-385 overlaps. Recheck before any parallel implementation or external
   disposition; no closure or transfer is authorized by this work.
 
-All four slices and the landing corrections below are present locally; focused
-checks pass after gate repairs. Unified lifecycle proof, LOO-406 integration and
+The original four slices and landing corrections are present; the independent
+completion/trigger revision remains to build. Earlier checks pass after repairs. Unified lifecycle proof, LOO-406 integration and
 the complete demo remain. No landing or installed-Home
 migration is authorized.
 

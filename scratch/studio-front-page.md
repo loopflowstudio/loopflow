@@ -184,3 +184,5 @@ The "Your machines / Your methods" ownership strip lived inside that section and
 
 Jack Heart, after blend A was ported: "i think ive changed my mind. lets go back to leading with the desktop app. when sellign the vision of loopflow, we should show the app in its fullness. then we can lean into the terminal stuff later on."
 Order becomes: hero, the Mac capture at full width, For you, For your agents (terminal), FAQ, install.
+
+Jack Heart on the FAQ's first answer ("No. lf is a command…"): "This is sort of wrong, Looplfow Desktop is a terminal." Answer rewritten to say the Mac app is one and `lf` also runs in other terminals.

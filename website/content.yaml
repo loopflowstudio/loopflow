@@ -224,8 +224,8 @@ homepage:
     heading: FAQ
     items:
     - question: Is Loopflow a terminal?
-      answer: No. `lf` is a command, so it runs in the terminal you already use, cmux and herdr
-        included.
+      answer: Loopflow for Mac is one, with your sessions filed under their tasks. `lf` is a command,
+        so it also runs in the terminal you already use, cmux and herdr included.
     - question: Which coding agents does it work with?
       answer: Claude Code, Codex, or OpenCode, on your own accounts. Loopflow uses the one you have
         installed and signed in.

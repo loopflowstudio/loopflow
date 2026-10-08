@@ -16,6 +16,28 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
+    match cmd {
+        MachineCommand::Connect {
+            target,
+            provider,
+            email,
+            chrome_profile,
+        } => {
+            let machine = super::ssh::resolve_target(target, false).await?;
+            return super::machine_credentials::connect(
+                &machine,
+                *provider,
+                email.as_deref(),
+                chrome_profile.as_deref(),
+                batch,
+            )
+            .await;
+        }
+        MachineCommand::Credentials { cmd } => {
+            return super::machine_credentials::receive(cmd).await
+        }
+        _ => {}
+    }
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
@@ -109,7 +131,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 let status = MachineStatus {
                     update_command: update_command(&machine.route),
                     machine,
-                    local_version: env!("CARGO_PKG_VERSION"),
+                    local_version: crate::build_info::BUILD_VERSION,
                     remote_version,
                     error,
                 };
@@ -138,6 +160,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Remove { label } => {
             store.remove_machine(label).await?;
             println!("Removed {label}");
+        }
+        MachineCommand::Connect { .. } | MachineCommand::Credentials { .. } => {
+            unreachable!("credential commands dispatch before opening the store")
         }
     }
     Ok(())
@@ -368,7 +393,7 @@ async fn install_remote(target: &str) -> anyhow::Result<()> {
 }
 
 pub(super) fn report_version(target: &str, remote: &str) {
-    let local = env!("CARGO_PKG_VERSION");
+    let local = crate::build_info::BUILD_VERSION;
     if remote != local {
         eprintln!(
             "lf versions differ: remote {remote}, local {local}. Update the remote with `{}`",

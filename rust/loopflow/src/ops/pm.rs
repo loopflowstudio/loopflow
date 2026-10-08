@@ -422,17 +422,15 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf --machine` resolves the PM
-    // credential on the caller's machine (where store lives) and hands it to the
-    // remote through the environment. The remote store holds no PM credential, so
-    // without this hook remote `lf repo refresh` could never authenticate.
-    if let Some(token) = forwarded_pm_token(provider) {
-        return Ok(token);
-    }
-
-    resolve_local_pm_token(provider)
-        .await?
-        .ok_or_else(missing_linear_credential)
+    let deadline = Instant::now() + PM_REFRESH_TIMEOUT;
+    tokio::time::timeout(PM_REFRESH_TIMEOUT, async {
+        let config = storage_config_from_env()?;
+        let store = open_pm_store(&config).await?;
+        let StorageConfig::Sqlite { path } = config;
+        resolve_pm_token_from_store(provider, &store, &path, deadline).await
+    })
+    .await
+    .map_err(|_| credential_deadline())?
 }
 
 fn missing_linear_credential() -> OpsError {
@@ -451,19 +449,6 @@ fn credential_deadline() -> OpsError {
     credential_retry("Linear credential resolution deadline elapsed; a pending write may still settle, so the next call must re-read the credential")
 }
 
-/// Optional local authority for SSH; forwarded bearer tokens are resolved separately.
-pub(crate) async fn resolve_local_pm_token(provider: PmProviderKind) -> OpsResult<Option<String>> {
-    let deadline = Instant::now() + PM_REFRESH_TIMEOUT;
-    tokio::time::timeout(PM_REFRESH_TIMEOUT, async {
-        let config = storage_config_from_env()?;
-        let store = open_pm_store(&config).await?;
-        let StorageConfig::Sqlite { path } = config;
-        resolve_pm_token_from_store(provider, &store, &path, deadline).await
-    })
-    .await
-    .map_err(|_| credential_deadline())?
-}
-
 fn usable_token(token: ProviderToken) -> OpsResult<String> {
     if token.access_token.trim().is_empty()
         || token
@@ -475,10 +460,6 @@ fn usable_token(token: ProviderToken) -> OpsResult<String> {
         ));
     }
     Ok(token.access_token)
-}
-
-fn changed_token(token: Option<ProviderToken>) -> OpsResult<Option<String>> {
-    token.map(usable_token).transpose()
 }
 
 async fn linear_refresh_lock(database: &Path, deadline: Instant) -> OpsResult<std::fs::File> {
@@ -516,25 +497,21 @@ async fn resolve_pm_token_from_store(
     store: &Store,
     database: &Path,
     deadline: Instant,
-) -> OpsResult<Option<String>> {
+) -> OpsResult<String> {
     let read = || async {
         store
             .get_provider_token(provider.as_str())
             .await
             .map_err(|_| credential_retry("Could not read the Linear credential"))
     };
-    let Some(initial) = read().await? else {
-        return Ok(None);
-    };
+    let initial = read().await?.ok_or_else(missing_linear_credential)?;
     if !provider_token_refresh_due(&initial, time::OffsetDateTime::now_utc().unix_timestamp()) {
-        return usable_token(initial).map(Some);
+        return usable_token(initial);
     }
     let lock = linear_refresh_lock(database, deadline).await?;
-    let Some(current) = read().await? else {
-        return Ok(None);
-    };
+    let current = read().await?.ok_or_else(missing_linear_credential)?;
     if !provider_token_refresh_due(&current, time::OffsetDateTime::now_utc().unix_timestamp()) {
-        return usable_token(current).map(Some);
+        return usable_token(current);
     }
     for attempt in 0..2 {
         match refresh_stored_provider_token(Provider::Linear, &current).await {
@@ -544,16 +521,16 @@ async fn resolve_pm_token_from_store(
                     .replace_provider_token(&current, &refreshed, lock, deadline)
                     .await;
                 return match replacement {
-                    Ok(ProviderTokenReplacement::Replaced) => usable_token(refreshed).map(Some),
-                    Ok(ProviderTokenReplacement::Changed(winner)) => usable_token(winner).map(Some),
-                    Ok(ProviderTokenReplacement::Missing) => Ok(None),
+                    Ok(ProviderTokenReplacement::Replaced) => usable_token(refreshed),
+                    Ok(ProviderTokenReplacement::Changed(winner)) => usable_token(winner),
+                    Ok(ProviderTokenReplacement::Missing) => Err(missing_linear_credential()),
                     Err(_) => {
                         // A failed write (including an uncertain commit) cannot authorize
                         // an unpersisted response. Re-read before considering fallback.
                         if let Some(latest) = read().await? {
                             if let Ok(access) = usable_token(latest) {
                                 tracing::warn!("Linear refresh persistence failed; using the current stored token");
-                                return Ok(Some(access));
+                                return Ok(access);
                             }
                         }
                         Err(credential_retry("Could not persist the refreshed Linear credential; re-read it on the next call"))
@@ -563,7 +540,7 @@ async fn resolve_pm_token_from_store(
             Err(error) => {
                 let latest = read().await?;
                 if latest.as_ref() != Some(&current) {
-                    return changed_token(latest);
+                    return usable_token(latest.ok_or_else(missing_linear_credential)?);
                 }
                 let TokenRefreshError::OAuth { reason, .. } = error else {
                     return Err(credential_retry("Linear credential refresh failed"));
@@ -573,7 +550,7 @@ async fn resolve_pm_token_from_store(
                 }
                 if let Ok(access) = usable_token(current.clone()) {
                     tracing::warn!(error = %reason, "proactive Linear refresh failed; using the still-valid token");
-                    return Ok(Some(access));
+                    return Ok(access);
                 }
                 return Err(if reason.requires_reconnect() {
                     OpsError::Message(format!("Linear refresh failed: {reason}. Run `doppler run -- lf account connect linear` to reconnect."))
@@ -586,31 +563,6 @@ async fn resolve_pm_token_from_store(
         }
     }
     unreachable!("both refresh attempts return or retry")
-}
-
-/// Env var carrying a PM access token forwarded by `lf --machine`.
-pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
-/// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
-pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
-
-/// A forwarded PM token from the environment, if present and matching `provider`.
-/// When `LF_FORWARDED_PM_PROVIDER` is set it must name `provider`; when it is
-/// absent the token is accepted for whatever provider the wave resolves to.
-fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
-    #[cfg(test)]
-    if PM_TEST_CONTEXT.try_with(|_| ()).is_ok() {
-        return None;
-    }
-    let token = std::env::var(FORWARDED_PM_TOKEN_ENV)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())?;
-    match std::env::var(FORWARDED_PM_PROVIDER_ENV) {
-        Ok(name) if !name.trim().is_empty() => {
-            (name.trim().eq_ignore_ascii_case(provider.as_str())).then_some(token)
-        }
-        _ => Some(token),
-    }
 }
 
 fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
@@ -4282,47 +4234,6 @@ mod tests {
         assert!(requests
             .iter()
             .any(|req| req.body.contains("commentCreate")));
-    }
-
-    // Env vars are process-global; serialize the forwarded-token tests so a
-    // concurrent test never observes a half-set environment.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn resolve_pm_token_prefers_forwarded_env() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "forwarded-secret");
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
-
-        // Returns the forwarded token without ever opening the store store.
-        let token = block_on_pm(resolve_pm_token(PmProviderKind::Linear)).expect("token");
-        assert_eq!(token, "forwarded-secret");
-
-        std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
-    }
-
-    #[test]
-    fn forwarded_pm_token_matches_provider_and_skips_blank() {
-        let _guard = ENV_LOCK.lock().expect("env lock");
-
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "tok");
-        std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "linear");
-        assert_eq!(
-            forwarded_pm_token(PmProviderKind::Linear).as_deref(),
-            Some("tok")
-        );
-
-        // A provider that doesn't match falls through to the store.
-        std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "github");
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
-
-        // A blank token is treated as absent.
-        std::env::set_var(FORWARDED_PM_TOKEN_ENV, "   ");
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
-
-        std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
-        std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
     }
 
     #[test]

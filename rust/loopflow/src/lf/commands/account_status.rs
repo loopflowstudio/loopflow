@@ -22,14 +22,12 @@ enum Verification {
 enum Scope {
     Managed,
     Local,
-    Forwarded,
 }
 
 /// One invocation's projection; retained windows keep their original evidence.
 #[derive(Debug, Serialize, Deserialize)]
 struct AccountReport {
     accounts: Vec<AccountRow>,
-    forwarded_accounts_diagnostic: Option<String>,
     browser: Option<BrowserDetails>,
 }
 
@@ -80,21 +78,6 @@ pub(super) async fn run(
         Some(store) => managed_rows(store, provider, verify).await?,
         None => vec![],
     };
-    let forwarded_accounts_diagnostic = if crate::provider_account::lease::account_lease_active() {
-        if verify {
-            match forwarded_rows(provider) {
-                Ok(forwarded) => {
-                    rows.extend(forwarded);
-                    None
-                }
-                Err(_) => Some("forwarded account identities unavailable; origin broker could not be inspected".into()),
-            }
-        } else {
-            Some("forwarded account identities uninspected; cached status does not contact the origin broker".into())
-        }
-    } else {
-        None
-    };
     rows.extend(local_rows(service.as_ref(), provider, verify).await?);
     let browser = if details {
         let (local_choices, discovery_diagnostic) = match crate::profile::local_chrome_profiles() {
@@ -118,7 +101,6 @@ pub(super) async fn run(
     };
     let report = AccountReport {
         accounts: rows,
-        forwarded_accounts_diagnostic,
         browser,
     };
     if json {
@@ -134,41 +116,6 @@ pub(super) async fn run(
         );
     }
     Ok(())
-}
-
-fn forwarded_rows(provider: Option<Provider>) -> Result<Vec<AccountRow>> {
-    let mut rows = Vec::new();
-    if let Some(client) = crate::provider_account::lease::AccountLeaseClient::from_env()? {
-        let lease = client.describe()?;
-        for grant in lease
-            .grants
-            .iter()
-            .filter(|g| provider.is_none_or(|p| p == g.provider))
-        {
-            for account_id in &grant.accounts {
-                rows.push(AccountRow {
-                    provider: grant.provider,
-                    account_id: Some(account_id.clone()),
-                    login: Some(client.login_email(grant.provider, account_id)?),
-                    scope: Scope::Forwarded,
-                    source: "forwarded_origin".into(),
-                    cached_credential_state: "uninspected".into(),
-                    verification: Verification::Unavailable,
-                    diagnostic: Some("remote verification is unavailable".into()),
-                    recovery: None,
-                    observed_plan: None,
-                    configured_plan: None,
-                    routing: None,
-                    cooldown_until: None,
-                    expires_at: None,
-                    windows: vec![],
-                    verified_windows: vec![],
-                    reset_credits: None,
-                });
-            }
-        }
-    }
-    Ok(rows)
 }
 
 async fn local_rows(
@@ -437,9 +384,7 @@ async fn managed_rows(
 
 fn next_action(row: &AccountRow, now: i64) -> String {
     let provider = row.provider.as_str();
-    if row.scope == Scope::Forwarded {
-        return "inspect lf account on the origin Machine".into();
-    }
+
     if row.scope == Scope::Local {
         return if row.cached_credential_state == "active"
             && row.expires_at.is_none_or(|expires| expires > now)
@@ -491,9 +436,7 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
                 }
             };
             lines.push(format!("  auth: {evidence}"));
-            if row.scope == Scope::Forwarded {
-                lines.push("  forwarded from origin · remote usage unknown".into());
-            }
+
             if let Some(plan) = &row.observed_plan {
                 lines.push(format!("  observed plan: {plan}"));
             }
@@ -591,13 +534,6 @@ fn render(report: &AccountReport, width: usize, now: i64) -> String {
         }
         if count == 0 {
             lines.push("  none".into());
-        }
-        if !local {
-            if let Some(diagnostic) = &report.forwarded_accounts_diagnostic {
-                lines.push(String::new());
-                lines.push("Forwarded accounts".into());
-                lines.push(format!("  {diagnostic}"));
-            }
         }
         lines.push(String::new());
     }
@@ -853,12 +789,8 @@ mod tests {
                 "usage: unknown",
                 "next: lf account claude",
                 "wait for cooldown, then lf account claude",
-                "inspect lf account on the origin Machine",
                 "needs login (identity or credential rejected)",
                 "verification unavailable",
-                "forwarded from origin",
-                "Forwarded accounts",
-                "forwarded account identities uninspected",
                 "cached expired",
                 "cached uninspected",
                 "Local services",

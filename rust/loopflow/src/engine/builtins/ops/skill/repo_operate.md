@@ -295,8 +295,8 @@ Do not reconstruct their state from processes, checkouts or Linear alone.
 A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.
 Use `lf id`, then `lf --wave <wave> wave/operate` locally or
 `lf --machine <machine-id> --wave <wave> wave/operate` at its placement. `lf --machine` runs the target's `lf`;
-its SSH route may change without moving Work. Foreground provider accounts can
-be forwarded; background Flows use credentials installed on their Machine.
+its SSH route may change without moving Work. Connect missing logins in the
+foreground with `lf machine connect`; work uses credentials resident on its Machine.
 
 Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or

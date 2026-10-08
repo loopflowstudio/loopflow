@@ -562,6 +562,22 @@ class _Trial:
     def _lf(self, name: str, args: list[str]) -> dict:
         return self._run(name, [str(self.bin / "lf"), *args])
 
+    def _observe_titles(self) -> None:
+        # Original output only: compare process naming and OSC titles without
+        # imitating a provider's screen or injecting host status.
+        for name in ("trial-agent", "claude"):
+            _write(self.bin / name, f"#!{self.python}\n" + TITLE_PROBE, True)
+        for name, argv in (
+            ("title-anonymous", [str(self.bin / "trial-agent")]),
+            ("title-claude", [str(self.bin / "claude")]),
+            ("title-lf", [str(self.bin / "lf"), "-m", "claude", "trial-one"]),
+        ):
+            receipt = self._run_in_herdr(name, argv, reply=True)
+            receipt["outcome"] = _outcome(receipt)
+            _json(self.output / f"{name}.json", receipt)
+            if receipt["outcome"] == "failure":
+                raise RuntimeError(f"{name}: title observation failed")
+
     def _confine(self, sentinel: Path) -> bool:
         probe = self.root / "probe.py"
         _write(probe, PROBE)
@@ -835,6 +851,24 @@ with socket.socket(socket.AF_UNIX) as client:
 print("CONFINED", flush=True)
 """
 
+TITLE_PROBE = """import sys
+import time
+
+if "--version" in sys.argv:
+    print("synthetic-title-probe 1")
+    raise SystemExit(0)
+print("SYNTHETIC-FIRST-CONTENT", flush=True)
+print(chr(27) + "]2;trial-title-alpha" + chr(7), end="", flush=True)
+print("SYNTHETIC_RESULT:title-probe", flush=True)
+time.sleep(2)
+print("SYNTHETIC_INPUT>", flush=True)
+answer = input()
+print(chr(27) + "]2;trial-title-beta" + chr(7), end="", flush=True)
+print("SYNTHETIC_RETURN:" + answer, flush=True)
+time.sleep(2)
+"""
+
+
 PROVIDER = """import json
 import os
 import sys
@@ -928,7 +962,9 @@ def _outcome(receipt: dict) -> str:
     }
     if receipt["returncode"] != 0:
         return "blocked" if name in boundaries and boundaries[name] in text else "failure"
-    if name in ("skill", "conversation") and "SYNTHETIC_RETURN:fixture-return" not in text:
+    if (name in ("skill", "conversation") or name.startswith("title-")) and (
+        "SYNTHETIC_RETURN:fixture-return" not in text
+    ):
         return "failure"
     if name in ("flow", "task-flow") and not _ordered_steps(text):
         return "failure"
@@ -1037,6 +1073,8 @@ def _exercise(args: argparse.Namespace, host: str, output: Path) -> dict:
                     if receipt["outcome"] == "failure":
                         summary["errors"].append(name + ": unexpected CLI result")
                     trial._inspect(name)
+                if args.observe_titles and host == "herdr":
+                    trial._observe_titles()
             finally:
                 if hasattr(trial, "server"):
                     cleanup = trial._stop_herdr()
@@ -1077,6 +1115,7 @@ def main() -> int:
     parser.add_argument("--herdr", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--observe-titles", action="store_true")
     args = parser.parse_args()
     output = (args.output or Path(tempfile.mkdtemp(prefix="lf-trial-receipts-"))).resolve()
     output.mkdir(parents=True, exist_ok=True)

@@ -6,24 +6,26 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 ## Terminal-host adoption (2026-10-07)
 
-Jack Heart's LOO-421 direction: other tools use lf; adoption grows Flow → Task →
-Wave, Desktop optional. Isolated trials/builds only: no live cmux, credentials,
-accounts or lifted code. Stop at findings. Jack required continuing past the timeout.
+Jack Heart's LOO-421 direction: other tools use lf; Flow → Task → Wave, Desktop
+optional. Isolated automated trials/builds only; no live cmux, credentials,
+accounts or lifted code. Stop at findings; Jack required continuing past timeout.
 
-Herdr built; isolated panes and PTYs passed skill, input/return and taskless Flow
-fixtures. Fresh Tasks need Linear team configuration; seeded Tasks need managed
-accounts. Synthetic Claude state stayed unknown; no real-agent, GUI, signed-in
-or external-progress proof.
+Herdr built; panes/PTYs passed synthetic skill, conversation and taskless Flow.
+Fresh Tasks stop at Linear configuration; seeded Tasks at managed accounts.
+Expected refusal is not adoption. Installed lf 0.13.9's revision is unknown;
+checkout fixes cannot rebut Jack's release observations.
 
-Jack reported cmux Task Flow success, absent status, noisy output, duplicate Codex
-flags and oversized Claude argv. Native resume's **Loopflow operating guide** title
-is one observation repeated three times; first-content naming remains his hypothesis.
-Titles: LOO-422; startup/status/polish mapping unresolved.
-[Findings](../../docs/reviews/terminal-host-trial.md) retain receipts, keyboard checks
-and unfiled follow-ups. Installed lf 0.13.9's source revision is unknown; checkout
-changes cannot rebut Jack's release observations. A passed fixture boundary can
-mean expected refusal, never successful newcomer Task adoption. Host title/status
-derivation remains unresolved; Desktop's #1490 report reader is no emission proof.
+Herdr's direct/lf title probes follow OSC 2; workspace/tab stay repo/1.
+Claude-named fixtures gain recognition, input/return stays unknown. Fresh planning:
+LOO-422 status and Jack's explicit title assignment; LOO-428 launch failures/Flow
+output; LOO-423 polish plus account guidance/retry noise; LOO-406 no-Linear planning.
+
+Native resume's **Loopflow operating guide** is one observation repeated three
+times; first-content naming remains Jack's hypothesis. Concurrent keyboard-review
+notes record Jack prioritizing interactive Sessions, a small cmux conversation
+working, and question/clearing screenshots. Those do not resolve the original
+Task launch failures or exact title source. [Findings](../../docs/reviews/terminal-host-trial.md)
+retain receipts, owners and remaining checks. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 

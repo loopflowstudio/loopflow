@@ -107,7 +107,8 @@ agent; later snapshots recognized the Claude-named fixture while its state staye
 unknown during input/return. The receipts retain both. This is sampling evidence,
 not a real provider status result. Agent labels and Loopflow Waiting are separate.
 The resize appears asynchronously in later snapshots (27 to 35 viewport rows);
-it is not compositor proof. No title-precedence cause is established.
+it is not compositor proof. The later title comparison below isolates the terminal-title input; visual precedence
+and real-provider naming remain unproved.
 
 Reference entry points consulted on 2026-10-07:
 [herdr install](https://herdr.dev/docs/install/),
@@ -117,3 +118,71 @@ Reference entry points consulted on 2026-10-07:
 [cmux notifications](https://cmux.com/docs/notifications).
 They guided protocol access; the observations above come from the trial or Jack's
 attributed reports. No host source, tests, skills, help text or config was imported.
+
+
+## Title and status derivation
+
+```sh
+uv run python scripts/terminal_host_trial.py --host herdr --observe-titles \
+  --herdr /path/to/pinned/herdr --output /tmp/new-terminal-title-trial
+```
+
+The opt-in comparison runs after the original smoke scenarios. It replaces the
+synthetic provider with one original script under two executable names, then runs
+that script as `trial-agent`, as `claude`, and through `lf -m claude trial-one`.
+First content, title alpha, and title beta are different strings. The script waits
+two seconds before requesting input and two after returning it; these delays allow
+host sampling, not performance measurement. It emits only OSC 2 title changes,
+using the [published control sequence](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Operating-System-Commands);
+no host status or provider screen pattern is injected. Overall success still means
+fixture transport and cleanup succeeded, not that the host inferred provider state.
+
+[title-01-herdr.jsonl](title-01-herdr.jsonl) retains 18 raw receipts: confinement,
+versions, executable hashes in the summary, initial snapshot, all three commands,
+pane reads and five-stage snapshots, and owned-process cleanup. The title fixture
+is `TITLE_PROBE` in the runner; the summary's original provider hash describes the
+preceding baseline fixture, before replacement. The same pinned herdr and lf
+hashes as final-02 were used. No survivors or cleanup errors remained.
+
+| Controlled input | Direct `trial-agent` | Direct `claude` | `lf` → `claude` |
+|---|---|---|---|
+| Identical first printed content | No agent | Claude recognised | Claude recognised |
+| OSC 2 alpha, awaiting input | `terminal_title=trial-title-alpha` | Same | Same |
+| OSC 2 beta, after input return | `terminal_title=trial-title-beta` | Same | Same |
+| Workspace / tab labels throughout | `repo` / `1` | `repo` / `1` | `repo` / `1` |
+| Input and return state | unknown | unknown | unknown |
+| Exit snapshot state | unknown | idle | idle |
+
+This is causal evidence for executable-name-sensitive recognition, and for terminal
+output supplying the pane title without changing the workspace/tab label in these
+samples. The same original title bytes pass through lf. It does not identify every
+recognition source, prove a screen-reading algorithm, establish name priority after
+manual rename, or reproduce a real agent's Working/Waiting display. Missing
+`terminal_title` in earlier snapshots meant no observed title, not an API that
+cannot expose one. Earlier brief samples without recognition remain valid.
+
+For cmux, public first-hand behavioral reports provide bounded evidence without
+using host implementation, help, skills or configuration:
+
+- The [May 8 report #3749](https://github.com/manaflow-ai/cmux/issues/3749)
+  observed eight live Codex panes with empty status, then a Running entry after a
+  manual hook invocation. That demonstrates a hook-to-status path and shows that
+  a visible agent title need not supply status. It is historical, not a guarantee
+  that October's cmux has no other source or that lf caused every empty state.
+- [August 15 report #10217](https://github.com/manaflow-ai/cmux/issues/10217)
+  records cmux 0.64.22 showing a Codex name after provider `/rename` and sidebar
+  Running/Idle independently of an absent title spinner. Provider names can reach
+  tab labels; title decoration and sidebar state are separate observations.
+- [July 20 report #8514](https://github.com/manaflow-ai/cmux/issues/8514) records a
+  topic-bearing auto-name disappearing after compaction in cmux 0.64.17. This is
+  another observed naming path, not proof of how Jack's title was generated.
+
+Only the reports' observed behavior is used here; their source-derived explanations,
+configuration excerpts and proposed implementations are not adopted. Jack's report
+and LOO-428 independently establish his wrapper interaction and loss of recognition
+when bypassing it. Together these justify retaining host wrappers and testing
+hooks, names and status separately. They do not prove that the first injected
+message generated “Loopflow operating guide.” Exact title-source and precedence
+attribution on Jack's installation is blocked by the no-live-cmux/no-provider-history
+boundary; the findings page gives the permitted next keyboard checks. No host code
+or configuration was imported, and no integration was installed.

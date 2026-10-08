@@ -387,7 +387,7 @@ wait grant neither mutation nor deletion authority. Main-reset/stash helpers can
 replace a held lock inode; explicit source selection avoids that failure class.
 
 Same-Home coverage, overlap, retry timing and interruption proofs remain at
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`
+`c41895363:wave/infrastructure/MEMORY.md`
 and its referenced commits `a60ac0281`, `02d6b3c00`, `95643bd50`, `d60d254ef`.
 They retain original ownership, physical failure, frozen coverage, candidate,
 caller bytes and child-held locks without republishing or double settlement.
@@ -766,18 +766,12 @@ and verify before reopening. The private-copy converter's live sidecar reads
 plus SQLite backup are not atomic. Preserve native IDs, pending reviews, selected
 captures and manually transferred Tasks; import neither old turns nor driver authority.
 
-September 29–30's detailed owner/compilation decisions and superseded schema
-proofs remain at `fe07245a3614334aea71dc40e802b54b47ccaf17:wave/infrastructure/MEMORY.md`
-under this heading. Current Process vocabulary supersedes Exec/FlowSession names:
-one actual lf Process, one durable AgentSession conversation and one compiled
-Flow graph with step Processes. History has no independent lifecycle. Skill steps
-use ordinary `lf skill`; operations use their own commands. Parent means Process
-ancestry, matched to Session/provider generation and origin, never Task or Flow
-authority. Replacement preserves proven historical ancestry. Loop passes are
-node/iteration positions, not child Flows; retry keeps the pass and iteration
-advances its counters. Captured input belongs to Session history and names its
-Process; deleted RunId and intermediate conversion owners stay deleted. Older
-proofs establish no final-frontier conversion.
+September 29–30's superseded owner/schema proofs:
+`fe07245a3:wave/infrastructure/MEMORY.md`.
+Current Process/Session/Flow contracts live in the architecture reference;
+ancestry grants no Task/Flow authority. Preserve proven ancestry, captured input
+and iteration identity. Deleted RunId/conversion owners stay deleted; old proofs
+establish no final-frontier conversion.
 
 - **Flow decisions are typed results** of the selected successful turn,
   modelled on PydanticAI and Jev: the step declares its output schema. The
@@ -802,30 +796,21 @@ proofs establish no final-frontier conversion.
   Chapter creation requires KRs, and backlog survives until explicit disposition.
   No Chapter table, second deployed client or distributed transaction is implied.
 
-LOO-298's gate and +6,202-line diff:
-`c418953634bd101f51878d2be2b40fb3facafabd:wave/infrastructure/MEMORY.md`.
-Full gate, configured acceptance and installed conversion remained unproved.
-Preserve ID ordering through Session projection, use dedicated PR stacking writes,
-and resolve automatic checkpoints through the same Work binding as execution.
-Provider stubs must contain conflict-agent launches: one bad fixture launched
-real credentials whose effects were not audited. Dense CLI timing and configured
-continuity remained unfinished in that dated evidence.
+LOO-298's gate/diff and unaudited credential-launch counterexample:
+`c41895363:wave/infrastructure/MEMORY.md`.
+Full gate, configured continuity and conversion remain unproved. Preserve Session
+ID order, dedicated PR stacking and shared Work-bound checkpoints; contain all
+conflict-agent launches in fixtures.
 
-Jack Heart retired numeric performance targets, soak and deeper optimization
-on October 7. LOO-291/300 evidence and instrumentation:
-`07bbd801e:wave/infrastructure/MEMORY.md` under this heading and in
+Jack Heart retired numeric targets, soak and deeper optimization October 7.
+LOO-291/300's evidence limits are historical, not open acceptance:
+`07bbd801e:wave/infrastructure/MEMORY.md`, this heading;
 [scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
-Different recording windows prove no causal improvement; PTY echo and next draw
-are not glyph presentation. Those historical gaps are not open acceptance requirements.
 
-The earlier S5 active-PR resolver left landed branches unbound. That is historical
-failure evidence, not binding policy: current Session rows own attribution and
-write-once bind permits done/landed Tasks. Preserve current ownership through the
-one-machine conversion; discarded historical attribution needs no importer.
-
-The superseded source-install staging incident remains at
-`1452f58d3:wave/infrastructure/MEMORY.md` under “Data model and performance
-decisions”; current published-installation policy governs verification.
+Historical S5 binding and source-install counterexamples:
+`d0a0a1ee3:wave/infrastructure/MEMORY.md`, this heading. Current Session attribution,
+write-once bind (including done Tasks) and published-installation policy supersede
+them; discarded historical attribution needs no importer.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 

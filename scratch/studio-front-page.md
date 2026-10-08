@@ -174,3 +174,8 @@ where the stack sits.
 
 Jack Heart proposed a topline: "Build software by conducting agents in harmony"? Asked as a question, not settled.
 Tried in `scratch/prototypes/blend-c.html` under the name; blends A and B keep "A software engineering CLI for your agents." for comparison.
+
+## Blend A chosen (2026-10-08)
+
+Jack Heart: "lets do A. cut the Where it sits section". Blend A is the structure; the three-row stack is removed from it.
+The "Your machines / Your methods" ownership strip lived inside that section and went with it.

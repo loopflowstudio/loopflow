@@ -830,10 +830,15 @@ fn interactive_flow_keeps_input_and_advances_only_after_each_provider_exits() {
             r#"#!/bin/sh
 set -eu
 if [ "${1-}" = --version ]; then echo '2.1.0 (fixture)'; exit 0; fi
-for arg in "$@"; do
-    case "$arg" in --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;; esac
+context_file=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --print|--output-format) echo 'unexpected headless launch' >&2; exit 1;;
+        --append-system-prompt-file) context_file="$2"; shift;;
+    esac
+    shift
 done
-case "$*" in
+case "$(cat "$context_file")" in
     *'<lf:skill:first>'*) step=first;;
     *'<lf:skill:second>'*) step=second;;
     *) exit 2;;

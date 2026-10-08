@@ -1,13 +1,13 @@
 # Sign a machine in as me — LOO-413
 
 Jack Heart authorized step 4 on 2026-10-07: implement fresh laptop logins installed
-on an added machine, publish the stacked PR, then stop for review. No landing,
+on an added machine, publish PR #1493, then stop for review. No landing,
 real login, real credential read or real-account provider contact is authorized.
-LOO-411 / PR #1489 owns the parent machine records. Its later shared connection,
-remote-install offer, failure hints and global selector are integrated from parent
-`72f06221183c771ddd43eaabd8f968417a82c571` (October 7 sync). Parent CI follow-up
-`d3c4dc7bc` is integrated through `dc3e9136e`; its website assertions for the
-retired forwarded catalog/provenance are replaced with resident-login expectations.
+Jack Heart's latest October 7 steer records LOO-411 / PR #1489 merged and requests
+sync to main, completion against `--machine`, and republication without landing.
+Main `35e759aaf` is integrated through `715404677`; shared SSH, the install offer,
+failure hints and the selector remain parent-owned. The parent's retired
+catalog/provenance website assertions now check resident-login guidance.
 
 The full remote-work design and dated decisions remain at
 `8f270beaf3cf752756bb0aaf254cf9a37dbc368d:scratch/work-on-another-machine-name.md`.
@@ -50,7 +50,7 @@ never be interpreted as absent and replaced. Once the file exists, later SSH rea
 avoid Keychain. New credential-free machines must be able to create their file
 without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 
-## Removed mechanisms
+## Delete — do not maintain
 
 - SSH's ambient provider/GitHub/Linear token exports and Doppler `--secret` export.
 - The detached-form string check and account broker/socket forwarding.
@@ -68,7 +68,7 @@ refresh, historical captures, machine records and routes remain.
 
 ## Remaining work
 
-- Publish the stacked PR and stop for Jack Heart's review. No landing.
+- Republish PR #1493 against main and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
   token-key handling. Child/output-handle cleanup remains unresolved. No installed
@@ -107,4 +107,4 @@ and `7a3f263cb:scratch/work-on-another-machine-name.md`. The after-skill account
 case failed before the argument-reordering repair and passed afterward. These
 fixtures establish no real refresh-chain or installed acceptance.
 
-Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test auth_tests -E 'test(provider_account::account_first_tests) | test(provider_account::inspection_tests) | test(provider_account::selection::) | test(lf::commands::profile::tests) | test(status_refreshes_by_default_and_cached_preserves_evidence)' --no-fail-fast` passed (29/29; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); nextest reported an open-output-handle leak for the pure route JSON fixture, so cleanup remains unproved; full affected verification and leak investigation belong to gate/CI. Reconciliation: `cd website && uv run python dev.py test -k test_docs_subscriptions_page_owns_account_selection` passed (1/1, headless and network-isolated); `git diff --check` passed.
+Checks after main sync: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test machine_commands --test machine_credentials --test global_commands -E 'binary(machine_commands) | binary(machine_credentials) | binary(global_commands) | test(lf::commands::machine_credentials::tests) | test(lf::commands::ssh::tests) | test(store::token_crypto::tests) | test(fresh_machine_login_does_not_replace_the_laptop_login)' --no-fail-fast` passed (40/40, one open-output-handle leak in the Linear fixture; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned). Gate/CI owns full affected verification and cleanup investigation. Prior 29-test routing and rendered-guide passes remain at `bd63ccb9d:scratch/work-on-another-machine-name.md`.

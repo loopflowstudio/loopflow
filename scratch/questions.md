@@ -13,7 +13,7 @@ remains separate.
 The previous broad design, rename evidence and unrelated later-slice assumptions
 remain at `8f270beaf3cf752756bb0aaf254cf9a37dbc368d:scratch/`.
 
-LOO-411's global `--machine` selector is integrated at `72f062211`. LOO-413's
-accepted resident-login design governs account selection and removes the
-parent's obsolete lease and Doppler forwarding. Task, worktree and Wave placement
-remain target-owned. Only fixtures and isolated directories prove this merge.
+Jack Heart's October 7 steer records LOO-411 / PR #1489 landed. Main at
+`35e759aaf` is integrated through `715404677`; LOO-413 retains resident logins
+and removes the parent's lease and Doppler forwarding. Task, worktree and Wave
+placement remain target-owned. Publication for review is authorized; landing is not.

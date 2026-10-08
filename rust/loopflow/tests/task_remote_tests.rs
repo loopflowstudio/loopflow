@@ -61,7 +61,7 @@ fn repository() -> TestRepo {
 }
 
 #[test]
-fn ssh_preamble_runs_a_skill_in_the_adopted_checkout_and_reuses_it() {
+fn machine_selector_runs_a_skill_in_the_adopted_checkout_and_reuses_it() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.push();
@@ -149,10 +149,11 @@ fn ssh_preamble_runs_a_skill_in_the_adopted_checkout_and_reuses_it() {
         (
             "ssh",
             r#"#!/bin/sh
+for arg in "$@"; do remote_command="$arg"; done
 exec /usr/bin/env -i HOME="$FIXTURE_TARGET" LF_HOME="$FIXTURE_TARGET/.lf" \
     LF_BIN="$LF_BIN" PATH="$FIXTURE_TARGET/.local/bin:/usr/bin:/bin" \
     GIT_ALLOW_PROTOCOL=file GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-    /bin/bash -s
+    /bin/bash -c "$remote_command"
 "#,
         ),
         (
@@ -172,7 +173,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
         fs::write(&path, script).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let invoke = || {
+    let command = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_lf"))
             .current_dir(repo.path())
             .env_clear()
@@ -184,23 +185,31 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
             .env("GIT_ALLOW_PROTOCOL", "file")
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .args([
-                "ssh",
-                "--repo",
-                "repo",
-                "fixture",
-                "--task",
-                fixture.task.id.as_str(),
-                "--isolate",
-                "--batch",
-                "skill",
-                "inspect-code",
-            ])
+            .args(args)
             .output()
             .unwrap()
     };
-    for _ in 0..2 {
-        let output = invoke();
+    let added = command(&["machine", "add", "fixture", "--repo", "repo", "--json"]);
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let machine: serde_json::Value = serde_json::from_slice(&added.stdout).unwrap();
+    let invoke = |selector: &str, task: &str| {
+        command(&[
+            "--machine",
+            selector,
+            "--task",
+            task,
+            "--isolate",
+            "--batch",
+            "skill",
+            "inspect-code",
+        ])
+    };
+    for selector in ["fixture", machine["id"].as_str().unwrap()] {
+        let output = invoke(selector, fixture.task.id.as_str());
         assert!(
             output.status.success(),
             "stdout: {}\nstderr: {}",
@@ -246,7 +255,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
     repo.stage_all();
     repo.commit("Further source work");
     git(repo.path(), &["push", "origin", branch]);
-    let output = invoke();
+    let output = invoke("fixture", "INF-123");
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -431,7 +440,7 @@ fn missing_remote_branch_or_commit_is_named_without_creating_a_task() {
 }
 
 #[test]
-fn ssh_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity() {
+fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity() {
     let repo = TestRepo::new();
     repo.create_file(
         ".lf/config.yaml",
@@ -461,16 +470,9 @@ fn ssh_names_unpushed_source_work_before_connecting_and_keeps_legacy_identity() 
     repo.create_file("unfinished.txt", "source work");
     let args = ["--task", "INF-123", "context", "--json"].map(str::to_string);
     let invoke = || {
-        loopflow::lf::commands::ssh::run(
-            "unreachable.invalid",
-            None,
-            &[],
-            false,
-            &loopflow::provider_account::lease::AccountSelection::default(),
-            &args,
-        )
-        .unwrap_err()
-        .to_string()
+        loopflow::lf::commands::ssh::run("unreachable.invalid", &[], false, &args)
+            .unwrap_err()
+            .to_string()
     };
     let dirty = invoke();
     assert!(

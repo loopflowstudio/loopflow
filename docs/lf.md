@@ -68,7 +68,7 @@ lf task run EXP-12 --reason "take the smaller approach"
 ```
 
 ```bash
-lf ssh mini --task EXP-12 skill implement # adopt the Task and use its pushed branch
+lf --machine mini --task EXP-12 skill implement # adopt the Task and use its pushed branch
 ```
 
 An absent Task is adopted by issue name through the same path as `lf task run`.

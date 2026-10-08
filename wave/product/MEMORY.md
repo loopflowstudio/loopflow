@@ -23,7 +23,7 @@ its comment read failed on an unbound Initiative. These decisions supersede olde
   not implemented window behavior. Repository correspondence across paths remains
   to design; do not equate repos solely by name or remote URL.
 - Jack specified macOS-only Desktop launching/control, with actionable Linux
-  errors and a terminal alternative before launch or Work mutation (LOO-426/431/432).
+  errors and a terminal alternative before launch or Work mutation (LOO-426/427).
   Ordinary lf remains cross-platform; the displaying Mac and execution machine
   are distinct.
 - LOO-416 owns saved per-Task panes and reattachment; LOO-426 owns Task/Session
@@ -44,9 +44,10 @@ its comment read failed on an unbound Initiative. These decisions supersede olde
   comments supersede their briefs' earlier options.
 
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
-command dispositions and proposed follow-ups. A disposable cmux window proved
-arrangement, targeted shell output and draft retention; it was cleaned up.
-No live provider, herdr pane or Desktop parity trial was performed. Dispatch, hidden output and usable rendering prove different things.
+command dispositions. Jack corrected scope: identity, repository-window control
+and terminal I/O belong in one LOO-427 diff, with internal slices; premature
+LOO-430/431/432 are folded back. An owned cmux probe proved arrangement, output
+and draft retention, then cleaned up. No provider, herdr-pane or Desktop parity proof.
 
 ## Live Home reconciliation (2026-10-05)
 

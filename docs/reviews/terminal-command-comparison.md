@@ -91,19 +91,19 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| Open on a supported platform | Mac app control; no Linux Desktop trial | Desktop is macOS; CLI works on Linux | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/431/432. |
+| Open on a supported platform | Mac app control; no Linux Desktop trial | Desktop is macOS; CLI works on Linux | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/427. |
 | ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | `lf desktop`; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
 | ★ Open the actual Task/conversation | `new-workspace --command CMD`; `new-surface --command CMD` (P) | `open 'loopflow://task/ISSUE?repo=PATH&session=ID'`; no installed `lf open ISSUE` | `tab create`, then `pane run P CMD` | **worse** — Task links already preserve Work identity, but lack the one-command entry; LOO-426. |
 | ★ Open everything waiting | `jump-to-unread` (H); notifications are not Work Waiting | `lf session list --waiting --json`; no batch Desktop open | `agent list`; no matching batch open found | **want** — open shared Waiting conversations once, not every completed Run; LOO-426. |
-| ★ Open/identify the repository window | `new-window`, `list-windows`, `current-window` (P except current-window) | Native windows; no addressable window inventory | `session list`; terminal-host windows are outside herdr | **want** — at most one window per repository across machines; repeated opens reuse it and commands address the repo; Desktop arrangement follow-up. |
-| ★ Focus an existing destination | `focus-window`, `select-workspace`, `focus-pane`, `focus-panel` (P for select-workspace) | Task link; sidebar, palette and pane click; no exact-window/pane CLI | `workspace focus`, `tab focus`, `pane focus --direction`, `agent focus` | **worse** — opening is addressable, existing pane focus is not; LOO-426 plus Desktop arrangement. |
-| ★ Add a companion pane/tab | `new-pane`, `new-surface`, `new-split` (P for last two) | **+** shell / Files / Flow log; split controls; no CLI | `tab create`, `pane split` | **want** — expose the existing Task workspace, not a parallel terminal hierarchy; Desktop arrangement. |
-| ★ Move/reorder within the workspace | `move-surface`, `split-off`, `drag-surface-to-split`, `reorder-surface` (H) | Retained multiplexer; no public programmatic placement | `pane move`, `pane swap` | **want** — rearrange existing views without restarting them; Desktop arrangement. |
+| ★ Open/identify the repository window | `new-window`, `list-windows`, `current-window` (P except current-window) | Native windows; no addressable window inventory | `session list`; terminal-host windows are outside herdr | **want** — at most one window per repository across machines; repeated opens reuse it and commands address the repo; LOO-427 arrangement slice. |
+| ★ Focus an existing destination | `focus-window`, `select-workspace`, `focus-pane`, `focus-panel` (P for select-workspace) | Task link; sidebar, palette and pane click; no exact-window/pane CLI | `workspace focus`, `tab focus`, `pane focus --direction`, `agent focus` | **worse** — opening is addressable, existing pane focus is not; LOO-426 plus LOO-427 arrangement. |
+| ★ Add a companion pane/tab | `new-pane`, `new-surface`, `new-split` (P for last two) | **+** shell / Files / Flow log; split controls; no CLI | `tab create`, `pane split` | **want** — expose the existing Task workspace, not a parallel terminal hierarchy; LOO-427 arrangement. |
+| ★ Move/reorder within the workspace | `move-surface`, `split-off`, `drag-surface-to-split`, `reorder-surface` (H) | Retained multiplexer; no public programmatic placement | `pane move`, `pane swap` | **want** — rearrange existing views without restarting them; LOO-427 arrangement. |
 | ★ Promote a tab to a sidebar entry | `move-tab-to-new-workspace` (P) | Tasks already own sidebar placement; a Session belongs to its checkout's Task | `pane move P --new-workspace` | **no** — do not create Tasks by moving tabs; open/select the existing Task through LOO-426. |
 | Move entire workspaces between windows | `move-workspace-to-window` (H) | Window-local surface pools; another window may see a client elsewhere | `pane move P --workspace ID` is within a server, not an app-window transfer | **no** — no arbitrary multi-window workspace system; one repo window spans machines. LOO-424 owns client transfer. |
 | Arbitrarily reorder/pin/color sidebar entries | `reorder-workspace`, `reorder-workspaces`, `workspace-action` (H) | Work outline derives from Waves and started Tasks | Workspace focus/rename; no equivalent ordering CLI found | **no** — keep the Work hierarchy; run lf inside cmux for host organization. |
-| ★ Resize/zoom an existing layout | `resize-pane`, `resize-window`; `tab-action` (H; action-dependent) | Native resize and pane zoom; no CLI | `pane resize`, `pane zoom` | **want** — expose pane sizing/zoom; OS window geometry need not be cloned; Desktop arrangement. |
-| ★ Hide/close a view, then restore it | `close-surface`, `close-workspace`, `close-window` (P for window) | Close view / Undo; shell closure and app quit can end PTYs; no CLI | `pane close`, `tab close`, `workspace close` | **want** — explicitly separate reversible visibility from ending a shell/client; Desktop arrangement. |
+| ★ Resize/zoom an existing layout | `resize-pane`, `resize-window`; `tab-action` (H; action-dependent) | Native resize and pane zoom; no CLI | `pane resize`, `pane zoom` | **want** — expose pane sizing/zoom; OS window geometry need not be cloned; LOO-427 arrangement. |
+| ★ Hide/close a view, then restore it | `close-surface`, `close-workspace`, `close-window` (P for window) | Close view / Undo; shell closure and app quit can end PTYs; no CLI | `pane close`, `tab close`, `workspace close` | **want** — explicitly separate reversible visibility from ending a shell/client; LOO-427 arrangement. |
 | Host navigation shortcuts | `next-window`, `previous-window`, `last-window`, `last-pane`, `find-window` (H) | Sidebar and ⌘K use Work names | `pane neighbor`, `pane edges`, directional focus | **no** — exact target focus is useful; tmux-shaped aliases are not a new Work API. |
 | Terminal maintenance/compatibility | `refresh-surfaces`, `swap-pane`, `break-pane`, `join-pane`, `respawn-pane`, `clear-history`, `copy-mode` (H) | Split/close/Undo and native selection; no matching CLI | `pane swap`, `pane move`, `pane close` | **no** — retain narrow arrange operations above; leave terminal administration to the host. |
 
@@ -111,11 +111,11 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| ★ Explain the command's target | `identify --json` (P) | Source: `lf machine id`; installed: `lf home id`; `lf task status --json`; `lf context` lacks full selection provenance | `pane current`, `agent explain` | **want** — one shared Work identity explanation; identity follow-up. |
-| ★ Inspect visual placement and selection | `tree --json`, `list-workspaces`, `list-panes`, `list-pane-surfaces`, `list-panels`, `current-workspace` (P for tree/workspaces/panels) | No Desktop tree read; Work membership is available via `lf task status` | `api snapshot`, `workspace get`, `tab get`, `pane list`, `pane get`, `pane layout` | **want** — join window/pane placement to Work IDs without replacing Work membership; Desktop arrangement. |
+| ★ Explain the command's target | `identify --json` (P) | Source: `lf machine id`; installed: `lf home id`; `lf task status --json`; `lf context` lacks full selection provenance | `pane current`, `agent explain` | **want** — one shared Work identity explanation; LOO-427 identity slice. |
+| ★ Inspect visual placement and selection | `tree --json`, `list-workspaces`, `list-panes`, `list-pane-surfaces`, `list-panels`, `current-workspace` (P for tree/workspaces/panels) | No Desktop tree read; Work membership is available via `lf task status` | `api snapshot`, `workspace get`, `tab get`, `pane list`, `pane get`, `pane layout` | **want** — join window/pane placement to Work IDs without replacing Work membership; LOO-427 arrangement. |
 | Inspect actual work/process ancestry | `top --processes`, `current`, `memory`, `surface-health` (H) | `lf ps --json`, `lf top`, `lf task status --json`; Task Flow log | `pane process-info`, `agent list`, `agent get` | **have** — Work-associated processes are already stronger than a terminal process tree; resource profiling stays with host tools. |
-| ★ Read the displayed terminal | `read-screen --surface S --lines N`, `capture-pane` (P for read-screen) | Native terminal display only; `lf monitor show ID --final` is a recorded conclusion, **not** the screen | `pane read P --source visible --lines N`; `agent read` | **want** — bounded passive reads of exact rendered surfaces; keep the relay byte-transparent under LOO-415. Terminal I/O follow-up. |
-| ★ Read selection or scrollback | `read-selection`, `read-screen --selection`, `read-screen --scrollback` (H) | Copy/selection and scrolling in UI; no targeted read API | `pane read --source recent`; no selection command found | **want** — useful for discussing what Jack is looking at; terminal I/O follow-up. |
+| ★ Read the displayed terminal | `read-screen --surface S --lines N`, `capture-pane` (P for read-screen) | Native terminal display only; `lf monitor show ID --final` is a recorded conclusion, **not** the screen | `pane read P --source visible --lines N`; `agent read` | **want** — bounded passive reads of exact rendered surfaces; keep the relay byte-transparent under LOO-415. LOO-427 terminal I/O slice. |
+| ★ Read selection or scrollback | `read-selection`, `read-screen --selection`, `read-screen --scrollback` (H) | Copy/selection and scrolling in UI; no targeted read API | `pane read --source recent`; no selection command found | **want** — useful for discussing what Jack is looking at; LOO-427 terminal I/O slice. |
 | Read durable conversation history | `sessions`, `vault sessions`, `vault search`, `vault checkpoints`, `recover` (H) | `lf session list --search TEXT`, `lf session history ID`, `lf monitor show ID --events` | `session list` is host lifetime, not provider history; `agent read` is terminal output | **worse** — shared history exists; outside-lf adoption/name-based continuation belongs to LOO-424. |
 | Capture a native window | `shot` (P); `record start/stop/status/note/list` (H) | AppleScript `capture screenshot` captures the key window, not an explicit target; `lf screenshot` captures HTML/URLs only | — | **worse** — current capture cannot establish which addressed window rendered; support explicit capture with Desktop inspection, not a video editor. |
 | Inspect patch/files beside work | `diff`, `markdown`, `open` (H) | `lf task diff ISSUE`, `lf task files ISSUE`, `lf task file ISSUE PATH`; Files/Diff pane | Shell/editor; no equivalent viewer command found | **have** — Task-backed file and diff identity is already useful; formatted Markdown is optional, not a new comparison Task. |
@@ -126,10 +126,10 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| ★ Insert text into an exact terminal | `send --surface S TEXT`, `paste`, `send-panel` (P for send) | Native typing/paste; no Desktop CLI | `pane send-text P TEXT` | **want** — explicit surface/content target; share LOO-387's draft preparation boundary. Terminal I/O follow-up. |
-| ★ Submit/interrupt with a key | `send-key --surface S KEY`, `send-key-panel`, `paste --submit` (P for send-key) | UI keys; `lf task interrupt ISSUE` is a provider action, not a general key API | `pane send-keys`, `pane run` | **want** — separate insertion from execution; no implicit Enter or transfer of client authority; terminal I/O follow-up. |
+| ★ Insert text into an exact terminal | `send --surface S TEXT`, `paste`, `send-panel` (P for send) | Native typing/paste; no Desktop CLI | `pane send-text P TEXT` | **want** — explicit surface/content target; share LOO-387's draft preparation boundary. LOO-427 terminal I/O slice. |
+| ★ Submit/interrupt with a key | `send-key --surface S KEY`, `send-key-panel`, `paste --submit` (P for send-key) | UI keys; `lf task interrupt ISSUE` is a provider action, not a general key API | `pane send-keys`, `pane run` | **want** — separate insertion from execution; no implicit Enter or transfer of client authority; LOO-427 terminal I/O slice. |
 | Continue a conversation semantically | `agent message`, `agent inbox`, `agent messages` (H; host messaging, not provider continuation) | `lf -b session resume ID MESSAGE`; ongoing interactive Session; Task steers via `lf task comment --steer` | `agent prompt TARGET TEXT` | **have** — durable conversation/steer path already exists; do not add another agent inbox. Live terminal input is the separate row above. |
-| Wait for a known outcome | `wait-for`; `pipe-pane --command CMD` (H) | `lf task wait ISSUE --until terminal --timeout N --json`; `lf monitor work --json --watch` for state changes | `pane wait-output --match TEXT --timeout MS`; `agent wait`; `agent prompt --wait` | **worse** — Task completion waits exist; terminal read/input needs bounded observation, not LM polling or a new completion authority. Terminal I/O follow-up. |
+| Wait for a known outcome | `wait-for`; `pipe-pane --command CMD` (H) | `lf task wait ISSUE --until terminal --timeout N --json`; `lf monitor work --json --watch` for state changes | `pane wait-output --match TEXT --timeout MS`; `agent wait`; `agent prompt --wait` | **worse** — Task completion waits exist; terminal read/input needs bounded observation, not LM polling or a new completion authority. LOO-427 terminal I/O slice. |
 | Host clipboard buffers and popups | `set-buffer`, `list-buffers`, `paste-buffer`, `popup`, `display-message` (H) | System clipboard and terminal paste; no buffer manager API | Native terminal clipboard | **no** — run lf inside cmux; do not add another clipboard store. |
 
 ## Name things, status and attention
@@ -190,7 +190,7 @@ The `vm`/`cloud` disposition covers every leaf advertised in top-level help:
 | Job | cmux commands (H unless marked) | lf / Desktop today (L) | herdr commands (H) | Judgment and owner |
 |---|---|---|---|---|
 | Learn commands from the tool | `help`, `help GROUP`, `guide` / `--skill`, `docs` (P for help/guide) | `lf help --all`, `lf help PATH`, `lf list --json`; ambiguity/typo rough edges | `--help`, leaf help, `--skill`, `completion` | **worse** — LOO-397 owns learnability; do not clone another tool's help or skill text. |
-| Observe changing Work | `events` | `lf monitor work --json --watch`; `lf activity --json` | `api snapshot`; waits for pane/agent conditions | **have** — Work events already feed Desktop; a visual layout snapshot belongs in Desktop arrangement. |
+| Observe changing Work | `events` | `lf monitor work --json --watch`; `lf activity --json` | `api snapshot`; waits for pane/agent conditions | **have** — Work events already feed Desktop; a visual layout snapshot belongs in LOO-427 arrangement. |
 | Schedule/run automation | `automation list/show/test/enable/disable/logs/reload`, `set-hook` | `lf wave cron`, `lf run FLOW`, `lf task run` | Shell tooling; integration lifecycle hooks | **have** — existing Work automation suffices; no second host automation engine. |
 | Use a host-specific automation service | `glaeda request/observe` | No Glaeda-specific equivalent | — | **no** — run lf inside the host; no integration need was demonstrated. |
 | Keep an ad hoc host todo list | `todo add/list/check/uncheck/start/rm/clear` | `lf task create`, Task Workflow and Project plan | No todo group found | **no** — preserve Work planning; LOO-406 explores its store, not a terminal-local backlog. |
@@ -237,7 +237,7 @@ No comparable Desktop run, herdr pane exercise, provider continuation, browser,
 SSH/cloud/account operation or latency benchmark was performed. A test-window
 screen and command receipts do not meet the chapter's sustained-use KRs.
 
-## Follow-up ownership
+## Implementation scope and existing owners
 
 Existing Tasks retain their scope:
 
@@ -266,19 +266,20 @@ Existing Tasks retain their scope:
   [LOO-429](https://linear.app/loopflow/issue/LOO-429): observed host launch/output
   problems and revised prompt placement, respecting their later comments.
 
-New outcomes are unstarted; filing does not launch implementation:
+Jack Heart corrected the scope: the following belong to **this LOO-427 diff**,
+implemented in internal slices and delivered as one PR:
 
-1. **[Identity explanation · LOO-430](https://linear.app/loopflow/issue/LOO-430)** — the keystone: resolved Work context and why it was
-   selected, without environment/database archaeology.
-2. **[Repository window and arrangement · LOO-431](https://linear.app/loopflow/issue/LOO-431)** — reuse one window across machines,
-   address it by repo, inspect placement/capabilities/actions and arrange retained panes.
-3. **[Terminal observation and input · LOO-432](https://linear.app/loopflow/issue/LOO-432)** — bounded screen/selection reads
-   and explicit text/key delivery with retained draft and focus behavior.
+1. **Identity explanation:** resolved Work context and why it was selected.
+2. **Repository window and arrangement:** one window across machines, addressed
+   by repo; placement, supported operations, legal actions and retained panes.
+3. **Terminal observation and input:** bounded screen/selection reads and explicit
+   text/key delivery, preserving drafts and focus.
 
-Each is independently useful; no implementation is launched by this comparison.
-Naming/transport and Session draft-conflict UX remain design questions. Browser,
-cloud, checkpoint vault, custom sidebars and host terminal administration earn
-no new Loopflow Tasks here.
+LOO-430/431/432 were filed prematurely; their scope is consolidated here.
+The design is `scratch/compare-cmux-s-command-line.md`. Transport, command spelling,
+repository correspondence and draft-conflict UX remain design questions.
+Browser, cloud, checkpoint vault, custom sidebars and host terminal administration
+remain outside this diff. Existing Tasks above retain their distinct outcomes.
 
 ## Loopflow source anchors
 

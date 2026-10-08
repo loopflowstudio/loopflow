@@ -1,6 +1,64 @@
 # Homepage copy approved by Jack Heart, prototype 05, 2026-10-07.
 # Edit copy here; main.py renders it.
 
+# The studio bar, company page and effort pages. Drafted with Jack Heart on
+# 2026-10-08. His wording so far: the Loopflow sentence, and the company page's
+# argument (Etude is sold, Loopflow is the tool for building it, Fantasia is the
+# research for doing it well). Each effort says what exists today.
+studio:
+  name: Loopflow Studio
+  bar:
+  - label: Loopflow
+    href: /
+  - label: Fantasia
+    href: /fantasia
+  - label: Etude
+    href: /etude
+  company:
+    title: Loopflow Studio
+    heading: We make three things.
+    efforts:
+    - name: Etude
+      label: What we sell
+      text: 'Experiment orchestration, for doing science inside a company: state the hypothesis,
+        run the experiment, read the evidence, change your mind.'
+      status: Not yet available
+      link:
+        label: Etude ↗
+        href: /etude
+    - name: Loopflow
+      label: The tool we build it with
+      text: Loopflow is a software engineering CLI for your agent. Free and open source.
+      status: Available today
+      link:
+        label: Loopflow ↗
+        href: /
+    - name: Fantasia
+      label: The research that keeps us good at it
+      text: 'Superhuman Magic: The Gathering bots, pursued for the joy of it.'
+      status: In progress
+      link:
+        label: Fantasia ↗
+        href: /fantasia
+  fantasia:
+    title: Fantasia
+    label: Fantasia · Loopflow Studio
+    heading: 'Superhuman Magic: The Gathering bots.'
+    lede: Research pursued for the joy of it, and to show what research done with craft looks
+      like.
+    points:
+    - title: Today
+      text: A person can play a one-on-one game against a trained bot, a search bot, or random
+        play, and replay the finished game.
+    - title: The aim
+      text: Bots that play better than the best people. They do not yet.
+    status: In progress. Nothing to install.
+  etude:
+    title: Etude
+    label: Etude · Loopflow Studio
+    heading: Experiment orchestration.
+    lede: We are building this.
+
 homepage:
   navigation:
   - label: Flows
@@ -196,6 +254,8 @@ homepage:
   footer:
     text: Loopflow · An open-source software instrument.
     links:
+    - label: Loopflow Studio
+      href: /studio
     - label: Get started ↗
       href: /docs/getting-started
     - label: Source ↗

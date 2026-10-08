@@ -1421,6 +1421,21 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .work-row .needs { font: 12px var(--font-mono); color: var(--text-secondary); }
 .home-page .needs a, .home-page .install-links a { text-decoration: underline; }
 .home-page .work-row .term { font-size: 12.5px; padding: 16px 18px; }
+.home-page .studio-bar { display: flex; align-items: center; justify-content: space-between; height: 44px; border-bottom: 1px solid var(--border); font: 11px var(--font-mono); text-transform: uppercase; letter-spacing: .1em; color: var(--text-secondary); }
+.home-page .studio-bar div { display: flex; gap: 24px; }
+.home-page .studio-bar a { display: inline-flex; align-items: center; min-height: 32px; }
+.home-page .studio-bar a[aria-current] { color: var(--burgundy); }
+.studio-hero { padding: 86px 0 56px; }
+.studio-hero .kicker { color: var(--burgundy); margin-bottom: 18px; }
+.studio-hero h1 { max-width: 900px; margin-bottom: 26px; }
+.studio-hero .intro { max-width: 680px; font-size: 21px; line-height: 1.45; margin: 0; }
+.home-page .strip.points { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.home-page .strip.points div { font-size: 15px; padding: 24px 28px 24px 0; }
+.home-page .studio-status { padding: 26px 0 80px; }
+.home-page .efforts .work-row { grid-template-columns: 230px 1fr 1.1fr; padding: 40px 0; }
+.home-page .efforts .work-row > p:not(.tag) { font-size: 17px; }
+.home-page .efforts .work-row .eyebrow { font-size: 11px; color: var(--burgundy); }
+.home-page .efforts .work-row .needs { font-size: 12px; margin-top: 12px; }
 .home-page .essay { max-width: 720px; }
 .home-page .essay .claim { font: 400 clamp(30px, 3.2vw, 44px)/1.15 var(--font-serif); color: var(--burgundy); letter-spacing: -.015em; margin-bottom: 28px; }
 .home-page .essay p { font-size: 18px; line-height: 1.6; margin-bottom: 20px; color: #333; }
@@ -1440,7 +1455,10 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-hero, .home-page .pair, .home-page .start { grid-template-columns: 1fr; gap: 30px; }
     .home-hero .intro { font-size: 18px; }
     .home-page .strip { grid-template-columns: 1fr 1fr; }
-    .home-page .work-row { grid-template-columns: 1fr; gap: 14px; }
+    .home-page .work-row, .home-page .efforts .work-row { grid-template-columns: 1fr; gap: 14px; }
+    .home-page .studio-bar div { gap: 16px; }
+    .studio-hero { padding: 44px 0 34px; }
+    .studio-hero .intro { font-size: 18px; }
     .home-page .block { padding: 48px 0 6px; }
     .home-page .parts { grid-template-columns: 1fr; }
     .home-page footer { flex-wrap: wrap; }

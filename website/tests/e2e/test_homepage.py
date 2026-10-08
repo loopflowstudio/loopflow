@@ -113,7 +113,7 @@ def test_legacy_redirects(page: Page, base_url: str):
     page.goto(f"{base_url}/story")
     assert page.url == f"{base_url}/"
     page.goto(f"{base_url}/loopflow")
-    assert page.url == f"{base_url}/download"
+    assert page.url == f"{base_url}/"
 
 
 def test_llms_txt(page: Page, base_url: str):
@@ -123,3 +123,16 @@ def test_llms_txt(page: Page, base_url: str):
     body = response.text()
     assert "/docs" in body
     assert "install.sh" in body
+
+
+def test_studio_bar_reaches_the_company_and_each_effort(page: Page, base_url: str) -> None:
+    for label, path, heading in [
+        ("Loopflow Studio", "/studio", "We make three things."),
+        ("Fantasia", "/fantasia", "Superhuman Magic: The Gathering bots."),
+        ("Etude", "/etude", "Experiment orchestration."),
+    ]:
+        page.goto(base_url)
+        page.locator(".studio-bar").get_by_role("link", name=label, exact=True).click()
+        assert page.url == f"{base_url}{path}"
+        expect(page.locator("h1")).to_have_text(heading)
+    expect(page.locator(".studio-bar").get_by_role("link", name="Loopflow", exact=True)).to_have_attribute("href", "/")

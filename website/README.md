@@ -12,6 +12,10 @@ ownership strip, terminal Flow, organizing rows, Mac capture, purpose, and insta
 `static/style.css` controls their layout. Homepage navigation points to each section;
 Flows navigation on other pages returns to `/#flows`.
 
+The `studio` block in `content.yaml` holds the bar above the homepage, the
+company page at `/studio`, and the `/fantasia` and `/etude` pages. An effort
+page with no `points` renders its heading and one line.
+
 The terminal section ships without a capture. The Mac capture is
 `static/wave-surface.png`; its adjacent JSON file retains capture provenance,
 and the image reserves its dimensions.

@@ -120,7 +120,9 @@ def CopyButton(text: str):
 
 
 # Homepage copy (edit content.yaml, not this file)
-HOME_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())["homepage"]
+SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text())
+STUDIO_CONTENT = SITE_CONTENT["studio"]
+HOME_CONTENT = SITE_CONTENT["homepage"]
 HERO_CONTENT = HOME_CONTENT["hero"]
 OWNERSHIP_CONTENT = HOME_CONTENT["ownership"]
 FLOWS_CONTENT = HOME_CONTENT["flows"]
@@ -334,7 +336,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/download", "/docs"] + [
+    pages = ["", "/studio", "/fantasia", "/etude", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
@@ -883,11 +885,93 @@ def _tasks_section() -> FT:
     )
 
 
+def _studio_bar(current: str) -> FT:
+    return Div(
+        A(STUDIO_CONTENT["name"], href="/studio", aria_current="page" if current == "/studio" else None),
+        Div(
+            *[
+                A(
+                    link["label"],
+                    href=link["href"],
+                    aria_current="page" if link["href"] == current else None,
+                )
+                for link in STUDIO_CONTENT["bar"]
+            ]
+        ),
+        cls="studio-bar",
+        role="navigation",
+        aria_label=STUDIO_CONTENT["name"],
+    )
+
+
+def _studio_page(current: str, content: dict, *sections) -> tuple:
+    return (
+        Title(content["title"]),
+        SkipLink(),
+        Div(
+            _studio_bar(current),
+            Main(
+                Section(
+                    P(content["label"], cls="eyebrow kicker") if "label" in content else None,
+                    H1(content["heading"]),
+                    P(content["lede"], cls="intro") if "lede" in content else None,
+                    cls="studio-hero",
+                ),
+                *sections,
+                id="main-content",
+                cls="home",
+            ),
+            cls="home-page",
+        ),
+    )
+
+
+def build_company_page() -> tuple:
+    content = STUDIO_CONTENT["company"]
+    return _studio_page(
+        "/studio",
+        content,
+        Section(
+            *[
+                Article(
+                    P(effort["label"], Span(effort["name"]), cls="tag"),
+                    P(effort["text"]),
+                    Div(
+                        P(effort["status"], cls="eyebrow"),
+                        P(A(effort["link"]["label"], href=effort["link"]["href"]), cls="needs"),
+                    ),
+                    cls="work-row",
+                )
+                for effort in content["efforts"]
+            ],
+            cls="work-rows efforts",
+            aria_label="What we make",
+        ),
+    )
+
+
+def build_effort_page(slug: str) -> tuple:
+    content = STUDIO_CONTENT[slug]
+    if "points" not in content:
+        return _studio_page(f"/{slug}", content)
+    return _studio_page(
+        f"/{slug}",
+        content,
+        Section(
+            *[Div(B(point["title"]), point["text"]) for point in content["points"]],
+            cls="strip points",
+            aria_label=content["title"],
+        ),
+        Section(P(content["status"], cls="capture-label"), cls="studio-status"),
+    )
+
+
 def build_homepage() -> tuple:
     return (
         Title("Loopflow — " + HERO_CONTENT["tagline"]),
         SkipLink(),
         Div(
+            _studio_bar("/"),
             Header(
                 A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
                 Nav(
@@ -1013,14 +1097,28 @@ def get():
 
 @rt("/loopflow")
 def get():
-    # The old product page; the app now lives on /download
-    return RedirectResponse("/download", status_code=302)
+    return RedirectResponse("/", status_code=302)
 
 
 @rt("/maestro")
 def get():
     # Redirect /maestro to download
     return RedirectResponse("/download", status_code=302)
+
+
+@rt("/studio")
+def get():
+    return build_company_page()
+
+
+@rt("/fantasia")
+def get():
+    return build_effort_page("fantasia")
+
+
+@rt("/etude")
+def get():
+    return build_effort_page("etude")
 
 
 @rt("/team")

@@ -926,6 +926,10 @@ fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts
         write_script(
             provider,
             r#"#!/bin/sh
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
 printf '%s\n' "$@" > "$LF_HOME/args"
 printf '%s' "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" > "$LF_HOME/title-disabled"
 touch "$LF_HOME/ready"
@@ -976,7 +980,7 @@ mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
             let slave = unsafe { fs::File::from_raw_fd(slave) };
             let mut launch = if first {
                 isolated_command(&[
-                    "--tui",
+                    "-i",
                     "--agent",
                     provider,
                     ":",

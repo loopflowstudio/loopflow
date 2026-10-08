@@ -87,9 +87,8 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   planning writer and optional Linear sync. Jack selected execution-machine local
   operations and custom Git-ref Task synchronization on October 8; LOO-412 owns
   exchange. Workflow, checkout and process authority remain local. The shared
-  model is selected, but coherent committed writer/exchange integration remains
-  unavailable at `b3cd894f3` (LOO-406) and `2bb5ce5c4` (LOO-412). Selecting the
-  prototype authorizes no publication of real planning data.
+  model is selected; writer/exchange integration is tracked in the working
+  design. Selecting the prototype authorizes no publication of real planning data.
 
 The [owner map](#implementation-scope-and-existing-owners) below retains the
 related Tasks' boundaries; this Task exposes the existing workspace owners.

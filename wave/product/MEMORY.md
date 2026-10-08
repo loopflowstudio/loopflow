@@ -63,10 +63,9 @@ assignment; unknown stays unavailable. Jack selected local operations and Git-re
 Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions, Processes,
 checkouts and control stay local; imported completion cannot move or clean them.
 Preserve pending changes, semi-live comments/completion, causal reopening and
-stable mutation IDs. No real plan publication is authorized. 406 still splits
-writers (`783305284`); 412's committed transport (`3ceb41bf4`) preserves revisions
-but lacks semantic merge and common-writer import. Integration, cold-open queue
-repair and native/shared proof remain.
+stable mutation IDs. No real plan publication is authorized. 406 shares Task/Project writes (`a16ca211f`); Wave provisioning/deletion
+still split. 412 (`985ed148c`) has causal merge/transport, without SQLite
+import/export or callers. Integration/native proof remain.
 
 ## Terminal-host adoption (2026-10-07)
 

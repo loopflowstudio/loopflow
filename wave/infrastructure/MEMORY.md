@@ -1072,7 +1072,7 @@ Credential-free 2.1.294 API capture now shows hook context in `system` for
 Sonnet/Opus. A `shouldQuery: false` user message followed by a native command
 preserves exact arguments and user context in one request, also after restart
 without resupply. A separate seed process saves context without a model call.
-These prove client mapping, not live-model or Loopflow behavior.
+These prove client mapping, not live-model or Loopflow behavior. Exclude answer leakage.
 Current resume replaces capture before claiming a driver; it cannot queue through
 a live native terminal. Live delivery versus inactive-only selection needs a
 design decision; no narrower outcome is approved. Installed 0.13.9 app launches recorded no native identity;

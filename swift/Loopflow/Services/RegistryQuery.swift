@@ -203,17 +203,12 @@ public struct RegistryQuery: Sendable {
         try await run(["project", "workflow", "source", project, name], cwd)
     }
 
-    public func savePersonalWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
-        let selector = name.hasPrefix("personal:") ? name : "personal:\(name)"
-        _ = try await runWithInput(["project", "workflow", "set", project, selector, "--file", "/dev/stdin"], cwd, content)
+    public func saveWorkflow(_ name: String, content: String, project: String, cwd: String?) async throws {
+        _ = try await runWithInput(["project", "workflow", "set", project, name, "--file", "/dev/stdin"], cwd, content)
     }
 
     public func customizeFlow(_ name: String, cwd: String?) async throws -> String {
         try await run(["flow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    public func customizeWorkflow(_ name: String, cwd: String?) async throws -> String {
-        try await run(["project", "workflow", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public func setWorkflow(_ name: String, project: String, cwd: String?) async throws {

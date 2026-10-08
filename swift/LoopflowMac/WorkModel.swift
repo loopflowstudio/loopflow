@@ -1134,11 +1134,11 @@ final class WorkModel {
         return try await query.workflowSource(name, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
     }
 
-    func savePersonalWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
+    func saveWorkflow(_ name: String, content: String, wave: WaveSnapshot) async throws {
         guard let project = visibleRoadmaps.first(where: { $0.wave.id == wave.id })?.projects.currentProject else {
             throw RegistryQueryError("Current Project is unavailable")
         }
-        try await query.savePersonalWorkflow(name, content: content, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
+        try await query.saveWorkflow(name, content: content, project: project.id, cwd: WaveOrigin.resolve(wave.repo))
         await refresh()
         await loadWorkflowCatalog(force: true)
     }
@@ -1162,25 +1162,6 @@ final class WorkModel {
         let path = try await query.customizeFlow(entry.name, cwd: repoPath)
         await loadFlowCatalog(force: true)
         return URL(fileURLWithPath: path)
-    }
-
-    func definitionSource(_ entry: WorkflowCatalogEntry) async throws -> URL {
-        let path = try await query.customizeWorkflow(entry.name, cwd: repoPath)
-        await loadWorkflowCatalog(force: true)
-        return URL(fileURLWithPath: path)
-    }
-
-    /// The repository file to edit for a Flow or workflow. A builtin gets its
-    /// `.lf/` file here; the catalog is reread so the entry names it.
-    func definitionSource(_ entry: WorkflowCatalogEntry, wave: WaveSnapshot) async -> URL? {
-        do {
-            let url = try await definitionSource(entry)
-            workflowErrors[wave.id] = nil
-            return url
-        } catch {
-            workflowErrors[wave.id] = error.localizedDescription
-            return nil
-        }
     }
 
     /// Launch a fresh Flow for the Task, then refresh the shared reading.

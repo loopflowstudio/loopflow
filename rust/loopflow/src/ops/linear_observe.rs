@@ -131,20 +131,27 @@ pub(crate) async fn publish_comment(
 }
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
+    // A command can outlive export or a mapping change. Observe the current link;
+    // pending outbound writes do not own or pause this input stream.
+    let task = store
+        .get_task(&task.id)
+        .await
         .map_err(|error| OpsError::Message(error.to_string()))?
-        == crate::planning::PlanningAuthority::Local
-    {
+        .ok_or_else(|| OpsError::Message(format!("Task {} is missing", task.id)))?;
+    let Some(issue) = &task.plan.linear_id else {
         return Ok(());
-    }
-    let client = super::pm::issue_client(task.worktree()?).await?;
+    };
+    let wave = store
+        .get_wave(&task.wave_id)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+    let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
     let observation = client
-        .observe_issue(task.plan.linear_id()?.as_str())
+        .observe_issue(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    reconcile_linear_observation(store, task, observation, "", OffsetDateTime::now_utc())
+    reconcile_linear_observation(store, &task, observation, "", OffsetDateTime::now_utc())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())

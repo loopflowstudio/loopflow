@@ -281,6 +281,16 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
         json!({"commentCreate":{"comment":{"id":id}}})
+    } else if query.contains("mutation UpdateProject") {
+        let mut project = project;
+        project["name"] = vars["name"].clone();
+        project["description"] = vars["description"].clone();
+        project["content"] = vars["content"].clone();
+        project["updatedAt"] = json!(time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap());
+        state.project_edit = Some(project);
+        json!({"projectUpdate":{"success":true}})
     } else if query.contains("mutation EditProject") {
         let mut project = project;
         if let Some(name) = vars["input"].get("name") {
@@ -329,6 +339,58 @@ async fn planning_graphql(
         panic!("unexpected creation fixture query: {query}");
     };
     axum::Json(json!({"data":data}))
+}
+
+#[tokio::test]
+async fn connected_project_workflow_uses_stored_definition_and_keeps_provider_fields() {
+    let fixture = Fixture::new().await;
+    fixture.seed(now() + 86_400).await;
+    let (repo, wave) = planning_repo(&fixture).await;
+    let (url, server) = serve(Arc::new(tokio::sync::Mutex::new(PlanningState::default()))).await;
+    let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
+    let source = repo.join("workflow.yaml");
+    std::fs::write(&source, definition).unwrap();
+    PM_TEST_CONTEXT
+        .scope(fixture.context(&url), async {
+            let selected =
+                crate::ops::project::workflow(&repo, "project-1", Some("code"), Some(&source))
+                    .await
+                    .unwrap();
+            assert_eq!(selected.workflow, "code");
+            assert_eq!(selected.id, "project-1");
+            assert_eq!(selected.initiative_ids, ["initiative-1"]);
+            assert_eq!(selected.team_ids, ["team-1"]);
+            std::fs::remove_file(&source).unwrap();
+            assert_eq!(
+                crate::ops::project::workflow_source(&repo, "project-1", "code")
+                    .await
+                    .unwrap(),
+                definition
+            );
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .wave_workflow(wave.id(), "code")
+                    .unwrap()
+                    .as_deref(),
+                Some(definition)
+            );
+            let catalog = crate::ops::project::workflow_catalog(&repo, Some("project-1"))
+                .await
+                .unwrap();
+            let entries = catalog
+                .iter()
+                .filter(|entry| entry.name == "code")
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].source.as_deref(), Some("stored"));
+            assert!(entries[0].workflow.as_ref().unwrap().nodes.is_empty());
+            assert!(!repo.join(".lf/workflows").exists());
+            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+        })
+        .await;
+    server.abort();
 }
 
 #[tokio::test]

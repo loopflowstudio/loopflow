@@ -911,7 +911,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
             "workflow",
             "set",
             project_id,
-            "personal:proof",
+            "proof",
             "--file",
             definition.to_str().unwrap(),
         ],
@@ -932,20 +932,14 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["name"] == "personal:proof")
+        .find(|entry| entry["name"] == "proof")
         .unwrap();
-    assert_eq!(private["source"], "personal");
+    assert_eq!(private["source"], "stored");
     assert!(private["workflow"].is_object());
     let source = lf(
         repo.path(),
         home.path(),
-        &[
-            "project",
-            "workflow",
-            "source",
-            project_id,
-            "personal:proof",
-        ],
+        &["project", "workflow", "source", project_id, "proof"],
     );
     assert_eq!(
         source.as_str().unwrap().trim(),

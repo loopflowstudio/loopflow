@@ -12,8 +12,8 @@ CREATE TABLE personal_wave_definitions (
     goal TEXT NOT NULL,
     memory TEXT NOT NULL
 );
-CREATE TABLE personal_workflows (
-    wave_id TEXT NOT NULL REFERENCES personal_wave_definitions(wave_id) ON DELETE RESTRICT,
+CREATE TABLE wave_workflows (
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
     name TEXT NOT NULL,
     content TEXT NOT NULL,
     PRIMARY KEY(wave_id,name)
@@ -256,13 +256,13 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_personal_wave_definitions_delete AFTER DELETE ON personal_wave_definitions
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
-CREATE TRIGGER store_revision_personal_workflows_insert AFTER INSERT ON personal_workflows
+CREATE TRIGGER store_revision_wave_workflows_insert AFTER INSERT ON wave_workflows
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
-CREATE TRIGGER store_revision_personal_workflows_update AFTER UPDATE ON personal_workflows
+CREATE TRIGGER store_revision_wave_workflows_update AFTER UPDATE ON wave_workflows
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
-CREATE TRIGGER store_revision_personal_workflows_delete AFTER DELETE ON personal_workflows
+CREATE TRIGGER store_revision_wave_workflows_delete AFTER DELETE ON wave_workflows
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_task_comments_update AFTER UPDATE ON task_comments

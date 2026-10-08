@@ -24,7 +24,7 @@ use crate::engine::git::{
     push_with_upstream, ref_exists, rev_parse, stash_including_untracked, stash_pop,
 };
 use crate::engine::naming::sanitize_for_branch;
-use crate::engine::workflow::{load_workflow, WorkflowDefinition, END, START};
+use crate::engine::workflow::{END, START};
 use crate::engine::worktrees::{
     create_from_placement_plan, plan_branch_placement, PlacementPlan, PlacementStrategy,
     WorktreeSegment,
@@ -505,11 +505,6 @@ pub fn task_place(
     })
 }
 
-fn load_workflow_definition(repo: &Path, name: &str) -> OpsResult<Option<WorkflowDefinition>> {
-    load_workflow(name, repo)
-        .map_err(|error| task_error(format!("failed to load workflow {name:?}: {error}")))
-}
-
 /// Choose what `lf task run` runs and, for a Task on a Workflow, put the Task
 /// on the edge this process sets out on. A Task keeps the Workflow it has; one
 /// with none takes up the workflow named, else its Project's. A named Flow
@@ -863,16 +858,26 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         })?;
         return Ok(existing);
     }
-    // Existing Tasks resolve names in their own checkout during traversal.
-    // For a new Task, reject an unknown name before placing its worktree.
-    if let Some(flow) = requested_flow.as_deref().filter(|flow| *flow != END) {
-        if load_workflow_definition(repo, flow)?.is_none() {
-            load_task_flow(repo, flow)?;
-        }
-    }
     let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     let resolved =
         crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
+    // Validate the same stored definition that traversal will capture, before placement.
+    if let Some(flow) = requested_flow.as_deref().filter(|flow| *flow != END) {
+        let definition = block_on_task(async {
+            let store = task_store().await?;
+            let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
+                .map_err(task_error)?;
+            let wave = store
+                .get_wave_at(&locator)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("owning Wave is not initialized"))?;
+            super::project::load_workflow(&store, wave.id(), flow, repo)
+        })?;
+        if definition.is_none() {
+            load_task_flow(repo, flow)?;
+        }
+    }
     if let Some(expected) = &expected_wave {
         if &resolved.wave != expected {
             return Err(task_error(format!(
@@ -1428,9 +1433,14 @@ fn create_prepared_task(
         // that names none leaves the Task without one until a run names it.
         if let (Some(process), Some(definition)) = (
             crate::journal::current_process_lfid(),
-            load_workflow(&project_workflow, task.worktree()?)
-                .ok()
-                .flatten(),
+            super::project::load_workflow(
+                &store,
+                &task.wave_id,
+                &project_workflow,
+                task.worktree()?,
+            )
+            .ok()
+            .flatten(),
         ) {
             store
                 .sqlite

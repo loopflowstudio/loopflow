@@ -10,6 +10,16 @@ mappings are links, not planning authorities. During an outage, local edits succ
 and show pending sync. Preserve uncertain effects and concurrent edits; no resident
 or automatic turn/Flow retry. This supersedes the branch's mixed-authority design.
 
+Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
+independent inbound completion, Project membership and comments while outbound
+writes are pending and after reconnect. Preserve both values on field conflicts
+and all Workflow/Process authority boundaries. Source at `3a219561a` refreshes
+active-Task comments at launch and every 15 seconds, with 5-second steer polling;
+that query omits state/membership. No current Linear webhook receiver was found;
+Desktop watches committed local state. Historical ingress APIs prove no live
+webhook delivery. Keep existing triggers/cadence; operation-entry proofs for all
+three examples remain required.
+
 Jack also selected Git-like Task prefixes: accept four or more hex digits, bare or
 prefixed, reject ambiguity, and retain full IDs. Display abbreviations can lengthen.
 Stable identity, creation receipts, provider mapping and placement stay distinct.
@@ -656,20 +666,13 @@ not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/i
 
 ## Planning and launch preservation (curated 2026-10-02)
 
-The September 28–29 planning, launch-hardening and branch-isolation details are
-preserved in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#earlier-synced-planning-and-runtime-selection-loo-334-2026-09-29).
-The current one-Home and Session cutovers above supersede their development-store
-routing, intermediate migration and Run-owner implementations, not unresolved
-acceptance. Historical test counts remain evidence of those revisions only.
-
-Jack Heart selected one local planning interface: repository Linear authority
-when connected, private plans otherwise; Git shares definitions and bindings.
-Cross-store discovery never grants another participant execution authority.
-Repository definitions establish Waves, not arbitrary Linear Initiatives.
-Jack selected one Initiative per Wave/subwave and portable A/B names; native
-parent relationships depend on provider support. Owning-checkout definitions
-include dirty additions/deletions; context-free reads use fetched configured
-main. No-remote policy and outward definition sync remained unresolved.
+The September 28–29 details remain at
+`3a219561ad029224aed4692d4ce23d6f17cad350:wave/infrastructure/MEMORY.md`
+under this heading and in its linked pre-curation history. Current one-Home,
+Session and LOO-406 unified-plan decisions supersede development-store routing,
+intermediate migration, Run owners and provider-authority selection. Records prove no configured acceptance. Repository-authored Wave identity and
+preservation obligations below remain; no-remote policy/outward definition sync
+were unresolved, not authorization to restore old writers.
 
 LOO-334's durable constraints survive: presence, freshness and execution eligibility
 are separate; omission is not deletion; acquisition time is not provider revision.

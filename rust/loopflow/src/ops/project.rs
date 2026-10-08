@@ -384,7 +384,7 @@ pub(crate) async fn write_plan(repo: &Path, wave: &Wave, content: ProjectContent
         let project = current_project(&store, wave)?;
         return store
             .sqlite
-            .update_local_project_content(
+            .update_project_content(
                 &crate::durable::ProjectId::parse(&project.id).map_err(project_error)?,
                 &content,
                 None,
@@ -509,23 +509,24 @@ pub async fn workflow_catalog(
         let project = resolve_project(&store, repo, selector).await?;
         for (name, content) in store
             .sqlite
-            .personal_workflows(&project.wave_id)
+            .wave_workflows(&project.wave_id)
             .map_err(project_error)?
         {
-            let name = format!("personal:{name}");
             let (workflow, unavailable) =
                 match crate::engine::workflow::parse_workflow(&name, &content, repo) {
                     Ok(workflow) => (Some(workflow), None),
                     Err(error) => (None, Some(error)),
                 };
+            entries.retain(|entry| entry.name != name);
             entries.push(crate::engine::workflow::WorkflowCatalogEntry {
                 name,
-                source: Some("personal".into()),
+                source: Some("stored".into()),
                 workflow,
                 unavailable,
             });
         }
     }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
 }
 
@@ -614,88 +615,81 @@ pub async fn workflow(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project Wave is unavailable"))?;
-    if store
-        .sqlite
-        .project_planning_authority(&project.id)
-        .map_err(project_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        let _guard = super::pm::lock_wave_planning(&wave).await?;
-        let mut current = super::task::local_project_item(
-            store
-                .sqlite
-                .project(&project.id)
-                .map_err(project_error)?
-                .ok_or_else(|| project_error("Project disappeared"))?,
-        )?;
-        if let Some(name) = selection {
-            let definition = file
-                .map(std::fs::read_to_string)
-                .transpose()
-                .map_err(project_error)?;
-            if let Some(content) = definition.as_deref() {
-                name.strip_prefix("personal:")
-                    .filter(|name| !name.is_empty())
-                    .ok_or_else(|| project_error("a stored Workflow uses personal:<name>"))?;
-                crate::engine::workflow::parse_workflow(name, content, repo)
-                    .map_err(project_error)?;
-            } else {
-                load_workflow(&store, wave.id(), name, repo)?
-                    .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?;
+    let definition = match selection {
+        Some(name) => {
+            let definition = match file {
+                Some(path) => std::fs::read_to_string(path).map_err(project_error)?,
+                None => read_workflow_source(&store, wave.id(), name, repo)?
+                    .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?,
+            };
+            if name.trim().is_empty() || name.contains([':', '/', '\\']) {
+                return Err(project_error("invalid Workflow name"));
             }
-            store
-                .sqlite
-                .update_local_project_content(
-                    &project.id,
-                    &ProjectContent {
-                        workflow: name.into(),
-                        krs: current.krs.clone(),
-                        metric_targets: current.metric_targets.clone(),
-                    },
-                    definition.as_deref(),
-                )
+            crate::engine::workflow::parse_workflow(name, &definition, repo)
                 .map_err(project_error)?;
-            current.workflow = name.into();
+            Some(definition)
         }
-        return Ok(current);
-    }
-    if file.is_some() || selection.is_some_and(|name| name.starts_with("personal:")) {
-        return Err(project_error(
-            "personal Workflow definitions belong to a personal Wave",
-        ));
-    }
-    if let Some(name) = selection {
-        crate::engine::workflow::load_workflow(name, repo)
+        None => None,
+    };
+    let acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let mut current = super::task::local_project_item(
+        store
+            .sqlite
+            .project(&project.id)
             .map_err(project_error)?
-            .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?;
-        super::pm::require_planning_home(&store, &wave).await?;
-        let acquisition = super::pm::lock_wave_planning(&wave).await?;
-        let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-        let provider = require_project(&ctx, project.plan.linear_id()?.as_str()).await?;
-        let content = ProjectContent {
-            workflow: name.to_string(),
-            metric_targets: provider.metric_targets.clone(),
-            krs: provider.krs.clone(),
-        };
-        ctx.client
-            .update_project(&provider.id, &provider.name, &content)
-            .await
+            .ok_or_else(|| project_error("Project disappeared"))?,
+    )?;
+    if let Some(name) = selection {
+        if let Some(id) = &project.plan.linear_id {
+            super::pm::require_planning_home(&store, &wave).await?;
+            let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
+            let provider = require_project(&ctx, id.as_str()).await?;
+            let content = ProjectContent {
+                workflow: name.into(),
+                krs: provider.krs,
+                metric_targets: provider.metric_targets,
+            };
+            ctx.client
+                .update_project(id.as_str(), &provider.name, &content)
+                .await
+                .map_err(project_error)?;
+            super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition.clone())
+                .await?;
+            current = super::task::local_project_item(
+                store
+                    .sqlite
+                    .project(&project.id)
+                    .map_err(project_error)?
+                    .ok_or_else(|| project_error("Project disappeared"))?,
+            )?;
+            if current.workflow != name {
+                return Err(project_error("Workflow selection was sent but readback differs; inspect the Project before retrying"));
+            }
+        }
+        store
+            .sqlite
+            .update_project_content(
+                &project.id,
+                &ProjectContent {
+                    workflow: name.into(),
+                    krs: current.krs.clone(),
+                    metric_targets: current.metric_targets.clone(),
+                },
+                definition.as_deref(),
+            )
             .map_err(project_error)?;
-        super::pm::refresh_pm_snapshot_locked(repo, &wave, &ctx, &store, acquisition).await?;
+        current.workflow = name.into();
     }
-    store
-        .sqlite
-        .accepted_projects(wave.id())
-        .map_err(project_error)?
-        .into_iter()
-        .find(|p| {
-            project
-                .plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == p.id)
-        })
-        .ok_or_else(|| project_error("Project planning is unavailable; sync its Wave"))
+    if let Some(id) = &project.plan.linear_id {
+        return store
+            .sqlite
+            .accepted_projects(wave.id())
+            .map_err(project_error)?
+            .into_iter()
+            .find(|project| project.id == id.as_str())
+            .ok_or_else(|| project_error("Project planning is unavailable; sync its Wave"));
+    }
+    Ok(current)
 }
 
 pub(crate) fn load_workflow(
@@ -717,12 +711,12 @@ fn read_workflow_source(
     name: &str,
     repo: &Path,
 ) -> OpsResult<Option<String>> {
-    if let Some(private) = name.strip_prefix("personal:") {
-        store
-            .sqlite
-            .personal_workflow(wave, private)
-            .map_err(project_error)
-    } else {
-        crate::engine::workflow::workflow_source(name, repo).map_err(project_error)
+    match store
+        .sqlite
+        .wave_workflow(wave, name)
+        .map_err(project_error)?
+    {
+        Some(content) => Ok(Some(content)),
+        None => crate::engine::workflow::workflow_source(name, repo).map_err(project_error),
     }
 }

@@ -505,7 +505,7 @@ pub enum ProjectWorkflowCommand {
     Source { project: String, name: String },
     /// List Workflow definitions, including unavailable local files
     List {
-        /// Include this Project's personal Wave definitions
+        /// Include this Project's stored Wave definitions
         #[arg(long)]
         project: Option<String>,
         #[arg(long)]
@@ -521,7 +521,7 @@ pub enum ProjectWorkflowCommand {
     Set {
         project: String,
         name: String,
-        /// Store this definition in the personal Wave; use a personal:<name> selector
+        /// Store this definition in the Wave
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },

@@ -314,6 +314,35 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert!(tasks[0].worktree.is_none());
             assert!(store.task_prs(&tasks[0].id).await.unwrap().is_empty());
             assert!(!store.task_started(&tasks[0].id).await.unwrap());
+
+            // The active command's refresh operation keeps reading independently of
+            // outbound completion, including an unplaced Task and a stale launch copy.
+            let pending = crate::work::task::PmWritebackState::Pending {
+                operation: crate::work::task::PmWritebackOperation::CompleteTask,
+                error: "outbound delivery unavailable".into(),
+            };
+            store.update_task_pm_writeback(&tasks[0].id, &pending, time::OffsetDateTime::now_utc()).await.unwrap();
+            let mut captured = tasks[0].clone();
+            captured.plan.linear_id = None;
+            let before = store.task_steers(&captured.id).await.unwrap().len();
+            provider.lock().await.thread = Thread::Failing;
+            assert!(crate::ops::linear_observe::refresh_task_comments(&store, &captured).await.is_err());
+            assert_eq!(store.task_steers(&captured.id).await.unwrap().len(), before);
+            {
+                let mut provider = provider.lock().await;
+                provider.thread = Thread::Empty;
+                provider.posted.push(comment("incoming-after-reconnect", Some("2026-10-08T12:00:00Z"),
+                    Some("Keep inbound observation independent."),
+                    json!({"id":"person-1", "displayName":"Jack", "name":"Jack H"})));
+            }
+            crate::ops::linear_observe::refresh_task_comments(&store, &captured).await.unwrap();
+            let delivered = store.task_steers(&captured.id).await.unwrap();
+            assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
+            crate::ops::linear_observe::refresh_task_comments(&store, &captured).await.unwrap();
+            assert_eq!(store.task_steers(&captured.id).await.unwrap(), delivered);
+            assert_eq!(store.get_task(&captured.id).await.unwrap().unwrap().pm_writeback, pending);
+            assert!(!store.task_started(&captured.id).await.unwrap());
+
         })
         .await;
     server.abort();

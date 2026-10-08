@@ -38,8 +38,8 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Personal workflows render and save through the store without creating a repository file")
-    func personalWorkflow() async throws {
+    @Test("Workflows render and save through the store without creating a repository file")
+    func storedWorkflow() async throws {
         var roadmap = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
         var waves = try #require(roadmap["waves"] as? [[String: Any]])
@@ -51,8 +51,8 @@ struct DesktopHeadlessTests {
         let wave = try JSONDecoder().decode(WaveSnapshot.self, from: JSONSerialization.data(withJSONObject: waveObject))
         var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
             fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
-        entries[0]["name"] = "personal:code"
-        entries[0]["source"] = "personal"
+        entries[0]["name"] = "code"
+        entries[0]["source"] = "stored"
         let catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
         actor Source {
             var content = "nodes: {}\nedges: []\n"
@@ -63,7 +63,7 @@ struct DesktopHeadlessTests {
         }
         let source = Source()
         let model = WorkModel(query: RegistryQuery(runWithInput: { args, _, content in
-            guard args.prefix(3) == ["project", "workflow", "set"], args.contains("personal:code") else {
+            guard args.prefix(3) == ["project", "workflow", "set"], args.contains("code") else {
                 throw RegistryQueryError("Unexpected write: \(args)")
             }
             try await source.save(content)
@@ -77,18 +77,18 @@ struct DesktopHeadlessTests {
         await model.refresh()
         model.select(.wave(id: wave.id))
         await model.loadWorkflowCatalog()
-        let view = WaveWorkflowView(model: model, wave: wave, name: "personal:code")
+        let view = WaveWorkflowView(model: model, wave: wave, name: "code")
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "Stored in this Wave")
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         _ = try view.inspect().find(button: "Edit")
         let updated = "nodes: {review: demo}\nedges: []\n"
-        try await model.savePersonalWorkflow("personal:code", content: updated, wave: wave)
-        #expect(try await model.workflowSource("personal:code", wave: wave) == updated)
+        try await model.saveWorkflow("code", content: updated, wave: wave)
+        #expect(try await model.workflowSource("code", wave: wave) == updated)
         do {
-            try await model.savePersonalWorkflow("personal:code", content: "invalid", wave: wave)
+            try await model.saveWorkflow("code", content: "invalid", wave: wave)
             Issue.record("Invalid content must not replace the stored workflow")
         } catch { #expect(error.localizedDescription == "Invalid workflow") }
-        #expect(try await model.workflowSource("personal:code", wave: wave) == updated)
+        #expect(try await model.workflowSource("code", wave: wave) == updated)
     }
 
     @Test("An unplaced personal Task and its CLI comment thread render without a display")
@@ -274,7 +274,6 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery { args, _ in
             await calls.add(args)
             if args.prefix(3) == ["project", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["project", "workflow", "customize"] { return "/repo/.lf/workflows/\(args[3]).yaml\n" }
             if args.prefix(3) == ["project", "workflow", "set"], args.last == "broken" {
                 throw RegistryQueryError("broken does not load")
             }
@@ -290,8 +289,7 @@ struct DesktopHeadlessTests {
         _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "builtin workflow")
         #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Customize")
-        let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
-        #expect(await model.definitionSource(entry, wave: wave)?.path == "/repo/.lf/workflows/code.yaml")
+        try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().tap()
 
         // An invalid repository file stays listed with its reason and can still be opened.
         let invalid = view("proof")

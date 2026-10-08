@@ -722,12 +722,12 @@ struct TaskDirectiveEditor: View {
     }
 }
 /// The Project's workflow, taken up by a Task's first `lf task run`: what it
-/// draws and the file that defines it.
+/// draws and its authored definition.
 struct WaveWorkflowView: View {
     let model: WorkModel
     let wave: WaveSnapshot
     let name: String
-    @State private var editingPersonal = false
+    @State private var editingWorkflow = false
     @Environment(\.palette) private var palette
 
     private var catalog: [WorkflowCatalogEntry] { model.workflowCatalog.value ?? [] }
@@ -752,20 +752,14 @@ struct WaveWorkflowView: View {
                 if let entry {
                     // A builtin is copied into the selected definition owner before editing.
                     Button(entry.source == nil ? "Customize" : "Edit") {
-                        if wave.name.hasPrefix("personal:") {
-                            editingPersonal = true
-                        } else {
-                            Task {
-                                if let url = await model.definitionSource(entry, wave: wave) { NSWorkspace.shared.open(url) }
-                            }
-                        }
+                        editingWorkflow = true
                     }
                     .buttonStyle(WorkOutlineButtonStyle())
-                    .help(wave.name.hasPrefix("personal:") ? "Edit this Wave’s stored workflow" : (entry.source ?? "Write this builtin to .lf/ and open it"))
+                    .help("Edit this Wave’s stored workflow")
                     .accessibilityIdentifier("wave-workflow-edit")
                 }
             }
-            Text(entry.map { $0.source == "personal" ? "Stored in this Wave" : ($0.source ?? "builtin workflow") } ?? "")
+            Text(entry.map { $0.source == "stored" ? "Stored in this Wave" : ($0.source ?? "builtin workflow") } ?? "")
                 .font(Typography.code(11)).foregroundStyle(palette.textTertiary)
                 .accessibilityIdentifier("wave-workflow-source")
             if let workflow = entry?.workflow {
@@ -792,11 +786,11 @@ struct WaveWorkflowView: View {
             }
         }
         .accessibilityIdentifier("wave-workflow")
-        .sheet(isPresented: $editingPersonal) { PersonalWorkflowEditor(model: model, wave: wave, name: name) }
+        .sheet(isPresented: $editingWorkflow) { WorkflowEditor(model: model, wave: wave, name: name) }
     }
 }
 
-struct PersonalWorkflowEditor: View {
+struct WorkflowEditor: View {
     let model: WorkModel
     let wave: WaveSnapshot
     let name: String
@@ -811,7 +805,7 @@ struct PersonalWorkflowEditor: View {
             Text("Edit \(name)").font(Typography.sectionTitle(22))
             TextEditor(text: $content).font(.system(.body, design: .monospaced))
                 .disabled(!ready || saving)
-                .accessibilityIdentifier("personal-workflow-content")
+                .accessibilityIdentifier("workflow-content")
             if let error { Text(error).foregroundStyle(Color.statusWarning) }
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -820,7 +814,7 @@ struct PersonalWorkflowEditor: View {
                     saving = true
                     defer { saving = false }
                     do {
-                        try await model.savePersonalWorkflow(name, content: content, wave: wave)
+                        try await model.saveWorkflow(name, content: content, wave: wave)
                         dismiss()
                     } catch { self.error = error.localizedDescription }
                 } }.disabled(!ready || saving).keyboardShortcut(.defaultAction)

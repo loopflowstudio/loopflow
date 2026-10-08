@@ -157,15 +157,17 @@ full IDs in automation.
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
-lf project workflow set <project-id> personal:review --file /tmp/review.yaml
+lf project workflow set <project-id> review --file /tmp/review.yaml
 lf project workflow list --project <project-id> --json
-lf project workflow source <project-id> personal:review
+lf project workflow source <project-id> review
 ```
 
-Ranks are zero-based within a Project. Personal workflows stay in SQLite; Desktop's
-Customize and Edit controls save them there too. Nested personal Waves use names
-such as `personal:parser/tokenizer`. Renaming them retains their IDs and descendants.
-Connected Wave definitions and workflow customizations keep their repository files.
+Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
+for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
+definitions override repository and builtin sources with the same name. Nested
+personal Waves use names such as `personal:parser/tokenizer`; renaming retains
+their IDs and descendants. Connected Wave goal and memory definitions use
+repository files.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`

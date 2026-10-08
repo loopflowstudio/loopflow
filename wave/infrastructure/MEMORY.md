@@ -615,8 +615,7 @@ acceptance remain at
 ## Tasks across machines (LOO-412, 2026-10-08)
 
 Jack Heart selected the originating-host callback and a fresh `pursue` through
-publication for another review, superseding adoption-only PR #1491. Remote Task
-planning calls the host's ordinary writer; execution and machine/account operations
+publication for another review, superseding adoption-only PR #1491. Task planning calls the host writer; execution and machine/account operations
 stay on the worker. LOO-406 owns one local planning model with optional Linear
 sync; host loss must not silently select a worker plan or direct Linear fallback.
 Keep original mutation IDs through lost replies; unavailable is not failure proof.
@@ -627,7 +626,7 @@ origin; clean up invocation forwarding even with a surviving SSH master.
 No automatic replay, resident service, detached-work guarantee or landing.
 
 Design: `scratch/work-on-another-machine-name.md`. Demo the worktree build.
-Five simulated adoption scenarios passed at `0cd8e7f14`; they prove no
+Five adoption scenarios passed at `0cd8e7f14`; they prove no
 callback or real SSH behavior. Public callback dispatch, lost-reply recovery,
 populated history and real loopback cleanup remain. Earlier evidence: `0cd8e7f14:wave/infrastructure/MEMORY.md` under this heading.
 

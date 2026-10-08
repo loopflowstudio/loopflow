@@ -618,25 +618,24 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected host callbacks through publication for review,
-superseding PR #1491's adoption. Planning uses the host writer; execution and
-machine/accounts stay on the worker. LOO-406 owns one local model with optional
-Linear sync. Host loss permits neither worker planning nor direct Linear fallback.
-Retain mutation IDs, host-born identity and divergent existing IDs/history.
-Delete copied planning/bootstrap; retain pushed-code checks, fetch-before-placement
-and dirty files. Nested calls retain the origin; cancel invocation forwarding
-even when the SSH master survives. No replay, resident service, detached-work
-guarantee or landing.
+Jack Heart reconsidered the full host-store callback design and clarified that
+the second machine needs to file follow-up Tasks that persist on the originating
+machine. Jack also requires semi-live comments/completion and suggested Task sync
+on machine registration. Whole-store callbacks and follow-up-only delivery are
+insufficient directions. Jack selected local stores with bidirectional planning
+sync, retaining execution per machine, and suggested Git as a possible transport.
+Git is a candidate, not a selected backend. Scope, sync lifetime, conflicts,
+completion versus local Workflow state and Linear coordination remain open.
+LOO-406 owns one local model with optional Linear sync.
 
-LOO-406's previously published `dfe18ab60` and rechecked local `3a219561a`
-still use personal/Linear writers; the latter updates memory only. Creation
-retains identity; edits/comments lack public retry identity. Mutation and receipt
-need one commit boundary. LOO-412 owns transport and worker registration; only
-the host writer depends on LOO-406. Callback unimplemented. Release's entry-point
-lesson requires unavailable/unconfirmed failures to reach command exits.
-Five scenarios at `0cd8e7f14` prove only adoption. Public dispatch, lost replies,
-history and loopback cleanup remain open; `scratch/work-on-another-machine-name.md`
-owns the remaining plan.
+The pursue Flow `73f78216-2429-4d5a-a404-ef4bd1f5ae81` stopped for review;
+partial callback transport remains unverified in the checkout. Preserve existing
+IDs/history, pushed-code checks, fetch-before-placement and dirty files. No
+automatic turn/Flow retry or landing. Further pursuit follows the selected sync
+direction; publication remains for Jack Heart's review. Five scenarios at
+`0cd8e7f14` prove only adoption; real SSH and follow-up delivery remain unproved.
+The current decision and superseded full-store proposal are distinguished in
+`scratch/work-on-another-machine-name.md`.
 
 ## Synced planning integration (LOO-334)
 

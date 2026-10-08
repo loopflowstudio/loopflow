@@ -482,7 +482,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
-    if built.skill_name.as_deref() == Some("default") || !built.process.auto {
+    if !built.process.auto {
         info!("launching interactive vendor session");
         let capture = begin_capture(built, "tui", &built.agent_config, None)?;
         let provider_session_id = if built.harness == "claude" {

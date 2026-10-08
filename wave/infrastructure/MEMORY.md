@@ -976,7 +976,11 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
 - **`scripts/test.py --all` cannot green the Loopflow UI suite headlessly**. `xcodebuild` runs 304 app/unit tests to a pass, then `LoopflowUITests-Runner` hangs before establishing its connection and Xcode exits 65. Reproduced with a fresh `derivedDataPath`, so it is not a stale-cache artifact. Treat a `--all` UI failure as unproven, not as a regression, until the runner hang is fixed.
 - **Run `cargo test` to completion before trusting a green-looking suite.** A failing lib target makes cargo skip every later target, so lib failures mask bin failures.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
-- **Source history must reconstruct every applied release frontier** (learned 2026-07-20). One pre-schema-closure local promotion embedded a test-materialized `0.12.4` batch and advanced the shared store while git retained the ten source drafts and omitted the canonical file. Recovery preserved the database, extracted the canonical bytes from the retained immutable binary, matched their checksum to `schema_migrations`, registered the batch, and removed only byte-identical drafts. If a store is ahead by an unknown migration, retain state and old binary bytes; prove the checksum before ratifying history. Since #1123, draft-bearing candidates fail promotion even at an exact frontier, while a schema-complete exact-frontier CLI repair may safely activate with live Runs because it writes no migration.
+- **Source history must reconstruct every applied release frontier.** Preserve
+  an unknown store frontier and its old binary; match embedded SQL against the
+  ledger before ratifying history. Draft-bearing candidates cannot promote;
+  schema-complete exact-frontier repairs need no migration. The July 20 recovery
+  and #1123 evidence remain at `ec126964d:wave/infrastructure/MEMORY.md` under Gotchas.
 - **Tests must survive draft migration materialization** (learned 2026-07-21).
   Release-equivalent Rust tests delete ordinal-free drafts and compile the
   generated canonical batch. Test fixtures resolve migration SQL by its draft
@@ -997,12 +1001,10 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **Historical continuity currently short-circuits daily telemetry** (observed
-  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
-  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
-  continuity obligation-aware. Fresh receipts are new evidence for that Task,
-  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
-  valid Run execution context.
+- **Historical continuity blocked daily telemetry** on August 23. LOO-241's
+  original eight-gap failure remains at `ec126964d:wave/infrastructure/MEMORY.md`
+  under Gotchas; current continuity judges the latest due interval, as recorded
+  under Shipped history. Fresh failures belong to existing work, not duplicate Tasks.
 - **Release orchestration and product publication are separate evidence**
   (observed 2026-08-23). A cron receipt proves only the scheduled target's
   terminal state. `lf release status` remained at tag `v0.12.14` with a
@@ -1060,9 +1062,9 @@ trigger, no split, relaunch fallback or lf-side refusal wording. PR #1498 owns
 transport and combined oversized-launch acceptance. Recorded Claude interactive
 readback proves neither plan mode, cmux tracking nor the combined candidate.
 Jack later authorized 429's landing after queued preparation despite these gaps;
-428's publication-only boundary remains.
+Jack separately authorized 428's queue and landing on October 8.
 
-Jack approved setup-free Codex coexistence and publication only. Source uses a
+Jack approved setup-free Codex coexistence. Source uses a
 temporary native profile for lf's capture hook and a bounded incomplete-argument
 probe for wrapper-supplied trust. Existing configuration/trust stays unchanged;
 normal exits remove the profile, interrupted launches can leave it unselected.
@@ -1074,11 +1076,15 @@ remain unproved; live Sessions stay untouched.
 Release's entry-point lesson applies per operation: launch receipts establish no
 fresh reconnect hooks, and native composition establishes no host tracking.
 
-Flow readability and transactional Started remain. Superseded argv diagnostics
-are removed; 429 owns oversized-context proof. Earlier limits and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
+Flow output now prints step position/name and agent messages; verbose enables
+accounting and INFO, never prompts. Started commits with Flow registration.
+429 owns oversized-context proof. Earlier limits and prompt history:
+`64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
 Jack Heart removed `--tui` on October 8: terminal is the interactive default;
 `-i` forces interactive execution and `-b` remains headless. Native PTYs pass.
-Jack authorized landing October 8; OSC 7501 follow-up is LOO-422.
+Compression removed `default`'s mode override. Reconciliation removed upstream
+#1500's stale `tui` forwarding reference; earlier passes did not cover that merge.
+OSC 7501 follow-up is LOO-422, after demonstrated provider/host adoption.
 Preserve caller-owned checkpointing and common invocation loading. Codex
 rejected-turn recovery remains unresolved. Homepage capture follows installation.
 

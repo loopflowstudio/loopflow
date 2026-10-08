@@ -999,11 +999,14 @@ fn authored_flow_records_each_skill_as_one_session() {
 #[test]
 fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
     let repo = loopflow_test_support::TestRepo::new();
-    write_skill(repo.path(), "work", "private-instructions-marker");
+    // Even a skill named default obeys the Flow's headless execution mode.
+    for name in ["default", "work"] {
+        write_skill(repo.path(), name, "private-instructions-marker");
+    }
     write_flow(
         repo.path(),
         "readable",
-        "- work\n- cmd: flow list\n- work\n",
+        "- default\n- cmd: flow list\n- work\n",
     );
     let bin = TempDir::new().unwrap();
     write_executable(
@@ -1024,7 +1027,7 @@ fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
         let mut args = vec![
             "--batch",
             "--no-loopflow",
-            "-m",
+            "-a",
             "codex",
             "run",
             "readable",
@@ -1042,7 +1045,7 @@ fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{stderr}");
         assert!(String::from_utf8_lossy(&output.stdout).contains("agent-readable-text"));
-        assert!(stderr.contains("[1/3] work"), "{stderr}");
+        assert!(stderr.contains("[1/3] default"), "{stderr}");
         assert!(stderr.contains("[2/3] flow list"), "{stderr}");
         assert!(stderr.contains("[3/3] work"), "{stderr}");
         assert_eq!(stderr.contains("INFO"), verbose, "{stderr}");

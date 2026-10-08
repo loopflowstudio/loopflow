@@ -189,7 +189,6 @@ impl Cli {
         for (flag, enabled) in [
             ("--batch", self.batch),
             ("--interactive", self.interactive),
-            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),

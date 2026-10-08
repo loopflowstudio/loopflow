@@ -182,6 +182,13 @@ impl SqliteStore {
              removed=MAX(removed,excluded.removed)",
             params![issue_id, revision, removed],
         )?;
+        if removed {
+            tx.execute(
+                "UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,?2)
+                 WHERE external_issue_id=?1",
+                params![issue_id, super::super::rows::now_unix()],
+            )?;
+        }
         let mut query =
             tx.prepare("SELECT repo,body FROM pm_items WHERE provider='linear' AND id=?1")?;
         let rows = query
@@ -534,6 +541,8 @@ fn project_accepted_planning(
              issue_identifier=json_extract(i.body,'$.identifier'),
              issue_title=json_extract(i.body,'$.name'),
              issue_description=json_extract(i.body,'$.description'),
+             planning_state=json_extract(i.body,'$.state'),
+             planning_completed=json_extract(i.body,'$.completed'),
              pm_snapshot_synced_at=i.observed_at,project_id=p.id
          FROM pm_items i
          JOIN projects p ON p.external_project_id=i.project_id
@@ -580,10 +589,10 @@ fn project_accepted_planning(
         let item: PmItem = serde_json::from_str(&body)?;
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'')",
+             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11)",
             params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank],
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed],
         )?;
     }
     Ok(())

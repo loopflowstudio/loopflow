@@ -53,12 +53,14 @@ saves abandonment and cancellation identity atomically in both modes, deleting
 provider-first decision writers. Cleanup checks execution separately and cannot
 reverse the decision. Safe cancellation delivery remains unimplemented and pending.
 
-`bd8d0191a` retains shared placement, winning checkout/PR recovery and Wave locks
-through caller cancellation. The next cut shares offline checkout preparation;
-paired CLI fixtures retain edits and restore the same PR/path. Mapped-only provider
-fact validation survives. Common schema, definitions, creation/edit and rotation
-remain; LOO-412 has no coherent writer boundary. Public resolution, composed
-reconnect and installed acceptance remain unproved.
+Placement now consumes saved Task planning state and deletion evidence without
+provider inventory. The obsolete registration writer and provider-plan rewrite are
+deleted; admission fixtures use `place_task`. The single draft and inbound writer
+retain state/completion and removal without moving Workflow or cleaning checkouts.
+Wave/checkout locks and winning PR/path survive cancellation. Common definitions,
+creation/edit, membership conflicts and rotation remain; LOO-412 has no coherent
+writer boundary. Public resolution, composed reconnect and installed acceptance
+remain unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
@@ -184,14 +186,11 @@ unpublished code retained, without deletion or delivery authorization.
 ## Process vocabulary (LOO-400, 2026-10-07)
 
 Jack Heart approved Process, LFID/PID and PR #1483 landing
-(comment `32c00054-4c60-4b96-bdf4-4d5f142ab881`).
-`process.lfid` is durable identity; optional `pid` is a reusable Unix PID.
-References use `process_lfid`/`parent_process_lfid`. One draft preserves IDs,
-parents, outcomes and unknown PIDs; LOO-397 owns command placement.
-SQL renames preserve JSON, captures, receipts and provider environments
-(boot-witness loss; Release's landing incident). Sequencer receipts retain
-`process_id` for Rust's `process_lfid`; round-trip tested.
-Fixtures prove neither installation nor control authority.
+(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). `process.lfid` is durable identity;
+optional `pid` is reusable. One draft preserves identities, parents, outcomes,
+unknown PIDs and historical JSON. Sequencer wire `process_id` still maps to Rust
+`process_lfid`. Fixtures establish no installed control authority; LOO-397 owns
+command placement. Exact evidence: `cbdb9a43b:wave/infrastructure/MEMORY.md`.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

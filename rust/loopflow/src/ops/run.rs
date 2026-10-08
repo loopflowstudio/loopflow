@@ -386,7 +386,7 @@ mod tests {
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
-        store.create_task(&task, &pr, None).await.unwrap();
+        store.seed_task(&task, &pr).await.unwrap();
         task
     }
 

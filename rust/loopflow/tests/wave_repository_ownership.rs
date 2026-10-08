@@ -1,3 +1,6 @@
+#[path = "support/planning.rs"]
+mod planning;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -379,7 +382,17 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         )
         .unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
-    store.create_task(&task, &task_pr, None).await.unwrap();
+    planning::seed_unplaced_task(&database, &task);
+    store
+        .place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &task_pr,
+            None,
+        )
+        .await
+        .unwrap();
     let placement = alpha_placement;
     let overlap = relocate_wave(
         &store,
@@ -782,8 +795,15 @@ async fn relocation_refuses_meaningful_destination_history() {
         )
         .unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
+    planning::seed_unplaced_task(&database, &owned_task);
     store
-        .create_task(&owned_task, &owned_pr, None)
+        .place_task(
+            &owned_task.id,
+            owned_task.worktree.as_ref().unwrap(),
+            &owned_task.workspace_slug,
+            &owned_pr,
+            None,
+        )
         .await
         .unwrap();
 

@@ -922,7 +922,7 @@ mod durable_store_tests {
             created_at: now,
             updated_at: now,
         };
-        store.insert_task(task.clone(), &pr).unwrap();
+        store.seed_task(&task, &pr).unwrap();
         (dir, store, task_id)
     }
 
@@ -938,7 +938,7 @@ mod durable_store_tests {
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
-        store.insert_task(new_task.clone(), &pr).unwrap();
+        store.seed_task(&new_task, &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
         assert!(!store.task_started(&task_id).unwrap());
         let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
@@ -961,8 +961,21 @@ mod durable_store_tests {
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
         rejected_pr.branch = "rejected".into();
-        assert!(store.insert_task(rejected.clone(), &rejected_pr).is_err());
-        assert!(store.task(&rejected.id).unwrap().is_none());
+        store.seed_unplaced_task(&rejected);
+        assert!(store
+            .place_task(
+                &rejected.id,
+                rejected.worktree.as_ref().unwrap(),
+                &rejected.workspace_slug,
+                &rejected_pr
+            )
+            .is_err());
+        assert!(store
+            .task(&rejected.id)
+            .unwrap()
+            .unwrap()
+            .worktree
+            .is_none());
         assert!(store.task_prs(&rejected.id).unwrap().is_empty());
         assert!(store.require_task_launch(&task_id).is_err());
         // An established start remains eligible after its Project becomes history.
@@ -1271,9 +1284,17 @@ mod durable_store_tests {
         let mut earlier = unpublished_conversation(None, None, 1);
         earlier.cwd = cwd;
         earlier.work_source = None;
-        let register = || store.insert_task(task.clone(), &pr);
+        store.seed_unplaced_task(&task);
+        let register = || {
+            store.place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+        };
         assert!(register().is_err());
-        assert!(store.task(&task.id).unwrap().is_none());
+        assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         drop(admission);
         let earlier = store.create_session(earlier, None).unwrap();
@@ -1300,7 +1321,15 @@ mod durable_store_tests {
         assert!(store.session(&conversation.id).unwrap().is_none());
         drop(exclusion);
         let session = store.create_session(conversation, None).unwrap();
-        store.insert_task(task.clone(), &pr).unwrap();
+        store.seed_unplaced_task(&task);
+        store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+            .unwrap();
         assert_eq!(
             store.session_task_ids(&session.id).unwrap(),
             vec![task.id.clone()]
@@ -1318,7 +1347,15 @@ mod durable_store_tests {
         let _unrelated = store
             .lock_checkout(&dir.path().join("unrelated-checkout/missing/src"))
             .unwrap();
-        store.insert_task(task.clone(), &pr).unwrap();
+        store.seed_unplaced_task(&task);
+        store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+            .unwrap();
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().worktree,
             task.worktree
@@ -1338,9 +1375,17 @@ mod durable_store_tests {
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
-        let register = || store.insert_task(task.clone(), &pr);
+        store.seed_unplaced_task(&task);
+        let register = || {
+            store.place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+        };
         assert!(register().is_err());
-        assert!(store.task(&task.id).unwrap().is_none());
+        assert!(store.task(&task.id).unwrap().unwrap().worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert!(store.session_task_ids(&session.id).unwrap().is_empty());
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);

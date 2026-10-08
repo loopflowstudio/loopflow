@@ -54,20 +54,6 @@ impl Store {
         .await
     }
 
-    pub async fn create_task(
-        &self,
-        task: &Task,
-        pr: &TaskPr,
-        acquisition: Option<Arc<super::PlanningLocks>>,
-    ) -> StoreResult<Task> {
-        let task = task.clone();
-        let pr = pr.clone();
-        run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(task, &pr)
-        })
-        .await
-    }
-
     pub async fn place_task(
         &self,
         task_id: &TaskId,
@@ -407,5 +393,12 @@ impl Store {
             store.project_events_after(&project_id, cursor)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+impl Store {
+    pub(crate) async fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
+        self.sqlite.seed_task(task, pr)
     }
 }

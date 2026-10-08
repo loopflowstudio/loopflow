@@ -2,6 +2,9 @@
 //! promises must be the JSON it emits, and the wave you are standing in must be
 //! the wave it reports. Drives the real binary against a seeded `LF_HOME`.
 
+#[path = "support/planning.rs"]
+mod planning;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
@@ -281,8 +284,14 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         created_at: now,
         updated_at: now,
     };
+    planning::seed_unplaced_task(&home.join("loopflow.db"), &stale_task);
     store
-        .insert_task(stale_task.clone(), &stale_pr)
+        .place_task(
+            &stale_task.id,
+            stale_task.worktree.as_ref().unwrap(),
+            &stale_task.workspace_slug,
+            &stale_pr,
+        )
         .expect("seed orphaned Task");
     if abandon_stale_project {
         let stale_work = store

@@ -143,7 +143,14 @@ impl Machine {
             created_at: now,
             updated_at: now,
         };
-        self.store.insert_task(task.clone(), &pr).unwrap();
+        self.store
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
+            .unwrap();
         worktree
     }
 

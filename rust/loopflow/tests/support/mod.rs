@@ -1,3 +1,5 @@
+mod planning;
+
 use std::env;
 use std::ffi::OsString;
 use std::path::Path;
@@ -266,6 +268,7 @@ pub fn bind_task_planning(repo: &TestRepo) {
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
 pub struct RegisteredTask {
+    database: std::path::PathBuf,
     pub store: Store,
     pub task: Task,
     pub pr: TaskPr,
@@ -432,11 +435,22 @@ fn register_task_fixture(
             .id;
         pr.task_id = task.id.clone();
         store
-            .create_task(&task, &pr, None)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+                None,
+            )
             .await
             .expect("create test Task");
     });
-    RegisteredTask { store, task, pr }
+    RegisteredTask {
+        store,
+        task,
+        pr,
+        database: home.join("loopflow.db"),
+    }
 }
 
 /// A second Task in the fixture's Wave and Project, tracking `branch` from its
@@ -471,8 +485,15 @@ pub fn register_sibling_task(
         updated_at: now,
         ..registered.pr.clone()
     };
+    planning::seed_unplaced_task(&registered.database, &task);
     runtime
-        .block_on(registered.store.create_task(&task, &pr, None))
+        .block_on(registered.store.place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &pr,
+            None,
+        ))
         .expect("create sibling Task");
     task
 }

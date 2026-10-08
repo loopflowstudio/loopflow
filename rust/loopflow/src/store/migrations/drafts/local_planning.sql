@@ -157,6 +157,8 @@ CREATE TABLE tasks_migration (
     planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0),
     planning_rank INTEGER NOT NULL DEFAULT 0 CHECK (planning_rank >= 0),
     planning_assignee TEXT,
+    planning_state TEXT,
+    planning_completed INTEGER NOT NULL DEFAULT 0 CHECK (planning_completed IN (0,1)),
     planning_deleted_at INTEGER
 );
 
@@ -279,6 +281,23 @@ UPDATE projects SET project_summary=COALESCE((SELECT json_extract(observed.body,
     FROM pm_projects observed JOIN waves w ON w.id=projects.wave_id
     WHERE observed.id=projects.external_project_id AND observed.repo=w.repo
         AND observed.provider='linear'),'');
+
+-- Accepted planning state is retained independently of execution and provider inventory.
+UPDATE tasks SET (planning_state,planning_completed) = (
+    SELECT json_extract(i.body,'$.state'),json_extract(i.body,'$.completed')
+    FROM pm_items i JOIN projects p ON p.id=tasks.project_id
+    JOIN waves w ON w.id=p.wave_id
+    WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear'
+      AND i.needs_refresh=0
+) WHERE EXISTS (
+    SELECT 1 FROM pm_items i JOIN projects p ON p.id=tasks.project_id
+    JOIN waves w ON w.id=p.wave_id
+    WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear'
+      AND i.needs_refresh=0
+);
+
+UPDATE tasks SET planning_deleted_at=COALESCE(planning_deleted_at,updated_at,created_at)
+WHERE EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=tasks.external_issue_id AND c.removed=1);
 
 PRAGMA legacy_alter_table = OFF;
 

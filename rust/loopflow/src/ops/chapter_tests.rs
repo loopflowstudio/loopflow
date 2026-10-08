@@ -467,7 +467,7 @@ async fn local_task(
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
-    context.store.create_task(&task, &pr, None).await.unwrap();
+    context.store.seed_task(&task, &pr).await.unwrap();
     (task, pr)
 }
 

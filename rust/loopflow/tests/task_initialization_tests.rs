@@ -459,6 +459,9 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
             [task.id.as_str()],
         )
         .unwrap();
+        // Provider inventory is observation history, not a prerequisite for saved placement.
+        conn.execute("DELETE FROM pm_items", []).unwrap();
+        conn.execute("DELETE FROM pm_wave_projects", []).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -489,6 +492,29 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
                 .output()
                 .unwrap()
         };
+        conn.execute(
+            "UPDATE tasks SET planning_state='completed',planning_completed=1 WHERE id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
+        let refused = checkout();
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("terminal planning state"));
+        assert!(runtime
+            .block_on(fixture.store.task_prs(&task.id))
+            .unwrap()
+            .is_empty());
+        assert!(runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap()
+            .worktree
+            .is_none());
+        conn.execute(
+            "UPDATE tasks SET planning_state='unstarted',planning_completed=0 WHERE id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
         let first = checkout();
         assert!(
             first.status.success(),

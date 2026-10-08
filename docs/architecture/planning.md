@@ -54,7 +54,10 @@ Saved Tasks use the same checkout preparation and placement transaction with or
 without Linear. Checkout reads retained planning and branch metadata; it does not
 refresh Linear. An unknown provider alias still needs initial acquisition.
 Placement records the first PR and checkout before filesystem creation, without rewriting
-planning fields. Competing reservations return the saved allocation; restoration
+planning fields. Accepted state and completion are retained on the Task, so terminal
+planning prevents first placement even without provider inventory. Incoming removal
+retains the Task and marks its planning deleted; neither observation moves a Workflow
+or cleans a checkout. Competing reservations return the saved allocation; restoration
 uses that checkout and PR. The queued writer retains the Wave lock through commit,
 even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
@@ -66,9 +69,8 @@ A mixed Local/Linear rotation retains each authority's recovery records; a SQLit
 transaction cannot make the external provider effects atomic.
 
 LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished: the placement
-transaction still validates mapped Tasks against retained provider observations.
-Creation, edits, definitions and rotation retain separate planning authorities;
+optional Linear synchronization. That cutover remains unfinished. Creation, edits,
+definitions and rotation retain separate planning authorities;
 the common offline checkout path does not establish common planning ownership.
 
 ## Connected Project selection

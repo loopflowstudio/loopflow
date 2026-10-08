@@ -3632,7 +3632,7 @@ pub(crate) fn find_discardable_task_successor(repo: &Path) -> OpsResult<Option<S
             return Ok(None);
         }
         let gate = task_completion_gate(&store, &task).await?;
-        if !gate.satisfied || gate.discardable_successor.is_none() {
+        if !gate.satisfied() || gate.discardable_successor.is_none() {
             return Ok(None);
         }
         // Landing settles an empty successor only over work that merged.
@@ -3849,19 +3849,15 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
     match pr.phase() {
         PrPhase::Merged => "Merged".to_string(),
         PrPhase::Abandoned => "Abandoned".to_string(),
-        _ => {
-            let completes = pr.after_merge() == AfterMerge::CompleteTask;
-            if completes {
-                "Open · completes task on merge".to_string()
-            } else if let Some(request) = pr.merge_request() {
+        _ => match pr.merge_request() {
+            Some(request) if request.after_merge == AfterMerge::ContinueTask => {
                 match request.mode {
                     PrMergeMode::User => "Open · user merge requested".to_string(),
                     PrMergeMode::Auto => "Open · auto-merge requested".to_string(),
                 }
-            } else {
-                "Open · published".to_string()
             }
-        }
+            _ => "Open · completes task on merge".to_string(),
+        },
     }
 }
 
@@ -3978,34 +3974,26 @@ async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) -> OpsResult<(
 /// The outcome of evaluating the completion gate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompletionGate {
-    pub satisfied: bool,
     pub blockers: Vec<String>,
-    /// A successor the lifecycle rotated after the Task's work merged that
-    /// provably holds nothing — never published, branch never moved off its
-    /// recorded base. It is the rotation's artifact, not work, so it does not
-    /// block completion; it must not outlive one either.
-    ///
-    /// Classification only, and exactly one thing acts on it: [`complete_task`]
-    /// passes it as the completion transaction's `skipped_pr`, which retires the
-    /// row and writes the terminal status together. Discarding it any earlier
-    /// would leave a non-terminal Task with no active PR — the state
-    /// [`rotate_task_pr`] rotates another empty PR from.
+    /// An unpublished PR still at its recorded base. Explicit completion may
+    /// retire it in the completion transaction; automatic completion preserves
+    /// it as remaining scope, even before its first commit.
     pub discardable_successor: Option<TaskPr>,
 }
 
 impl CompletionGate {
+    fn satisfied(&self) -> bool {
+        self.blockers.is_empty()
+    }
+
     /// One actionable, human-readable sentence. Empty when the gate is
     /// satisfied.
     pub fn reason(&self) -> String {
-        if self.blockers.is_empty() {
-            String::new()
-        } else {
-            self.blockers.join("; ")
-        }
+        self.blockers.join("; ")
     }
 
     pub(crate) fn refusal(&self, identifier: &str) -> Option<String> {
-        (!self.satisfied).then(|| {
+        (!self.satisfied()).then(|| {
             format!(
                 "Task {identifier} cannot complete until its gates close: {}",
                 self.reason()
@@ -4021,7 +4009,6 @@ pub(crate) async fn task_completion_gate(
     task: &Task,
 ) -> OpsResult<CompletionGate> {
     let mut gate = CompletionGate {
-        satisfied: true,
         blockers: Vec::new(),
         discardable_successor: None,
     };
@@ -4030,7 +4017,6 @@ pub(crate) async fn task_completion_gate(
         return Ok(gate);
     }
     if let Some(blocker) = task_worktree_blocker(store, task).await? {
-        gate.satisfied = false;
         gate.blockers.push(blocker.reason);
         return Ok(gate);
     }
@@ -4071,11 +4057,7 @@ pub(crate) async fn task_completion_gate(
     }
 
     // Every active PR must be settled (merged or explicitly abandoned).
-    if let Some(pr) = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-    {
+    if let Some(pr) = prs.iter().find(|pr| pr.is_active()) {
         let which = pr
             .github()
             .map(|github| format!("#{}", github.number))
@@ -4092,7 +4074,7 @@ pub(crate) async fn task_completion_gate(
             // row exactly as it found it.
             // A PR never published whose branch never moved holds nothing:
             // reaching `end` retires it, with or without earlier merges.
-            PrPhase::Working => match unpublished_work(&task.worktree, &pr)? {
+            PrPhase::Working => match unpublished_work(&task.worktree, pr)? {
                 CommittedFollowUp::ProvenEmpty => {
                     gate.discardable_successor = Some(pr.clone());
                 }
@@ -4108,12 +4090,11 @@ pub(crate) async fn task_completion_gate(
         }
     }
 
-    gate.satisfied = gate.blockers.is_empty();
     Ok(gate)
 }
 
-/// True when the Task has a settled merged PR whose `after_merge` is
-/// `CompleteTask` — i.e. completion is pending on the gate, not on a future PR.
+/// Latest merged delivery that completes by default or whose keep-open scope
+/// was explicitly resolved. A named successor still requires delivery.
 async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
     let prs = store
         .task_prs(&task.id)
@@ -4220,7 +4201,7 @@ pub(crate) async fn reconcile_task_completion(
     let gate = task_completion_gate(store, task).await?;
     // A separately started successor is an explicit scope decision, even
     // before its first commit. Only an explicit end/land discards an empty PR.
-    if !gate.satisfied || gate.discardable_successor.is_some() {
+    if !gate.satisfied() || gate.discardable_successor.is_some() {
         return Ok(());
     }
     if !is_clean(&task.worktree)? {
@@ -4234,12 +4215,7 @@ pub(crate) async fn reconcile_task_completion(
     // the Task's position and writeback facts, never a stale copy of the
     // settled PR.
     store
-        .complete_task(
-            task,
-            gate.discardable_successor.as_ref(),
-            EndMove::Set,
-            Some("its pull request merged"),
-        )
+        .complete_task(task, None, EndMove::Set, Some("its pull request merged"))
         .await
         .map_err(task_error)?;
     Ok(())
@@ -5111,7 +5087,7 @@ mod tests {
             .unwrap();
         let before = fixture.store.sqlite.session(&session.id).unwrap();
         let blockers =
-            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task).unwrap();
         assert!(blockers
             .iter()
             .any(|reason| reason.contains("reserved input")));
@@ -5124,7 +5100,7 @@ mod tests {
         let gate = runtime
             .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
             .unwrap();
-        assert!(gate.satisfied, "{:?}", gate.blockers);
+        assert!(gate.satisfied(), "{:?}", gate.blockers);
 
         // Exact live identity does not change the decision or confer stop authority.
         let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
@@ -5140,12 +5116,10 @@ mod tests {
         let receipt_path = root.join(format!("{}.json", process.lfid));
         let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
         std::fs::write(&receipt_path, &receipt_bytes).unwrap();
-        assert!(
-            runtime
-                .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
-                .unwrap()
-                .satisfied
-        );
+        assert!(runtime
+            .block_on(super::task_completion_gate(&fixture.store, &fixture.task))
+            .unwrap()
+            .satisfied());
         for attempt in 0..2 {
             runtime
                 .block_on(fixture.store.complete_task(
@@ -5182,7 +5156,7 @@ mod tests {
             .unwrap());
         assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
         assert!(
-            super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
                 .unwrap()
                 .iter()
                 .any(|reason| reason.contains("live or unresolved"))
@@ -5470,7 +5444,7 @@ mod tests {
                 blocked,
             );
             assert_eq!(
-                !super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task)
+                !super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
                     .unwrap()
                     .is_empty(),
                 blocked,
@@ -5490,8 +5464,9 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture("WORK-1"));
         let worktree = fixture.task.worktree.to_string_lossy().into_owned();
-        let blockers =
-            || super::lifecycle::associated_work_blockers(&fixture.store, &fixture.task).unwrap();
+        let blockers = || {
+            super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task).unwrap()
+        };
         fixture.store.sqlite.test_flow(
             "code",
             &worktree,

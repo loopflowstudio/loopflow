@@ -180,22 +180,10 @@ enum AccountLogin {
 #[derive(Clone)]
 struct AccountCandidate {
     account: ProviderAccount,
-    limits: Vec<AccountLimitRow>,
     credential_available: bool,
+    strained: bool,
     store: SharedStore,
     home: PathBuf,
-}
-
-impl AccountCandidate {
-    fn is_strained(&self, now: i64) -> bool {
-        active_account_strain(
-            &self.account.provider,
-            &self.account.account_id,
-            &self.limits,
-            now,
-        )
-        .is_some()
-    }
 }
 
 #[derive(Clone)]
@@ -217,7 +205,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
             .field("provider", &self.provider)
             .field("account_id", &self.account_id)
             .field("home", &home)
-            .field("login", &"profile")
             .field("resume_requested_session", &self.resume_requested_session)
             .finish()
     }
@@ -255,10 +242,10 @@ impl ProviderAccountRoute {
     }
 
     /// The home an isolated conversation on this account runs in.
-    fn account_home(&self) -> PathBuf {
+    fn account_home(&self) -> &Path {
         match &self.login {
             AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
-                profile.clone()
+                profile
             }
         }
     }
@@ -323,25 +310,21 @@ impl ProviderAccountRoute {
     /// secret-bearing representation to persist or log.
     pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
         self.check_identity().await?;
-        match &self.login {
-            AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
-                let home = self.credential_home(profile);
-                crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
-                    .await
-                    .map_err(|error| ProviderAccountError::CredentialUnavailable {
-                        provider: self.provider,
-                        account_id: self.account_id.clone(),
-                        reason: error.to_string(),
-                    })?
-                    .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
-                        provider: self.provider,
-                        accounts: format!(
-                            "{} (provider CLI reports no active OAuth login)",
-                            self.account_id
-                        ),
-                    })?;
-            }
-        }
+        let home = self.credential_home(self.account_home());
+        crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
+            .await
+            .map_err(|error| ProviderAccountError::CredentialUnavailable {
+                provider: self.provider,
+                account_id: self.account_id.clone(),
+                reason: error.to_string(),
+            })?
+            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                provider: self.provider,
+                accounts: format!(
+                    "{} (provider CLI reports no active OAuth login)",
+                    self.account_id
+                ),
+            })?;
         self.check_identity().await?;
         Ok(())
     }
@@ -352,7 +335,7 @@ impl ProviderAccountRoute {
             | AccountLogin::Replayed {
                 catalog: store,
                 profile,
-            } => (Arc::clone(store), profile),
+            } => (store, profile),
         };
         let accounts = store
             .list_provider_accounts(Some(self.provider.as_str()))
@@ -1003,7 +986,7 @@ fn active_candidate(
     candidates.iter().position(|(candidate, explicit)| {
         *explicit == named
             && candidate.credential_available
-            && !candidate.is_strained(now_unix())
+            && !candidate.strained
             && candidate.account.account_id == *active
     })
 }
@@ -1029,6 +1012,7 @@ async fn ordered_selected_candidates(
         let limits = store
             .provider_account_limits(Some(provider.as_str()))
             .await?;
+        let now = now_unix();
         for account in catalog
             .iter()
             .filter(|account| account.provider == provider.as_str())
@@ -1054,7 +1038,13 @@ async fn ordered_selected_candidates(
                 credential_available: account.credential_state == CredentialState::Connected
                     && identity_matches,
                 account: account.clone(),
-                limits: limits.clone(),
+                strained: active_account_strain(
+                    provider.as_str(),
+                    &account.account_id,
+                    &limits,
+                    now,
+                )
+                .is_some(),
                 store: Arc::clone(store),
                 home,
             });
@@ -1135,7 +1125,7 @@ async fn ordered_selected_candidates(
         .count();
     order[preferred_count..].sort_by_key(|index| {
         (
-            candidates[*index].is_strained(now),
+            candidates[*index].strained,
             plan_preference(&candidates[*index].account),
         )
     });
@@ -2914,7 +2904,7 @@ mod account_first_tests {
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
         let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
-        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
         let listed = |accounts: &[&str]| {
             let accounts: Vec<String> = accounts.iter().map(|id| format!("codex={id}")).collect();
             let selection = selection::AccountSelection::from_flags(&accounts, &[]).unwrap();
@@ -2931,6 +2921,27 @@ mod account_first_tests {
             .unwrap();
         assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
+
+        // A strained active account does not displace a healthy named choice.
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &parse_account_id("second").unwrap(),
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".into(),
+                    used_percent: 95,
+                    resets_at: Some(now_unix() + 3600),
+                    plan: None,
+                }],
+                "stream",
+            )
+            .await
+            .unwrap();
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "first");
 
         // Naming only another account is a request to move to it.
         listed(&["first"]);

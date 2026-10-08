@@ -56,6 +56,7 @@ without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 - The hidden account-lease probe and the obsolete bearer-forwarding PM reader.
 - Keychain key writes (which passed key bytes in argv) and truncate-in-place key files.
 - Remaining lease-only selection wrappers, forwarding diagnostics and replay arguments.
+- Route candidates' local/forwarded `source` field and per-candidate usage-window copies.
 - Dynamic forwarded-secret environment expansion and broker-only fixture setup;
   retain ordinary Session credential and account-selection isolation.
 - The `lf ssh` command, through LOO-411's global `--machine` selector cutover.
@@ -88,17 +89,19 @@ The remote dispatch reuses local argument reordering before selecting the reside
 login, while `--` preserves literal prompt flags. Command and placement resolution
 remain on the target. No additional product decision is needed.
 
-Compression reuses the verified fresh-login identity and parses the remote CLI
-once. Account selection no longer wraps each resolved provider/account pair;
-the replay API no longer accepts a Session ID used only by the deleted broker.
-Literal account/home flags after `--` remain prompt text. Provider selection's
-ambiguity and duplicate checks are retained on the surviving local path.
+Compression keeps one parsed remote command, verified fresh-login identity and
+static Session credential scrub list. Lease-only wrappers, replay arguments and
+broker fixtures are deleted. Routing candidates now retain their strain result
+from one usage snapshot instead of copying every provider window into each
+candidate and rescanning during sorting. A healthy named account still displaces
+a strained active account. Route reports and their JSON fixture drop the constant
+local/forwarded provenance; credential readiness borrows the existing home and
+catalog directly. Replay still records no routing outcomes; local/shared behavior is retained.
 
-The follow-up compression removes broker socket/token fixtures and the retired
-lease/forwarded-secret environment reader and scrub lists. Session startup uses
-one static list for current credentials and account choices. A shell execution
-test proves those values are absent in the child; local account reporting still
-checks cached/live evidence and successful/failed Process outcomes without a
-provider executable. No old-peer compatibility path is retained.
+Earlier selector, shell isolation and login/key proofs remain at
+`d0134546fffbe68b2f8fe7d29c6e4c1f632617ca:scratch/work-on-another-machine-name.md`
+and `7a3f263cb:scratch/work-on-another-machine-name.md`. The after-skill account
+case failed before the argument-reordering repair and passed afterward. These
+fixtures establish no real refresh-chain or installed acceptance.
 
-Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; network-isolated `cargo nextest run -p loopflow --lib --test machine_commands --test machine_credentials --test cli_discovery -E 'binary(machine_commands) | binary(machine_credentials) | test(remote_selection_preserves_command_arguments_and_literal_boundaries) | test(engine::flow_graph::tests) | test(lf::commands::ssh::tests)' --no-fail-fast` passed 31/31 with inherited LF_/LOOPFLOW_ authority cleared and LF_BIN pinned to this checkout; the strengthened retired-option proof also passed alone. The after-skill account case failed before the argument-reordering repair and passes afterward. Earlier login/key preservation evidence remains at `7a3f263cb:scratch/work-on-another-machine-name.md`; full affected verification belongs to gate/CI.
+Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test auth_tests -E 'test(provider_account::account_first_tests) | test(provider_account::inspection_tests) | test(provider_account::selection::) | test(lf::commands::profile::tests) | test(status_refreshes_by_default_and_cached_preserves_evidence)' --no-fail-fast` passed (29/29; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); nextest reported an open-output-handle leak for the pure route JSON fixture, so cleanup remains unproved; full affected verification and leak investigation belong to gate/CI.

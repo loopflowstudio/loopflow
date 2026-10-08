@@ -445,6 +445,8 @@ consumers must migrate; the removed interfaces have no compatibility aliases.
 - Account selection lives in `provider_account::selection`; the SSH credential
   broker and lent-account API are removed. Launch local commands with `--account`
   or `--only-account`; a Flow carries those choices to its steps.
+- Route candidates belong to the executing machine. Their JSON and text omit
+  the former local/forwarded `source` field.
 
 The forward database migration preserves existing account/profile identities,
 ordered bindings and configured expected logins. Source API compatibility and

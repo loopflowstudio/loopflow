@@ -67,7 +67,6 @@ struct RouteReport {
 struct RouteAccount {
     account_id: ProviderAccountId,
     login: Option<String>,
-    source: String,
     credential_state: String,
     routing: String,
     cooldown_until: Option<i64>,
@@ -137,7 +136,6 @@ async fn show_routes(
             candidates.push(RouteAccount {
                 account_id: account.account_id,
                 login: account.login_email.map(|email| email.to_string()),
-                source: "local".into(),
                 credential_state: account.credential_state.as_str().into(),
                 routing: account.routing_state.as_str().into(),
                 cooldown_until: account.cooldown_until,
@@ -199,12 +197,11 @@ async fn show_routes(
             }
             for (position, account) in report.candidates.iter().enumerate() {
                 println!(
-                    "  {}. {} · {} · {} · {}",
+                    "  {}. {} · {} · {}",
                     position + 1,
                     account.account_id,
                     account.login.as_deref().unwrap_or("login unknown"),
-                    account.credential_state,
-                    account.source
+                    account.credential_state
                 );
                 if let Some(demotion) = &account.demotion {
                     println!("     demoted: {demotion}");
@@ -330,7 +327,7 @@ mod tests {
     use super::RouteReport;
 
     #[test]
-    fn route_json_preserves_account_identity_origin_and_unknowns() {
+    fn route_json_preserves_account_identity_and_unknowns() {
         let fixture = include_str!("../../../../../tests/fixtures/dto/auth_routes.json");
         let reports: Vec<RouteReport> = serde_json::from_str(fixture).unwrap();
         assert_eq!(

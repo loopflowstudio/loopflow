@@ -4,6 +4,28 @@ Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wav
 scope widened past the Mac app: product now owns the shared API and every surface
 (CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
+## Task delivery boundary (LOO-418, 2026-10-07)
+
+Jack Heart decided: a Task has zero or one PR, never a serial chain. Follow-through
+is a follow-up Task, filed after landing before the source Task completes.
+Dependent PRs belong to stacked Tasks and may start before their parents merge;
+research can end without a PR. This supersedes older serial-chain/keep-open
+directions below. Jack authorized kickoff and its design review boundary, not
+landing. `scratch/make-a-task-up-to.md` is a draft, not accepted implementation.
+
+Base `626789dcd` includes #1488: bare land already defaults to completion, while
+`TaskFollowUp` keeps an obligation on the source Task. Replace that writer as
+well as rotation; retain existing obligations and multi-PR history. LOO-385's
+no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.
+
+Source inspection found Process admission before `--task` placement, while
+Started and Flow membership use recorded cwd. A disposable trigger probe
+reproduced the warning with caller cwd and accepted target cwd; historical
+launches and the corrected public CLI remain unverified. Stack sync already
+preserves child code through parent updates/squash; deliberate scratch isolation
+explains missing designs. Handoff must preserve child-specific scope. Proposed
+post-merge filing, waiting, due-date return and migration mechanisms await review.
+
 ## Live Home reconciliation (2026-10-05)
 
 Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
@@ -782,42 +804,23 @@ caps, and keep missing ownership evidence explicit.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-- **The sealed chapter records the accepted starting plan**, not the provisional
-  summer drafts: [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
-  The interval is 23 September–21 October, starting at 00:09:59 UTC. Gate 2
-  accepted the plan; it did not authorize publication. The 24 September human
-  amendments above govern current hierarchy and ownership. The summer review judged
-  39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
-  List adds three previously unreviewed claims. Those are different populations.
-- **Product value is explicitly chosen external progress.** Current Work
-  direction plus material Task progress in any three of Cube, Etude, Kata, and
-  Hootro makes a successful week. An open Session, refreshed plan, settled Run,
-  or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
-  review heuristics, never runtime limits. Preserve capacity outside Loopflow.
-- **The summer reset clarified ownership through real use.** Product dogfood
-  built much of the execution foundation; that was useful discovery, not simply
-  work in the wrong Wave. Infrastructure now owns execution and self-hosting
-  repair, Intelligence owns evidence, and Product owns the external experience.
-  The validated Sessions design is a foundation to finish, not restart.
-- **Review rows before telling the story.** Freeze the exact Project/KR union,
-  including retired or rewritten claims; keep each report's Run id and recompute
-  totals from rows. A definition verdict is not another KR. A complete current
-  roster cannot establish complete historical lineage. Missing duration proof is
-  unknown unless a dated in-scope counterexample disproves the claim.
-- **Keep evidence and user consequences together.** Each Project report needs
-  both exact observations and a concise account of who benefited, what changed,
-  and why the KRs prove it. Carry, learned, not actually prioritized, and misplaced
-  work are separate judgments; review proposes, accepted start applies.
-- **Chapter review now aggregates one report per Wave.** The former direct
-  Project-review shortcut belongs to the multi-Project chapter. Preserve exact
-  historical KR membership and dated reports; current operations must not recreate
-  a Project operator. Run settlement and the report together establish completion;
-  unknown liveness remains unknown. Archive authority follows explicit Task binding.
-- **The baseline cannot recover missing KR history.** PM retains current text
-  and `holds` with one overwritten snapshot timestamp. The new start ledger
-  establishes a forward boundary; retain later wording changes as dated evidence.
-  Append-only PM revisions or provider KR identities remain an instrumentation
-  option when a real review needs lineage the archive cannot supply.
+The accepted September 23–October 21 start, different summer/start KR populations,
+and detailed review lessons remain at `626789dcd:wave/product/MEMORY.md` under
+this heading and [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
+Plan acceptance did not authorize publication; later decisions govern hierarchy.
+
+Product value is selected material progress in three of Cube, Etude, Kata and
+Hootro, never planning churn or self-hosting alone. Preserve external capacity;
+Small/Medium/Big are review heuristics. Dogfood legitimately discovered execution
+work; Infrastructure now owns execution, Intelligence evidence, Product experience.
+
+Freeze exact historical Project/KR membership and report Run IDs before counting.
+Current rosters and overwritten snapshots cannot recover missing lineage or
+duration proof. Preserve dated revisions; unknown stays unknown. Reports connect
+observations to beneficiaries and distinguish carry, learned, unprioritized and
+misplaced work. Review proposes; accepted start applies. Aggregate per Wave,
+never restore a Project operator. Report plus Run settlement establishes review
+completion; archive authority requires explicit Task binding.
 
 ## Work and continuity (reconciled 2026-09-23)
 

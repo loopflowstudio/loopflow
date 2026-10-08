@@ -6,7 +6,8 @@ remain at `e50dbd749e3207599f9937ce45653f4c6f33a5cd:scratch/questions.md` and it
 companion design; no later slice is selected.
 
 - A target has the repository cloned and a compatible installed `lf`. Machine
-  registration/version handling belongs to LOO-411.
+  registration/version handling is supplied by merged LOO-411; the saved repository
+  replaces a per-call repository override.
 - An existing Linear issue supplies its Project identity. The cold-clone test
   exposed SQLite's current-Project admission requirement. Preserve that authority:
   importing absent planning seeds only an unselected Wave with the issue's exact

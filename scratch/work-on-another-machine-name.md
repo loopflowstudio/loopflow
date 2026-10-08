@@ -1,7 +1,8 @@
 # Run a Task on another machine — LOO-412
 
-Jack Heart authorized step 3 on 2026-10-07: implement, publish a PR stacked on
-LOO-394 / #1484, then stop for review. No landing or other remote-work slice.
+Jack Heart authorized step 3 on 2026-10-07: implement and publish for review.
+His latest steer selects main after LOO-411 / #1489 merged, global `--machine`,
+and republication of #1491. No landing or other remote-work slice.
 The complete multi-step design and dated decisions remain at
 `e50dbd749e3207599f9937ce45653f4c6f33a5cd:scratch/work-on-another-machine-name.md`.
 LOO-411 owns machine registration; credentials, detached work, relay, Desktop
@@ -12,7 +13,7 @@ automatic turn/Flow retry. Each redesign deletes what it replaces.
 
 ## Outcome
 
-`lf ssh <machine> --task <ISSUE> …` adopts an absent Task and checks out its
+`lf --machine <label-or-id> --task <ISSUE> …` adopts an absent Task and checks out its
 pushed implementation. Repetition reuses the Task and checkout. New Task IDs
 are deterministic from the Linear issue ID; existing IDs survive unchanged.
 Unpushed branches or commits are named in an error without committing, pushing
@@ -37,8 +38,10 @@ or resetting them. Each machine owns its Workflow, Sessions and history.
   and launch retain their current-Project checks; no provider Project is created.
 - UUID v5 derives new Task IDs from the issue's stable ID. No schema migration.
 
-## Removed
+## Delete — do not maintain
 
+- The retired remote subcommand, raw-host dispatch and per-call repository override;
+  LOO-411 owns the registered-machine selector and transport.
 - The local-only `--task` lookup in `ops/run.rs`.
 - Random Task ID minting in `create_prepared_task`.
 - The PR-dependent fetch repair after placement has already selected a strategy.
@@ -53,26 +56,23 @@ checkout lacking the requested commit reports the needed branch/commit and
 
 ## Remaining
 
-Reconciled 2026-10-07. Parent `76b4b28e6` is integrated by `ec4c1ff28` without
-conflicts. Publication for review remains; no additional product decision is needed.
+Reconciled 2026-10-07 against main `35e759aaf4e79e7dc8eef2e8d30048f10172b45a`.
+The Task source is attached to the registered-machine transport. Target parsing,
+account selection, identity probes and saved repository remain owned by LOO-411.
+The public command fixture registers the target and invokes the real recipient
+CLI by both label and ID. It reads pushed implementation twice from one checkout,
+then rejects a later required commit while retaining local notes and HEAD.
+Source legacy Task IDs travel as issue names. SSH networking and providers are
+simulated; no installed machine or real credentials are exercised.
 
-Five remote tests now cover the public `lf ssh` command through its generated
-stdin preamble and a real recipient CLI. An isolated provider fixture reads the
-pushed implementation twice from the same adopted checkout. The source's legacy
-Task ID resolves to the portable issue and target's deterministic ID. A later
-pushed commit is rejected with `lf sync`, preserving the target's HEAD and local
-notes. SSH networking/authentication and the provider are simulated; no installed
-machine or real credentials were exercised.
+Publication of #1491 for review remains. Gate owns full affected suites, real
+two-machine SSH acceptance and focused preservation of existing Project
+selection/pending rotation and Workflow/Session history. The empty Workflow
+assertion proves no eager creation, not an existing Workflow's preservation.
 
-The other tests retain cold adoption on two stores, observation age, missing
-pushed code, source dirtiness and target removal evidence. Gate still owns full
-affected suites, real two-machine SSH acceptance, and focused preservation of
-existing Project selection/pending rotation and Workflow/Session history. The
-empty Workflow assertion proves no eager creation, not an existing Workflow's
-preservation. These limits remain explicit for review.
+Review retains Release's entry-point lesson: the public selector must exercise
+the new transport and the actual recipient, not just call adoption directly.
+The other fixtures cover two-store identity, observation age, missing pushed
+code, source dirtiness and target removal evidence.
 
-Review closed the missing public-dispatch proof with the new test; no production
-repair was needed. Release's entry-point lesson informed that check. Its goal and
-relevant recovery evidence were read during this reconciliation.
-
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated `task_remote_tests` (5), and `python/tests/test_loopflow_skill_alignment.py` (4) pass; unchanged preparation/binding results are retained; full affected suites and real SSH acceptance remain with gate.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `task_remote_tests` (5) pass; full affected suites and real SSH acceptance remain with gate.

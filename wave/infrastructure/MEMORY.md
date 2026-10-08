@@ -706,7 +706,7 @@ authorized.
 Jack Heart approved scope and delivery, excluding cross-account continuation,
 native refresh coordination and headroom ranking. Branch proofs, retained failures
 and unresolved configured login/Claude `invalid_grant` acceptance remain at
-`862e3463065f8541fc0f86c6df4e8675c2b34f40:wave/infrastructure/MEMORY.md`
+`35e759aaf4e79e7dc8eef2e8d30048f10172b45a:wave/infrastructure/MEMORY.md`
 under this heading. Native providers own OAuth completion; cached state and reset
 success prove neither current login nor capacity. Source fixtures authorize no
 installed repair. [Subscriptions](../../docs/subscriptions.md) owns mechanics.

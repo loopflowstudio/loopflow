@@ -89,7 +89,7 @@ fn concurrent_publication_preserves_both_revisions_and_all_source_bytes() {
     };
     assert_eq!(observed, left);
     assert_eq!(worker.local().unwrap(), Some(right.clone()));
-    // Reconciliation is supplied by the common writer, never inferred by transport.
+    // Reconciliation is supplied by the exchange layer, never inferred by transport.
     let merged = worker
         .save(
             br#"{"comments":["laptop","worker"]}"#,

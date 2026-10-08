@@ -135,7 +135,7 @@ impl PlanningGit {
         Ok(document)
     }
 
-    /// Save the common writer's reconciled bytes. Parents are causal inputs, not
+    /// Save the exchange layer's reconciled bytes. Parents are causal inputs, not
     /// permission to decide conflicts. The local ref update compares its old tip.
     pub fn save(
         &self,

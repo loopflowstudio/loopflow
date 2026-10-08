@@ -891,9 +891,10 @@ uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py 
 Use a native Codex binary supporting profile files. This headless PTY fixture
 uses disposable provider and Loopflow homes, a loopback model endpoint, and an
 independently authored wrapper supplying trust plus SessionStart/Stop hooks.
-It verifies completed turns, exact native capture, both host hooks, reconnect,
+It verifies completed turns, exact native capture, both launch hooks, reconnect,
 unchanged configuration and temporary-profile cleanup. It uses no account or
-login. This proves native composition, not cmux's actual tab tracking.
+login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
+without lf. This proves launch composition, not cmux's actual tab tracking.
 
 ### Released capture-history preservation
 

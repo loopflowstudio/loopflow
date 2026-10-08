@@ -1068,12 +1068,12 @@ temporary native profile for lf's capture hook and a bounded incomplete-argument
 probe for wrapper-supplied trust. Existing configuration/trust stays unchanged;
 normal exits remove the profile, interrupted launches can leave it unselected.
 Codex 0.160.1 executes profile and CLI hooks together; two CLI hook tables replace
-one another, and config-based bypass is ignored. Native loopback PTY proofs pass
-plain/wrapped launch, both host hooks, exact capture and reconnect. Actual cmux
-tracking and installed acceptance remain unproved; live Sessions stay untouched.
+one another, and config-based bypass is ignored. Native PTYs prove launch hooks,
+exact capture and reconnect. Fresh reconnect hooks are absent even without lf;
+previous assertions reread launch receipts. Actual cmux tracking and installation
+remain unproved; live Sessions stay untouched.
 
-Flow readability and transactional Task Started remain preserved. Superseded argv
-diagnostics are removed; 429 still owns oversized-context proof. Earlier limits
-and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
+Flow readability and transactional Started remain. Superseded argv diagnostics
+are removed; 429 owns oversized-context proof. Earlier limits and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
 Preserve caller-owned checkpointing and common invocation loading. Codex
 rejected-turn recovery remains unresolved. Homepage capture follows installation.

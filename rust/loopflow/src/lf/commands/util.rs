@@ -934,7 +934,12 @@ fn prepare_codex_capture(process: &mut Command) -> Result<tempfile::NamedTempFil
         .tempfile_in(home)?;
     let executable = std::env::current_exe()
         .map_err(|error| anyhow!("cannot resolve lf for Codex session capture: {error}"))?;
-    profile.write_all(codex_session_start_hook_for(&executable).as_bytes())?;
+    let command = format!(
+        "{} __provider-session",
+        crate::engine::process::shell_escape(&executable.to_string_lossy())
+    );
+    let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
+    write!(profile, "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}")?;
     profile.flush()?;
     if !codex_supplies_hook_trust(process)? {
         process.arg("--dangerously-bypass-hook-trust");
@@ -1005,17 +1010,6 @@ fn codex_supplies_hook_trust(process: &Command) -> Result<bool> {
     bail!(
         "Codex argument probe failed before launch: {}",
         diagnostic.trim()
-    )
-}
-
-fn codex_session_start_hook_for(executable: &Path) -> String {
-    let command = format!(
-        "{} __provider-session",
-        crate::engine::process::shell_escape(&executable.to_string_lossy())
-    );
-    let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
-    format!(
-        "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}"
     )
 }
 
@@ -1868,15 +1862,6 @@ mod tests {
                 session
             );
         }
-    }
-
-    #[test]
-    fn codex_session_start_hook_records_the_native_thread() {
-        let hook = codex_session_start_hook_for(Path::new("/tmp/lf binary"));
-
-        assert!(hook.contains("SessionStart"));
-        assert!(hook.contains("matcher = \"startup\""));
-        assert!(hook.contains("'/tmp/lf binary' __provider-session"));
     }
 
     #[test]

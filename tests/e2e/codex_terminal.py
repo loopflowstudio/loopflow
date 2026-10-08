@@ -104,6 +104,7 @@ def _terminal(
             if child.poll() is not None:
                 break
         assert child.poll() is not None, "terminal did not exit within 30 seconds"
+        assert b"FIXTURE_DONE" in output, "terminal never displayed the completed turn"
         return child.returncode
     finally:
         transcript.write_bytes(output)
@@ -130,21 +131,18 @@ requires_openai_auth=false
 trust_level="trusted"
 """
     (native / "config.toml").write_text(config)
-    hooks = {
-        event: [
-            {
-                "matcher": "startup|resume" if event == "SessionStart" else "*",
-                "hooks": [
-                    {"type": "command", "command": f"cat > {shlex.quote(str(root / event))}"}
-                ],
-            }
-        ]
-        for event in ["SessionStart", "Stop"]
-    }
+    hooks = []
+    for event, matcher in [("SessionStart", "startup|resume"), ("Stop", "*")]:
+        command = json.dumps(f"cat > {shlex.quote(str(root / event))}")
+        hooks.append(
+            f'{event}=[{{matcher="{matcher}",hooks=[{{type="command",command={command}}}]}}]'
+        )
     # An independently authored wrapper models only the reported host behavior.
     # Both modes select an isolated native foreground TUI, with no account access.
     host_args = (
-        ["--dangerously-bypass-hook-trust", "-c", "hooks=" + _toml_hooks(hooks)] if wrapped else []
+        ["--dangerously-bypass-hook-trust", "-c", "hooks={" + ",".join(hooks) + "}"]
+        if wrapped
+        else []
     )
     wrapper = (
         "#!/bin/sh\nexec "
@@ -174,7 +172,7 @@ trust_level="trusted"
     native_id, session_id = sessions[0]
     assert any(native.glob(f"sessions/*/*/*/rollout-*-{native_id}.jsonl")), native_id
     if wrapped:
-        for event in hooks:
+        for event in ["SessionStart", "Stop"]:
             assert json.loads((root / event).read_text())["session_id"] == native_id
     assert (native / "config.toml").read_text() == config
     assert not list(native.glob("lf-capture-*.config.toml"))
@@ -183,24 +181,10 @@ trust_level="trusted"
         [str(lf), "--tui", "session", "connect", session_id], env, root, root / "resume.txt"
     )
     assert status == 0, (status, root / "resume.txt")
-    if wrapped:
-        assert json.loads((root / "SessionStart").read_text())["session_id"] == native_id
-        assert json.loads((root / "Stop").read_text())["session_id"] == native_id
+    assert native_id.encode() in (root / "resume.txt").read_bytes()
     print(
-        f"{'wrapped' if wrapped else 'plain'}: captured {native_id}, "
-        f"reconnected {session_id}",
+        f"{'wrapped' if wrapped else 'plain'}: captured {native_id}, reconnected {session_id}",
         flush=True,
-    )
-
-
-def _toml_hooks(hooks: dict) -> str:
-    return (
-        "{"
-        + ",".join(
-            f'{event}=[{{matcher={json.dumps(groups[0]["matcher"])},hooks=[{{type="command",command={json.dumps(groups[0]["hooks"][0]["command"])}}}]}}]'
-            for event, groups in hooks.items()
-        )
-        + "}"
     )
 
 

@@ -276,18 +276,15 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
-        // Cancellation delivery belongs to the subsequent delivery cut.
-        if delivery.target == "canceled" {
-            return Err(OpsError::Message(
-                "Cancellation saved locally; safe Linear cancellation delivery is not implemented"
-                    .into(),
-            ));
-        }
         if delivery.attempted {
             return Err(OpsError::Message(
                 "Prior state delivery remains uncertain; saved decision retained".into(),
             ));
         }
+        let state_id = client
+            .item_state_id(issue.as_str(), &delivery.target)
+            .await
+            .map_err(|e| message(&e))?;
         if !store
             .sqlite
             .attempt_task_state(&delivery)
@@ -295,17 +292,10 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
-        if delivery.target == "completed" {
-            client
-                .complete_item(issue.as_str())
-                .await
-                .map_err(|e| message(&e))?;
-        } else {
-            client
-                .reopen_item(issue.as_str())
-                .await
-                .map_err(|e| message(&e))?;
-        }
+        client
+            .set_item_state(issue.as_str(), &state_id)
+            .await
+            .map_err(|e| message(&e))?;
         let (confirmed, _) = client
             .issue_ownership(issue.as_str())
             .await

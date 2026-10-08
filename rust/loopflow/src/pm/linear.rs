@@ -232,6 +232,15 @@ const LIST_UNSTARTED_WORKFLOW_STATES_QUERY: &str = r#"query UnstartedWorkflowSta
   }
 }"#;
 
+const LIST_CANCELED_WORKFLOW_STATES_QUERY: &str = r#"query CanceledWorkflowStates($teamId: ID!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "canceled" } }) {
+    nodes {
+      id
+      position
+    }
+  }
+}"#;
+
 const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) {
     comment {
@@ -588,44 +597,28 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear issue with id {item_id}")))
     }
 
-    async fn completed_state_id(&self, team_id: &str) -> PmResult<String> {
-        let response: WorkflowStatesData = self
-            .graphql(
-                LIST_COMPLETED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": team_id }),
-            )
-            .await?;
-
+    /// Resolve before reserving a write: failed reads leave delivery retryable.
+    pub(crate) async fn item_state_id(&self, item_id: &str, target: &str) -> PmResult<String> {
+        let query = match target {
+            "completed" => LIST_COMPLETED_WORKFLOW_STATES_QUERY,
+            "unstarted" => LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
+            "canceled" => LIST_CANCELED_WORKFLOW_STATES_QUERY,
+            _ => return Err(PmError::Message(format!("unsupported Task state {target}"))),
+        };
+        let team_id = self.item_team_id(item_id).await?;
+        let response: WorkflowStatesData =
+            self.graphql(query, json!({ "teamId": team_id })).await?;
         response
             .workflow_states
             .nodes
             .into_iter()
-            .next()
+            .min_by(|left, right| left.position.total_cmp(&right.position))
             .map(|state| state.id)
             .ok_or_else(|| {
                 PmError::Message(format!(
-                    "no completed Linear workflow state found for team {team_id}"
+                    "no {target} Linear workflow state found for team {team_id}"
                 ))
             })
-    }
-
-    /// Resolve the team's default active state (`type == "unstarted"`, e.g. Todo),
-    /// preferring the lowest-position state. Returns `None` when the team has no
-    /// unstarted state so the caller can fall back to Linear's own default.
-    async fn unstarted_state_id(&self, team_id: &str) -> PmResult<Option<String>> {
-        let response: WorkflowStatesData = self
-            .graphql(
-                LIST_UNSTARTED_WORKFLOW_STATES_QUERY,
-                json!({ "teamId": team_id }),
-            )
-            .await?;
-
-        Ok(response
-            .workflow_states
-            .nodes
-            .into_iter()
-            .min_by(|left, right| left.position.total_cmp(&right.position))
-            .map(|state| state.id))
     }
 
     pub async fn create_wave(&self, name: &str, summary: &str) -> PmResult<String> {
@@ -1036,39 +1029,11 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let state_id = self.completed_state_id(&team_id).await?;
+    pub(crate) async fn set_item_state(&self, item_id: &str, state_id: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
                 SET_ITEM_STATE_MUTATION,
-                json!({
-                    "id": item_id,
-                    "stateId": state_id,
-                }),
-            )
-            .await?;
-        Ok(())
-    }
-
-    /// Reopen a completed issue by moving it back to the team's default active
-    /// (`unstarted`) workflow state. Mirrors [`complete_item`]; the repair path
-    /// uses it when a Task was prematurely completed while its gates were open.
-    /// Errors when the team has no unstarted state to return to.
-    pub async fn reopen_item(&self, item_id: &str) -> PmResult<()> {
-        let team_id = self.item_team_id(item_id).await?;
-        let Some(state_id) = self.unstarted_state_id(&team_id).await? else {
-            return Err(PmError::Message(format!(
-                "no active Linear workflow state found to reopen issue {item_id}"
-            )));
-        };
-        let _: Value = self
-            .graphql(
-                SET_ITEM_STATE_MUTATION,
-                json!({
-                    "id": item_id,
-                    "stateId": state_id,
-                }),
+                json!({ "id": item_id, "stateId": state_id }),
             )
             .await?;
         Ok(())
@@ -2085,6 +2050,7 @@ mod tests {
     fn workflow_state_filters_use_linear_team_id() {
         assert!(LIST_COMPLETED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
         assert!(LIST_UNSTARTED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
+        assert!(LIST_CANCELED_WORKFLOW_STATES_QUERY.contains("$teamId: ID!"));
     }
 
     #[test]
@@ -2787,7 +2753,8 @@ mod tests {
             base_url,
         );
 
-        client.complete_item("ENG-7").await.expect("complete item");
+        let state = client.item_state_id("ENG-7", "completed").await.unwrap();
+        client.set_item_state("ENG-7", &state).await.unwrap();
 
         let requests = requests.lock().await;
         assert_eq!(requests.len(), 3);
@@ -2811,36 +2778,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reopen_item_resolves_state_from_the_issue_team_not_the_wave_team() {
-        let (base_url, requests) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [
-                    { "id": "state-todo", "position": 1.0 }
-                ] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "ENG-7" } } } }),
-            ),
-        ])
-        .await;
-        let client = LinearClient::with_base_url(
-            "linear-secret".to_string(),
-            Some("team-wave".to_string()),
-            base_url,
-        );
-
-        client.reopen_item("ENG-7").await.expect("reopen item");
-
-        let requests = requests.lock().await;
-        let states_body: Value =
-            serde_json::from_str(&requests[1].body).expect("states body is json");
-        assert_eq!(states_body["variables"]["teamId"], json!("team-eng"));
+    async fn reopening_and_cancellation_resolve_the_issue_team_default_state() {
+        for target in ["unstarted", "canceled"] {
+            let (base_url, requests) = test_server::spawn(vec![
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "issue": { "team": { "id": "team-eng" } } } }),
+                ),
+                json_response(
+                    StatusCode::OK,
+                    json!({ "data": { "workflowStates": { "nodes": [
+                        { "id": "state-secondary", "position": 2.0 },
+                        { "id": "state-default", "position": 1.0 }
+                    ] } } }),
+                ),
+            ])
+            .await;
+            let client = LinearClient::with_base_url(
+                "linear-secret".to_string(),
+                Some("team-wave".to_string()),
+                base_url,
+            );
+            assert_eq!(
+                client.item_state_id("ENG-7", target).await.unwrap(),
+                "state-default"
+            );
+            let requests = requests.lock().await;
+            let body: Value = serde_json::from_str(&requests[1].body).unwrap();
+            assert_eq!(body["variables"]["teamId"], "team-eng");
+            assert!(body["query"]
+                .as_str()
+                .unwrap()
+                .contains(&format!("eq: \"{target}\"")));
+        }
     }
 
     #[test]

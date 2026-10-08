@@ -129,7 +129,7 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Task/Project export, relative-order/deletion/cancellation
+CLI edits report pending sync. Task/Project export, relative-order/deletion
 delivery, complete Desktop pending presentation and composed reconnect remain
 unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
@@ -414,8 +414,10 @@ The provider read and mutation remain separate requests; they do not prevent a
 concurrent Linear edit between them. Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation
-remains pending until safe provider delivery is implemented. Delivery and pending-state projection currently require an
-existing mapping; pending export of unmapped connected Tasks remains unfinished.
+uses the same state delivery path as completion and reopening. Resolve the issue
+team and target state before marking a receipt attempted, so failed reads remain
+retryable. A lost mutation reply retains uncertainty until provider observation.
+Delivery and pending-state projection currently require an existing mapping; pending export of unmapped connected Tasks remains unfinished.
 
 ## Read each step's result
 

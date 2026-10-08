@@ -2,9 +2,8 @@
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 
-Jack Heart selected one locally owned plan with identical stored representations
-and read/write APIs, whether or not the repository connects to Linear. Connection
-is all-or-nothing for the repository. Delete personal/shared namespaces,
+Jack Heart selected identical local plan records/APIs with or without repository-wide
+Linear synchronization. Delete personal/shared namespaces,
 `personal_plans`, personal-only workflows and `project_authority_on`; provider
 mappings are links, not planning authorities. During an outage, local edits succeed
 and show pending sync. Preserve uncertain effects and concurrent edits; no resident
@@ -62,17 +61,17 @@ issue update. More reads cannot prove atomic preservation; Linear-wins selects
 precedence, not atomicity. The design retains exact race and schema evidence.
 
 `b3cd894f3`’s manual comment choices are superseded: adopt provider body/author/time,
-retain the losing comment without replacement or echo. `783305284` saves cancellation
-atomically; delivery remains pending and cleanup checks execution separately.
+retain the losing comment without replacement or echo. Cancellation saves atomically
+and now delivers through state receipts. Resolve Team/state before marking attempted;
+failed discovery stays retryable. Foreground reconnect, lost-reply and conflict fixtures
+pass; installed acceptance is unproved. Cleanup still checks execution separately.
 
-Common writers and ownership are committed through `bbc6eb8d3`; its memory under
-this heading retains deletion, migration and compression proofs. `84664e661` is
-LOO-412's boundary. SQLite owns Wave documents and relocation; explicit
-ingestion preserves IDs/file bytes. Personal owners and provider-first deletion
-are gone; execution, PRs, checkout and uncertain effects survive. Exact Project IDs
-precede slugs. The draft retains attempt errors and acknowledged revisions.
-Installed conversion, historical uncertainty, export, relative-order/cancellation/
-deletion delivery, pending presentation and composed reconnect remain unfinished.
+Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundary:
+`84664e661`. SQLite owns Wave documents/relocation; ingestion preserves IDs/files.
+Personal owners and provider-first deletion are removed; execution, PRs, checkouts
+and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
+attempt errors and acknowledged revisions.
+Installed conversion, historical uncertainty, export, relative-order/deletion delivery, pending presentation and composed reconnect remain unfinished.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

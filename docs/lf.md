@@ -340,17 +340,18 @@ requests without a stated outcome surface for an explicit scope decision.
 reserved inputs and unknown process exits cannot veto it. Execution history and
 live process controls remain intact; uncertain or occupied checkouts are retained.
 `lf task abandon EXP-12` saves cancellation locally, including while Linear is
-unavailable. Retry retains its decision and delivery identity. Safe Linear
-cancellation delivery remains unimplemented and shows pending sync. Open PRs and
-additional committed work still need delivery or explicit abandonment.
+unavailable. Retry retains its decision and delivery identity. An active connection
+delivers cancellation from that saved receipt; unavailable Linear states remain
+pending. Open PRs and additional committed work still need delivery or explicit
+abandonment.
 
 Completing an uncached Linear issue first retains its Task locally, without a
 checkout. The completion reason stays in Task history; retries reuse that identity
 and preserve the recorded outcome while provider writeback is pending.
 
-Completion and reopening save locally before contacting Linear. An active Task
-Session or Desktop connection delivers pending decisions independently of comments
-and incoming planning. Status and Desktop retain pending synchronization feedback.
+Completion, reopening and cancellation save locally before contacting Linear.
+An active Task Session or Desktop connection delivers pending decisions independently
+of comments and incoming planning. Status and Desktop retain pending synchronization feedback.
 
 ```bash
 lf task sync EXP-12                     # attempt pending delivery once

@@ -70,6 +70,7 @@ struct PlanningState {
     // Discovery and confirmation under the Wave lock consume two reads before mutation.
     fail_issue_read_after: Option<usize>,
     fail_completion: bool,
+    missing_canceled_state: bool,
     lose_completion: bool,
     reopen_during_completion: bool,
     lose_comment: bool,
@@ -302,6 +303,14 @@ async fn planning_graphql(
             mark_issue_updated(&mut state.issues[0]);
         }
         json!({"workflowStates":{"nodes":[{"id":"completed"}]}})
+    } else if query.contains("query CanceledWorkflowStates") {
+        json!({"workflowStates":{"nodes":if state.missing_canceled_state {
+            vec![]
+        } else {
+            vec![json!({"id":"canceled","position":0})]
+        }}})
+    } else if query.contains("query UnstartedWorkflowStates") {
+        json!({"workflowStates":{"nodes":[{"id":"unstarted","position":0}]}})
     } else if query.contains("mutation SetIssueState") {
         if state.fail_completion {
             state.fail_completion = false;
@@ -528,6 +537,216 @@ fn task_abandonment_saves_offline_in_both_connection_modes() {
             });
         });
     }
+}
+
+#[test]
+fn task_abandonment_active_sync_delivers_after_reconnect() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async { state.lock().await.field_outage = true });
+        crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        let sync =
+            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
+                .unwrap();
+        runtime.block_on(async {
+            // Observe the foreground connection's failed attempt, then restore the
+            // provider without another command, agent turn or manual refresh.
+            let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                loop {
+                    let error: Option<String> = conn
+                        .query_row(
+                            "SELECT error FROM task_state_deliveries WHERE id=?1",
+                            [&receipt.id],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
+                    if error.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+                state.lock().await.field_outage = false;
+                while fixture
+                    .store
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .is_some()
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "canceled");
+            assert_eq!(provider.completion_writes, 1);
+            assert_eq!(
+                conn.query_row(
+                    "SELECT id FROM task_state_deliveries WHERE task_id=?1",
+                    [task.id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+                receipt.id
+            );
+        });
+        drop(sync);
+        let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
+        assert!(matches!(saved.pm_writeback, PmWritebackState::Current));
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .work_status(&crate::durable::WorkRef::Task(task.id.clone()),)
+                .unwrap(),
+            WorkStatus::Abandoned
+        );
+        assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+    });
+}
+
+#[test]
+fn task_abandonment_lost_reply_reconciles_without_repeating_cancellation() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            state.lock().await.lose_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let pending = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(pending.id, receipt.id);
+            assert!(pending.attempted);
+            assert_eq!(state.lock().await.issues[0]["state"]["type"], "canceled");
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            assert_eq!(state.lock().await.completion_writes, 1);
+        });
+    });
+}
+
+#[test]
+fn task_abandonment_adopts_linear_conflict_and_retains_local_decision() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            provider.issues[0]["state"] = json!({"type":"completed"});
+            mark_issue_updated(&mut provider.issues[0]);
+            drop(provider);
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert_eq!(state.lock().await.completion_writes, 0);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+                .state
+                .as_deref(),
+            Some("completed")
+        );
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let (target, conflict): (String, String) = conn
+            .query_row(
+                "SELECT target,conflict_json FROM task_state_deliveries WHERE id=?1",
+                [&receipt.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(target, "canceled");
+        assert!(conflict.contains("completed"));
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .work_status(&crate::durable::WorkRef::Task(task.id.clone()),)
+                .unwrap(),
+            WorkStatus::Abandoned
+        );
+    });
+}
+
+#[test]
+fn task_abandonment_missing_linear_state_leaves_the_save_retryable() {
+    with_completion_task(|runtime, fixture, repo, task, state| {
+        crate::ops::task::task_abandon(repo, Some(task.id.as_str()), false).unwrap();
+        let receipt = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            state.lock().await.missing_canceled_state = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let pending = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(pending.id, receipt.id);
+            assert!(!pending.attempted);
+            assert_eq!(state.lock().await.issues[0]["state"]["type"], "unstarted");
+            state.lock().await.missing_canceled_state = false;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            assert_eq!(state.lock().await.issues[0]["state"]["type"], "canceled");
+        });
+    });
 }
 
 #[test]

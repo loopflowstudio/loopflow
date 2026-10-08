@@ -374,12 +374,21 @@ fn _migration_transaction(
 }
 
 pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResult<()> {
-    let mut failures = validate_json_column::<crate::work::task::PmWritebackState>(
-        conn,
-        "tasks",
-        "id",
-        "pm_writeback_json",
-    )?;
+    // Released stores still carry this field until delivery receipts take ownership.
+    let mut failures = if conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='pm_writeback_json')",
+        [],
+        |row| row.get::<_, bool>(0),
+    )? {
+        validate_json_column::<crate::work::task::PmWritebackState>(
+            conn,
+            "tasks",
+            "id",
+            "pm_writeback_json",
+        )?
+    } else {
+        Vec::new()
+    };
     failures.extend(validate_json_column::<crate::work::task::CiObservation>(
         conn,
         "task_prs",
@@ -4289,6 +4298,89 @@ mod tests {
     }
 
     #[test]
+    fn local_planning_preserves_pending_decisions_without_workflow_history() {
+        let conn = open();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        apply_before_current_draft(&conn, "local_planning");
+        if !_draft_is_canonical("local_planning") {
+            for draft in crate::build_info::migration_draft_manifest() {
+                if draft.name == "local_planning" {
+                    break;
+                }
+                conn.execute_batch(draft.sql).unwrap();
+            }
+        }
+        conn.execute_batch(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES('wave_delivery','delivery','/repo',1);
+             INSERT INTO projects(id,wave_id,external_project_id,created_at)
+                 VALUES('project_delivery','wave_delivery','linear_project',1);
+             INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,pm_writeback_json)
+                 VALUES('task_complete','project_delivery','issue_complete','FIX-1',1,
+                    '{\"state\":\"pending\",\"operation\":\"complete_task\",\"error\":\"lost completion reply\"}'),
+                       ('task_reopen','project_delivery','issue_reopen','FIX-2',1,
+                    '{\"state\":\"pending\",\"operation\":\"reopen_task\",\"error\":\"lost reopening reply\"}');",
+        ).unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(&current_draft_sql("local_planning"))
+            .unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        validate_persisted_json(&conn).unwrap();
+        let mut query = conn.prepare(
+            "SELECT task_id,target,attempted,settled,error,move_seq FROM task_state_deliveries ORDER BY task_id",
+        ).unwrap();
+        let receipts = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            receipts,
+            vec![
+                (
+                    "task_complete".into(),
+                    "completed".into(),
+                    true,
+                    false,
+                    "lost completion reply".into(),
+                    None
+                ),
+                (
+                    "task_reopen".into(),
+                    "unstarted".into(),
+                    true,
+                    false,
+                    "lost reopening reply".into(),
+                    None
+                ),
+            ]
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM task_workflow_moves", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('tasks') WHERE name='pm_writeback_json'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn legacy_persisted_json_upgrades_to_typed_stable_tasks() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("loopflow.db");
@@ -4420,21 +4512,14 @@ mod tests {
             .unwrap();
         assert_eq!(stale_gate_count, 0);
 
-        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        apply_set(&conn, MIGRATIONS).unwrap();
-        conn.execute_batch("COMMIT").unwrap();
-        validate_foreign_keys(&conn).unwrap();
-        validate_persisted_json(&conn).unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-
-        let error = apply_sqlite_transaction(&conn, |conn| {
+        let error = super::_migration_transaction(&conn, |conn| {
             conn.execute(
                 "UPDATE tasks
                  SET pm_writeback_json='{\"state\":\"pending\",\"operation\":\"invented\",\"error\":\"offline\"}'
                  WHERE external_issue_id='issue-reopen'",
                 [],
             )?;
-            Ok(())
+            validate_persisted_json(conn)
         })
         .unwrap_err();
         let message = error.to_string();
@@ -4448,10 +4533,19 @@ mod tests {
             .unwrap(),
             "{\"state\":\"current\"}"
         );
+        conn.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        apply_set(&conn, MIGRATIONS).unwrap();
+        conn.execute_batch("COMMIT").unwrap();
+        validate_foreign_keys(&conn).unwrap();
+        validate_persisted_json(&conn).unwrap();
+
         // The store below opens with this build's schema, drafts included.
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         for draft in crate::build_info::migration_draft_manifest() {
             conn.execute_batch(draft.sql).unwrap();
         }
+        validate_foreign_keys(&conn).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         drop(conn);
 
         let store = crate::store::sqlite::SqliteStore::new(&path).unwrap();

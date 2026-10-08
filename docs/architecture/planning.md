@@ -320,11 +320,16 @@ kept in the move's note.
 
 Foreground Task connections acquire repository membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
-attempt evidence and conflicting value. A response can acknowledge only the current
-decision; explicit state resolution supersedes its delivery identity without changing
-the Workflow. No local/provider clock comparison orders edits. The complete unified
-planning-owner cutover remains in progress; creation, edits and rotation still use
-the split paths described above.
+attempt evidence and conflicting value. The latest receipt determines the displayed
+writeback state; Tasks store no separate copy. A response records only its captured
+effect, so it cannot settle a newer decision. Explicit state resolution supersedes
+the delivery identity without changing the Workflow. No local/provider clock
+comparison orders edits. The provider read and mutation remain separate requests;
+they do not prevent a concurrent Linear edit between them. The complete unified
+planning-owner cutover remains in progress; creation, edits, abandonment and rotation
+still use split paths. Connected abandonment requires provider access before the
+final local decision. Delivery and pending-state projection currently require an
+existing mapping; pending export of unmapped connected Tasks remains unfinished.
 
 ## Read each step's result
 

@@ -4,7 +4,6 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
 use crate::store::{StoreError, StoreResult};
-use crate::work::task::{PmWritebackOperation, PmWritebackState};
 
 use super::SqliteStore;
 
@@ -29,20 +28,6 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
          WHERE t.id=?1",
         params![task.as_str(), uuid::Uuid::new_v4().to_string(), target],
     )?;
-    let operation = if target == "completed" {
-        PmWritebackOperation::CompleteTask
-    } else {
-        PmWritebackOperation::ReopenTask
-    };
-    let pending = PmWritebackState::Pending {
-        operation,
-        error: "Saved locally; pending Linear synchronization".into(),
-    };
-    conn.execute(
-        "UPDATE tasks SET pm_writeback_json=CASE WHEN external_issue_id IS NULL
-             THEN '{\"state\":\"current\"}' ELSE ?2 END WHERE id=?1",
-        params![task.as_str(), serde_json::to_string(&pending)?],
-    )?;
     Ok(())
 }
 
@@ -53,7 +38,10 @@ impl SqliteStore {
     ) -> StoreResult<Vec<crate::work::task::Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-            WHERE w.repo=?1 AND (json_extract(t.pm_writeback_json,'$.state')='pending' OR EXISTS(
+            WHERE w.repo=?1 AND t.external_issue_id IS NOT NULL AND (EXISTS(
+                SELECT 1 FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
+                AND d.conflict_json IS NULL
+                AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)) OR EXISTS(
                 SELECT 1 FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
                 WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_body IS NULL))")?;
         let ids = query
@@ -71,21 +59,19 @@ impl SqliteStore {
         delivery: &TaskStateDelivery,
         observed: &crate::pm::PmItem,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let changed = tx.execute("UPDATE task_state_deliveries SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL",
-            params![delivery.id, serde_json::json!({"state":observed.state,"revision":observed.revision}).to_string()])?;
-        if changed != 0 {
-            let state = PmWritebackState::Pending {
-                operation: if delivery.target == "completed" { PmWritebackOperation::CompleteTask } else { PmWritebackOperation::ReopenTask },
-                error: format!("State conflict: saved locally as {}; Linear reports {} at revision {}. Use `lf task sync {} --resolve local` or `--resolve linear`",
-                    delivery.target, observed.state.as_deref().unwrap_or("unknown"), observed.revision.as_deref().unwrap_or("unknown"), delivery.task_id),
-            };
-            tx.execute("UPDATE tasks SET pm_writeback_json=?3 WHERE id=?1 AND EXISTS(SELECT 1 FROM task_state_deliveries
-                WHERE id=?2 AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",
-                params![delivery.task_id.as_str(),delivery.id,serde_json::to_string(&state)?])?;
-        }
-        tx.commit()?;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let error = format!("State conflict: saved locally as {}; Linear reports {} at revision {}. Use `lf task sync {} --resolve local` or `--resolve linear`",
+            delivery.target, observed.state.as_deref().unwrap_or("unknown"), observed.revision.as_deref().unwrap_or("unknown"), delivery.task_id);
+        conn.execute(
+            "UPDATE task_state_deliveries SET conflict_json=?2,error=?3
+             WHERE id=?1 AND settled=0 AND conflict_json IS NULL",
+            params![
+                delivery.id,
+                serde_json::json!({"state":observed.state,"revision":observed.revision})
+                    .to_string(),
+                error
+            ],
+        )?;
         Ok(())
     }
 
@@ -109,21 +95,16 @@ impl SqliteStore {
             ));
         }
         tx.execute(
-            "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
-                SELECT ?2,task_id,move_seq,target,?3,?4 FROM task_state_deliveries WHERE id=?1",
+            "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state,settled)
+                SELECT ?2,task_id,move_seq,target,?3,?4,?5 FROM task_state_deliveries WHERE id=?1",
             params![
                 delivery.id,
                 uuid::Uuid::new_v4().to_string(),
                 observed.revision,
-                observed.state
+                observed.state,
+                !keep_local,
             ],
         )?;
-        if !keep_local {
-            tx.execute(
-                "UPDATE tasks SET pm_writeback_json='{\"state\":\"current\"}' WHERE id=?1",
-                [delivery.task_id.as_str()],
-            )?;
-        }
         super::children::insert_task_event_in(&tx, &delivery.task_id, &crate::work::task::TaskEventKind::Progress {
             summary: format!("Resolved planning state delivery {}: retained {}. Local Workflow unchanged. Linear state: {} at revision {}",
                 delivery.id, if keep_local { "local decision for synchronization" } else { "Linear state" },
@@ -141,7 +122,7 @@ impl SqliteStore {
         conn.query_row(
             "SELECT d.id,d.target,d.base_revision,d.base_state,d.attempted,d.conflict_json
              FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
-             WHERE d.task_id=?1 AND json_extract(t.pm_writeback_json,'$.state')='pending'
+             WHERE d.task_id=?1 AND d.settled=0 AND t.external_issue_id IS NOT NULL
              AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
             [task.as_str()],
             |row| {
@@ -165,7 +146,8 @@ impl SqliteStore {
     pub(crate) fn attempt_task_state(&self, delivery: &TaskStateDelivery) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
-            "UPDATE task_state_deliveries SET attempted=1 WHERE id=?1 AND attempted=0
+            "UPDATE task_state_deliveries SET attempted=1
+             WHERE id=?1 AND attempted=0 AND settled=0 AND conflict_json IS NULL
              AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2)",
             params![delivery.id, delivery.task_id.as_str()],
         )? == 1)
@@ -177,28 +159,12 @@ impl SqliteStore {
         delivery: &TaskStateDelivery,
         error: Option<&str>,
     ) -> StoreResult<()> {
-        let state = match error {
-            None => PmWritebackState::Current,
-            Some(error) => PmWritebackState::Pending {
-                operation: if delivery.target == "completed" {
-                    PmWritebackOperation::CompleteTask
-                } else {
-                    PmWritebackOperation::ReopenTask
-                },
-                error: error.into(),
-            },
-        };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE tasks SET pm_writeback_json=?3 WHERE id=?1 AND pm_writeback_json IS NOT ?3 AND EXISTS(
-                 SELECT 1 FROM task_state_deliveries d WHERE d.id=?2 AND d.task_id=?1
-                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1)
-                 AND d.conflict_json IS NULL)",
-            params![
-                delivery.task_id.as_str(),
-                delivery.id,
-                serde_json::to_string(&state)?,
-            ],
+            "UPDATE task_state_deliveries SET settled=?2,error=?3
+             WHERE id=?1 AND settled=0 AND conflict_json IS NULL
+             AND (settled IS NOT ?2 OR error IS NOT ?3)",
+            params![delivery.id, error.is_none(), error],
         )?;
         Ok(())
     }

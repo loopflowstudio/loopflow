@@ -580,8 +580,8 @@ fn project_accepted_planning(
         let item: PmItem = serde_json::from_str(&body)?;
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,pm_writeback_json)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'','{\"state\":\"current\"}')",
+             issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'')",
             params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
                 item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank],
         )?;

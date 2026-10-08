@@ -21,21 +21,22 @@ delayed completion cannot overwrite explicit reopening. Machine clocks prove no 
 LOO-412's transport, scope and active-owner choices remain under review; no restart
 or replication here is authorized.
 
-Comments and completion/reopening now save decisions and delivery identities before
-provider I/O. The foreground runner and selected Desktop Task independently acquire
-comments and repository state/membership and deliver pending repository effects.
-No resident or turn retry is introduced. Incoming completion never moves a Workflow.
-Fixtures cover atomic rollback, lost replies, late acknowledgement and retained
-conflicts. Public CLI/watch and headless views exercise pending display; native
-comment proofs remain narrower than composed state/reconnect acceptance.
+Comments and completion/reopening save locally before provider I/O. Foreground
+connections independently acquire selected-Task comments and repository inventory,
+and deliver mapped Tasks' effects. Receipts now own writeback status; the compression
+diff removes its duplicate Task column and retains legacy pending decisions without
+inventing Workflow history. Effect locks exclude neither saves nor inbound reads.
+Acknowledgements settle only their captured decision; `lf task sync --resolve
+local|linear` supersedes its identity while retaining conflict evidence.
 
-A provider effect lock must not block local saves or inbound acquisition. A receipt
-can settle only its captured decision; explicit state resolution supersedes its
-identity and retains both values. `lf task sync --resolve local|linear` owns that
-choice. Comment resolution, the ownership deletion and general field writes remain
-unfinished. Provider read-before-write leaves a concurrency interval unproved;
-fixture success establishes no conditional provider mutation or installed outcome.
-Release's operation-entry lesson still applies. No webhook receiver was found.
+Ownership deletion, field writes, offline abandonment, comment resolution and
+unmapped export/presentation remain unfinished. Connected abandonment still needs
+Linear before recording its final local outcome. Read-before-write does not fence
+concurrent provider changes. Fixtures cover rollback, lost replies and late replies;
+watch reconnect proves retained local data, not provider recovery. Direct inventory
+tests prove no composed native/Flow or Desktop completion presentation. Release's
+operation-entry lesson applies; pending display and helper passes prove no installed
+outcome. No webhook receiver was found.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

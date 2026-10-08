@@ -1254,6 +1254,12 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             .sqlite
             .settle_task_state(&completed, None)
             .unwrap();
+        // A stale failure cannot erase the receipt for that completed effect.
+        fixture
+            .store
+            .sqlite
+            .settle_task_state(&completed, Some("late failure"))
+            .unwrap();
         assert_eq!(
             fixture
                 .store
@@ -1276,6 +1282,14 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         );
         assert!(!fixture.store.sqlite.attempt_task_state(&completed).unwrap());
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let receipt: (bool, Option<String>) = conn
+            .query_row(
+                "SELECT settled,error FROM task_state_deliveries WHERE id=?1",
+                [&completed.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt, (true, None));
         assert!(conn
             .query_row(
                 "SELECT attempted FROM task_state_deliveries WHERE id=?1",

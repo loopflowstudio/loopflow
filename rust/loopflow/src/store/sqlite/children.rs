@@ -1267,7 +1267,6 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.plan.title,
             task.plan.description,
             task.plan.pm_snapshot_synced_at,
-            serde_json::to_string(&task.pm_writeback)?,
             task.worktree
                 .as_ref()
                 .map(|path| path.display().to_string()),
@@ -1333,11 +1332,11 @@ fn validate_task_project(conn: &Connection, task: &Task) -> StoreResult<()> {
 
 const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
-    issue_description, pm_snapshot_synced_at, pm_writeback_json,
+    issue_description, pm_snapshot_synced_at,
     worktree, workspace_slug,
     abandon_requested_at, abandon_reason, created_at, updated_at, agent
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
 )";
 const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
@@ -1352,7 +1351,14 @@ const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
         ELSE t.issue_identifier END,
     t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
-    t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
+    t.created_at, t.updated_at, t.pm_snapshot_synced_at,
+    COALESCE((SELECT json_object('state','pending','operation',
+        CASE d.target WHEN 'completed' THEN 'complete_task' ELSE 'reopen_task' END,
+        'error',COALESCE(d.error,'Saved locally; pending Linear synchronization'))
+        FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
+            AND t.external_issue_id IS NOT NULL
+            AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
+        '{\"state\":\"current\"}'),
     t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
@@ -2299,7 +2305,7 @@ mod local_planning_tests {
         let task = TaskId::new();
         conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'shared','/repo',1),(?2,'recovery','/repo',1)", params![wave,orphan_wave]).unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',1,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
-        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,worktree,workspace_slug,updated_at) VALUES(?1,?2,'linear-task','LOO-1',1,'Retain title','Retain brief',7,'{\"state\":\"current\"}','/repo/task','task',7)",params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,issue_title,issue_description,pm_snapshot_synced_at,worktree,workspace_slug,updated_at) VALUES(?1,?2,'linear-task','LOO-1',1,'Retain title','Retain brief',7,'/repo/task','task',7)",params![task.as_str(),project.as_str()]).unwrap();
         conn.execute("INSERT INTO task_issue_identities(wave_id,issue_id,identifier) VALUES(?1,'orphan-issue','LOO-2')",[&orphan_wave]).unwrap();
         let payload: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/task_history_planning.json"

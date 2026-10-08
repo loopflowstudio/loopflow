@@ -109,6 +109,32 @@ CREATE TRIGGER selected_project_owner_update BEFORE UPDATE OF wave_id ON project
 WHEN EXISTS(SELECT 1 FROM waves WHERE current_project_id=NEW.id AND id!=NEW.wave_id)
 BEGIN SELECT RAISE(ABORT, 'selected Project cannot change Wave ownership'); END;
 
+-- Delivery metadata belongs to the decision that produced it. Superseding a
+-- decision preserves its attempted effect, without granting it write authority.
+CREATE TABLE task_state_deliveries (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    move_seq INTEGER REFERENCES task_workflow_moves(seq),
+    target TEXT NOT NULL CHECK(target IN ('completed','unstarted')),
+    base_revision TEXT,
+    base_state TEXT,
+    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
+    settled INTEGER NOT NULL DEFAULT 0 CHECK(settled IN (0,1)),
+    error TEXT,
+    conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json))
+);
+CREATE INDEX task_state_deliveries_task ON task_state_deliveries(task_id,seq);
+
+INSERT INTO task_state_deliveries(id,task_id,move_seq,target,attempted,error)
+SELECT lower(hex(randomblob(16))),t.id,max(m.seq),
+    CASE json_extract(t.pm_writeback_json,'$.operation')
+        WHEN 'complete_task' THEN 'completed' WHEN 'reopen_task' THEN 'unstarted' END,
+    1,json_extract(t.pm_writeback_json,'$.error')
+FROM tasks t LEFT JOIN task_workflow_moves m ON m.task_id=t.id
+WHERE json_extract(t.pm_writeback_json,'$.state')='pending'
+GROUP BY t.id;
+
 CREATE TABLE tasks_migration (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -118,7 +144,6 @@ CREATE TABLE tasks_migration (
     issue_title TEXT,
     issue_description TEXT,
     pm_snapshot_synced_at INTEGER,
-    pm_writeback_json TEXT,
     worktree TEXT,
     workspace_slug TEXT,
     abandon_requested_at INTEGER,
@@ -138,14 +163,14 @@ CREATE TABLE tasks_migration (
 INSERT INTO tasks_migration (
     id, project_id, external_issue_id, issue_identifier,
     created_at, issue_title, issue_description, pm_snapshot_synced_at,
-    pm_writeback_json, worktree, workspace_slug, abandon_requested_at,
+    worktree, workspace_slug, abandon_requested_at,
     abandon_reason, updated_at, agent, started_at,
     automation_enabled, abandoned_at, primary_session_id
 )
 SELECT
     id, project_id, external_issue_id, issue_identifier,
     created_at, issue_title, issue_description, pm_snapshot_synced_at,
-    pm_writeback_json, worktree, workspace_slug, abandon_requested_at,
+    worktree, workspace_slug, abandon_requested_at,
     abandon_reason, updated_at, agent, started_at,
     automation_enabled, abandoned_at, primary_session_id
 FROM tasks;
@@ -206,27 +231,6 @@ CREATE TABLE task_creation_intents (
     description TEXT NOT NULL
 );
 
--- Delivery metadata belongs to the decision that produced it. Superseding a
--- decision preserves its attempted effect, without granting it write authority.
-CREATE TABLE task_state_deliveries (
-    seq INTEGER PRIMARY KEY,
-    id TEXT NOT NULL UNIQUE,
-    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-    move_seq INTEGER NOT NULL REFERENCES task_workflow_moves(seq),
-    target TEXT NOT NULL CHECK(target IN ('completed','unstarted')),
-    base_revision TEXT,
-    base_state TEXT,
-    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
-    conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json))
-);
-CREATE INDEX task_state_deliveries_task ON task_state_deliveries(task_id,seq);
-
-INSERT INTO task_state_deliveries(id,task_id,move_seq,target,attempted)
-SELECT lower(hex(randomblob(16))),t.id,max(m.seq),'completed',1
-FROM tasks t JOIN task_workflow_moves m ON m.task_id=t.id
-WHERE json_extract(t.pm_writeback_json,'$.state')='pending'
-GROUP BY t.id;
-
 CREATE TABLE task_comments (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
@@ -249,12 +253,12 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 -- Import only accepted, owned issues. UUID v4 identity is independent of provider
 -- IDs; existing mappings and orphan deletion-recovery evidence stay untouched.
 INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
-    issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,pm_writeback_json)
+    issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug)
 SELECT 'task_' || lower(hex(randomblob(6))) || '4' || substr(lower(hex(randomblob(2))),2) ||
     substr('89ab',(random() & 3)+1,1) || substr(lower(hex(randomblob(2))),2) || lower(hex(randomblob(6))),
     p.id,i.id,json_extract(i.body,'$.identifier'),json_extract(i.body,'$.name'),
     json_extract(i.body,'$.description'),i.observed_at,i.observed_at,i.observed_at,
-    json_extract(i.body,'$.rank'),'','{"state":"current"}'
+    json_extract(i.body,'$.rank'),''
 FROM pm_items i
 JOIN projects p ON p.external_project_id=i.project_id
 JOIN waves w ON w.id=p.wave_id AND w.repo=i.repo
@@ -306,4 +310,11 @@ CREATE TRIGGER store_revision_task_comment_deliveries_update AFTER UPDATE ON tas
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_task_comment_deliveries_delete AFTER DELETE ON task_comment_deliveries
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_task_state_deliveries_insert AFTER INSERT ON task_state_deliveries
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_state_deliveries_update AFTER UPDATE ON task_state_deliveries
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_task_state_deliveries_delete AFTER DELETE ON task_state_deliveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

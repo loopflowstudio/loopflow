@@ -52,6 +52,9 @@ async fn graphql(
     let data = if query.contains("query ListTeams") {
         json!({"teams": {"nodes": [{"id":"team-1","name":"Fixture","key":"FIX",
             "description":"<!-- loopflow-repository: loopflowstudio/fixture -->"}]}})
+    } else if query.contains("query ListInitiativeProjects") {
+        // Comment delivery remains independent of unavailable repository inventory.
+        return Json(json!({"errors":[{"message":"inventory unavailable"}]}));
     } else if query.contains("query IssueOwnership") {
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","completedAt": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
@@ -282,12 +285,10 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert_eq!(truncated.comments, read.comments);
 
             let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
-            let pending = crate::work::task::PmWritebackState::Pending {
-                operation: crate::work::task::PmWritebackOperation::CompleteTask,
-                error: "unrelated completion remains pending".into(),
-            };
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap()
-                .execute("UPDATE tasks SET pm_writeback_json=?2 WHERE id=?1", rusqlite::params![task.id.as_str(),serde_json::to_string(&pending).unwrap()]).unwrap();
+                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error)
+                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending')",
+                    [task.id.as_str()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
                 .await.unwrap();
@@ -415,7 +416,10 @@ exit 0
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
-            assert_eq!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback, pending);
+            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
+                crate::work::task::PmWritebackState::Pending {
+                    operation: crate::work::task::PmWritebackOperation::CompleteTask, ..
+                }));
             assert!(!store.task_started(&task.id).await.unwrap());
 
         })

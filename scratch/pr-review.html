@@ -1,0 +1,364 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PR 1502 · Codex hooks, together</title><style>
+:root{color-scheme:light;--ink:#222b30;--muted:#59656b;--rule:#d7dddd;--paper:#fafaf7;--code:#eef1ef;--link:#145d64}*{box-sizing:border-box}html{scroll-padding-top:26px}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1120px;margin:0 auto;padding:60px 40px 85px}a{color:var(--link);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}a:focus-visible,summary:focus-visible,pre:focus-visible{outline:3px solid #147c86;outline-offset:4px}.skip{position:absolute;top:-100px}.skip:focus{top:8px;left:8px;background:white;padding:10px;z-index:3}h1{font-size:clamp(30px,4vw,46px);line-height:1.15;font-weight:650;letter-spacing:-1.4px;margin:13px 0 22px}h2{font-size:28px;line-height:1.3;font-weight:620;letter-spacing:-.6px;margin:0 0 15px}h3{font-size:19px;font-weight:620;margin:28px 0 10px}p{max-width:880px;margin:13px 0}.eyebrow,.meta,figcaption{color:var(--muted);font-size:13px;line-height:1.55}.eyebrow{letter-spacing:1.3px;text-transform:uppercase}.lead{font-size:20px;line-height:1.55;max-width:840px}.meta{overflow-wrap:anywhere}nav{display:flex;flex-wrap:wrap;gap:12px 26px;padding:22px 0 26px;border-bottom:1px solid var(--rule);font-size:15px}section{padding-top:56px;margin-top:20px;border-top:1px solid var(--rule)}section:first-of-type{border:0;padding-top:32px;margin-top:0}table{width:100%;border-collapse:collapse;margin:24px 0 0;font-size:15px;line-height:1.6}th{text-align:left;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px;font-weight:600}td,th{padding:16px 16px 16px 0;border-bottom:1px solid var(--rule);vertical-align:top}td:first-child{width:23%}td:nth-child(2){width:36%}figure{margin:26px 0 32px;min-width:0}figcaption{margin-bottom:8px;overflow-wrap:anywhere}figcaption span{display:block}pre{background:var(--code);border-left:2px solid #bdc9c7;padding:22px 24px;margin:0;overflow:auto;font:14px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:4}pre code{font:inherit;white-space:pre}p code,td code,li code{font: .86em ui-monospace,SFMono-Regular,Menlo,monospace}.terminal pre{background:#243237;color:#edf3f2;border:0}.note{border-left:2px solid #a7bdb7;padding:0 0 0 18px;margin:24px 0;max-width:900px}.note strong{font-weight:650}details{margin:26px 0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:16px 0}summary{cursor:pointer;font-size:15px;font-weight:600}details p{font-size:15px}ul{padding-left:22px}li{margin:8px 0}footer{border-top:1px solid var(--rule);margin-top:60px;padding-top:22px;font-size:13px;color:var(--muted)}.number{color:var(--muted);font-size:13px;letter-spacing:1px;display:block;margin-bottom:10px}@media(max-width:650px){main{padding:32px 20px 55px}body{font-size:16px}h1{letter-spacing:-.8px}h2{font-size:25px}.lead{font-size:18px}nav{gap:10px 20px}section{padding-top:34px;margin-top:18px}table,tbody,tr,td{display:block}thead{display:none}tr{border-bottom:1px solid var(--rule);padding:14px 0}td,td:first-child,td:nth-child(2){width:100%;border:0;padding:5px 0}td::before{content:attr(data-label);display:block;font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:3px}pre{font-size:13px;padding:16px}figcaption{font-size:12px}}@media print{body{background:white;font-size:11pt}main{max-width:none;padding:0}nav,.skip{display:none}section{padding-top:24px}pre{white-space:pre-wrap;overflow:visible;font-size:9pt}pre code{white-space:pre-wrap;overflow-wrap:anywhere}figure{break-inside:avoid}.terminal pre{background:#eee;color:black}a{color:inherit}details> :not(summary){display:block!important}summary{list-style:none}}
+</style></head><body><a class="skip" href="#map">Skip to reading map</a><main>
+<header><div class="eyebrow">Loopflow · PR 1502 · code walkthrough</div><h1>Codex hooks, together.</h1><p class="lead">Start Codex through the existing terminal wrapper. Let the host keep its hooks while lf records the conversation it will reopen.</p>
+<p class="meta"><a href="https://github.com/loopflowstudio/loopflow/pull/1502">Preserve terminal hooks when capturing Codex Sessions</a><br>Published diff: main <code>873f40e30b155b201a9839b60da1832a092da71f</code> → <code>b3fa787b8cee10c39571a3d07c7f21753e2cd0aa</code><br>Inspected October 8, 2026. Local HEAD matches published head; no working changes were present. This page is a local review artifact.</p>
+<p>Jack Heart approved setup-free hook coexistence and publication for review. Earlier Flow-output and Task Started repairs remain in this PR. Prompt delivery belongs to <a href="https://github.com/loopflowstudio/loopflow/pull/1498">LOO-429 / PR 1498</a>; it is not reimplemented here.</p></header><nav aria-label="Reading route"><a href="#launch">1. Start</a><a href="#trust">2. Trust flag</a><a href="#identity">3. Capture & reconnect</a><a href="#flow">4. Read a Flow</a><a href="#proof">Evidence limits</a></nav>
+<section id="map"><h2>The interaction, mapped</h2><table><thead><tr><th>When you…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
+<tr><td data-label="When you…">Start a new Codex Session through lf</td><td data-label="What happens">lf selects a temporary profile carrying its capture hook; the wrapper’s hook table remains available.</td><td data-label="Where the code controls this"><a href="#launch"><code>prepare_codex_capture</code></a> owns the profile file for the lifetime of the launch.</td></tr>
+<tr><td data-label="When you…">Use a wrapper that supplies hook trust</td><td data-label="What happens">A parse-only probe detects the duplicate; lf omits its own copy of the flag.</td><td data-label="Where the code controls this"><a href="#trust"><code>codex_supplies_hook_trust</code></a> recognizes two parser diagnostics and rejects any other result.</td></tr>
+<tr><td data-label="When you…">Reconnect, or leave a launch whose hook failed</td><td data-label="What happens">Reconnect uses the recorded native ID. A successful provider exit without capture becomes an explicit lf error; unrelated history is never adopted.</td><td data-label="Where the code controls this"><a href="#identity"><code>ProviderSessionRef</code> and the launch completion branch</a> separate durable identity from process success.</td></tr>
+<tr><td data-label="When you…">Run a headless Flow</td><td data-label="What happens">Step names and positions stay visible; accounting is opt-in. Started is recorded with the Flow.</td><td data-label="Where the code controls this"><a href="#flow"><code>print_step_progress</code> and <code>record_flow_process</code></a> own the display and the transaction respectively.</td></tr></tbody></table></section>
+<section id="launch"><span class="number">01 / START</span><h2>A separate hook layer, scoped to this launch</h2>
+<figure class="terminal"><figcaption>Illustrative command and expected visible behavior from source; not a captured cmux run.</figcaption><pre tabindex="0"><code>$ lf --tui -m codex --task LOO-418 review-design
+[Native Codex terminal opens; no new lf success banner.]</code></pre></figure>
+<p><code>SessionCommand</code> carries the executable name, argv and working directory. The existing launch API passes that command into the terminal lifecycle; this PR changes its preparation, not the Session model.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/util.rs#L49-L77">rust/loopflow/src/lf/commands/util.rs · SessionCommand; launch_session; launch_session_with_env · L49–77</a><span>b3fa787b8 · unchanged entry and command model</span></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SessionCommand {
+    pub(crate) program: String,
+    pub(crate) args: Vec&lt;String&gt;,
+    pub(crate) cwd: PathBuf,
+}
+
+pub fn launch_session(
+    harness: &amp;str,
+    model: Option&lt;&amp;str&gt;,
+    worktree: &amp;Path,
+    prompt: &amp;str,
+) -&gt; Result&lt;()&gt; {
+    launch_session_with_env(harness, model, worktree, prompt, &amp;BTreeMap::new(), None)
+}
+
+pub(crate) fn launch_session_with_env(
+    harness: &amp;str,
+    model: Option&lt;&amp;str&gt;,
+    worktree: &amp;Path,
+    prompt: &amp;str,
+    environment: &amp;BTreeMap&lt;String, String&gt;,
+    provider_session_id: Option&lt;&amp;str&gt;,
+) -&gt; Result&lt;()&gt; {
+    let worktree = absolute_path(worktree);
+    let command = build_session_command(harness, model, &amp;worktree, prompt, provider_session_id)?;
+    spawn_session_command_with_env(&amp;command, environment, provider_session_id, None, None)
+}
+</code></pre></figure>
+<p>The returned <code>NamedTempFile</code> owns cleanup. lf creates the file in the effective Codex home and selects it by profile name; it does not edit saved config or trust records.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/util.rs#L846-L882">rust/loopflow/src/lf/commands/util.rs · prepare_codex_capture · L846–882</a><span>b3fa787b8 · new implementation</span></figcaption><pre tabindex="0"><code>fn prepare_codex_capture(process: &amp;mut Command) -&gt; Result&lt;tempfile::NamedTempFile&gt; {
+    let home = process
+        .get_envs()
+        .find(|(key, _)| *key == &quot;CODEX_HOME&quot;)
+        .map(|(_, value)| value.map(PathBuf::from))
+        .unwrap_or_else(|| std::env::var_os(&quot;CODEX_HOME&quot;).map(PathBuf::from))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from(&quot;.&quot;))
+                .join(&quot;.codex&quot;)
+        });
+    std::fs::create_dir_all(&amp;home)?;
+    let mut profile = tempfile::Builder::new()
+        .prefix(&quot;lf-capture-&quot;)
+        .suffix(&quot;.config.toml&quot;)
+        .tempfile_in(home)?;
+    let executable = std::env::current_exe()
+        .map_err(|error| anyhow!(&quot;cannot resolve lf for Codex session capture: {error}&quot;))?;
+    let command = format!(
+        &quot;{} __provider-session&quot;,
+        crate::engine::process::shell_escape(&amp;executable.to_string_lossy())
+    );
+    let command = serde_json::to_string(&amp;command).expect(&quot;shell command serializes as TOML string&quot;);
+    write!(profile, &quot;hooks={{ SessionStart = [{{ matcher = \&quot;startup\&quot;, hooks = [{{ type = \&quot;command\&quot;, command = {command}, timeout = 5 }}] }}] }}&quot;)?;
+    profile.flush()?;
+    if !codex_supplies_hook_trust(process)? {
+        process.arg(&quot;--dangerously-bypass-hook-trust&quot;);
+    }
+    let name = profile
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(&quot;.config.toml&quot;))
+        .expect(&quot;generated Codex profile has a valid name&quot;);
+    process.args([&quot;--profile&quot;, name]);
+    Ok(profile)
+}</code></pre></figure>
+<aside class="note"><strong>Change from base.</strong> The old launch inserted a whole <code>-c hooks={…}</code> table and the trust flag unconditionally. The new native profile layer composes with a wrapper’s CLI hooks in the recorded fixture. It requires native profile-file support; interruption can leave an unselected temporary file.</aside></section>
+<section id="trust"><span class="number">02 / TRUST FLAG</span><h2>Ask the parser before the real launch</h2>
+<figure class="terminal"><figcaption>Illustrative internal probe and recognized diagnostic fragments, not a user command to run or a captured transcript.</figcaption><pre tabindex="0"><code>codex --dangerously-bypass-hook-trust --model
+
+# When the wrapper also supplies trust:
+error: the argument &#x27;--dangerously-bypass-hook-trust&#x27; cannot be used multiple times
+
+# Without wrapper-supplied trust:
+error: a value is required for &#x27;--model &lt;MODEL&gt;&#x27; but none was supplied</code></pre></figure>
+<p>The probe uses the same PATH command, cwd and explicit environment. Its incomplete model option is meant to stop parsing before a Session starts. The actual Codex process keeps its terminal descriptors.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/util.rs#L884-L941">rust/loopflow/src/lf/commands/util.rs · codex_supplies_hook_trust · L884–941</a><span>b3fa787b8 · complete new parser probe</span></figcaption><pre tabindex="0"><code>fn codex_supplies_hook_trust(process: &amp;Command) -&gt; Result&lt;bool&gt; {
+    let mut probe = Command::new(process.get_program());
+    if let Some(cwd) = process.get_current_dir() {
+        probe.current_dir(cwd);
+    }
+    for (key, value) in process.get_envs() {
+        match value {
+            Some(value) =&gt; {
+                probe.env(key, value);
+            }
+            None =&gt; {
+                probe.env_remove(key);
+            }
+        }
+    }
+    // Help can bypass wrapper injection. An incomplete option reaches the
+    // ordinary parser, but cannot start a provider or consume terminal input.
+    let mut stderr = tempfile::tempfile()?;
+    probe
+        .args([&quot;--dangerously-bypass-hook-trust&quot;, &quot;--model&quot;])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(stderr.try_clone()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        probe.process_group(0);
+    }
+    let mut child = probe.spawn()?;
+    let group = crate::engine::process::ProcessGroupGuard::new(child.id());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait()?.is_none() {
+        if std::time::Instant::now() &gt;= deadline {
+            group.terminate();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            bail!(&quot;Codex argument probe timed out before launch&quot;);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    group.terminate();
+    stderr.seek(SeekFrom::Start(0))?;
+    let mut diagnostic = String::new();
+    stderr.take(65536).read_to_string(&amp;mut diagnostic)?;
+    if diagnostic
+        .contains(&quot;the argument &#x27;--dangerously-bypass-hook-trust&#x27; cannot be used multiple times&quot;)
+    {
+        return Ok(true);
+    }
+    if diagnostic.contains(&quot;a value is required for &#x27;--model &lt;MODEL&gt;&#x27;&quot;) {
+        return Ok(false);
+    }
+    bail!(
+        &quot;Codex argument probe failed before launch: {}&quot;,
+        diagnostic.trim()
+    )
+}</code></pre></figure>
+<aside class="note"><strong>The main tradeoff.</strong> Setup-free launch now invokes the wrapper twice and depends on exact English parser text. An unfamiliar diagnostic or a five-second timeout blocks the real launch. The probe has no provider argv or capture profile; a wrapper whose behavior varies with those inputs is not covered by the synthetic fixture.</aside>
+<p>On an unfamiliar diagnostic, the error includes the provider text. Resolve that diagnostic before retrying the same lf command; the implementation does not silently guess which flag to send or relaunch a live provider.</p></section>
+<section id="identity"><span class="number">03 / CAPTURE & RECONNECT</span><h2>Record one native conversation, then reopen it</h2>
+<figure class="terminal"><figcaption>Illustrative reconnect; exact missing-capture message split across lines for readability. Paths and IDs are placeholders.</figcaption><pre tabindex="0"><code>$ lf --tui session connect &lt;recorded-lf-session-id&gt;
+[The same native conversation and its history reopen.]
+
+# If a new launch exits successfully without its capture hook:
+Codex exited without recording its native Session ID.
+Launch evidence remains at &lt;capture-directory&gt;.
+Inspect the provider&#x27;s hook diagnostic before retrying; no unrelated Session was attached.</code></pre></figure>
+<p>Only a new captured Codex launch prepares the profile. Reconnect already has a native ID, so the existing path records that ID and bypasses profile creation and the parser probe.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/util.rs#L696-L713">rust/loopflow/src/lf/commands/util.rs · session_command_status_with_env — new-launch / reconnect selection · L696–713</a><span>b3fa787b8 · new profile branch with existing reconnect write</span></figcaption><pre tabindex="0"><code>    let codex_profile =
+        if command.program == &quot;codex&quot; &amp;&amp; provider_session_id.is_none() &amp;&amp; capture_dir.is_some() {
+            Some(prepare_codex_capture(&amp;mut process)?)
+        } else {
+            None
+        };
+    process.args(&amp;command.args);
+    if let (Some(capture_dir), Some(provider_session_id)) =
+        (capture_dir.as_deref(), provider_session_id)
+    {
+        crate::session_record::write_provider_session(
+            capture_dir,
+            provider_session_id,
+            account_route
+                .as_ref()
+                .map(|route| route.account_id().clone()),
+        )?;
+    }</code></pre></figure>
+<p>The hook calls the existing <code>lf __provider-session</code> entry. It reads the callback’s <code>session_id</code> and writes it against the inherited capture. The durable object stays a Session observation; no new table or “latest native history” resolver is introduced.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/session_record.rs#L199-L204">rust/loopflow/src/session_record.rs · ProviderSessionRef · L199–204</a><span>b3fa787b8 · unchanged durable evidence shape</span></figcaption><pre tabindex="0"><code>#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ProviderSessionRef {
+    schema_version: u32,
+    pub(crate) provider_session_id: String,
+    pub(crate) account_id: Option&lt;crate::store::ProviderAccountId&gt;,
+}</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/session_record.rs#L1450-L1477">rust/loopflow/src/session_record.rs · write_provider_session · L1450–1477</a><span>b3fa787b8 · unchanged writer used by the callback</span></figcaption><pre tabindex="0"><code>pub(crate) fn write_provider_session(
+    dir: &amp;Path,
+    provider_session_id: &amp;str,
+    account_id: Option&lt;crate::store::ProviderAccountId&gt;,
+) -&gt; std::io::Result&lt;()&gt; {
+    if provider_session_id.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            &quot;provider session id cannot be empty&quot;,
+        ));
+    }
+    let input = input_id_from_dir(dir)?;
+    let store = row_store(dir).map_err(std::io::Error::other)?;
+    let session = store
+        .session_for_artifact(&amp;input)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| std::io::Error::other(&quot;provider history has no admitted Session&quot;))?;
+    let source = format!(&quot;provider-session:{}&quot;, Uuid::new_v4());
+    store.retain_session_observation(&amp;session, &amp;crate::session::SessionObservation {
+        artifact_key: input.clone(), source: source.clone(),
+        observed_at: OffsetDateTime::now_utc().unix_timestamp(),
+        task_id: session.task_id.clone(), wave_id: session.wave_id.clone(),
+        payload: serde_json::json!({&quot;input_id&quot;:input,&quot;source&quot;:source,&quot;evidence&quot;:ProviderSessionRef {
+            schema_version: SCHEMA_VERSION,
+            provider_session_id: provider_session_id.to_string(), account_id,
+        }}),
+    }).map_err(std::io::Error::other)
+}</code></pre></figure>
+<details><summary>Follow the callback into that writer</summary>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/session_history.rs#L93-L114">rust/loopflow/src/lf/commands/session_history.rs · observe_provider_session · L93–114</a><span>b3fa787b8 · unchanged callback entry</span></figcaption><pre tabindex="0"><code>/// Record a provider callback against its owning Session capture.
+pub fn observe_provider_session() -&gt; Result&lt;()&gt; {
+    let key = crate::session_record::inherited_capture_key()?
+        .ok_or_else(|| anyhow!(&quot;provider session callback has no active Session capture&quot;))?;
+    let capture_dir = crate::session_record::capture_dir(&amp;key)?;
+    let mut payload = String::new();
+    std::io::stdin().read_to_string(&amp;mut payload)?;
+    let payload: serde_json::Value = serde_json::from_str(&amp;payload)
+        .map_err(|error| anyhow!(&quot;invalid provider session callback: {error}&quot;))?;
+    let provider_session_id = payload
+        .get(&quot;session_id&quot;)
+        .and_then(serde_json::Value::as_str)
+        .filter(|session_id| !session_id.is_empty())
+        .ok_or_else(|| anyhow!(&quot;provider session callback has no session_id&quot;))?;
+    let account_id = std::env::var(crate::session_record::PROVIDER_ACCOUNT_ID_ENV)
+        .ok()
+        .map(|value| crate::store::ProviderAccountId::parse(&amp;value))
+        .transpose()
+        .map_err(|error| anyhow!(&quot;invalid provider account in session callback: {error}&quot;))?;
+    crate::session_record::write_provider_session(&amp;capture_dir, provider_session_id, account_id)
+        .map_err(|error| anyhow!(&quot;cannot preserve provider session: {error}&quot;))
+}</code></pre></figure>
+</details><p>A provider exit alone is insufficient. After the process is waited and its outcome recorded, the new completion condition checks for native identity. The Session and launch evidence survive a missing callback.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/util.rs#L786-L803">rust/loopflow/src/lf/commands/util.rs · session_command_status_with_env — final capture check · L786–803</a><span>b3fa787b8 · new failure branch</span></figcaption><pre tabindex="0"><code>    let stop_reason = client
+        .as_ref()
+        .map(ProviderClientGuard::take_stop_reason)
+        .transpose()?
+        .flatten();
+    if status.success() &amp;&amp; stop_reason.is_none() &amp;&amp; codex_profile.is_some() {
+        let capture_dir = capture_dir
+            .as_deref()
+            .expect(&quot;Codex capture has a directory&quot;);
+        if crate::session_record::read_provider_session(capture_dir)?.is_none() {
+            bail!(&quot;Codex exited without recording its native Session ID. Launch evidence remains at {}. Inspect the provider&#x27;s hook diagnostic before retrying; no unrelated Session was attached.&quot;, capture_dir.display());
+        }
+    }
+    Ok(SessionCommandOutcome {
+        status,
+        stop_reason,
+    })
+}</code></pre></figure>
+<aside class="note"><strong>Recovery limit.</strong> Inspect the retained capture and provider hook diagnostic, repair the cause, then retry the original launch. The error does not promise reconnect without an ID. The regression deliberately seeds unrelated native history and verifies that no identity is adopted.</aside>
+<h3>What the native fixture establishes</h3><p>The PTY fixture checks the host’s launch-hook receipts against the exact ID stored by lf, then reopens that conversation. These are source assertions, not a new test run for this walkthrough.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/tests/e2e/codex_terminal.py#L162-L188">tests/e2e/codex_terminal.py · _case — launch receipts and reconnect · L162–188</a><span>b3fa787b8 · inspected assertions; recorded pass on the implementation branch</span></figcaption><pre tabindex="0"><code>    args = [str(lf), &quot;--tui&quot;, &quot;--no-loopflow&quot;, &quot;--diff&quot;, &quot;none&quot;, &quot;-m&quot;, &quot;codex&quot;, &quot;:&quot;, &quot;hello&quot;]
+    status = _terminal(args, env, root, root / &quot;launch.txt&quot;)
+    assert status == 0, (status, root / &quot;launch.txt&quot;)
+    with sqlite3.connect(root / &quot;lf&quot; / &quot;loopflow.db&quot;) as database:
+        sessions = database.execute(
+            &quot;SELECT DISTINCT json_extract(payload,&#x27;$.evidence.provider_session_id&#x27;),session_id &quot;
+            &quot;FROM session_events WHERE kind=&#x27;observed&#x27; &quot;
+            &quot;AND json_extract(payload,&#x27;$.evidence.provider_session_id&#x27;) IS NOT NULL&quot;
+        ).fetchall()
+    assert len(sessions) == 1, sessions
+    native_id, session_id = sessions[0]
+    assert any(native.glob(f&quot;sessions/*/*/*/rollout-*-{native_id}.jsonl&quot;)), native_id
+    if wrapped:
+        for event in [&quot;SessionStart&quot;, &quot;Stop&quot;]:
+            assert json.loads((root / event).read_text())[&quot;session_id&quot;] == native_id
+    assert (native / &quot;config.toml&quot;).read_text() == config
+    assert not list(native.glob(&quot;lf-capture-*.config.toml&quot;))
+    assert not (native / &quot;hooks.json&quot;).exists()
+    status = _terminal(
+        [str(lf), &quot;--tui&quot;, &quot;session&quot;, &quot;connect&quot;, session_id], env, root, root / &quot;resume.txt&quot;
+    )
+    assert status == 0, (status, root / &quot;resume.txt&quot;)
+    assert native_id.encode() in (root / &quot;resume.txt&quot;).read_bytes()
+    print(
+        f&quot;{&#x27;wrapped&#x27; if wrapped else &#x27;plain&#x27;}: captured {native_id}, reconnected {session_id}&quot;,
+        flush=True,
+    )</code></pre></figure>
+<aside class="note"><strong>Unverified product boundary.</strong> Fresh hooks did not emit on native resume, including a direct Codex reproduction without lf. Reopened identity and history are proved by the fixture; cmux agent-list tracking after launch or reconnect is not. Launch receipts must not stand in for reconnect receipts.</aside></section>
+<section id="flow"><span class="number">04 / RETAINED FLOW CHANGES</span><h2>Read the work while it runs</h2>
+<figure class="terminal"><figcaption>Illustrative test scenario: readable = work → flow list → work, with a synthetic provider. Streams combined for explanation; not captured output.</figcaption><pre tabindex="0"><code>$ lf -b run readable
+[1/3] work
+agent-readable-text
+[2/3] flow list
+[Flow catalog output omitted]
+[3/3] work
+agent-readable-text
+
+$ lf -v -b run readable
+[The same steps, plus context accounting and INFO diagnostics.]</code></pre></figure>
+<p>Skills and operations call the same printer. The Flow launcher forwards verbosity once to child commands; prompt-bearing instrumentation and debug dumps are removed in both modes.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/lf/commands/flow.rs#L704-L716">rust/loopflow/src/lf/commands/flow.rs · print_step_progress · L704–716</a><span>b3fa787b8 · replaces two printers; operations now use it too</span></figcaption><pre tabindex="0"><code>fn print_step_progress(progress: Option&lt;StepProgress&gt;, name: &amp;str) {
+    let position = match progress {
+        Some(progress) =&gt; format!(&quot;{}/{}&quot;, progress.index + 1, progress.total),
+        None =&gt; &quot;*&quot;.to_owned(),
+    };
+    let colors = Colors::new();
+    eprintln!(
+        &quot;{dim}[{position}]{reset} {bold}{name}{reset}&quot;,
+        dim = colors.dim,
+        reset = colors.reset,
+        bold = colors.bold,
+    );
+}</code></pre></figure>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/bin/lf.rs#L1269-L1283">rust/loopflow/src/bin/lf.rs · init_tracing · L1269–1283</a><span>b3fa787b8 · default WARN; verbose INFO; RUST_LOG remains an explicit override</span></figcaption><pre tabindex="0"><code>fn init_tracing(verbose: bool) {
+    let default_filter = if verbose {
+        &quot;lf=info,loopflow=info&quot;
+    } else {
+        &quot;warn&quot;
+    };
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter)),
+        )
+        .with_writer(std::io::stderr)
+        .without_time()
+        .init();
+}
+</code></pre></figure>
+<details><summary>Assertions for output and prompt omission</summary>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/tests/flow_tests.rs#L910-L921">rust/loopflow/tests/flow_tests.rs · flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics — assertions · L910–921</a><span>b3fa787b8 · default, verbose and trace modes exercised by the surrounding test</span></figcaption><pre tabindex="0"><code>        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&amp;output.stderr);
+        assert!(output.status.success(), &quot;{stderr}&quot;);
+        assert!(String::from_utf8_lossy(&amp;output.stdout).contains(&quot;agent-readable-text&quot;));
+        assert!(stderr.contains(&quot;[1/3] work&quot;), &quot;{stderr}&quot;);
+        assert!(stderr.contains(&quot;[2/3] flow list&quot;), &quot;{stderr}&quot;);
+        assert!(stderr.contains(&quot;[3/3] work&quot;), &quot;{stderr}&quot;);
+        assert_eq!(stderr.contains(&quot;INFO&quot;), verbose, &quot;{stderr}&quot;);
+        assert_eq!(stderr.contains(&quot;total&quot;), verbose, &quot;{stderr}&quot;);
+        assert!(!stderr.contains(&quot;private-message-marker&quot;), &quot;{stderr}&quot;);
+        assert!(!stderr.contains(&quot;private-instructions-marker&quot;), &quot;{stderr}&quot;);
+    }</code></pre></figure>
+</details><h3>Started is committed with the Flow</h3><p>At Flow entry, <code>execute</code> calls this writer before any step runs. A Task whose checkout contains that Process’s cwd gets its first Started time in the same transaction as the Flow record. The separate best-effort Task update is deleted.</p>
+<figure><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/b3fa787b8cee10c39571a3d07c7f21753e2cd0aa/rust/loopflow/src/store/sqlite/flow_inventory.rs#L206-L227">rust/loopflow/src/store/sqlite/flow_inventory.rs · record_flow_process · L206–227</a><span>b3fa787b8 · changed transaction; no schema migration</span></figcaption><pre tabindex="0"><code>    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
+    pub(crate) fn record_flow_process(
+        &amp;self,
+        driver: &amp;ProcessLfid,
+        flow: &amp;str,
+        graph: &amp;FlowGraph,
+    ) -&gt; StoreResult&lt;()&gt; {
+        let mut conn = self.conn.lock().expect(&quot;store mutex poisoned&quot;);
+        let tx = conn.transaction()?;
+        tx.execute(
+            &quot;INSERT INTO flow_processes(process_lfid,flow,graph) VALUES(?1,?2,?3)&quot;,
+            params![driver, flow, serde_json::to_string(graph)?],
+        )?;
+        tx.execute(
+            &quot;UPDATE tasks SET started_at=?2 WHERE started_at IS NULL AND worktree!=&#x27;&#x27;
+             AND EXISTS(SELECT 1 FROM processes WHERE lfid=?1
+                 AND (cwd=rtrim(tasks.worktree,&#x27;/&#x27;) OR instr(cwd,rtrim(tasks.worktree,&#x27;/&#x27;)||&#x27;/&#x27;)=1))&quot;,
+            params![driver, crate::store::rows::now_unix()],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }</code></pre></figure>
+<aside class="note">Checkout membership selects the Tasks; an explicitly named Task alone does not. If either write fails, the transaction does not commit. Started records work beginning, not Task completion.</aside></section>
+<section id="proof"><h2>Where the evidence stops</h2><ul><li><strong>Inspected now:</strong> the published base-to-head diff, surrounding launch and capture APIs, native fixture and missing-capture/output regressions. Source excerpts are pinned to the published head.</li><li><strong>Recorded passes, not rerun here:</strong> build, formatting, Clippy, Ruff, missing-capture regression and native PTY fixture. The fixture used Codex 0.160.1, disposable homes, a loopback model and independently written wrapper hooks; no real accounts.</li><li><strong>Still unverified:</strong> actual cmux agent-list behavior, fresh reconnect hook emission, installed acceptance, and affected-suite verification on the integrated candidate. The publication notes assign the suites to gate.</li><li><strong>Separate dependency:</strong> LOO-429 owns context-file delivery and the combined oversized-context launch. This review makes no delivery or merge decision.</li></ul><details><summary>Source of the recorded evidence</summary><p><a href="https://github.com/loopflowstudio/loopflow/pull/1502">PR #1502’s published description</a> and the branch’s working design retain those pass claims and limits. No new provider launch, account access or live cmux manipulation was performed to create this page.</p><p>The parser probe also assumes the selected executable reaches its ordinary argument parser for the incomplete option. The existing fixture demonstrates plain and reported wrapper behavior; it is not a proof for every wrapper or Codex version.</p></details></section><footer>Local walkthrough · generated from immutable Git source · code excerpts remain readable offline.<br>Keyboard: Tab to links, code scroll regions and evidence disclosures. Print uses wrapped code and expanded evidence.</footer></main></body></html>

@@ -28,6 +28,18 @@ on PATH; the earlier access-policy denial remains valid. LOO-429 owns the combin
 oversized Claude/Codex launch. Homepage capture follows landing and installation.
 Source fixtures prove neither installed behavior nor actual cmux tracking.
 
+## Terminal selector removal (Jack Heart, 2026-10-08)
+
+Jack Heart requested removal of `--tui` after PR #1497 removed `--ide` and
+`session.launch`. Terminal launch remains the sole interactive surface. A direct
+TTY launches interactively by default; `-i` retains the explicit interactive
+choice for piped or detached callers, and `-b` retains headless execution.
+Delete `Cli.tui`, its dispatch branches and generated flag documentation. Move
+internal callers and fixtures to the surviving interactive selection; preserve
+native capture, reconnect, historical `tui` surface records and provider TUI code.
+Reject the removed flag at a valid skill entry. Verify default TTY, explicit
+interactive without a TTY, headless batch and the real terminal capture path.
+
 ## Implementation and preservation
 
 A disposable `lf-capture-*.config.toml` profile in the effective Codex home adds
@@ -97,4 +109,4 @@ Earlier interface table and complete pre-compression notes remain in the launch
 snapshot `.lf/tmp/context/036c563040dd8f5e56d2b30fd95d88df8385cd239ce93cd8058bf95c101c8955.md`.
 `lf commit` excludes scratch, so that existing snapshot preserves the local notes.
 
-Checks: `git diff --check` PASS (realign, prose only); prior build/fmt/Clippy, isolated `terminal_launch_tests`/`codex_terminal.py` and Ruff passes retained without rerun; gate owns affected suites, capable review owns cmux tracking, LOO-429 owns combined oversized input.
+Checks (2026-10-08): build/fmt/Clippy, Ruff, six focused selector/prompt tests, isolated `terminal_launch_tests` and native `codex_terminal.py` PASS; native PTYs now exercise default terminal launch/reconnect without `--tui`; generated CLI reference refreshed; gate owns affected suites, capable review owns cmux tracking, LOO-429 owns combined oversized input.

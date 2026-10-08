@@ -13,6 +13,17 @@ use crate::work::project::Project;
 use super::{durable, SqliteStore};
 
 impl SqliteStore {
+    pub(crate) fn wave_document(&self, wave: &WaveId, name: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT content FROM wave_documents WHERE wave_id=?1 AND name=?2",
+            params![wave, name],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::from)
+    }
+
     pub fn wave_documents(&self, wave: &WaveId) -> StoreResult<BTreeMap<String, String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query =
@@ -57,6 +68,7 @@ impl SqliteStore {
         }
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let workflows = read_workflows(Path::new(repo))?;
         let mut parent: Option<WaveId> = None;
         let mut prefix = String::new();
         for part in name.split('/') {
@@ -64,7 +76,7 @@ impl SqliteStore {
                 prefix.push('/');
             }
             prefix.push_str(part);
-            let documents = read_documents(&Path::new(repo).join("wave").join(&prefix))?;
+            let documents = read_files(&Path::new(repo).join("wave").join(&prefix), &["md"])?;
             let authored_id = documents
                 .get("GOAL.md")
                 .map(|content| crate::work::wave::config::parse_wave_config(content))
@@ -91,25 +103,11 @@ impl SqliteStore {
                     wave
                 }
             };
-            save_imported_documents(
-                &tx,
-                wave.as_str(),
-                documents,
-                read_workflows(Path::new(repo))?,
-            )?;
+            save_imported_documents(&tx, wave.as_str(), documents, &workflows)?;
             parent = Some(wave);
         }
         tx.commit()?;
         Ok(parent.expect("validated Wave has at least one component"))
-    }
-
-    /// Import missing documents once. Saved edits and original file bytes survive retry.
-    pub fn import_wave_documents(&self, wave: &WaveId, repo: &Path, name: &str) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        import_documents_on(&tx, wave.as_str(), repo, name)?;
-        tx.commit()?;
-        Ok(())
     }
 }
 
@@ -139,8 +137,8 @@ pub(super) fn import_documents_on(
     save_imported_documents(
         conn,
         wave,
-        read_documents(&repo.join("wave").join(name))?,
-        read_workflows(repo)?,
+        read_files(&repo.join("wave").join(name), &["md"])?,
+        &read_workflows(repo)?,
     )
 }
 
@@ -148,7 +146,7 @@ fn save_imported_documents(
     conn: &rusqlite::Connection,
     wave: &str,
     documents: BTreeMap<String, String>,
-    workflows: BTreeMap<String, String>,
+    workflows: &BTreeMap<String, String>,
 ) -> StoreResult<()> {
     for (name, content) in documents {
         conn.execute(
@@ -165,10 +163,6 @@ fn save_imported_documents(
         )?;
     }
     Ok(())
-}
-
-fn read_documents(directory: &Path) -> StoreResult<BTreeMap<String, String>> {
-    read_files(directory, &["md"])
 }
 
 fn read_workflows(repo: &Path) -> StoreResult<BTreeMap<String, String>> {
@@ -317,6 +311,10 @@ mod tests {
             "Retain tokens.",
         )
         .unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+        let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
+        std::fs::write(repo.path().join(".lf/workflows/review.yaml"), definition).unwrap();
+        std::fs::write(repo.path().join(".lf/workflows/review.yml"), "not selected").unwrap();
         store.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_import BEFORE INSERT ON wave_documents BEGIN SELECT RAISE(ABORT,'disk failure'); END;").unwrap();
         assert!(store
             .ensure_wave(repo.path().to_str().unwrap(), "tools/parser")
@@ -338,6 +336,13 @@ mod tests {
             first
         );
         assert_eq!(store.list_waves(None).unwrap().len(), 2);
+        std::fs::remove_dir_all(repo.path().join(".lf/workflows")).unwrap();
+        for wave in store.list_waves(None).unwrap() {
+            assert_eq!(
+                store.wave_workflow(wave.id(), "review").unwrap().as_deref(),
+                Some(definition)
+            );
+        }
     }
 
     #[tokio::test]

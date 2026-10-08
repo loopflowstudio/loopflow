@@ -21,9 +21,8 @@ pub(crate) fn read_wave_document(
         .map_err(std::io::Error::other)?
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Wave not found"))?;
     store
-        .wave_documents(wave.id())
+        .wave_document(wave.id(), document)
         .map_err(std::io::Error::other)?
-        .remove(document)
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -149,11 +148,9 @@ pub(crate) fn try_read_wave_config(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     };
-    Ok(Some(match split_frontmatter(&content) {
-        Some((frontmatter, _)) => serde_yaml_ng::from_str::<WaveConfig>(&frontmatter)
-            .map_err(|source| WaveConfigError::Parse { path, source })?,
-        None => WaveConfig::default(),
-    }))
+    parse_wave_config(&content)
+        .map(Some)
+        .map_err(|source| WaveConfigError::Parse { path, source })
 }
 
 /// Read only the external chat binding, so malformed unrelated Wave policy
@@ -378,7 +375,7 @@ mod tests {
     struct ConfigRepo {
         repo: loopflow_test_support::TestRepo,
         _home: tempfile::TempDir,
-        previous: Option<std::ffi::OsString>,
+        _env: crate::lf::commands::flow::EnvVarGuard,
     }
 
     impl ConfigRepo {
@@ -390,12 +387,14 @@ mod tests {
                     .unwrap();
             let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
             store.ensure_wave(&canonical.to_string(), "scan").unwrap();
-            let previous = std::env::var_os("LF_HOME");
-            std::env::set_var("LF_HOME", home.path());
+            let env = crate::lf::commands::flow::EnvVarGuard::set(
+                "LF_HOME",
+                home.path().to_str().unwrap(),
+            );
             Self {
                 repo,
                 _home: home,
-                previous,
+                _env: env,
             }
         }
         fn path(&self) -> &Path {
@@ -403,14 +402,6 @@ mod tests {
         }
         fn write(&self, content: &str) -> std::io::Result<()> {
             write_wave_document(self.path(), "scan", "GOAL.md", content)
-        }
-    }
-    impl Drop for ConfigRepo {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var("LF_HOME", value),
-                None => std::env::remove_var("LF_HOME"),
-            }
         }
     }
 

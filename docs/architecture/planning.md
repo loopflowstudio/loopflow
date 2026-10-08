@@ -94,42 +94,33 @@ destination changes neither the revision nor receipt. Pending refiling allows in
 observations from another Wave to preserve both conflicting membership values and
 advance unrelated fields. It never grants execution or provider-write authority.
 
-LOO-406's common ownership cut removes the personal namespace and provider/local
-writer selection. Export, field/deletion delivery, accepted conflict precedence and
-composed reconnect remain unfinished synchronization work.
-Task creation and edits use one SQLite writer, regardless of provider mapping.
-Creation receipts retain the original Project and input; field receipts retain
-stable mutation identity, baseline and the first conflicting provider value.
-`sqlite/task_content.rs` saves field edits and rank changes to neighboring Tasks.
-Task and Project writers share `sqlite/planning_changes.rs` for receipt creation,
-pending fields and inbound conflict retention; their tables retain separate foreign
-keys. No-op retries retain revision and receipt IDs; actual inbound field changes advance the local optimistic-write revision. The
-provider-first creation, marker lookup and edit writers are deleted. Connected
-CLI commands report pending sync; Task export, field delivery/resolution and
-Desktop pending presentation remain unfinished.
-Project names, summaries, content and stored Wave workflows use
-`sqlite/project_content.rs` in both connection modes. Edits and per-field delivery
-receipts commit together, including before a provider mapping exists. Inbound
-acquisition preserves pending fields and their first conflicting provider value;
-unrelated fields advance. Neither matching readback nor a provider timestamp
-acknowledges an unsent change. Workflow selection reads KRs and targets inside the
-write transaction and owns definition writes. Repeated field, content and definition
-saves preserve receipts without notifying readers of an unchanged plan.
-`wave update-plan` uses the same content writer for the complete plan;
-it no longer selects provider-first behavior. Workflow inspection reads committed
-planning without taking the Wave mutation lock. The CLI exposes pending fields/conflicts; Project delivery and
-Desktop pending presentation remain unfinished. Comments use `sqlite/task_comments.rs`. `sqlite/plan_read.rs` supplies registered Task status
-and Wave/Desktop planning from saved Task and Project rows. Reads preserve state,
-completion time, ordering, assignee, provider metadata and observation age separately
-from Workflow position. Missing provider inventory cannot erase saved planning;
-malformed observations retain fields and invalidation diagnostics. Pending local
-state decisions survive inbound completion while other fields advance. Ingestion
-and the released-frontier migration retain editable Project content, including KRs
-and targets. Current Project selection and readiness also read saved fields and
-observation age without personal/Linear dispatch. Missing provider inventory keeps
-that selection readable; retained archival, invalidation or membership conflicts
-still make it unavailable. These local guarantees do not fix Linear's unconditional
-update race.
+Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
+foreign keys. Each receipt retains a stable mutation identity, baseline and first
+conflicting provider value. `sqlite/task_content.rs` owns Task fields and neighboring
+rank changes; `sqlite/project_content.rs` owns Project fields, content and Workflow
+selection. Edits and receipts commit together before provider mapping or I/O.
+No-op saves preserve revisions and receipts without notifying readers. Accepted
+inbound changes advance the local optimistic-write revision; unrelated fields keep
+advancing during pending delivery. Neither matching readback nor provider timestamps
+acknowledge unsent changes.
+
+Workflow selection reads KRs and targets inside its definition-write transaction.
+`wave update-plan` uses the same content writer; inspection takes no Wave mutation
+lock. Comments use `sqlite/task_comments.rs`. Registered Task status and Wave/Desktop
+planning use `sqlite/plan_read.rs`, preserving state, completion time, ordering,
+assignee, metadata and observation age separately from Workflow position.
+Missing provider inventory cannot erase saved planning or Project selection;
+retained archival, invalidation and membership conflicts still affect availability.
+Malformed observations retain fields and diagnostics. Ingestion and migration
+preserve editable KRs and targets.
+
+The personal namespace and provider-first planning writers are deleted. Connected
+CLI edits report pending sync. Task/Project export, field/deletion/cancellation
+delivery, complete Desktop pending presentation and composed reconnect remain
+unfinished. Current ingestion retains pending local intentions on conflict;
+Jack Heart selected automatic Linear precedence for every observed planning conflict,
+with losing edits retained as history. That replacement remains to be implemented.
+The documented unconditional-update race remains a protocol limit.
 
 ## Project creation and selection
 
@@ -402,12 +393,11 @@ Foreground Task connections acquire repository membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
 attempt evidence and conflicting value. The latest receipt determines the displayed
 writeback state; Tasks store no separate copy. A response records only its captured
-effect, so it cannot settle a newer decision. Explicit state resolution supersedes
-the delivery identity without changing the Workflow. No local/provider clock
-comparison orders edits. The provider read and mutation remain separate requests;
-they do not prevent a concurrent Linear edit between them. The complete unified
-planning-owner cutover remains in progress; Wave provisioning and deletion still use
-split paths. Abandonment of an existing Task saves the decision and cancellation
+effect, so it cannot settle a newer decision. Current manual state resolution
+supersedes the delivery identity without changing the Workflow; automatic Linear
+precedence remains unfinished. No local/provider clock comparison orders edits.
+The provider read and mutation remain separate requests; they do not prevent a
+concurrent Linear edit between them. Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation
 remains pending until safe provider delivery is implemented. Delivery and pending-state projection currently require an

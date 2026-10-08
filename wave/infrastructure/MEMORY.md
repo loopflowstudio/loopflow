@@ -14,13 +14,14 @@ Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
 independent inbound completion, membership and comments during pending writes and
 after reconnect. Comment `93690dc2-5526-4ecf-a203-5e248339b0c9` adds immediate local
 comment/completion saves and active CLI/Desktop propagation without another turn,
-manual refresh or unrelated outbound drain. The common writer retains pending
-changes, stable mutation identities, both conflict values and reconnect deduplication.
-Jack Heart subsequently selected Linear as winner for every planning conflict.
+manual refresh or unrelated outbound drain. Acceptance requires stable mutation
+identities, retained conflicts and reconnect deduplication. Jack Heart selected
+Linear as winner for every planning conflict.
 Without Linear, prefer the host where possible, otherwise last-write-wins with
 try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering. Local saves
-remain immediate/pending. Observed conflicts adopt Linear and retire the losing
-intention without erasing history. Sessions, Processes, Flow/captured Workflow
+remain immediate/pending. The accepted policy requires adopting observed Linear
+conflicts and retiring losing intentions; implementation remains unfinished.
+Sessions, Processes, Flow/captured Workflow
 position, reservations and checkouts never synchronize. Planning completion grants
 no Workflow movement, Process control or cleanup authority.
 Jack Heart selected user-keyed Git planning by default, with explicit opt-in to
@@ -41,9 +42,10 @@ replication here or real plan publication to the public code repo is authorized.
 Foreground connections independently acquire comments/inventory and deliver mapped
 Tasks' effects. Receipts replace duplicate writeback state without inventing Workflow
 history. Effect locks exclude neither saves nor inbound reads. Acknowledgements
-cannot settle newer decisions; `lf task sync --resolve local|linear` supersedes
-identity while retaining conflicts. At `5a786d905`, inbound direction, comment threads
-and Steers commit together. These transactions grant no provider concurrency guarantee.
+cannot settle newer decisions. Current ingestion overlays pending local fields;
+manual `--resolve local|linear` remains implemented but superseded by Jack's policy.
+At `5a786d905`, inbound direction, threads and Steers commit together, without
+provider concurrency guarantees.
 
 October 8's enabled regression `task_completion_preserves_linear_reopening_during_delivery`
 fails: between ownership read and unconditional mutation, Linear reopening is
@@ -52,22 +54,23 @@ at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updat
 Extra reads and matching readback cannot prove preserved concurrent changes.
 The race remains a limit; Linear-wins resolves precedence, not atomicity.
 
-`b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
-local creates one retry-stable UUID without overwriting the provider comment or
-repeating direction. `783305284` saves abandonment/cancellation identity atomically,
-deleting provider-first decision writers. Cleanup checks execution separately;
-safe cancellation delivery remains pending.
+`b3cd894f3` retains both comment conflict values and retry-stable replacement
+identity without overwriting provider comments or repeating direction. `783305284`
+saves abandonment/cancellation atomically; cleanup checks execution separately.
+Safe cancellation delivery remains pending.
 
 Common Task/Project writers, selection, rotation and refiling are committed;
 prior proofs remain at `fa35cfd88:wave/infrastructure/MEMORY.md`, this heading.
-October 8's ownership cut removes personal schema/types/addresses and authority
-selection. Wave documents, inherited context, edits and relocation share SQLite;
+Ownership commit `84664e661` removes personal schema/types/addresses and authority
+selection. Wave documents, context, edits and relocation share SQLite;
 explicit ingestion preserves authored IDs and file bytes. The one v0.13.10 draft
 imports available registered definitions. Missing sources preserve identity for later
 import. Task deletion saves removal and stable pending identity atomically, retaining
 Workflow, Session, Process, PR, checkout and historical provider evidence. Its old
-provider-first writer is deleted. Local CLI/rollback/migration fixtures pass; this
-proves neither installed conversion nor delivery. Historical uncertain relocation
+provider-first writer is deleted. Local CLI/rollback/migration fixtures pass;
+stored plans remain readable beside missing or malformed provider evidence, while
+metric evaluation retains its evidence requirements. This proves neither installed
+conversion nor delivery. Historical uncertain relocation
 and provider transitions remain unresolved. LOO-412 can consume the committed source
 boundary; export, safe field/cancellation/deletion delivery, automatic Linear-wins
 adoption, pending presentation and composed reconnect remain unfinished. An ownership

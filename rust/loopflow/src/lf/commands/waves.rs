@@ -417,7 +417,6 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
     let result = async {
         let registered = store.list_projects(Some(wave.id())).await?;
         let observed = store.sqlite.planning_projects(wave.id())?;
-        let partial = false;
         let current = crate::store::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
@@ -446,7 +445,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 krs: project.krs,
             })
             .collect();
-        Ok((projects, partial))
+        Ok((projects, false))
     }
     .await;
     Evidence::from_result(result)
@@ -985,9 +984,9 @@ pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<Wa
         status,
         goal: store
             .sqlite
-            .wave_documents(wave.id())?
-            .get("GOAL.md")
-            .map(|content| crate::work::wave::config::wave_summary(content))
+            .wave_document(wave.id(), "GOAL.md")?
+            .as_deref()
+            .map(crate::work::wave::config::wave_summary)
             .unwrap_or_else(|| wave.slug().to_string()),
         repo,
         active_tasks,
@@ -2644,7 +2643,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wave_reads_project_plan_and_preserves_unavailable_evidence() {
+    async fn wave_reads_owned_plan_and_preserves_invalid_provider_evidence() {
         let directory = tempfile::tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
@@ -2661,7 +2660,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         assert!(matches!(
             super::project_planning(&store, &wave).await,
-            super::Evidence::Unavailable { .. }
+            super::Evidence::Ok { items, truncated: false } if items.is_empty()
         ));
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
@@ -2702,15 +2701,22 @@ mod tests {
             super::project_planning(&store, &wave).await,
             super::Evidence::Ok { items, .. } if items.len() == 1
         ));
-        // Corrupt the stored entity directly; ingestion rejects malformed plans.
+        // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute("UPDATE pm_projects SET body='not-json'", [])
             .unwrap();
-        assert!(matches!(
-            super::project_planning(&store, &wave).await,
-            super::Evidence::Unavailable { .. }
-        ));
+        let super::Evidence::Ok {
+            items,
+            truncated: false,
+        } = super::project_planning(&store, &wave).await
+        else {
+            panic!("saved Project plan unavailable");
+        };
+        assert_eq!(items.len(), 1);
+        assert!(items[0].current);
+        assert_eq!(items[0].krs[0].text, "Edited proof");
+        assert_eq!(items[0].status, crate::pm::ProjectStatus::Started);
         let missing =
             crate::ops::metrics::wave_metric_portfolio(&store, &wave, OffsetDateTime::now_utc())
                 .await

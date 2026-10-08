@@ -190,10 +190,13 @@ pub async fn workflow_catalog(
     names
         .into_iter()
         .map(|name| {
-            let content = read_workflow_source(&store, &project.wave_id, &name, repo)?;
+            let content = stored
+                .get(&name)
+                .map(String::as_str)
+                .or_else(|| crate::engine::workflow::builtin_workflow(&name));
             let (workflow, unavailable) = match content {
                 Some(content) => {
-                    match crate::engine::workflow::parse_workflow(&name, &content, repo) {
+                    match crate::engine::workflow::parse_workflow(&name, content, repo) {
                         Ok(workflow) => (Some(workflow), None),
                         Err(error) => (None, Some(error)),
                     }
@@ -216,7 +219,7 @@ pub async fn workflow_catalog(
 pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
-    read_workflow_source(&store, &project.wave_id, name, repo)?
+    read_workflow_source(&store, &project.wave_id, name)?
         .ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
 }
 
@@ -255,7 +258,7 @@ pub async fn workflow(
     if let Some(name) = selection {
         let definition = match file {
             Some(path) => std::fs::read_to_string(path).map_err(project_error)?,
-            None => read_workflow_source(&store, &project.wave_id, name, repo)?
+            None => read_workflow_source(&store, &project.wave_id, name)?
                 .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?,
         };
         crate::engine::workflow::parse_workflow(name, &definition, repo).map_err(project_error)?;
@@ -302,7 +305,7 @@ pub(crate) fn load_workflow(
     name: &str,
     repo: &Path,
 ) -> OpsResult<Option<crate::engine::workflow::WorkflowDefinition>> {
-    read_workflow_source(store, wave, name, repo)?
+    read_workflow_source(store, wave, name)?
         .map(|content| {
             crate::engine::workflow::parse_workflow(name, &content, repo).map_err(project_error)
         })
@@ -313,7 +316,6 @@ fn read_workflow_source(
     store: &Store,
     wave: &crate::id::WaveId,
     name: &str,
-    _repo: &Path,
 ) -> OpsResult<Option<String>> {
     match store
         .sqlite

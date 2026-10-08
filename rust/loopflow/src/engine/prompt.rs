@@ -545,13 +545,15 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let store =
         crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
             .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let repo = crate::repository::CanonicalRepo::discover(repo_root)
+        .map_err(|error| CoreError::IoError(error.to_string()))?;
     let mut prefix = String::new();
     for segment in wave.split('/') {
         if !prefix.is_empty() {
             prefix.push('/');
         }
         prefix.push_str(segment);
-        let locator = crate::work::wave::WaveLocator::discover(repo_root, &prefix)
+        let locator = crate::work::wave::WaveLocator::new(repo.clone(), &prefix)
             .map_err(|error| CoreError::IoError(error.to_string()))?;
         let Some(saved) = store
             .get_wave_at(&locator)

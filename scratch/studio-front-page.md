@@ -179,3 +179,8 @@ Tried in `scratch/prototypes/blend-c.html` under the name; blends A and B keep "
 
 Jack Heart: "lets do A. cut the Where it sits section". Blend A is the structure; the three-row stack is removed from it.
 The "Your machines / Your methods" ownership strip lived inside that section and went with it.
+
+## Lead with the desktop app (2026-10-08)
+
+Jack Heart, after blend A was ported: "i think ive changed my mind. lets go back to leading with the desktop app. when sellign the vision of loopflow, we should show the app in its fullness. then we can lean into the terminal stuff later on."
+Order becomes: hero, the Mac capture at full width, For you, For your agents (terminal), FAQ, install.

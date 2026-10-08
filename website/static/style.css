@@ -1375,9 +1375,15 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .actions { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
 
 /* Hero: kicker, headline, one paragraph, the install command. */
-.home-hero { padding: 84px 0 56px; max-width: 900px; }
+.home-hero { padding: 84px 0 20px; }
 .home-hero .kicker { color: var(--burgundy); margin-bottom: 22px; }
-.home-hero h1 { margin-bottom: 26px; }
+.home-hero h1 { max-width: 980px; margin-bottom: 26px; }
+.home-hero .actions { font-size: 13px; }
+.home-hero .actions a:not(.button) { text-decoration: underline; text-underline-offset: 4px; }
+.home-hero .window { margin-top: 48px; }
+.home-page .group > .lede + .lede { margin-top: -20px; }
+.home-page .group > .install-row { margin-bottom: 18px; }
+.home-page .group > .term { max-width: 680px; }
 .home-hero .intro { font-size: 20px; line-height: 1.55; color: #333; max-width: 680px; margin-bottom: 34px; }
 .home-page .install-row { display: flex; align-items: stretch; max-width: 680px; background: #1c1718; border-radius: 8px; overflow: hidden; }
 .home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: 14px 18px; }
@@ -1386,22 +1392,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .copy:focus-visible { outline: 3px solid #f2a7bd; outline-offset: -4px; }
 .home-page .cost { font-size: 13px; color: var(--text-secondary); margin: 14px 0 0; max-width: 680px; }
 .home-page .cost a, .home-page .faq a { text-decoration: underline; text-underline-offset: 4px; }
-
-/* One surface, two panes: the agents' side and the person's side. */
-.home-page .surface { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); border: 1px solid #d9d4cc; border-radius: 12px; overflow: hidden; box-shadow: 0 30px 70px -30px #722f3755, 0 2px 6px #0001; }
-.home-page .pane { display: flex; flex-direction: column; min-width: 0; }
-.home-page .pane-label { display: flex; gap: 10px; align-items: center; padding: 14px 22px; font: 500 11px/1.6 var(--font-mono); text-transform: uppercase; letter-spacing: .12em; margin: 0; }
-.home-page .pane-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
-.home-page .pane.agents { background: #1c1718; color: #efe9e6; }
-.home-page .pane.agents .pane-label { color: #f2a7bd; border-bottom: 1px solid #ffffff1c; }
-.home-page .pane.agents .commands { flex: 1; display: flex; align-items: center; min-width: 0; }
-.home-page .pane.agents .term { flex: 1; min-width: 0; border-radius: 0; background: none; padding: 26px 22px; font-size: 12px; }
-.home-page .pane.you { background: #f4f0ea; color: var(--text); }
-.home-page .pane.you .pane-label { color: var(--burgundy); border-bottom: 1px solid #d9d4cc; }
-.home-page .pane.you .shot { flex: 1; display: flex; align-items: center; padding: 22px; }
-.home-page .pane.you .window { box-shadow: 0 14px 34px -18px #722f3766, 0 1px 3px #0001; width: 100%; }
-.home-page .surface-notes { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; margin-top: 12px; }
-.home-page .surface-notes .capture-label { margin: 0; max-width: 640px; }
 
 /* Numbered claims, in two groups. */
 .home-page .group { padding: 90px 0 0; }
@@ -1496,10 +1486,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-hero .intro { font-size: 18px; }
     .home-page .install-row .term { font-size: 12px; padding: 14px; }
     .home-page .copy { min-width: 72px; padding: 0 12px; }
-    .home-page .surface { grid-template-columns: minmax(0, 1fr); }
-    .home-page .pane.agents .term { padding: 18px 16px; }
-    .home-page .pane-label { padding: 12px 16px; }
-    .home-page .pane.you .shot { padding: 14px; }
     .home-page .group { padding-top: 56px; }
     .home-page .claim, .home-page .claim.wide { grid-template-columns: 1fr; gap: 12px; padding: 30px 0; }
     .home-page .number { padding-top: 0; }

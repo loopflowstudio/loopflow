@@ -244,6 +244,17 @@ About). The organizing system is described plainly and not sold: "Our
 organization system is not special and shoudlnt be sold as such." This
 supersedes the October 7 section order above.
 
+Still October 8, Jack chose a structure borrowed from herdr's and cmux's pages
+(numbered one-sentence claims, an FAQ, a closing install) and then reversed the
+order: "lets go back to leading with the desktop app. when sellign the vision
+of loopflow, we should show the app in its fullness. then we can lean into the
+terminal stuff later on." The page opens with the Mac capture at full width,
+then For you, then For your agents. He cut a "Where it sits" section that
+stacked Loopflow over the coding agent and the terminal. The headline "Build
+software by conducting agents in harmony." is his candidate, asked as a
+question and not yet confirmed; "A software engineering CLI for your agents."
+heads the terminal section.
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

@@ -7,28 +7,32 @@ from playwright.sync_api import Page, expect
 
 
 def test_approved_homepage_sections(homepage: Page) -> None:
-    expect(homepage.locator("h1")).to_have_text("A software engineering CLI for your agents.")
+    expect(homepage.locator("h1")).to_have_text("Build software by conducting agents in harmony.")
     assert homepage.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["flows", "mac", "faq", "start"]
+    ) == ["mac", "flows", "faq", "start"]
     assert homepage.locator(".claim .number").all_text_contents() == [
         f"{number:02}" for number in range(1, 9)
     ]
     expect(homepage.locator(".faq dt")).to_have_count(9)
 
 
-def test_hero_carries_the_install_command_and_its_cost(homepage: Page) -> None:
+def test_hero_leads_with_the_mac_app(homepage: Page) -> None:
     hero = homepage.locator(".home-hero")
-    assert "loopflow.studio/install.sh" in hero.locator("pre").text_content()
-    expect(hero.get_by_role("button", name="Copy")).to_be_visible()
+    expect(hero.get_by_role("link", name="Download for Mac")).to_have_attribute(
+        "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+    )
     expect(hero.locator(".cost")).to_contain_text("has its own cost")
+    assert hero.locator(".window img").bounding_box()["width"] > 1000
+    hero.get_by_role("link", name="Or install the command line ↓").click()
+    expect(homepage.locator("#start h2")).to_be_in_viewport()
 
 
-def test_both_surfaces_sit_side_by_side(homepage: Page) -> None:
-    agents = homepage.locator(".pane.agents").bounding_box()
-    you = homepage.locator(".pane.you").bounding_box()
-    assert agents["y"] == you["y"]
-    assert agents["x"] + agents["width"] <= you["x"] + 1
+def test_terminal_section_carries_the_install_command(homepage: Page) -> None:
+    agents = homepage.locator("#flows")
+    expect(agents.locator("h2")).to_have_text("A software engineering CLI for your agents.")
+    assert "loopflow.studio/install.sh" in agents.locator(".install-row pre").text_content()
+    expect(agents.get_by_role("button", name="Copy", exact=True)).to_be_visible()
 
 
 def test_guide_links_resolve(homepage: Page, base_url: str) -> None:

@@ -124,7 +124,6 @@ SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
 HERO_CONTENT = HOME_CONTENT["hero"]
-SURFACE_CONTENT = HOME_CONTENT["surface"]
 AGENTS_CONTENT = HOME_CONTENT["agents"]
 YOU_CONTENT = HOME_CONTENT["you"]
 FAQ_CONTENT = HOME_CONTENT["faq"]
@@ -776,65 +775,51 @@ def _terminal(content: str, label: str) -> FT:
 
 
 def _hero_section() -> FT:
+    capture = HERO_CONTENT["capture"]
     return Section(
         P(HERO_CONTENT["label"], cls="eyebrow kicker"),
         H1(HERO_CONTENT["heading"]),
         P(HERO_CONTENT["introduction"], cls="intro"),
         Div(
-            Pre(
-                Span("$", cls="p"),
-                " ",
-                Span(HERO_CONTENT["install_command"], id="install-command"),
-                cls="term",
-                tabindex="0",
-                aria_label="Install Loopflow",
+            A(
+                INSTALL_CONTENT["download_label"],
+                href=INSTALL_CONTENT["download_url"],
+                cls="button solid",
             ),
-            Button("Copy", type="button", cls="copy", data_copy="install-command", aria_live="polite"),
-            cls="install-row",
+            A(HERO_CONTENT["command_line"]["label"], href=HERO_CONTENT["command_line"]["href"]),
+            cls="actions",
         ),
-        P(
-            HERO_CONTENT["cost"],
-            " ",
-            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"]),
-            cls="cost",
+        P(HERO_CONTENT["cost"], cls="cost"),
+        Div(
+            Img(
+                src=capture["image"],
+                alt=capture["image_alt"],
+                width=capture["width"],
+                height=capture["height"],
+            ),
+            cls="window",
         ),
+        P(capture["caption"], cls="capture-label"),
         cls="home-hero",
     )
 
 
-def _surface_section() -> FT:
-    capture = SURFACE_CONTENT["capture"]
-    return Section(
-        Div(
-            Div(
-                P(SURFACE_CONTENT["agents_label"], cls="pane-label"),
-                Div(_terminal(SURFACE_CONTENT["commands"], "lf commands"), cls="commands"),
-                cls="pane agents",
-            ),
-            Div(
-                P(SURFACE_CONTENT["you_label"], cls="pane-label"),
-                Div(
-                    Div(
-                        Img(
-                            src=capture["image"],
-                            alt=capture["image_alt"],
-                            width=capture["width"],
-                            height=capture["height"],
-                        ),
-                        cls="window",
-                    ),
-                    cls="shot",
-                ),
-                cls="pane you",
-            ),
-            cls="surface",
+def _install_row() -> FT:
+    return Div(
+        Pre(
+            Span("$", cls="p"),
+            " ",
+            Span(AGENTS_CONTENT["install_command"], id="install-command"),
+            cls="term",
+            tabindex="0",
+            aria_label="Install Loopflow",
         ),
-        Div(*[P(note, cls="capture-label") for note in SURFACE_CONTENT["notes"]], cls="surface-notes"),
-        aria_label="Both sides of the work",
+        Button("Copy", type="button", cls="copy", data_copy="install-command", aria_live="polite"),
+        cls="install-row",
     )
 
 
-def _claims_section(content: dict, section_id: str, first_number: int) -> FT:
+def _claims_section(content: dict, section_id: str, first_number: int, *opening) -> FT:
     """One group of numbered claims; numbers run on across groups."""
 
     def claim(number: int, item: dict) -> FT:
@@ -860,7 +845,8 @@ def _claims_section(content: dict, section_id: str, first_number: int) -> FT:
     return Section(
         P(content["label"], cls="eyebrow"),
         H2(content["heading"]),
-        P(content["introduction"], cls="lede") if "introduction" in content else None,
+        *[P(line, cls="lede") for line in content.get("introduction", [])],
+        *opening,
         Div(
             *[claim(first_number + index, item) for index, item in enumerate(content["claims"])],
             cls="claims",
@@ -1024,9 +1010,14 @@ def build_homepage() -> tuple:
             _topbar("/"),
             Main(
                 _hero_section(),
-                _surface_section(),
-                _claims_section(AGENTS_CONTENT, "flows", 1),
-                _claims_section(YOU_CONTENT, "mac", 1 + len(AGENTS_CONTENT["claims"])),
+                _claims_section(YOU_CONTENT, "mac", 1),
+                _claims_section(
+                    AGENTS_CONTENT,
+                    "flows",
+                    1 + len(YOU_CONTENT["claims"]),
+                    _install_row(),
+                    _terminal(AGENTS_CONTENT["commands"], "lf commands"),
+                ),
                 _faq_section(),
                 _install_section(),
                 id="main-content",

@@ -7,9 +7,10 @@ uv run python dev.py test
 
 Run from `website/`. Preview at `http://localhost:5001`.
 
-Edit homepage copy and examples in `content.yaml`. `main.py` renders two
-sections, For your agents (which opens the page) and For you, then install;
-`static/style.css` controls their layout. `navigation` at the top of the file
+Edit homepage copy and examples in `content.yaml`. `main.py` renders the
+hero with the Mac capture, numbered claims under For you and For your agents,
+the FAQ, then install; `static/style.css` controls their layout. Backticks in
+claim and answer copy set code. `navigation` at the top of the file
 is the one bar on the homepage and studio pages, including its Company menu.
 Flows navigation on docs pages returns to `/#flows`.
 

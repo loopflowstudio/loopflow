@@ -1071,9 +1071,9 @@ proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 
 ## Agent startup profiling (LOO-436, 2026-10-08)
 
-October 8 memory records Jack Heart's landing approval for #1505. Latest supplied
-iteration direction retains an unmerged PR and open Task; delivery owns publication.
-Cold-cache verification remains outstanding.
+After the HTML graphs and overhead explanation, Jack Heart requested landing
+#1505 on October 8. This supersedes review-only Flow feedback.
+Keep the Task open for outstanding cold-cache verification.
 [The report](../../scripts/benchmarks/agent-startup/README.md) owns numbers,
 release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and

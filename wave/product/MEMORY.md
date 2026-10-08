@@ -13,10 +13,10 @@ Optional PRs and post-merge filing remain unbuilt. Dependent PRs use stacked Tas
 Jack accepted a waited landing Flow with follow-through, recovered by the next
 Task/Wave operation, without a new watcher. No schedule means no automatic wake.
 These decisions supersede older serial-chain and keep-open directions below.
-Jack requested advancement: first Flow visibility and the completion alias;
-no landing. `scratch/make-a-task-up-to.md` retains unresolved lifecycle choices.
+Jack rejected the agent's launch/alias-only demo stop: build the full lifecycle
+on PR #1499 before demo. No landing. The design retains implementation defaults.
 
-Integrated `35e759aaf` includes #1488/#1495: bare land defaults to completion, while
+Base #1488/#1495: bare land defaults to completion, while
 `TaskFollowUp` keeps an obligation on the source Task. Replace that writer as
 well as rotation; retain existing obligations and multi-PR history. LOO-385's
 no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.

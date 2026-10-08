@@ -1,0 +1,1 @@
+`cargo test -p loopflow --test default_conversation_tests --test flow_tests`: 29 passed, one exposed same-second context-file overwrites; repaired with unique prompt IDs, then `cargo test -p loopflow --lib write_prompt_log_creates_file` and `cargo test -p loopflow --test flow_tests bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone -- --exact` passed.

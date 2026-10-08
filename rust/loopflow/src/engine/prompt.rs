@@ -17,6 +17,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tiktoken_rs::CoreBPE;
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 /// Source of a context document or context token bucket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1706,7 +1707,7 @@ pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied c
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
+/// File format: `{timestamp}-{trace_id}-{id}-{sources}.{skill}.md`, with the
 /// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
 /// to its command trace.
 ///
@@ -1734,9 +1735,11 @@ pub fn write_prompt_log(
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
+    // Steps share a trace and may launch within the same second. Retain each input.
+    let id = Uuid::new_v4();
     let filename = match trace_part {
-        Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
-        None => format!("{}-{}.md", timestamp, name_part),
+        Some(trace_id) => format!("{timestamp}-{trace_id}-{id}-{name_part}.md"),
+        None => format!("{timestamp}-{id}-{name_part}.md"),
     };
     let path = prompts_dir.join(&filename);
 
@@ -2792,8 +2795,10 @@ mod tests {
         assert!(path.to_string_lossy().contains(".lf/prompts/"));
         assert!(path.to_string_lossy().ends_with("-implement.md"));
 
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, prompt);
+        let next = write_prompt_log(repo.path(), "Next step", "implement", None).unwrap();
+        assert_ne!(path, next);
+        assert_eq!(fs::read_to_string(&path).unwrap(), prompt);
+        assert_eq!(fs::read_to_string(&next).unwrap(), "Next step");
     }
 
     #[test]

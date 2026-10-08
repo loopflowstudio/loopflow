@@ -688,6 +688,7 @@ fn process_ci_fix(
                     launch.provider_account_id = request.account_id;
                     launch.system_prompt = request.system_prompt;
                     launch.task_prompt = request.task_prompt;
+                    launch.skill_invocation = request.skill_invocation;
                     launch.max_turns = request.max_turns;
                     launch.write_scope = request.write_scope;
                     launch.execution_boundary = request.execution_boundary;

@@ -820,7 +820,15 @@ impl Harness for CodexHarness {
 
     async fn send_input(&mut self, content: &str) -> Result<()> {
         let text = content.trim();
-        if text.is_empty() {
+        let invocation = self
+            .should_seed_prompt
+            .then(|| {
+                self.launch
+                    .as_ref()
+                    .and_then(|launch| launch.skill_invocation.as_ref())
+            })
+            .flatten();
+        if text.is_empty() && invocation.is_none() {
             return Ok(());
         }
         if self.turn_in_progress.load(Ordering::Relaxed) {
@@ -845,7 +853,10 @@ impl Harness for CodexHarness {
         let thread_id = self
             .thread_id()
             .ok_or_else(|| anyhow!("codex thread not started"))?;
-        let input = json!([{ "type": "text", "text": turn_text }]);
+        let mut input = vec![json!({ "type": "text", "text": turn_text })];
+        if let Some(invocation) = invocation {
+            input.push(json!({ "type": "text", "text": invocation.codex_prompt() }));
+        }
 
         let params = json!({ "threadId": thread_id, "input": input });
         self.send_request("turn/start", params).await?;

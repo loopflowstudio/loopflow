@@ -258,23 +258,6 @@ pub enum SessionFlowOccurrence {
     Past,
 }
 
-/// Add one headless input to an open conversation and return it prepared; the
-/// launch that takes it resumes the conversation's native history.
-pub(crate) fn continue_conversation(id: &str) -> Result<String> {
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
-    let mut next = store.session(id)?.ok_or_else(|| session_not_found(id))?;
-    anyhow::ensure!(
-        next.completed_at.is_none(),
-        "session {id:?} is already complete"
-    );
-    let replaced = next.captured;
-    next.artifact_key = crate::session_record::new_artifact_key();
-    next.input_published = false;
-    let next = store.replace_session_input(replaced, next)?;
-    let flow = crate::session_record::SessionFlowMembership::Independent;
-    Ok(publish_prepared_input(&store, &next, flow)?.artifact_key)
-}
-
 pub(crate) fn publish_prepared_input(
     store: &crate::store::sqlite::SqliteStore,
     session: &AgentSession,
@@ -293,17 +276,7 @@ pub(crate) fn publish_prepared_input(
             repo: None,
             worktree: Some(session.cwd.clone()),
             skill: session.skill.clone(),
-            subjects: work_selector(session)
-                .map(|selector| crate::session_record::SubjectAttribution {
-                    selector,
-                    source: if session.work_source == Some(WorkSource::Inherited) {
-                        crate::session_record::AttributionSource::Inherited
-                    } else {
-                        crate::session_record::AttributionSource::Declared
-                    },
-                })
-                .into_iter()
-                .collect(),
+            subjects: capture_subjects(session),
             flow,
             work: None,
         },
@@ -338,16 +311,7 @@ pub(crate) async fn list(
     workspace::associate(store, &mut sessions).await?;
     if association_filter {
         let task = if let Some(selector) = &filter.task {
-            store
-                .task_checkouts()
-                .await?
-                .into_iter()
-                .find(|task| {
-                    task.task_id.as_str() == selector
-                        || task.issue_id == *selector
-                        || task.issue_identifier == *selector
-                })
-                .map(|task| task.task_id)
+            store.sqlite.resolve_task_id(selector, None)?
         } else {
             None
         };
@@ -608,7 +572,7 @@ async fn serve_locked(
 
 async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -> Vec<String> {
     let mut args = vec![
-        "--tui".to_string(),
+        "-i".to_string(),
         "--agent".to_string(),
         launch_model(session),
         "--__cwd".to_string(),
@@ -636,6 +600,22 @@ async fn conversation_launch_args(store: &SharedStore, session: &AgentSession) -
             .unwrap_or_else(|| PRIMARY_MESSAGE.to_string()),
     );
     args
+}
+
+pub(crate) fn capture_subjects(
+    session: &AgentSession,
+) -> Vec<crate::session_record::SubjectAttribution> {
+    work_selector(session)
+        .map(|selector| crate::session_record::SubjectAttribution {
+            selector,
+            source: if session.work_source == Some(WorkSource::Inherited) {
+                crate::session_record::AttributionSource::Inherited
+            } else {
+                crate::session_record::AttributionSource::Declared
+            },
+        })
+        .into_iter()
+        .collect()
 }
 
 fn work_selector(session: &AgentSession) -> Option<String> {

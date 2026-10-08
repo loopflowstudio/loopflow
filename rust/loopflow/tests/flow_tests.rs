@@ -414,6 +414,7 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .args(args)
         .current_dir(repo)
         .env("HOME", home)
+        .env("CODEX_HOME", home.join(".codex"))
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("NO_COLOR", "1");
@@ -717,7 +718,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
         write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
         ));
         let path = format!(
             "{}:{}",
@@ -727,7 +728,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let launch = run_lf(
             repo.path(),
             home.path(),
-            &["--tui", "skill", "identity-proof", "--no-loopflow"],
+            &["-i", "skill", "identity-proof", "--no-loopflow"],
             Some(&path),
         );
         assert!(
@@ -792,6 +793,7 @@ fn flow_parsing_parity() {
         flow.items[1],
         Step {
             target: loopflow::engine::target::Target::Skill(Skill {
+                source: None,
                 name: "review".to_string(),
                 agent: None,
                 default_agent: None,
@@ -998,6 +1000,65 @@ fn authored_flow_records_each_skill_as_one_session() {
     assert!(runs
         .iter()
         .all(|run| run["recorded_outcome"] == "completed"));
+}
+
+#[test]
+fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
+    let repo = loopflow_test_support::TestRepo::new();
+    // Even a skill named default obeys the Flow's headless execution mode.
+    for name in ["default", "work"] {
+        write_skill(repo.path(), name, "private-instructions-marker");
+    }
+    write_flow(
+        repo.path(),
+        "readable",
+        "- default\n- cmd: flow list\n- work\n",
+    );
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("agent-readable-text", ""),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    for (verbose, log_filter) in [
+        (false, None),
+        (true, None),
+        (true, Some("loopflow=trace,lf=trace")),
+    ] {
+        let home = TempDir::new().unwrap();
+        let mut args = vec![
+            "--batch",
+            "--no-loopflow",
+            "-a",
+            "codex",
+            "run",
+            "readable",
+            "private-message-marker",
+        ];
+        if verbose {
+            args.insert(0, "--verbose");
+        }
+        let mut command = lf_command(repo.path(), home.path(), &args, Some(&path));
+        command.env_remove("RUST_LOG");
+        if let Some(filter) = log_filter {
+            command.env("RUST_LOG", filter);
+        }
+        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("agent-readable-text"));
+        assert!(stderr.contains("[1/3] default"), "{stderr}");
+        assert!(stderr.contains("[2/3] flow list"), "{stderr}");
+        assert!(stderr.contains("[3/3] work"), "{stderr}");
+        assert_eq!(stderr.contains("INFO"), verbose, "{stderr}");
+        assert_eq!(stderr.contains("total"), verbose, "{stderr}");
+        assert!(!stderr.contains("private-message-marker"), "{stderr}");
+        assert!(!stderr.contains("private-instructions-marker"), "{stderr}");
+    }
 }
 
 #[test]
@@ -1382,7 +1443,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     write_executable(
         &bin.path().join("codex"),
         &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\n\
              printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
              | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
             launched.display()
@@ -1409,7 +1470,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // In the Task's checkout, a plain launch binds to that Task.
     repo.create_branch("task-binding");
-    let bound = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let bound = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     let listed = session(&bound);
     assert_eq!(
         listed["work"],
@@ -1429,7 +1490,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
 
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
-    let unbound = launch(&unrelated, &["--tui", "binding-work", "--no-loopflow"]);
+    let unbound = launch(&unrelated, &["-i", "binding-work", "--no-loopflow"]);
     let history = json(&["session", "list", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
@@ -1445,13 +1506,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     repo.checkout("task-binding");
     let explicit = launch(
         repo.path(),
-        &[
-            "--task",
-            "INF-124",
-            "--tui",
-            "binding-work",
-            "--no-loopflow",
-        ],
+        &["--task", "INF-124", "-i", "binding-work", "--no-loopflow"],
     );
     assert_eq!(
         session(&explicit)["work"],
@@ -1487,7 +1542,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     runtime
         .block_on(task.store.update_task_pr(&landed))
         .unwrap();
-    let after_landing = launch(repo.path(), &["--tui", "binding-work", "--no-loopflow"]);
+    let after_landing = launch(repo.path(), &["-i", "binding-work", "--no-loopflow"]);
     assert_eq!(
         session(&after_landing)["work"],
         serde_json::json!({"kind": "task", "id": task.task.id})
@@ -1543,9 +1598,9 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
 
     register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
-    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
-        "read -r turn_start\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
+        "read -r turn_start\npwd >> \"$LF_HOME/cwds\"\nprintf '%s\\n' \"$thread_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );
     write_executable(&bin.path().join("codex"), &provider);
     let path = format!(

@@ -65,10 +65,23 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
+`cargo test -p loopflow --test agent_startup_tests` exercises bare `lf` and
+Session reconnect to a stand-in provider with an empty environment and no
+credentials. CI's ordinary Rust network isolation covers it. It bounds provider
+and Git launches, SQLite statement/returned-row counts, and time to provider
+handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
+remain a separate opt-in benchmark.
+
 Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
 Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent
 of product defaults.
+
+Changes to interactive/headless selection also run `default_conversation_tests`
+and `context_launch_tests` alongside `flow_tests`: bare `lf`, explicit `-b`, and a
+Flow invoking the `default` skill must preserve their distinct launch modes.
+Prompt fixtures read the harness's actual inputs, including context files and
+stdin, rather than assuming everything remains in argv.
 
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
@@ -662,9 +675,9 @@ Run the launch checks after syncing CLI changes; they parse the current flags
 before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
-review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
-to cover interactive skill launches. Keep prose contracts in builtin tests;
-launch tests should prove that the canonical document is included.
+review them before gate. The `skill_launch` checks above cover terminal launches.
+Keep prose contracts in builtin tests; launch tests should prove that the
+canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,
@@ -756,8 +769,8 @@ Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
-installation proofs and the Linux `task_deletion_tests` binary test. macOS skips
-the deletion test, and the regular Rust suite skips installation proofs. Keep
+installation proofs and the paired `local_planning` deletion proof. The independent abandonment
+`task_deletion_tests` binary fixture runs only on Linux, and the regular Rust suite skips installation proofs. Keep
 simulated provider revisions and checkout Team/Initiative bindings consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
@@ -833,7 +846,7 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise Task deletion through the real CLI on Linux:
+Exercise retained execution during abandonment through the real CLI on Linux:
 
 ```bash
 cargo test -p loopflow --test task_deletion_tests
@@ -842,9 +855,9 @@ cargo test -p loopflow --test task_deletion_tests
 Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so this test is Linux-only. It verifies native removal, local retirement,
-completed history, retained PRs/files, retries, planning sync, diagnostics and
-rejection of the removed `pm`/`work` groups. No installation or live provider is
+setting, so this test is Linux-only. It verifies an immediate cancellation save, stable pending delivery and retained
+Sessions, Processes, PRs and files. `local_planning` covers deletion in both connection
+modes, rollback, retry identity and retained execution without provider access. No installation or live provider is
 used.
 
 Exercise Linear expiry and rejection through an explicit experimental CLI:
@@ -888,6 +901,21 @@ It exercises the real CLI, verified shell installer, store creation, repeat
 installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
+
+### Native Codex terminal capture
+
+```bash
+uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py \
+  --lf target/debug/lf --codex /path/to/native/codex
+```
+
+Use a native Codex binary supporting profile files. This headless PTY fixture
+uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+independently authored wrapper supplying trust plus SessionStart/Stop hooks.
+It verifies completed turns, exact native capture, both launch hooks, reconnect,
+unchanged configuration and temporary-profile cleanup. It uses no account or
+login. Native 0.160.1 resume emits neither fresh hook in this fixture, even
+without lf. This proves launch composition, not cmux's actual tab tracking.
 
 ### Released capture-history preservation
 
@@ -1048,6 +1076,11 @@ Loopflow can hide the CI failure.
 Include direct provider-harness startup tests in this check: even an expected
 spawn failure first resolves the conversation's `lf`. Pin a fixture executable
 under the environment lock and restore the pin afterward.
+
+Changes to terminal provider probes or spawning must run both `session_cli_tests`
+and `agent_startup_tests`. An executable that exits with an error still started
+and must record its opening; use an absent or non-executable fixture for spawn
+failure, with PATH restricted so no installed provider can take its place.
 
 Release repair checks must cover completion before inherited checkout locks close.
 Use the public release path with a delayed repair launcher; a terminal Process receipt

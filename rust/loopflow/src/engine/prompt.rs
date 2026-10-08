@@ -5,6 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -192,6 +193,17 @@ pub struct PromptComponents {
     pub diff_file_count: usize,
     /// Source reductions carried into the existing Run context evidence.
     pub budget_decisions: Vec<crate::trace::ContextDecision>,
+}
+
+impl PromptComponents {
+    pub fn is_standalone_skill(&self) -> bool {
+        !self.operate
+            && self.skill.as_ref().is_some_and(|skill| {
+                skill.source.as_ref().is_some_and(|source| {
+                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                })
+            })
+    }
 }
 
 /// Count tokens using tiktoken (cl100k_base encoding).
@@ -530,30 +542,32 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    let mut directory = PathBuf::from("wave");
-    for segment in Path::new(wave).components() {
-        directory.push(segment);
-        let absolute = repo_root.join(&directory);
-        if !absolute.is_dir() {
-            continue;
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let repo = crate::repository::CanonicalRepo::discover(repo_root)
+        .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let mut prefix = String::new();
+    for segment in wave.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
         }
-        let mut paths = fs::read_dir(&absolute)?
-            .map(|entry| entry.map(|entry| entry.path()))
-            .collect::<Result<Vec<_>, _>>()?;
-        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
-        paths.sort_by_key(|path| {
-            (
-                path.file_name().is_none_or(|name| name != "README.md"),
-                path.clone(),
-            )
-        });
-        for path in paths {
+        prefix.push_str(segment);
+        let locator = crate::work::wave::WaveLocator::new(repo.clone(), &prefix)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+        let Some(saved) = store
+            .get_wave_at(&locator)
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        else {
+            continue;
+        };
+        for (name, content) in store
+            .wave_documents(saved.id())
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        {
             docs.push(Document {
-                path: directory
-                    .join(path.file_name().expect("directory entry has a name"))
-                    .to_string_lossy()
-                    .into_owned(),
-                content: fs::read_to_string(&path)?,
+                path: format!("wave/{prefix}/{name}"),
+                content,
                 source: DocumentSource::Wave,
             });
         }
@@ -1496,6 +1510,9 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
 
 /// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
+    if components.is_standalone_skill() {
+        return Vec::new();
+    }
     let mut parts = Vec::new();
 
     if components.operate {
@@ -1525,9 +1542,10 @@ pub fn loopflow_section() -> String {
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
+        let memory = format!("Curate stored Wave memory with `lf wave edit {wave} --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.");
         parts.push(format!(
             "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
-             Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.\n\
+             {memory}\n\
              Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
         ));
     }
@@ -1706,7 +1724,7 @@ pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied c
 /// Write a runtime prompt file and return its path.
 ///
 /// In-repo: `.lf/prompts/<file>` — agent reads this at runtime.
-/// File format: `{timestamp}-{trace_id}-{sources}.{skill}.md`, with the
+/// File format: `{timestamp}-{trace_id}-{unique}-{sources}.{skill}.md`, with the
 /// `{trace_id}` segment present when `LF_TRACE_ID` is set, joining the prompt
 /// to its command trace.
 ///
@@ -1734,13 +1752,17 @@ pub fn write_prompt_log(
         .ok()
         .map(|value| value.trim().replace('/', "."))
         .filter(|value| !value.is_empty());
-    let filename = match trace_part {
-        Some(trace_id) => format!("{}-{}-{}.md", timestamp, trace_id, name_part),
-        None => format!("{}-{}.md", timestamp, name_part),
+    let prefix = match trace_part {
+        Some(trace_id) => format!("{timestamp}-{trace_id}-"),
+        None => format!("{timestamp}-"),
     };
-    let path = prompts_dir.join(&filename);
-
-    fs::write(&path, prompt)?;
+    // A later step must not overwrite context retained by an earlier invocation.
+    let mut file = tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(&format!("-{name_part}.md"))
+        .tempfile_in(&prompts_dir)?;
+    file.write_all(prompt.as_bytes())?;
+    let (_, path) = file.keep().map_err(|error| error.error)?;
 
     Ok(path)
 }
@@ -2172,6 +2194,7 @@ mod tests {
     fn format_prompt_with_skill() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement the feature described.".to_string()),
                 agent: None,
@@ -2192,6 +2215,7 @@ mod tests {
     fn format_prompt_with_skill_no_content() {
         let components = PromptComponents {
             skill: Some(Skill {
+                source: None,
                 name: "review".to_string(),
                 content: None,
                 agent: None,
@@ -2284,6 +2308,7 @@ mod tests {
                 source: DocumentSource::Docs,
             }],
             skill: Some(Skill {
+                source: None,
                 name: "implement".to_string(),
                 content: Some("Implement it.".to_string()),
                 agent: None,
@@ -2763,7 +2788,13 @@ mod tests {
 
     #[test]
     fn gather_context_wave_preserved() {
-        let temp = tempfile::tempdir().expect("create temp dir");
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+            .unwrap();
+        let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();
 
         let opts = GatherContextOpts {
@@ -2792,8 +2823,26 @@ mod tests {
         assert!(path.to_string_lossy().contains(".lf/prompts/"));
         assert!(path.to_string_lossy().ends_with("-implement.md"));
 
-        let content = fs::read_to_string(&path).unwrap();
-        assert_eq!(content, prompt);
+        let next = write_prompt_log(repo.path(), "Next step", "implement", None).unwrap();
+        assert_ne!(path, next);
+        assert_eq!(fs::read_to_string(&path).unwrap(), prompt);
+        assert_eq!(fs::read_to_string(&next).unwrap(), "Next step");
+    }
+
+    #[test]
+    fn write_prompt_log_retains_each_invocations_context() {
+        let repo = init_repo();
+        let prompts: Vec<_> = (0..16)
+            .map(|turn| {
+                let text = format!("Context for invocation {turn}");
+                let path = write_prompt_log(repo.path(), &text, "work.context", None).unwrap();
+                (path, text)
+            })
+            .collect();
+
+        for (path, text) in prompts {
+            assert_eq!(fs::read_to_string(path).unwrap(), text);
+        }
     }
 
     #[test]

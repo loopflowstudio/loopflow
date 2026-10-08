@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::Command;
 use serde::Serialize;
 
-use crate::lf::discovery::{
-    definition_source, list_all_skills, resolve_local_definition, DefinitionKind, Target,
+use crate::engine::target::{resolve_definition, DefinitionKind};
+use crate::lf::navigation::{
+    command_tree, definition_invocation, definition_source, format_target, resolve_path,
 };
-use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
 
 #[derive(Debug, Serialize)]
 pub struct Entry {
@@ -20,22 +20,17 @@ pub struct Entry {
     pub invocation: String,
 }
 
-fn definition_entry(tree: &Command, repo: &Path, name: String, kind: DefinitionKind) -> Entry {
-    let description = match resolve_local_definition(repo, &name, Some(kind)) {
-        Ok(Target::Skill(skill)) => skill
-            .content
-            .unwrap_or_default()
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or_default()
-            .trim_start_matches('#')
-            .trim()
-            .to_string(),
-        Ok(target) => crate::lf::discovery::format_target(&target),
+fn flow_entry(tree: &Command, repo: &Path, name: String) -> Entry {
+    let kind = DefinitionKind::Flow;
+    let description = match resolve_definition(repo, &name, Some(kind)) {
+        Ok(target) => format_target(&target),
         Err(error) => format!("unavailable: {error}"),
     };
     Entry {
-        source: definition_source(repo, &name, kind),
+        source: definition_source(
+            repo,
+            crate::engine::flow::find_flow_source_path(&name, repo).as_deref(),
+        ),
         invocation: definition_invocation(tree, &name, kind),
         name,
         kind: kind.as_str().to_string(),
@@ -71,16 +66,11 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
         }
     }
     if path.is_empty() || path.first().is_some_and(|name| name == "skill") {
-        let (local, global, builtin, external) = list_all_skills(Some(repo));
-        let names: BTreeSet<_> = local
-            .into_iter()
-            .chain(global)
-            .chain(builtin)
-            .chain(external.into_iter().map(|(name, _)| name))
-            .collect();
+        let catalog = crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))?;
         let namespace = path.get(1).map(|name| format!("{name}/"));
         let mut namespaces = BTreeSet::new();
-        for name in names {
+        for source in catalog.entries() {
+            let name = &source.name;
             if namespace
                 .as_ref()
                 .is_some_and(|prefix| !name.starts_with(prefix))
@@ -101,7 +91,19 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
                     continue;
                 }
             }
-            entries.push(definition_entry(tree, repo, name, DefinitionKind::Skill));
+            let description = match source.read() {
+                Ok(content) => {
+                    crate::engine::skills::skill_description(&content).unwrap_or_default()
+                }
+                Err(error) => format!("unavailable: {error}"),
+            };
+            entries.push(Entry {
+                name: name.clone(),
+                kind: "skill".into(),
+                source: definition_source(repo, source.path.as_deref()),
+                description,
+                invocation: definition_invocation(tree, name, DefinitionKind::Skill),
+            });
         }
         if !path.is_empty() {
             return Ok(entries);
@@ -109,7 +111,7 @@ fn collect_entries(tree: &Command, path: &[String], repo: &Path) -> Result<Vec<E
     }
     if path.is_empty() || path == ["flow"] {
         for name in crate::engine::available_flow_names(repo)? {
-            entries.push(definition_entry(tree, repo, name, DefinitionKind::Flow));
+            entries.push(flow_entry(tree, repo, name));
         }
         if !path.is_empty() {
             return Ok(entries);

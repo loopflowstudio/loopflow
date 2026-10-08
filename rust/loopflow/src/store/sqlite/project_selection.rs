@@ -2,12 +2,14 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::SqliteStore;
+use crate::durable::ProjectId;
 use crate::id::WaveId;
+use crate::pm::PmProject;
 use crate::store::{PlanningLocks, StoreError, StoreResult};
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
-        "SELECT p.external_project_id FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
+        "SELECT COALESCE(p.external_project_id,p.id) FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
         [wave], |row| row.get(0),
     )?)
 }
@@ -18,6 +20,43 @@ pub(crate) fn read_project_binding(
 ) -> StoreResult<Option<String>> {
     let conn = store.conn.lock().expect("store mutex poisoned");
     read_in(&conn, wave)
+}
+
+// Selection accepts exact saved identities; display names and slugs never select a plan.
+fn resolve_project_id(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM projects WHERE wave_id=?1 AND (id=?2 OR external_project_id=?2)",
+            params![wave, project],
+            |row| row.get(0),
+        )
+        .optional()?;
+    id.map(ProjectId::from_raw).ok_or_else(|| {
+        StoreError::InvalidAuthority("Project ID has no saved record in this Wave".into())
+    })
+}
+
+// Initial binding and one-time import share the same identity decision.
+fn bind_in(conn: &Connection, wave: &WaveId, project: &str) -> StoreResult<ProjectId> {
+    let id = resolve_project_id(conn, wave, project)?;
+    let selected: Option<String> = conn.query_row(
+        "SELECT current_project_id FROM waves WHERE id=?1",
+        [wave],
+        |row| row.get(0),
+    )?;
+    if selected
+        .as_deref()
+        .is_some_and(|selected| selected != id.as_str())
+    {
+        return Err(StoreError::InvalidAuthority(
+            "Wave already has a different configured Project".into(),
+        ));
+    }
+    conn.execute(
+        "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NULL",
+        params![wave, id.as_str()],
+    )?;
+    Ok(id)
 }
 
 fn write_in(
@@ -31,26 +70,16 @@ fn write_in(
             "Project selection changed; preserve the intervening decision".into(),
         ));
     }
-    let id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM projects WHERE wave_id=?1 AND external_project_id=?2",
-            params![wave, project],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let id = id.ok_or_else(|| {
-        StoreError::InvalidAuthority(
-            "Project selection requires accepted facts owned by this Wave".into(),
-        )
-    })?;
+    let id = resolve_project_id(conn, wave, project)?;
     conn.execute(
         "UPDATE waves SET current_project_id=?2 WHERE id=?1 AND current_project_id IS NOT ?2",
-        params![wave, id],
+        params![wave, id.as_str()],
     )?;
     Ok(())
 }
 
 /// Callers hold the Wave guard through reconciliation; compare and replace in one transaction.
+#[cfg(test)]
 pub(crate) fn write_project_binding(
     store: &SqliteStore,
     wave: &WaveId,
@@ -66,24 +95,126 @@ pub(crate) fn write_project_binding(
 }
 
 impl SqliteStore {
-    pub(crate) fn finish_project_creation(
-        &self,
-        wave: &WaveId,
-        expected: Option<&str>,
-        project: &str,
-        _guard: &PlanningLocks,
-    ) -> StoreResult<()> {
+    pub(crate) fn bind_project(&self, wave: &WaveId, project: &str) -> StoreResult<PmProject> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        write_in(&tx, wave, expected, project)?;
-        let updated = tx.execute("UPDATE project_transitions SET settled_at=COALESCE(settled_at,unixepoch()) WHERE wave_id=?1 AND successor_id=?2 AND predecessor_id IS NULL AND reset_name IS NULL", params![wave,project])?;
-        if updated != 1 {
+        let project = bind_in(&tx, wave, project)?;
+        let candidate = super::plan_read::project_in(&tx, &project)?;
+        let competing: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM project_transitions WHERE wave_id=?1 AND settled_at IS NULL
+            AND (successor_id NOT IN (?2,?3) OR predecessor_id IS NOT NULL OR reset_name IS NOT NULL))",
+            params![wave,project.as_str(),candidate.id],|row|row.get(0))?;
+        if competing {
             return Err(StoreError::InvalidAuthority(
-                "Project creation reservation is missing".into(),
+                "an unfinished Project transition owns selection".into(),
             ));
         }
+        match readiness_in(&tx,wave)?.state {
+            ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
+                "Project is terminal or has unresolved provider evidence; selection is unchanged".into())),
+            _ => {}
+        }
         tx.commit()?;
-        Ok(())
+        Ok(candidate)
+    }
+
+    pub(crate) fn ensure_project(&self, wave: &WaveId, name: &str) -> StoreResult<ProjectId> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let selected = read_in(&tx, wave)?;
+        let pending: Option<(String, Option<String>, Option<String>)> = tx
+            .query_row(
+                "SELECT successor_id,predecessor_id,reset_name FROM project_transitions
+             WHERE wave_id=?1 AND settled_at IS NULL",
+                [wave],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        if pending.as_ref().is_some_and(|(id, predecessor, reset)| {
+            predecessor.is_some()
+                || reset.is_some()
+                || selected.as_ref().is_some_and(|selected| selected != id)
+        }) {
+            return Err(StoreError::InvalidAuthority(
+                "an unfinished Project transition owns selection; resume its original request"
+                    .into(),
+            ));
+        }
+        let now = crate::store::rows::now_unix();
+        let id = if selected.is_some() {
+            if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+                return Err(StoreError::InvalidAuthority(
+                    "selected Project has unresolved provider evidence".into(),
+                ));
+            }
+            tx.query_row(
+                "SELECT current_project_id FROM waves WHERE id=?1",
+                [wave],
+                |row| row.get::<_, String>(0),
+            )?
+        } else {
+            let id = match &pending {
+                Some((id, _, _)) => {
+                    let uuid = uuid::Uuid::parse_str(id.strip_prefix("proj_").unwrap_or(id))
+                        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+                    ProjectId::from_raw(format!("proj_{}", uuid.simple()))
+                }
+                None => ProjectId::new(),
+            };
+            // A retained mapping may already own an interrupted creation's identity.
+            let existing: Option<String> = tx.query_row(
+                "SELECT id FROM projects WHERE wave_id=?1 AND (id=?2 OR external_project_id=?3)",
+                params![wave,id.as_str(),pending.as_ref().map(|p| &p.0)], |row| row.get(0),
+            ).optional()?;
+            if let Some(existing) = existing {
+                existing
+            } else {
+                tx.execute(
+                    "INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,
+                    project_name,project_prompt_context,status,workflow)
+                    VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
+                    params![id.as_str(), wave, now, name],
+                )?;
+                super::durable::inherit_project_placement(&tx, &id)?;
+                if pending.is_none() {
+                    tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
+                        VALUES(?1,?2,?3,?4)",params![wave,id.as_str(),now,serde_json::json!({"name":name}).to_string()])?;
+                }
+                id.to_string()
+            }
+        };
+        let id = ProjectId::from_raw(id);
+        let project = super::plan_read::project_in(&tx, &id)?;
+        if !matches!(
+            project.status,
+            crate::pm::ProjectStatus::Backlog
+                | crate::pm::ProjectStatus::Planned
+                | crate::pm::ProjectStatus::Started
+        ) {
+            return Err(StoreError::InvalidAuthority(
+                "terminal or paused Project history cannot be activated".into(),
+            ));
+        }
+        super::planning_changes::PlanningChanges::Project(&id).record(
+            &tx,
+            "status",
+            serde_json::to_value(project.status)?,
+            serde_json::json!("started"),
+        )?;
+        tx.execute(
+            "UPDATE projects SET status='started',updated_at=?2 WHERE id=?1 AND status!='started'",
+            params![id.as_str(), now],
+        )?;
+        write_in(&tx, wave, selected.as_deref(), id.as_str())?;
+        if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+            return Err(StoreError::InvalidAuthority(
+                "Project has unresolved provider evidence; activation is unchanged".into(),
+            ));
+        }
+        tx.execute("UPDATE project_transitions SET settled_at=COALESCE(settled_at,?3)
+            WHERE wave_id=?1 AND successor_id=?2 AND predecessor_id IS NULL AND reset_name IS NULL AND settled_at IS NULL",
+            params![wave,pending.as_ref().map_or(id.as_str(),|p|p.0.as_str()),now])?;
+        tx.commit()?;
+        Ok(id)
     }
 
     pub(crate) fn record_project_activation(
@@ -128,13 +259,7 @@ impl SqliteStore {
         )?;
         if !imported {
             if let Some(project) = project {
-                let selected = read_in(&tx, wave)?;
-                if selected.as_deref().is_some_and(|id| id != project) {
-                    return Err(StoreError::InvalidAuthority(
-                        "YAML import conflicts with the Wave's selected Project".into(),
-                    ));
-                }
-                write_in(&tx, wave, selected.as_deref(), project)?;
+                bind_in(&tx, wave, project)?;
             }
             tx.execute("INSERT INTO project_binding_imports(wave_id,original_yaml,imported_at) VALUES(?1,?2,unixepoch())", params![wave, original])?;
         }
@@ -171,33 +296,49 @@ pub struct ProjectActivation {
 }
 
 impl SqliteStore {
-    /// Partial ingestion can confirm one Project before a full inventory exists.
-    pub(crate) fn accepted_projects(
+    pub(crate) fn selected_planning_project(
         &self,
         wave: &WaveId,
-    ) -> StoreResult<Vec<crate::pm::PmProject>> {
+    ) -> StoreResult<Option<PmProject>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT f.body FROM projects p JOIN waves w ON w.id=p.wave_id
-            JOIN pm_projects f ON f.repo=w.repo AND f.provider='linear' AND f.id=p.external_project_id
-            JOIN pm_wave_projects m ON m.wave_id=w.id AND m.project_id=f.id
-            LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
-            WHERE w.id=?1 AND f.archived=0 AND f.membership_unresolved=0
-              AND p.pm_snapshot_synced_at=f.observed_at
-              AND (s.wave_id IS NULL OR EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative))
-            ORDER BY m.position,f.id")?;
-        let rows = query.query_map([wave], |row| row.get::<_, String>(0))?;
-        rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
+        let tx = conn.unchecked_transaction()?;
+        let readiness = readiness_in(&tx, wave)?;
+        match readiness.state {
+            ProjectReadinessState::Unconfigured => return Ok(None),
+            ProjectReadinessState::Unavailable => {
+                return Err(StoreError::InvalidData(format!(
+                    "Wave {wave} selected Project is unavailable; inspect its saved fields and retained provider evidence"
+                )));
+            }
+            _ => {}
+        }
+        let id: String = tx.query_row(
+            "SELECT current_project_id FROM waves WHERE id=?1",
+            [wave],
+            |row| row.get(0),
+        )?;
+        let project = super::plan_read::project_in(&tx, &ProjectId::from_raw(id))?;
+        tx.commit()?;
+        Ok(Some(project))
     }
 
     pub(crate) fn project_readiness(&self, wave: &WaveId) -> StoreResult<ProjectReadiness> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT p.external_project_id, f.observed_at,
+        readiness_in(&conn, wave)
+    }
+}
+
+// Saved planning supplies values and age; retained provider evidence can invalidate
+// selection, but absent inventory does not erase an owned Project.
+fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+    Ok(conn.query_row(
+            "SELECT COALESCE(p.external_project_id,p.id), p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
-                  WHEN NOT json_valid(f.body) THEN 'unavailable'
-                  WHEN f.id IS NULL OR f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at!=f.observed_at
+                  WHEN p.id IS NULL OR p.project_name IS NULL OR p.project_slug IS NULL OR p.project_prompt_context IS NULL THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND NOT json_valid(f.body) THEN 'unavailable'
+                  WHEN f.id IS NOT NULL AND (f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at IS NOT f.observed_at
                     OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)
-                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative))
+                    OR (s.wave_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM json_each(f.body,'$.initiative_ids') WHERE value=s.initiative)))
                     THEN 'unavailable'
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
@@ -226,7 +367,6 @@ impl SqliteStore {
                 })
             },
         )?)
-    }
 }
 
 #[cfg(test)]
@@ -235,6 +375,56 @@ mod tests {
     use crate::id::WaveId;
     use crate::store::{sqlite::SqliteStore, PlanningLocks};
     use crate::work::wave::Wave;
+
+    #[test]
+    fn project_creation_rolls_back_and_reuses_retained_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("loopflow.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "product".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let reserved = "11111111-1111-4111-8111-111111111111";
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO project_transitions(wave_id,successor_id,created_at) VALUES(?1,?2,1)",
+                rusqlite::params![wave.id(), reserved],
+            )
+            .unwrap();
+        store.conn.lock().unwrap().execute_batch("CREATE TRIGGER reject_selection BEFORE UPDATE OF current_project_id ON waves BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        let before = store.revisions().unwrap();
+        assert!(store.ensure_project(wave.id(), "Original name").is_err());
+        assert!(store.list_projects(Some(wave.id())).unwrap().is_empty());
+        assert_eq!(store.revisions().unwrap(), before);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER reject_selection")
+            .unwrap();
+        let id = store.ensure_project(wave.id(), "Original name").unwrap();
+        assert_eq!(id.as_str(), "proj_11111111111141118111111111111111");
+        store.edit_project(&id, Some("Later edit"), None).unwrap();
+        let changes = store.pending_project_changes(&id).unwrap();
+        let before = store.revisions().unwrap();
+        assert_eq!(
+            store.ensure_project(wave.id(), "Original name").unwrap(),
+            id
+        );
+        assert_eq!(store.revisions().unwrap(), before);
+        assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
+        assert_eq!(store.planning_project(&id).unwrap().name, "Later edit");
+        let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+        assert_eq!(receipt, (reserved.into(), true));
+        assert!(store
+            .project(&id)
+            .unwrap()
+            .unwrap()
+            .plan
+            .linear_id
+            .is_none());
+    }
 
     #[test]
     fn selection_import_is_once_and_only_committed_selection_wakes_readers() {
@@ -261,10 +451,19 @@ mod tests {
             ProjectReadinessState::Unconfigured
         );
         assert_eq!(store.revisions().unwrap(), before);
-        store
-            .import_project_binding(wave.id(), Some(&original), Some(first), &guard)
-            .unwrap();
+        assert!(store
+            .import_project_binding(wave.id(), Some(&original), Some("missing"), &guard)
+            .is_err());
+        assert!(!store.project_binding_imported(wave.id()).unwrap());
+        assert_eq!(store.revisions().unwrap(), before);
+        write_project_binding(&store, wave.id(), None, first, &guard).unwrap();
         assert!(store.revisions().unwrap().planning > before.planning);
+        let selected = store.revisions().unwrap();
+        // Local and provider IDs select the same stored Project during import too.
+        store
+            .import_project_binding(wave.id(), Some(&original), Some("one"), &guard)
+            .unwrap();
+        assert_eq!(store.revisions().unwrap(), selected);
         write_project_binding(&store, wave.id(), Some(first), second, &guard).unwrap();
         let selected = store.revisions().unwrap();
         store

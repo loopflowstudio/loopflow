@@ -207,6 +207,26 @@ impl ContextBudgetReport {
         });
     }
 
+    pub(crate) fn check_input(&self) -> Result<(), CoreError> {
+        let input = self
+            .usage
+            .iter()
+            .find(|usage| usage.source == "total assembled input")
+            .expect("measure the final input before checking its budget");
+        let tokens = input.submitted_tokens;
+        let bytes = input.submitted_bytes;
+        let input_tokens = input.token_limit;
+        let input_bytes = input.byte_limit;
+        if bytes > input_bytes || tokens > input_tokens {
+            return Err(CoreError::ExecutionFailed(format!(
+                "launch context exceeds the input budget: {tokens}/{input_tokens} tokens, \
+                 {bytes}/{input_bytes} bytes. Reduce explicit docs, skill instructions, \
+                 clipboard or diff context; full memory, scratch and goal sources remain on disk"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn render(&self) -> String {
         let mut lines = vec!["Context budgets (cl100k_base tokens; UTF-8 bytes). Query again after edits: `lf context`.".into()];
         for (key, limit) in &self.budgets.0 {
@@ -477,30 +497,11 @@ fn preserve_source(text: &str, repo_root: &Path) -> Result<PathBuf, CoreError> {
     Ok(path)
 }
 
-pub(crate) fn check_input(
-    system: &str,
-    task: &str,
-    budgets: &ContextBudgets,
-) -> Result<(), CoreError> {
-    let input_tokens = budgets.limit(BudgetKey::InputTokens);
-    let input_bytes = budgets.limit(BudgetKey::InputBytes);
-    let bytes = system.len() + task.len();
-    let tokens = tokens_in(system) + tokens_in(task);
-    if bytes > input_bytes || tokens > input_tokens {
-        return Err(CoreError::ExecutionFailed(format!(
-            "launch context exceeds the input budget: {tokens}/{input_tokens} tokens, \
-             {bytes}/{input_bytes} bytes. Reduce explicit docs, skill instructions, \
-             clipboard or diff context; full memory, scratch and goal sources remain on disk"
-        )));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{bound_context, check_input, BudgetKey, ContextBudgets};
+    use super::{bound_context, BudgetKey, ContextBudgetReport, ContextBudgets};
     use crate::engine::config::{load_config, Config};
     use crate::engine::prompt::{Document, DocumentSource, PromptComponents};
 
@@ -527,9 +528,15 @@ mod tests {
             assert!(report.usage[0].submitted_tokens <= 16_000);
             assert_eq!(components.budget_decisions.len(), usize::from(excerpted));
         }
-        assert!(check_input("", &" word".repeat(64_000), &budgets).is_ok());
-        assert!(check_input("", &" word".repeat(64_001), &budgets).is_err());
         assert_eq!(budgets.limit(BudgetKey::InputBytes), 512 * 1024);
+        let mut report = ContextBudgetReport {
+            budgets,
+            usage: Vec::new(),
+        };
+        for (words, allowed) in [(64_000, true), (64_001, false)] {
+            report.measure_input("", "", "", &" word".repeat(words));
+            assert_eq!(report.check_input().is_ok(), allowed);
+        }
     }
 
     #[test]
@@ -551,6 +558,18 @@ mod tests {
             "---\ncontext_budgets:\n  memory_tokens: 6000\n---\nBuild.\n",
         )
         .unwrap();
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(repo.path())
+                    .unwrap()
+                    .to_string(),
+                "build",
+            )
+            .unwrap();
         let config = load_config(Some(repo.path())).unwrap().unwrap();
         let budgets = ContextBudgets::resolve(&config, repo.path(), Some("build")).unwrap();
         for (key, value, source) in [
@@ -641,8 +660,15 @@ mod tests {
             ..Default::default()
         };
         let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
-        assert!(check_input("small", "message", &budgets).is_ok());
-        assert!(check_input("", &" word".repeat(101), &budgets)
+        let mut report = ContextBudgetReport {
+            budgets,
+            usage: Vec::new(),
+        };
+        report.measure_input("", "", "small", "message");
+        assert!(report.check_input().is_ok());
+        report.measure_input("", "", "", &" word".repeat(101));
+        assert!(report
+            .check_input()
             .unwrap_err()
             .to_string()
             .contains("/100 tokens"));

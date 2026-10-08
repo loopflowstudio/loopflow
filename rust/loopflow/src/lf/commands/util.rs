@@ -2,14 +2,12 @@ use anyhow::{anyhow, bail, Context, Result};
 use fs2::FileExt;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
-use crate::engine::{
-    check_cli_available, codex_permission_args, missing_agent_message, workspace_add_dirs,
-};
+use crate::engine::{codex_permission_args, missing_agent_message, workspace_add_dirs};
 use crate::provider_auth::Provider;
 use crate::session_record::{ProviderClientRef, ProviderClientStopReason};
 use crate::store::sqlite::SqliteStore;
@@ -53,34 +51,19 @@ pub(crate) struct SessionCommand {
     pub(crate) cwd: PathBuf,
 }
 
-pub fn launch_session(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-) -> Result<()> {
-    launch_session_with_env(
-        harness,
-        model,
-        worktree,
-        prompt,
-        &BTreeMap::new(),
-        None,
-        None,
-    )
-}
-
-pub(crate) fn launch_session_with_env(
+#[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
+pub(crate) fn launch_session(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
     prompt: &str,
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
+    flags: &[String],
     context_file: Option<&Path>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
-    let command = build_session_command(
+    let mut command = build_session_command(
         harness,
         model,
         &worktree,
@@ -88,6 +71,7 @@ pub(crate) fn launch_session_with_env(
         provider_session_id,
         context_file,
     )?;
+    command.args.splice(0..0, flags.iter().cloned());
     spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
 
@@ -99,10 +83,9 @@ pub(crate) fn build_session_command(
     provider_session_id: Option<&str>,
     context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
-    let cwd = worktree.to_path_buf();
     let worktree_arg = worktree.to_string_lossy().to_string();
 
-    match harness {
+    let args = match harness {
         "codex" => {
             let mut args = vec!["-C".to_string(), worktree_arg];
             if let Some(model) = model {
@@ -121,12 +104,10 @@ pub(crate) fn build_session_command(
                     serde_json::to_string(&path.to_string_lossy())?
                 ));
             }
+            // Ported skill frontmatter starts with `---`, which is prompt data.
+            args.push("--".to_string());
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "codex".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "claude" => {
             let mut args = Vec::new();
@@ -149,11 +130,7 @@ pub(crate) fn build_session_command(
             // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "claude".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "opencode" => {
             let mut args = vec![worktree_arg, "--prompt".to_string(), prompt.to_string()];
@@ -161,17 +138,18 @@ pub(crate) fn build_session_command(
                 args.push("--model".to_string());
                 args.push(model.to_string());
             }
-            Ok(SessionCommand {
-                program: "opencode".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
-        _ => Err(anyhow!(
+        _ => bail!(
             "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
             harness
-        )),
-    }
+        ),
+    };
+    Ok(SessionCommand {
+        program: harness.to_string(),
+        args,
+        cwd: worktree.to_path_buf(),
+    })
 }
 
 pub(crate) fn resume_session(
@@ -322,10 +300,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let task = store
         .task_by_issue(task_id.as_str())?
         .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
-    if store
-        .task_deletion(&task.wave_id, task.plan.id.as_str())?
-        .is_some()
-    {
+    if store.task_deleted(&task)? {
         bail!(
             "Task {} was deleted and cannot resume execution",
             task.plan.identifier
@@ -658,6 +633,7 @@ fn session_command_status_with_env(
     exact_account_id: Option<&crate::store::ProviderAccountId>,
     launch_lock: Option<File>,
 ) -> Result<SessionCommandOutcome> {
+    let started = std::time::Instant::now();
     // Keep admission and client publication on the same side of Session stop.
     // Release before waiting for the child, so stop can settle that client.
     let capture_dir = environment
@@ -672,10 +648,6 @@ fn session_command_status_with_env(
             Ok(launch)
         })
         .transpose()?;
-    if !check_cli_available(&command.program) {
-        return Err(anyhow!(missing_agent_message(&command.program)));
-    }
-
     let provider = match command.program.as_str() {
         "claude" => Some(Provider::Claude),
         "codex" => Some(Provider::Codex),
@@ -697,10 +669,6 @@ fn session_command_status_with_env(
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
-    if command.program == "codex" && provider_session_id.is_none() && capture_dir.is_some() {
-        let hook = codex_session_start_hook()?;
-        process.args(["--dangerously-bypass-hook-trust", "-c", &hook]);
-    }
     let observed_capture = capture_dir
         .clone()
         .filter(|_| command.program == "opencode" && provider_session_id.is_none());
@@ -709,7 +677,6 @@ fn session_command_status_with_env(
         process.stderr(Stdio::piped());
     }
     process
-        .args(&command.args)
         .current_dir(&command.cwd)
         .env_remove("LOOPFLOW_DIRECTIVE_FILE")
         .envs(environment);
@@ -726,6 +693,13 @@ fn session_command_status_with_env(
         );
         route.record_process_blocking(provider_session_id.map(str::to_string), None)?;
     }
+    let codex_profile =
+        if command.program == "codex" && provider_session_id.is_none() && capture_dir.is_some() {
+            Some(prepare_codex_capture(&mut process)?)
+        } else {
+            None
+        };
+    process.args(&command.args);
     if let (Some(capture_dir), Some(provider_session_id)) =
         (capture_dir.as_deref(), provider_session_id)
     {
@@ -743,11 +717,18 @@ fn session_command_status_with_env(
     if let Some((store, session, driver)) = &owned {
         store.record_session_provider_launch(session, driver, true)?;
     }
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis(),
+        "prepared native provider launch"
+    );
     let mut child = match process.spawn() {
         Ok(child) => child,
         Err(error) => {
             if let Some((store, session, driver)) = &owned {
                 store.record_native_provider_exit(session, driver, false)?;
+            }
+            if error.kind() == std::io::ErrorKind::NotFound {
+                return Err(anyhow!(missing_agent_message(&command.program)));
             }
             return Err(error.into());
         }
@@ -814,6 +795,14 @@ fn session_command_status_with_env(
         .map(ProviderClientGuard::take_stop_reason)
         .transpose()?
         .flatten();
+    if status.success() && stop_reason.is_none() && codex_profile.is_some() {
+        let capture_dir = capture_dir
+            .as_deref()
+            .expect("Codex capture has a directory");
+        if crate::session_record::read_provider_session(capture_dir)?.is_none() {
+            bail!("Codex exited without recording its native Session ID. Launch evidence remains at {}. Inspect the provider's hook diagnostic before retrying; no unrelated Session was attached.", capture_dir.display());
+        }
+    }
     Ok(SessionCommandOutcome {
         status,
         stop_reason,
@@ -861,20 +850,100 @@ impl Drop for ProviderClientGuard {
     }
 }
 
-fn codex_session_start_hook() -> Result<String> {
+fn prepare_codex_capture(process: &mut Command) -> Result<tempfile::NamedTempFile> {
+    let home = process
+        .get_envs()
+        .find(|(key, _)| *key == "CODEX_HOME")
+        .map(|(_, value)| value.map(PathBuf::from))
+        .unwrap_or_else(|| std::env::var_os("CODEX_HOME").map(PathBuf::from))
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".codex")
+        });
+    std::fs::create_dir_all(&home)?;
+    let mut profile = tempfile::Builder::new()
+        .prefix("lf-capture-")
+        .suffix(".config.toml")
+        .tempfile_in(home)?;
     let executable = std::env::current_exe()
         .map_err(|error| anyhow!("cannot resolve lf for Codex session capture: {error}"))?;
-    Ok(codex_session_start_hook_for(&executable))
-}
-
-fn codex_session_start_hook_for(executable: &Path) -> String {
     let command = format!(
         "{} __provider-session",
         crate::engine::process::shell_escape(&executable.to_string_lossy())
     );
     let command = serde_json::to_string(&command).expect("shell command serializes as TOML string");
-    format!(
-        "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}"
+    write!(profile, "hooks={{ SessionStart = [{{ matcher = \"startup\", hooks = [{{ type = \"command\", command = {command}, timeout = 5 }}] }}] }}")?;
+    profile.flush()?;
+    if !codex_supplies_hook_trust(process)? {
+        process.arg("--dangerously-bypass-hook-trust");
+    }
+    let name = profile
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".config.toml"))
+        .expect("generated Codex profile has a valid name");
+    process.args(["--profile", name]);
+    Ok(profile)
+}
+
+fn codex_supplies_hook_trust(process: &Command) -> Result<bool> {
+    let mut probe = Command::new(process.get_program());
+    if let Some(cwd) = process.get_current_dir() {
+        probe.current_dir(cwd);
+    }
+    for (key, value) in process.get_envs() {
+        match value {
+            Some(value) => {
+                probe.env(key, value);
+            }
+            None => {
+                probe.env_remove(key);
+            }
+        }
+    }
+    // Help can bypass wrapper injection. An incomplete option reaches the
+    // ordinary parser, but cannot start a provider or consume terminal input.
+    let mut stderr = tempfile::tempfile()?;
+    probe
+        .args(["--dangerously-bypass-hook-trust", "--model"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(stderr.try_clone()?);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        probe.process_group(0);
+    }
+    let mut child = probe.spawn()?;
+    let group = crate::engine::process::ProcessGroupGuard::new(child.id());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while child.try_wait()?.is_none() {
+        if std::time::Instant::now() >= deadline {
+            group.terminate();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            bail!("Codex argument probe timed out before launch");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    group.terminate();
+    stderr.seek(SeekFrom::Start(0))?;
+    let mut diagnostic = String::new();
+    stderr.take(65536).read_to_string(&mut diagnostic)?;
+    if diagnostic
+        .contains("the argument '--dangerously-bypass-hook-trust' cannot be used multiple times")
+    {
+        return Ok(true);
+    }
+    if diagnostic.contains("a value is required for '--model <MODEL>'") {
+        return Ok(false);
+    }
+    bail!(
+        "Codex argument probe failed before launch: {}",
+        diagnostic.trim()
     )
 }
 
@@ -1683,15 +1752,6 @@ mod tests {
     }
 
     #[test]
-    fn codex_session_start_hook_records_the_native_thread() {
-        let hook = codex_session_start_hook_for(Path::new("/tmp/lf binary"));
-
-        assert!(hook.contains("SessionStart"));
-        assert!(hook.contains("matcher = \"startup\""));
-        assert!(hook.contains("'/tmp/lf binary' __provider-session"));
-    }
-
-    #[test]
     fn opencode_startup_log_identifies_only_a_created_session() {
         let line = "timestamp=2026-08-28T18:56:34Z level=INFO run=tui message=created id=ses_012345 directory=/tmp/repo";
 
@@ -1842,7 +1902,17 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        launch_session("claude", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "claude",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -1913,7 +1983,17 @@ mod tests {
             .await
             .unwrap();
 
-        launch_session("opencode", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "opencode",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
@@ -1940,7 +2020,17 @@ mod tests {
             })
             .await
             .unwrap();
-        launch_session("codex", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "codex",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+            &[],
+            None,
+        )
+        .unwrap();
     }
 
     #[test]

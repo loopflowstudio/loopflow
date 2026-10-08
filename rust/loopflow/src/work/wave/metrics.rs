@@ -298,7 +298,7 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
     })?;
     let (frontmatter, markdown) = crate::engine::flow::split_frontmatter(&content)
         .ok_or(MetricError::MissingContractFrontmatter)?;
-    let frontmatter: MetricContractFrontmatter = serde_yaml_ng::from_str(&frontmatter)
+    let frontmatter: MetricContractFrontmatter = serde_yaml_ng::from_str(frontmatter)
         .map_err(|error| MetricError::InvalidContractFrontmatter(error.to_string()))?;
     if frontmatter.schema != 1 {
         return Err(MetricError::UnsupportedContractSchema(frontmatter.schema));
@@ -320,7 +320,7 @@ pub fn load_metric_contract(path: &Path, wave_id: &str) -> Result<MetricContract
             filename: file_name.to_string(),
         });
     }
-    let (name, body) = parse_metric_markdown(&markdown)?;
+    let (name, body) = parse_metric_markdown(markdown)?;
 
     MetricContract::new(MetricContractDefinition {
         identity: MetricIdentity {

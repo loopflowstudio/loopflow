@@ -24,7 +24,8 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
 
 ## Evidence and version boundary
 
-- **P**: exercised locally, restricted to our disposable cmux window. cmux
+- **P**: exercised locally. Pane operations used only the disposable cmux window;
+  help, discovery and herdr status reads are noted separately below. cmux
   **0.65.0 (108), dda24fbd2**. All nine `cmux help GROUP` screens, `--help`,
   `guide` and individual command help were inspected. No host source, tests,
   configuration or skill text was incorporated.
@@ -82,8 +83,9 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   status read half; emission is deferred to LOO-415, with LOO-422 interoperability.
 - **Current command/product boundaries:** LOO-401 selects `self`, `config user`,
   app opening, and outright HTML screenshot removal. LOO-418 selects zero or one
-  PR per Task and follow-through as another Task. LOO-406's plan-store changes
-  remain exploration; they do not establish a new planning authority here.
+  PR per Task and follow-through as another Task. LOO-406 owns the accepted local
+  planning lifecycle, preserving connected Linear repositories; it excludes
+  cross-machine synchronization. Shared-source authority remains unresolved here.
 
 The [owner map](#implementation-scope-and-existing-owners) below retains the
 related Tasks' boundaries; this Task exposes the existing workspace owners.

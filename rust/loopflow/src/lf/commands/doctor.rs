@@ -147,7 +147,7 @@ fn check_binary_freshness() -> Check {
             FRESHNESS,
             format!(
                 "cannot compare build revision {}: no git checkout at this binary's source root \
-                 or working directory. Run `lf machine doctor` from a loopflow checkout to learn whether \
+                 or working directory. Run `lf doctor` from a loopflow checkout to learn whether \
                  the running binary is current",
                 crate::build_info::short_revision(revision)
             ),

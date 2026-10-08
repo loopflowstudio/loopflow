@@ -182,7 +182,7 @@ def _contract(binary: Path, claude: Path, root: Path, server: Messages, results:
         """One headless Loopflow conversation: its launch and the login it sent."""
         launched, before = len(record.read_text().splitlines()), len(server.bearers)
         # The fixture endpoint refuses every turn; only the launch is under test.
-        done = lf(*flags, "--mode", "batch", "--model", "claude", ":", "say hi", check=False)
+        done = lf(*flags, "--mode", "batch", "--agent", "claude", ":", "say hi", check=False)
         launches = [json.loads(line) for line in record.read_text().splitlines()[launched:]]
         sent = set(server.bearers[before:])
         assert launches and len(sent) == 1, (launches, sent, done.stdout, done.stderr)

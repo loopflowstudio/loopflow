@@ -126,8 +126,7 @@ code examples, with restrained typography, generous whitespace, and little decor
    A diagram earns space only when it clarifies state
    ownership or a transition better than the excerpts.
 
-   Render through an available browser capture tool (in Loopflow,
-   `lf screenshot scratch/pr-review.html -o scratch/pr-review.png`). Inspect
+   Render through whatever browser capture tool the agent has available. Inspect
    desktop and narrow widths, including the code sections, navigation, contrast,
    overflow, and disclosures. Fix defects before delivery. If rendering is
    unavailable, state the limit. Recheck excerpts against the named revisions.

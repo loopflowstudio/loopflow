@@ -28,34 +28,38 @@ def _marker_locations(request: dict, marker: str) -> list[str]:
 
 
 def _assess(requests: list[dict], skill: Path, marker: str, context: str, argument: str) -> dict:
-    current = [body for body in requests if _marker_locations(body, marker)]
-    locations = [_marker_locations(body, context) for body in current]
-    users = [
-        [
-            block.get("text", "")
-            for message in body["messages"]
-            if message["role"] == "user"
-            for block in (
-                [{"text": message["content"]}]
-                if isinstance(message["content"], str)
-                else message["content"]
-            )
-        ]
-        for body in current
-    ]
+    locations = [_marker_locations(body, context) for body in requests]
+    users = [_user_texts(body) for body in requests]
     return {
-        "request_observed": bool(current),
-        "single_model_request": len(current) == len(requests) == 1,
-        "context_user_only": bool(locations)
-        and all(roles and set(roles) == {"user"} for roles in locations),
-        "selected_source": bool(current)
-        and all(
-            any(f"Base directory for this skill: {skill.parent}\n" in text for text in texts)
-            for texts in users
-        ),
-        "expanded_argument": bool(current)
-        and all(any(f"{marker}|{argument}|" in text for text in texts) for texts in users),
+        "requests": len(requests),
+        "request_models": sorted({body["model"] for body in requests}),
+        "context_roles": locations,
+        "checks": {
+            "single_model_request": len(requests) == 1,
+            "context_user_only": bool(locations)
+            and all(roles and set(roles) == {"user"} for roles in locations),
+            "selected_source": bool(users)
+            and all(
+                any(f"Base directory for this skill: {skill.parent}\n" in text for text in texts)
+                for texts in users
+            ),
+            "expanded_argument": bool(users)
+            and all(any(f"{marker}|{argument}|" in text for text in texts) for texts in users),
+        },
     }
+
+
+def _user_texts(request: dict) -> list[str]:
+    texts = []
+    for message in request.get("messages", []):
+        if message["role"] != "user":
+            continue
+        content = message["content"]
+        if isinstance(content, str):
+            texts.append(content)
+        else:
+            texts.extend(block.get("text", "") for block in content)
+    return texts
 
 
 def _response(model: str) -> bytes:
@@ -189,11 +193,11 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             with Path(claude).open("rb") as executable:
                 digest = hashlib.file_digest(executable, "sha256").hexdigest()
             print(json.dumps({"version": version, "executable_sha256": digest}), flush=True)
+            base = _claude_command(claude) + ["--model", model]
             for index, argument in enumerate(("alpha", "beta")):
-                command = _claude_command(claude) + ["--model", model]
+                command = base + ["--session-id" if index == 0 else "--resume", session]
                 messages = [_user_message([f"/lf-mapping {argument}"])]
                 if index == 0:
-                    command += ["--session-id", session]
                     if channel == "hook":
                         command += ["--settings", _hook_settings("cat " + shlex.quote(str(hook)))]
                     else:
@@ -212,45 +216,33 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                                 flush=True,
                             )
                             passed &= seeded.returncode == 0 and not requests
-                            command = _claude_command(claude) + [
-                                "--model",
-                                model,
-                                "--resume",
-                                session,
-                            ]
+                            command = base + ["--resume", session]
                         else:
                             messages.insert(0, context_message)
                 else:
                     hook.unlink()
-                    command += ["--resume", session]
                 start = len(requests)
                 result = _run(command, workspace, env, messages)
                 _, native_arguments = _read_output(_output_events(result.stdout))
-                current = [
-                    body for body in requests[start:] if _marker_locations(body, skill_marker)
-                ]
-                locations = [_marker_locations(body, context_marker) for body in current]
-                checks = {
-                    "exit_zero": result.returncode == 0,
-                    "native_arguments_exact": native_arguments == argument,
-                    **_assess(requests[start:], skill, skill_marker, context_marker, argument),
-                }
+                observation = _assess(
+                    requests[start:], skill, skill_marker, context_marker, argument
+                )
+                observation["checks"].update(
+                    exit_zero=result.returncode == 0,
+                    native_arguments_exact=native_arguments == argument,
+                )
                 print(
                     json.dumps(
                         {
                             "case": "initial" if index == 0 else "resumed",
                             "model": model,
-                            "request_models": sorted({body["model"] for body in current}),
                             "channel": channel,
-                            "requests": len(current),
-                            "total_requests": len(requests) - start,
-                            "context_roles": locations,
-                            **checks,
+                            **observation,
                         }
                     ),
                     flush=True,
                 )
-                passed &= all(checks.values())
+                passed &= all(observation["checks"].values())
         finally:
             server.shutdown()
             server.server_close()

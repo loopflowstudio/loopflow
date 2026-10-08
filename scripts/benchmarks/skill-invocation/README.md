@@ -89,7 +89,9 @@ Runs the real Claude client against a local fake Messages API with external
 egress denied, a disposable home/config and dummy authentication. No live model
 or real credentials are used. Output includes the binary version/digest,
 requested model, actual request roles, selected source, exact native arguments
-and request count. The fake response contains no fixture markers. Run its
+and request count. Each observation groups pass/fail assertions under `checks`;
+all captured requests contribute to its models, roles and count. The fake response
+contains no fixture markers. Run its
 offline assertions with `uv run pytest scripts/benchmarks/skill-invocation/ -q`.
 
 `queued` sends a user context message with `shouldQuery: false`, then the exact
@@ -121,32 +123,11 @@ removed `--ide` after the installed reconnect probe below. The selector rename
 and app-launch removal are implemented. LOO-420's native discovery, dispatch and
 ports remain unfinished; these probes do not implement them.
 
-The remaining design has these constraints:
-
-- One catalog must supply discovery, help, execution and export source collection.
-  Replace the separate resolver, rams alias, fuzzy npx fetching and recursive
-  Markdown scan together. Installed npx skills remain ordinary skill folders.
-  Repository-before-personal-before-builtin ordering is proposed; the precise
-  cross-format ordering is unselected. Honor provider home overrides and prove
-  the invoked native source is the selected file when names collide.
-- Carry selected source, dialect, exact arguments and separate bounded context
-  through canonical prompt preparation, capture and retained Flow instructions.
-  Preserve supporting-file access and source bytes. Do not confuse Claude's
-  subagent declaration with Loopflow's harness selector. Generated builtin
-  exports cannot override current embedded instructions.
-- Translate cross-harness arguments, tool and model declarations; report loss
-  in one line and continue with runnable instructions for unfamiliar shapes.
-  Permission hints do not establish enforced tool policy. Never overwrite an
-  existing native skill to stage a port. No database migration is selected.
-- An invocation in an existing Session must retain native history and Work
-  attribution and enter through its current driver. Selecting another skill
-  needs an explicit interface and admission proof; active-turn steering is
-  unproved. Lost acknowledgements cannot justify duplicate execution.
-- Use Claude's user-message channel, resolve live-Session admission, then prove Loopflow capture and
-  unchanged third-party skills on both harnesses, including controls and bundled
-  assets. Compare repeated matched plain-versus-lf startup and whole-turn context
-  costs, including context read from disk and resumed conversations. Retention
-  with resupplied context does not prove recall.
+[LOO-420](https://linear.app/loopflow/issue/LOO-420) owns implementation and
+acceptance: one catalog, faithful native dispatch, translated ports, existing
+Session admission, unchanged third-party fixtures and matched startup/context
+measurements. The working design lives in `scratch/run-any-claude-or-codex.md`
+while the Task is in progress.
 
 ### Installed app-launch counterexample
 

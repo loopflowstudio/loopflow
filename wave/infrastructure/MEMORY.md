@@ -625,10 +625,10 @@ survives delayed completion; concurrent values remain conflicts. Equal concurren
 values retain both causes. Membership moves as a Wave/Project pair; comment IDs
 deduplicate replay. Fourteen pure/Git fixtures prove reconciliation and transport,
 not SQLite import, semi-live arrival, hosted policy or public machine dispatch.
-Rechecked LOO-406 remains `783305284`, without transactional peer import/checkpoints.
-Its writer must save causal context atomically; export reuses mutation IDs.
-Fetched Git history is not import acknowledgement.
-Callback bytes remain retained; adoption awaits replacement. Acceptance stays in
+LOO-406 `bd8d0191a` retains Local/Linear splitting; causal peer import/export and
+checkpoints remain absent. Persist causality atomically; export reuses IDs.
+Fetch never acknowledges import. Callback design survives in Git; replace adoption.
+Acceptance:
 `scratch/work-on-another-machine-name.md`; preserve IDs, history and pushed code.
 No automatic turn/Flow retry.
 

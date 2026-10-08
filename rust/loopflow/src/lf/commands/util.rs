@@ -53,16 +53,7 @@ pub(crate) struct SessionCommand {
     pub(crate) cwd: PathBuf,
 }
 
-pub fn launch_session(
-    harness: &str,
-    model: Option<&str>,
-    worktree: &Path,
-    prompt: &str,
-) -> Result<()> {
-    launch_session_with_env(harness, model, worktree, prompt, &BTreeMap::new(), None)
-}
-
-pub(crate) fn launch_session_with_env(
+pub(crate) fn launch_session(
     harness: &str,
     model: Option<&str>,
     worktree: &Path,
@@ -82,10 +73,9 @@ pub(crate) fn build_session_command(
     prompt: &str,
     provider_session_id: Option<&str>,
 ) -> Result<SessionCommand> {
-    let cwd = worktree.to_path_buf();
     let worktree_arg = worktree.to_string_lossy().to_string();
 
-    match harness {
+    let args = match harness {
         "codex" => {
             let mut args = vec!["-C".to_string(), worktree_arg];
             if let Some(model) = model {
@@ -98,11 +88,7 @@ pub(crate) fn build_session_command(
             }
             args.extend(codex_permission_args(Some(worktree), false, false));
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "codex".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "claude" => {
             let mut args = Vec::new();
@@ -121,11 +107,7 @@ pub(crate) fn build_session_command(
             // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
             args.push(prompt.to_string());
-            Ok(SessionCommand {
-                program: "claude".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
         "opencode" => {
             let mut args = vec![worktree_arg, "--prompt".to_string(), prompt.to_string()];
@@ -133,17 +115,18 @@ pub(crate) fn build_session_command(
                 args.push("--model".to_string());
                 args.push(model.to_string());
             }
-            Ok(SessionCommand {
-                program: "opencode".to_string(),
-                args,
-                cwd,
-            })
+            args
         }
-        _ => Err(anyhow!(
+        _ => bail!(
             "unsupported session launcher harness '{}'. Use claude, codex, or opencode.",
             harness
-        )),
-    }
+        ),
+    };
+    Ok(SessionCommand {
+        program: harness.to_string(),
+        args,
+        cwd: worktree.to_path_buf(),
+    })
 }
 
 pub(crate) fn resume_session(
@@ -1814,7 +1797,15 @@ mod tests {
         crate::provider_account::identity::tests::write_claude_identity(&mut account);
         store.upsert_provider_account(&account).await.unwrap();
 
-        launch_session("claude", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "claude",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             std::fs::read_to_string(capture).unwrap(),
@@ -1887,7 +1878,15 @@ mod tests {
             .await
             .unwrap();
 
-        launch_session("opencode", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "opencode",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+        )
+        .unwrap();
 
         assert_eq!(std::fs::read_to_string(capture).unwrap(), "stored-key");
 
@@ -1914,7 +1913,15 @@ mod tests {
             })
             .await
             .unwrap();
-        launch_session("codex", None, temp.path(), "review it").unwrap();
+        launch_session(
+            "codex",
+            None,
+            temp.path(),
+            "review it",
+            &BTreeMap::new(),
+            None,
+        )
+        .unwrap();
     }
 
     #[test]

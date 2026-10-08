@@ -658,9 +658,9 @@ Run the launch checks after syncing CLI changes; they parse the current flags
 before verifying delivery to the provider.
 
 Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
-review them before gate, and run `cargo test -p loopflow --lib skill_launch_seed`
-to cover interactive skill launches. Keep prose contracts in builtin tests;
-launch tests should prove that the canonical document is included.
+review them before gate. The `skill_launch` checks above cover terminal launches.
+Keep prose contracts in builtin tests; launch tests should prove that the
+canonical document is included.
 For migration regressions, use the materialized Rust
 test path above: inspect historical fields at their migration boundary, then
 finish the upgrade and verify the current schema. When chapter triggers change,

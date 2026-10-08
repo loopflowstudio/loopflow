@@ -3,7 +3,7 @@ use crate::engine::{
     write_prompt_log, AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig,
     ProcessPromptInput, PromptComponents, StreamFormat, Surface,
 };
-use crate::lf::commands::util::launch_session_with_env;
+use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
 use crate::lf::Cli;
 use crate::session_record::{
@@ -498,7 +498,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         };
         let mut environment = built.agent_config.env.clone();
         environment.extend(capture.environment());
-        let result = launch_session_with_env(
+        let result = launch_session(
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,

@@ -31,8 +31,13 @@ Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
 publication and review, later superseded by the landing request below. A machine
 is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
 opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
-Jack chose to discard version-1 Desktop caches and name install scope `installation`
-(artifact updates and skill exports); short commands stay. Released gates,
+Jack chose to discard version-1 Desktop caches. Jack Heart's October 7 LOO-401
+steer supersedes `installation` with `self` for install, doctor and skill export;
+`config user` reads the display name. Root `open` replaces desktop; screenshot
+and its supervisor are removed. The GUI-browser capture prohibition and independent
+Desktop snapshot remain. No aliases; short install/doctor/user commands stay.
+Jack Heart accepted PR #1494 and advancement through shipping. LOO-401 supplies
+LOO-397's command map. Released gates,
 receipts and jobs pin `~/.lf-machine/install` and the promotion lock path; no
 relocation is proved. Recovery uses `install` for retained binaries. Cron reads
 released JSON keys; historical payloads survive.
@@ -50,7 +55,10 @@ SQL. Local source proofs establish no installed migration or configured remote
 continuity. Release schedules retain original ownership and activation.
 Release's operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
-Corrected installation fixtures still require disposable OS-account isolation.
+Root words may resolve to authored skills; public lookup proves builtin removal.
+After #1489, Machine discovery covers id/add/list/status/rename/remove; Flow
+normalization must not restore the removed SSH owner path.
+Renamed installation entry proofs passed in disposable Linux OS accounts.
 
 Jack Heart's PR #1489 review permits private OpenSSH sharing, an interactive
 first-install offer (default yes), and distinct failures with recovery commands,
@@ -130,24 +138,26 @@ LOO-408 owns completion, LOO-324 native/account discovery, LOO-400 terminology.
 CLI/PTY proofs pass; installed reconnect still fails. No migration. The legacy
 Session lacks exact process evidence; driver success proves no provider exit.
 
-## Storage footprint (LOO-390, 2026-10-06)
+## Storage footprint (LOO-390, 2026-10-07)
 
-Jack Heart authorized autonomous investigation, cleanup and delivery. Findings,
-measurements and prioritized proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
-`session_events` was 92% of a 2.6 GiB store growing about 0.5 GiB a day since the
-October 2 capture cutover: every streamed token was two rows, and the same
-events also sit in `runs/*/events.jsonl`. Source now coalesces increments before
-SQLite, validates an exact-frontier store in place during install preflight
-(full copies killed by the 30 s currency probe stranded 11.7 GiB in `$TMPDIR`;
-#1465's pinned snapshot remains for pending migrations),
-limits the WAL to 64 MiB, and keeps two fingerprinted migration backups.
-27.9 GiB was reclaimed: stranded preflight copies and Cargo output of two merged
-idle worktrees. Installed effect awaits a release and is unobserved. Existing
-rows are not rewritten. Jack's 78.7 GiB recording and 81-copy leads were gone
-before measurement. Undecided, and left intact: which of SQLite or `events.jsonl`
-is the system of record, capture retention, binary/artifact pruning, and about
-23 GiB of legacy `traces`, `backups`, `lfd.db*` and `logs` with no reader.
-Unknown ownership is not permission to delete. Test `session_record` with `LF_*` cleared.
+Jack Heart authorized autonomous investigation, cleanup and delivery. Evidence
+and proposals: [storage footprint review](../../docs/reviews/storage-footprint.md).
+`session_events` was 92% of a 2.6 GiB store: each streamed token was two rows,
+also kept in `runs/*/events.jsonl`. PR #1474 (v0.13.9, installed October 7 and
+measured): new captures keep 28% of rows and 72% of bytes, preflight validates
+an exact store in place (1.0 s, no copy), WAL holds 64 MiB, two fingerprinted
+migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
+PR 2 (source, not installed): published promotion appended every release to
+`retained_published_sets`; a settled install now retains its fallback and the
+prior one, then removes unnamed content-addressed binaries/bundles no live
+process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
+Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
+retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
+then sizes in `lf home doctor`. 27.9 GiB was reclaimed October 6; Jack's 78.7 GiB
+recording and 81-copy leads were gone before measurement. Left intact: 23 GiB of
+unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
+`/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
+`session_record` with `LF_*` cleared.
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
@@ -553,27 +563,21 @@ Jack Heart selected one editable draft per Task and immutable released SQL.
 Mechanics: [MIGRATIONS.md](../../rust/loopflow/src/store/MIGRATIONS.md).
 Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
-## One main Home (LOO-342, curated 2026-10-04)
+## One main Home (LOO-342, curated 2026-10-07)
 
-Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
-Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
-`LF_HOME` experiment initializes once and needs a fresh directory after schema
-changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
-at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
-reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
-The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
-configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
+Jack Heart approved the one-Home cutover: ordinary commands, Task workers and
+Flow steps use installed `lf` and `~/.lf`; explicit `LF_HOME` experiments need a
+fresh directory after schema changes. PR #1381 merged as `6c73356074c4`; installed
+v0.12.31 acceptance passed and LOO-342 is done. Current mechanics:
+[CLI docs](../../docs/lf.md#use-one-machine) and
+[Machines](../../docs/architecture/machines.md#one-main-machine).
 
-### Legacy retirement completed (2026-10-04)
-
-Jack Heart explicitly authorized clearing all legacy stores and their process
-owners. All 37 identified processes exited after SIGTERM, none needing SIGKILL.
-The four installed stores, the unused root database and two demo databases are
-intact under `~/.lf-retired/20261004T161815Z/` (`retirement.json` records
-identities, signals and paths); seven earlier snapshots remain at
-`~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
-identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
+Jack authorized legacy retirement on October 4. All 37 identified processes
+exited after SIGTERM; retained databases and exact signal/path receipts remain
+under `~/.lf-retired/20261004T161815Z/`, earlier snapshots under
+`~/.lf-retired/20261002T191224Z/worktrees/`. Main identity stayed unchanged.
+Release recovery, acceptance and retirement details:
+`173d649cf:wave/infrastructure/MEMORY.md` under “One main Home.”
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
@@ -732,25 +736,21 @@ drafts and broke its older CLI; Jack then forbade branch-binary access and
 promotion. Source proofs use disposable Homes without inherited authority.
 Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
-## Task convergence (LOO-319, curated 2026-10-02)
+## Task convergence (LOO-319, curated 2026-10-07)
 
-[LOO-319](https://linear.app/loopflow/issue/LOO-319) and
-[PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301) retain ownership.
-[Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#task-convergence-loo-319-branch-evidence-2026-09-27)
-preserves exact slice/demo evidence and superseded Flow compositions.
+LOO-319 / PR #1301 own this work. Exact slice/demo evidence and superseded
+Flow compositions remain at `cc18c992b:wave/infrastructure/MEMORY.md` under this
+heading and its linked prior memory.
 
-Jack Heart selected reconciliation before decision/publication and retained human
-demo and authored delivery. Captured invocations keep their definitions; tests
-must locate captured policy rather than copy current catalog indices. Feedback
-never supplies a verdict, and failed decisions cannot regain authority. Task
-agent choice survives PM refresh and reloads at each launch, including review.
-A PATH-only provider repair failed: executable and Home must agree. The real
-Codex fixture used synthetic feedback and predates generic loop-decide; configured
-Claude launch/resume, real five-minute stall and rendered Desktop agreement
-remain unverified. Local simulated liveness is not signal authority. Preserve
-first PID/birth identity across missing samples; active tool work prevents a
-false stall. TESTING.md owns fixture isolation and disk-resource policy. Source
-verification uses disposable stores; no old branch binary may migrate main.
+Jack Heart selected reconciliation before decision/publication, demo and authored
+delivery. Preserve captured definitions; locate policy rather than catalog indices.
+Feedback is not a verdict; failed decisions cannot regain authority. Reload Task
+agent choice at each launch, including review, despite PM refresh. Executable and
+Home must agree. The real Codex fixture used synthetic feedback and predates
+generic loop-decide; Claude launch/resume, real five-minute stall and rendered
+Desktop agreement remain unverified. Simulated liveness grants no signal authority;
+preserve first PID/birth across missing samples and account for active tools.
+TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
@@ -1000,9 +1000,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
-- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
-  origin/<own branch>` made that tip #1456's base; land refused its own commits
-  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
@@ -1075,3 +1072,13 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 `44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
 checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
+
+LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
+translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
+separate context and same-thread resume, not recall without resupply. Claude hook
+context survives deletion; rendering metadata cannot establish model authority.
+Exclude answer leakage. Installed 0.13.9 app launches recorded no native identity;
+both reconnects failed. Jack then directed removal of `--ide` and its app-launch
+path. Keep terminal/headless execution and historical records. Launcher success
+proves no engine exit. Native dispatch, ports and fidelity remain unproved.
+[Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

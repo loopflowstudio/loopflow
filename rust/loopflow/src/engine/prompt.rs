@@ -131,6 +131,7 @@ pub enum PromptFormatMode {
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
     Cli,
+    /// Retained for recorded app-launch context; no launcher emits this surface.
     Ide,
     Mac,
     Iphone,
@@ -2406,7 +2407,7 @@ mod tests {
     }
 
     #[test]
-    fn surface_parser_accepts_ide() {
+    fn surface_parser_preserves_historical_ide() {
         let parsed = "ide"
             .parse::<Surface>()
             .expect("surface parsing is infallible");

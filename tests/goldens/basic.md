@@ -90,8 +90,7 @@ conversation is that scope's operator: it reads failed work's logs and keeps
 started Tasks moving. Running Flows and optional scheduled checks continue
 independently; nothing re-invokes a conversation.
 
-Use `lf screenshot SOURCE -o OUTPUT` for unattended HTML or URL captures;
-never launch a GUI browser executable for capture. Keep credentials out of
+Never launch a GUI browser executable for capture. Keep credentials out of
 output, logs, and chat; follow the repository's secret-management policy.
 
 ## Context and durable knowledge

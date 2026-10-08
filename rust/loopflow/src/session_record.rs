@@ -1669,38 +1669,11 @@ pub(crate) fn generated_session_title(
     task: Option<&str>,
     cwd: &Path,
 ) -> String {
-    let request = context.and_then(|context| {
-        context
-            .system
-            .iter()
-            .chain(std::iter::once(&context.task))
-            .find_map(|channel| {
-                channel.assets.iter().find_map(|asset| {
-                    (asset.kind == crate::trace::ContextAssetKind::UserMessage)
-                        .then(|| {
-                            channel
-                                .text
-                                .get(asset.byte_start as usize..asset.byte_end as usize)
-                        })
-                        .flatten()
-                })
-            })
-            // Library callers have unassembled, separate system/task prompts.
-            .or_else(|| {
-                context
-                    .task
-                    .assets
-                    .iter()
-                    .all(|asset| asset.kind == crate::trace::ContextAssetKind::Assembly)
-                    .then_some(context.task.text.as_str())
-                    .filter(|text| *text != crate::engine::prompt::INITIAL_TURN_PROMPT)
-            })
-    });
     let purpose = skill
         .and_then(|skill| skill.rsplit('/').next())
         .filter(|skill| !matches!(*skill, "session" | "operate"));
     [
-        request,
+        context.and_then(session_request),
         purpose,
         task,
         cwd.file_name().and_then(|name| name.to_str()),
@@ -1728,6 +1701,33 @@ pub(crate) fn generated_session_title(
         (!title.is_empty()).then_some(title)
     })
     .unwrap_or_else(|| "Session".to_string())
+}
+
+fn session_request(context: &crate::trace::PreparedTurnContext) -> Option<&str> {
+    use crate::trace::ContextAssetKind;
+
+    for channel in context.system.iter().chain(std::iter::once(&context.task)) {
+        for asset in channel
+            .assets
+            .iter()
+            .filter(|asset| asset.kind == ContextAssetKind::UserMessage)
+        {
+            if let Some(request) = channel
+                .text
+                .get(asset.byte_start as usize..asset.byte_end as usize)
+            {
+                return Some(request);
+            }
+        }
+    }
+    // Library callers have unassembled, separate system/task prompts.
+    let task = &context.task;
+    (task.text != crate::engine::prompt::INITIAL_TURN_PROMPT
+        && task
+            .assets
+            .iter()
+            .all(|asset| asset.kind == ContextAssetKind::Assembly))
+    .then_some(task.text.as_str())
 }
 
 /// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.

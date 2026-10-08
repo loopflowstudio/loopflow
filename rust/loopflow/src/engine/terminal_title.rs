@@ -51,28 +51,7 @@ impl TerminalTitle {
             return None;
         }
         let input = environment.get(crate::session_record::CAPTURE_KEY_ENV)?;
-        let read = || -> anyhow::Result<Option<Self>> {
-            let store =
-                SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
-            let Some(session) = store.session_for_artifact(input)? else {
-                return Ok(None);
-            };
-            let driver = store.session_driver(&session.id)?;
-            let name = session_title(&store, &session)?;
-            let cmux = std::env::var("CMUX_WORKSPACE_ID")
-                .ok()
-                .zip(std::env::var("CMUX_SURFACE_ID").ok())
-                .filter(|(workspace, surface)| !workspace.is_empty() && !surface.is_empty());
-            Ok(Some(Self {
-                store,
-                session: session.id,
-                driver,
-                name,
-                cmux,
-                checked: Instant::now(),
-            }))
-        };
-        let mut title = match read() {
+        let mut title = match Self::load(input) {
             Ok(Some(title)) => title,
             Ok(None) => return None,
             Err(error) => {
@@ -96,6 +75,25 @@ impl TerminalTitle {
         }
         title.publish();
         Some(title)
+    }
+
+    fn load(input: &str) -> anyhow::Result<Option<Self>> {
+        let store =
+            SqliteStore::open_processes_read_only(&crate::store::database_path_from_env()?)?;
+        let Some(session) = store.session_for_artifact(input)? else {
+            return Ok(None);
+        };
+        Ok(Some(Self {
+            driver: store.session_driver(&session.id)?,
+            name: session_title(&store, &session)?,
+            store,
+            session: session.id,
+            cmux: std::env::var("CMUX_WORKSPACE_ID")
+                .ok()
+                .zip(std::env::var("CMUX_SURFACE_ID").ok())
+                .filter(|(workspace, surface)| !workspace.is_empty() && !surface.is_empty()),
+            checked: Instant::now(),
+        }))
     }
 
     pub(crate) fn refresh(&mut self) {

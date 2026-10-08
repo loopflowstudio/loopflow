@@ -1,118 +1,130 @@
 # Session titles (LOO-439)
 
-Jack Heart requested implementation through demo on October 8, 2026, without
-provider accounts or changes to existing cmux windows. No landing. Request-derived
-lf naming and native hooks are implemented. The universal native and host agreement
-requirements remain unfinished; the gaps below are not waived.
+## Accepted scope — October 8, 2026
+
+Jack Heart requested implementation through demo, without provider accounts,
+changes to existing cmux windows, or landing. His October 8 correction
+`283fa7b5-3fdd-4457-9170-0de821534803` supersedes the earlier narrowed scope:
+cover as many **future** Sessions as supported mechanisms allow, including
+lf/plain, interactive/headless, Task/taskless and embedded Codex. Coverage takes
+precedence over a single mechanism. No provider capability work is authorized.
+
+Existing conversations are entirely out: no instruction-title repair or old
+unnamed reconnect handling. Concurrent manual-rename preservation remains unproved.
+The demo must show a short start-path coverage table, including unsupported future
+starts and the exact missing capability. No question or scope decision blocks it.
+
+Sidebar/tab/window agreement, readable Task-first titles, plain terminal/herdr
+presentation and retained latest-message hooks remain host acceptance. Request
+excerpts are the implementation choice; title quality needs Jack's demo judgment.
 
 ## Implementation and ownership
 
-The Session name in SQLite owns lf presentation. Names use a three-word excerpt of
-the attributed request, excluding common articles and terminal controls, within
-80 characters. UserMessage assets can come from either channel; LOO-429's generic
-trigger and inherited Goal are not naming inputs. Concrete skills, Task titles
-and workspace names supply missing purpose. Task-primary Sessions use Task titles.
-Existing names and human precedence survive. This is an excerpt, not a semantic
-summary. Generic opening words remain a naming-quality limitation.
+SQLite's Session name owns lf presentation. `engine::naming` uses a three-word
+excerpt of the attributed request, excluding common articles and terminal controls,
+within 80 characters. UserMessage assets can come from either channel; LOO-429's
+generic trigger and inherited Goal are not naming inputs. Concrete skills, Task
+titles and workspace names supply missing purpose. Task-primary Sessions use Task
+titles. Existing names and human precedence survive. Generic opening words remain
+a naming-quality limitation; this is an excerpt, not a semantic summary.
 
-Terminal presentation prefixes the Task identifier and limits its purpose to three
-words. Taskless presentation uses the stored name. `TerminalTitle` serves both
-interactive entry points. OSC 0 is written before spawn; live cmux updates use
-workspace/tab control commands with launching-environment identifiers. Read-only
-name observation stops on driver replacement; bounded host-command failure disables
-updates until reconnect. Other terminals update on reconnect. Claude receives
-`--name`; titled lf launches suppress Claude/Codex terminal-title updates. Native
-stdio and host message hooks are retained.
+`TerminalTitle` serves both interactive entry points. Task presentation prefixes
+the identifier and limits purpose to three words; taskless presentation uses the
+stored name. OSC 0 is written before spawn. cmux workspace/tab updates use the
+launching environment's identifiers. Read-only observation stops on driver
+replacement; bounded host-command failure disables updates until reconnect.
+Other terminals update on reconnect. Claude receives `--name`; titled lf launches
+suppress Claude/Codex terminal-title updates. Native stdio and message hooks stay.
 
-Plain native hooks share the same request-excerpt function. Claude returns its
-supported `sessionTitle`, preserving `session_title`; an unnamed resume reads its
-first non-meta user request. Codex uses `thread/read` and `thread/name/set` on the
-existing shared app-server's WebSocket control socket, preserving existing names.
-No second engine, provider-history writer, model call or concurrent OSC writer is
-introduced. Native providers own terminal output. Hooks skip conversations already
-recorded as lf Sessions, so later native turns cannot create a competing title.
+Plain native hooks share the excerpt function and run only on UserPromptSubmit.
+Claude supplies `sessionTitle` while preserving nonempty `session_title`; this
+works for new interactive and `claude -p` conversations. Codex uses `thread/read`
+and `thread/name/set` on the existing shared app-server control socket. Neither
+provider reads old turns or installs a resume hook. Both skip nonempty names and
+lf-owned conversations. Providers own native history and terminal output.
 
-Published installation adds UserPromptSubmit and resume SessionStart hooks under
-the standard `.claude` and `.codex` homes, preserving other hooks, settings,
-permissions and symlink destinations. Hook callbacks act beneath `.lf` directories.
-Codex's own hook trust review remains in force. No native settings were installed
-on Jack's machine. Installation-entry acceptance remains gate-owned; helper tests
-prove merging and repeated installation, not a published installation.
+Published installation merges UserPromptSubmit hooks under both standard homes.
+Existing hooks, settings, permissions and symlink destinations survive. Hooks act
+only beneath `.lf` directories. Codex's ordinary trust review remains. No native
+settings were installed on Jack's machine. Installation-entry acceptance belongs
+to gate; helper fixtures establish merging and repeated installation only.
 
-## Native evidence and counterexamples — October 8
+## Demo coverage — October 8
 
-Claude Code 2.1.295 and Codex 0.161.0 ran real TUIs in private PTYs with fresh homes,
-no real credentials and external-network denial. A loopback fake API returns one
-fixed response; it proves transport and naming, not model judgment. First requests
-produce `Plan store migration` in native title output. Native `/rename`, another
-request and native resume preserve `Manual release notes`. Claude also names a
-previously unnamed resume from its original request.
+| How the Session starts | Titled? | Evidence or missing capability |
+| --- | --- | --- |
+| lf interactive, Task | Yes: Task id and purpose | Public CLI/PTY fixture; live cmux rendering still unavailable. |
+| lf interactive, taskless | Yes: Session name | Same fixture proves agreement with `lf session list` and live host rename commands. |
+| lf headless, Task or taskless | Yes in Loopflow | Shared capture creation names every agent Session before provider launch; no terminal title without a terminal. |
+| New plain Claude TUI | Yes | Real 2.1.295 TUI emits request title; manual rename survives the next turn. |
+| New plain `claude -p` | Yes | Real 2.1.295 headless run saves `Plan store migration` in native history. |
+| New plain Codex TUI, shared server | Yes, with trusted hook | Real 0.161.0 TUI emits request title using native title defaults. |
+| New plain Codex TUI, embedded (`--no-daemon` / bypass-hook-trust) | No automatic native name from lf | No control socket to its active engine; inspected hook output has no title operation. |
+| New plain `codex exec` | No automatic native name from lf | Real 0.161.0 headless fixture completes, leaves name unset and exposes no shared socket. |
+| Plain native launch with hooks disabled/untrusted or outside `.lf` | No lf naming | Callback is not run or intentionally does not apply. |
 
-`tests/e2e/native_titles.py` retains the reproducible probes. Initial and resumed
-OSC captures are written to the caller's output directory. These are native TUI
-proofs, not rendered cmux/herdr or configured-shim proofs. The first exploratory
-probe separately established that an external API rename reaches the active Codex
-TUI's OSC output and footer; the later hook probes establish actual first-request
-naming rather than mere API acknowledgement.
+Account-free TUI captures: `/tmp/lf-title-future-claude-tui-20261008/` and
+`/tmp/lf-title-scope-codex-20261008/`.
+Headless readbacks, stdout and stderr are in
+`/tmp/lf-title-future-{claude,codex}-headless-20261008/` (`naming.json`). Fixed
+fake responses establish transport/name persistence, not model judgment. The
+headless Codex probe explicitly enables its known fixture hook; lack of trust is
+not the missing endpoint. Future native coverage requires the published hooks;
+no installed acceptance is implied.
 
-Two Codex counterexamples invalidate a universal hook-only design:
+The [Codex hooks](https://learn.chatgpt.com/docs/hooks) output contract offers
+context/control, not a title field. The
+[app-server API](https://learn.chatgpt.com/docs/app-server) offers `thread/name/set`
+through a connected server. Inspected
+[CLI commands](https://learn.chatgpt.com/docs/developer-commands) and local 0.161.0
+`exec --help` expose no external embedded rename command. This audit identified no
+supported native naming operation for the missing modes; it does not disprove
+undocumented integrations. No provider change, storage writer, launch-mode switch
+or competing OSC writer was introduced.
 
-- `--dangerously-bypass-hook-trust` selected embedded execution in the isolated
-  probe, with no shared control socket. The normal shared-server API therefore
-  cannot name that TUI. `--no-daemon` has the same missing-endpoint limitation.
-  No competing writer or storage edit substitutes for live adoption. LOO-428's
-  configured shim path still needs its own proof and supported naming mechanism.
-- Reconnecting to an already-loaded unnamed thread did not invoke SessionStart.
-  The callback can derive and apply its original request through the API when
-  explicitly invoked, but a native reconnect did not invoke it. The
-  `--unnamed-resume` Codex probe retains this failing acceptance case. A native
-  attach event/API or another supported integration is still needed. Existing
-  named resumes pass; that does not cover this counterexample.
+Existing-name and old-reconnect capability evidence remains at
+`4b4aba7d9:scratch/every-lf-session-in-cmux.md` and its native probe. Additional
+findings were preserved before reconciliation at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/lf-title-scope-evidence-coy9w1oj/`.
+These are historical evidence, not remaining implementation requirements.
 
-The current provider integration must not be called universal or accepted while
-those execution shapes remain uncovered. Changing a provider/host configuration
-or replacing native stdio is not authorized by these probes.
+## Evidence and remaining demo/gate work
 
-Sources: [Claude hooks](https://code.claude.com/docs/en/hooks),
-[Codex hooks](https://learn.chatgpt.com/docs/hooks),
-[Codex app-server](https://learn.chatgpt.com/docs/app-server).
+`tests/e2e/native_titles.py` exercises new native conversations against a local
+fake API in private PTYs or with `--headless`, fresh homes and external-network
+denial. It retains native defaults, latest-OSC assertions and sequential manual
+rename preservation. Old unnamed/named resume probes and all resume-only naming
+code are removed.
 
-## Remaining host and gate work
+The twelve-launch public CLI fixture covers Task/taskless names, rename/reconnect
+and host failure in isolated homes. Only stderr has a PTY; this proves no native
+TUI or rendered host. Lifecycle/capture/attribution fixtures retain human precedence
+and request/Goal identity. Gate retains driver replacement, missing cmux executable,
+captured-Flow launch and installation-entry acceptance.
 
-cmux again denied separate unfocused workspace creation before creating anything:
-only processes started inside cmux may connect. Existing windows were untouched.
-An allowed cmux-origin process is needed for the separate synthetic-provider demo.
-Sidebar/tab/window agreement, latest-message line, herdr and LOO-428's configured
-shim path remain unobserved. No publication, landing or acceptance is claimed.
-
-Live lf rename changes cmux workspace/tab names only. OSC and Claude's native name
-are set at launch; Codex receives terminal-title suppression. Whether host control
-renames update the window bar remains unknown. Repair requires observed host
-behavior; adding an unsynchronized terminal writer would violate native passthrough.
-Visible agreement remains demo-owned, not waived by the source fixture.
-
-Gate retains driver replacement, missing cmux executable, captured-Flow launch and
-installation-entry acceptance. The earlier twelve-launch public CLI fixture covers
-automatic Task/taskless titles, rename/reconnect and host failure in isolated homes;
-only stderr has a PTY, so it proves no provider TUI or host rendering. Existing
-lifecycle/capture/attribution checks cover human precedence and request/Goal identity.
+The October 8 demo attempt again failed before creating its unfocused workspace:
+the caller must originate inside cmux. A separate workspace with `--focus false` remains the only
+authorized live host demo. Sidebar/tab/window agreement, latest-message line,
+herdr and configured-shim behavior remain unobserved. Live lf rename updates
+workspace/tab names only; window-bar propagation needs observation. No
+unsynchronized terminal writer is planned. No publication, landing or acceptance
+is claimed. Release's entry-point lesson applies: native callback, actual hook,
+TUI/headless launch, installation and configured-host proofs are distinct.
 
 ## Delete — do not maintain
 
-Random word lists and duplicate child wait loops are removed. Both native and lf
-names use `request_title`; only `TerminalTitle` writes lf presentation. Preserve
-native history, human names, lf attribution and host message hooks. No provider
-wrapper, terminal registry, schema change or second naming algorithm is planned.
+Removed both providers' SessionStart registration, resume transcript readers and
+all old-conversation probes. Existing lf reconnect behavior remains part of the
+Session lifecycle; this Task adds no historical repair. Future headless probes
+replace the old-conversation branch. No provider capability work is planned.
+Random word lists, duplicate child wait loops and capture-owned naming policy
+were already removed. `engine::naming`, `TerminalTitle` and `harness::native_titles`
+retain their separate naming, projection and native-hook responsibilities. No
+wrapper, terminal registry, schema change or second naming algorithm remains.
 
-Review repaired native/lf naming competition and preserved symlinked provider
-settings. Release's child memory reinforces testing each entry point: native
-callback, actual hook, TUI reconnect and installed distribution are distinct proofs.
-The shared-daemon probe does not repair embedded execution or synthesize an attach
-hook. Dependent universal-native implementation requires a revised mechanism.
-
-Checks: `cargo build`, focused Rust compilation, network-isolated title units (4) and CLI ownership (1), `native_titles.py` Claude/Codex naming/manual-rename/resume plus Claude unnamed-resume, fmt/Clippy, Ruff and `git diff --check` pass; Codex `--unnamed-resume` reproduces the missing callback; remaining acceptance is gate/demo-owned.
+Checks: `cargo build`, isolated `native_titles` units (2), native TUI/headless probes, fmt, all-target Clippy, Ruff and `git diff --check` pass; Codex exec records the unnamed/no-socket gap; prior lf presentation proofs reused; host/installation acceptance remains demo/gate-owned.
 
 Earlier request/Goal and Task-primary proof: `91c4d07f9:scratch/every-lf-session-in-cmux.md`.
 Earlier transport/demo plan: `04027f096:scratch/every-lf-session-in-cmux.md`.
-Public cmux naming documentation and CLI help were studied; no cmux/herdr source,
-tests, skills or configuration were read or reused.
+Public cmux documentation and CLI help informed behavior only; no cmux/herdr
+source, tests, skills or configuration were read or reused.

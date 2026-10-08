@@ -179,6 +179,8 @@ also fixed an outside-repository assertion previously masked by the generic trig
 
 Checks: `git diff --check` passes (October 8 realign, prose only); reuse `ca5a28b31` build, native-title units, twelve-launch CLI fixture, Claude/Codex TUI, fmt, Clippy and Ruff passes and `b1feca0eb` headless evidence; host judgment remains demo-owned, installation proof gate-owned.
 
+Sync check (October 8): `cargo test -p loopflow --test session_cli_tests terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts -- --exact` passed after merging `24db5d4d6`; fixture now uses `-i` and answers the Codex launch probe; broader checks remain gate-owned.
+
 Earlier request/Goal and Task-primary proof: `91c4d07f9:scratch/every-lf-session-in-cmux.md`.
 Earlier transport/demo plan: `04027f096:scratch/every-lf-session-in-cmux.md`.
 Public cmux documentation and CLI help informed behavior only; no cmux/herdr

@@ -414,23 +414,30 @@ pub struct ProjectSummary {
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
-        let personal = crate::ops::task::local_wave_plan(store, wave.id()).await?;
-        let row = store.pm_snapshot(wave.id()).await?;
-        let (observed, partial) = match personal.or_else(|| row.map(|row| row.snapshot)) {
-            Some(plan) => (plan.projects, false),
-            None => {
-                let projects = store.sqlite.accepted_projects(wave.id())?;
-                if projects.is_empty() {
-                    return Err(anyhow!("Project planning has not been synced"));
+        let registered = store.list_projects(Some(wave.id())).await?;
+        let (observed, partial) = if store.sqlite.personal_wave_definition(wave.id())?.is_some() {
+            let projects = registered
+                .iter()
+                .cloned()
+                .map(crate::ops::task::local_project_item)
+                .collect::<crate::ops::OpsResult<Vec<_>>>()?;
+            (projects, false)
+        } else {
+            match store.pm_snapshot(wave.id()).await? {
+                Some(row) => (row.snapshot.projects, false),
+                None => {
+                    let projects = store.sqlite.accepted_projects(wave.id())?;
+                    if projects.is_empty() {
+                        return Err(anyhow!("Project planning has not been synced"));
+                    }
+                    (projects, true)
                 }
-                (projects, true)
             }
         };
         let current = crate::store::sqlite::project_selection::read_project_binding(
             &store.sqlite,
             wave.id(),
         )?;
-        let registered = store.list_projects(Some(wave.id())).await?;
         let projects = observed
             .into_iter()
             .map(|project| ProjectSummary {

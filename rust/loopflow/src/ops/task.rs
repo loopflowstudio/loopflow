@@ -1453,15 +1453,6 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
-) -> OpsResult<crate::pm::PmItem> {
-    task_create_with_id(repo, wave, title, report, crate::durable::TaskId::new())
-}
-
-pub fn task_create_with_id(
-    repo: &Path,
-    wave: Option<&str>,
-    title: Option<String>,
-    report: Option<String>,
     identity: crate::durable::TaskId,
 ) -> OpsResult<crate::pm::PmItem> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
@@ -4000,17 +3991,6 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     })
 }
 
-async fn task_was_deleted(store: &Store, task: &Task) -> OpsResult<bool> {
-    match &task.plan.linear_id {
-        Some(id) => Ok(store
-            .task_deletion(&task.wave_id, id.as_str())
-            .await
-            .map_err(task_error)?
-            .is_some()),
-        None => Ok(false),
-    }
-}
-
 fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<Task>> {
     block_on_task(async move {
         let store = task_store().await?;
@@ -4024,7 +4004,7 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
         let Some(mut task) = task else {
             return Ok(None);
         };
-        if task_was_deleted(&store, &task).await? {
+        if store.sqlite.task_deleted(&task).map_err(task_error)? {
             return match issue {
                 Some(_) => Ok(Some(task)),
                 None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
@@ -4711,7 +4691,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .await
             .map_err(task_error)?;
         let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
-        let actions = if task_was_deleted(&store, &task).await? {
+        let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
             TaskActionModel {
                 recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
                 reason: "Task was deleted; retained history is read-only".into(),

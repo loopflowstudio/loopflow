@@ -624,6 +624,7 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
             Some("product"),
             Some("Continue training".into()),
             Some("Retain the issue".into()),
+            crate::durable::TaskId::new(),
         )
         .unwrap();
         crate::ops::task::task_edit(
@@ -672,7 +673,7 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
         let identity = crate::durable::TaskId::new();
         let create = || {
-            crate::ops::task::task_create_with_id(
+            crate::ops::task::task_create(
                 &repo,
                 Some("product"),
                 Some("Future work".into()),
@@ -830,6 +831,7 @@ fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
             Some("product"),
             Some("Future work".into()),
             Some("Preserve this issue's outcome".into()),
+            crate::durable::TaskId::new(),
         )
         .unwrap();
     });
@@ -1086,6 +1088,7 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
             Some("product"),
             Some("Finish without checkout".into()),
             Some("Retain the completion".into()),
+            crate::durable::TaskId::new(),
         )
         .unwrap();
         let task = runtime
@@ -1173,6 +1176,7 @@ fi
             Some("product"),
             Some("Future work".into()),
             Some("A directive".into()),
+            crate::durable::TaskId::new(),
 )
         .unwrap();
         let task = {
@@ -1609,6 +1613,7 @@ esac
                 Some("product"),
                 Some("Cancel me".into()),
                 Some("Keep history".into()),
+                crate::durable::TaskId::new(),
             )
             .unwrap();
             let timestamp = time::OffsetDateTime::now_utc();
@@ -1857,6 +1862,7 @@ fn foreign_projects_do_not_block_sweep_refresh_or_sync() {
             Some("product"),
             Some("Eligible work".into()),
             Some("Cancel only repository work".into()),
+            crate::durable::TaskId::new(),
         )
         .unwrap();
         for plan in [true, false] {
@@ -1971,6 +1977,7 @@ fn task_sweep_previews_old_chapters_and_preserves_current_and_terminal_issues() 
             Some("product"),
             Some("Planning work".into()),
             Some("Retain evidence".into()),
+            crate::durable::TaskId::new(),
         )
         .unwrap();
         assert!(crate::ops::task::task_sweep(&repo, true)

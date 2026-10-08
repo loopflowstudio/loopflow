@@ -988,7 +988,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             };
             let identity = creation_id.clone().unwrap_or_default();
             eprintln!("Creation identity: {identity}; retain --creation-id {identity} when retrying this request");
-            let issue = loopflow::ops::task::task_create_with_id(
+            let issue = loopflow::ops::task::task_create(
                 repo,
                 wave.as_deref(),
                 title.clone(),

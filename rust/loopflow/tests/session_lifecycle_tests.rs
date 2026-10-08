@@ -396,12 +396,24 @@ esac
     assert_eq!(fixture.count("agent_sessions"), 2);
     fixture.db().execute("UPDATE waves SET personal_plan_id=(SELECT id FROM personal_plans LIMIT 1) WHERE id=(SELECT p.wave_id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1)", [task_id]).unwrap();
     // A retained alias/deletion observation cannot transfer personal authority.
+    let personal = fixture.json(&["task", "status", task_id, "--json"]);
+    assert_eq!(personal["planning_state"], "available");
+    assert_ne!(
+        personal["execution"]["actions"]["reason"],
+        "Task was deleted; retained history is read-only"
+    );
     fixture.json(&["task", "abandon", task_id, "--json"]);
     let terminal = fixture.run(&["-b", "--agent", "codex", "task", "run", task_id]);
     assert!(!terminal.status.success());
     assert_eq!(fixture.count("agent_sessions"), 2);
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
+    let history = fixture.json(&["task", "status", task_id, "--json"]);
+    assert_eq!(history["planning_state"], "removed");
+    assert_eq!(
+        history["execution"]["actions"]["reason"],
+        "Task was deleted; retained history is read-only"
+    );
     let refused = fixture
         .command(&["session", "resume", &session])
         .current_dir(fixture.repo.path())

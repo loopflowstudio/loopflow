@@ -532,15 +532,8 @@ pub async fn workflow_catalog(
 pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
     let store = super::pm::pm_store().await?;
     let project = resolve_project(&store, repo, selector).await?;
-    let content = if let Some(name) = name.strip_prefix("personal:") {
-        store
-            .sqlite
-            .personal_workflow(&project.wave_id, name)
-            .map_err(project_error)?
-    } else {
-        crate::engine::workflow::workflow_source(name, repo).map_err(project_error)?
-    };
-    content.ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
+    read_workflow_source(&store, &project.wave_id, name, repo)?
+        .ok_or_else(|| project_error(format!("Workflow {name:?} is unavailable")))
 }
 
 pub async fn edit(
@@ -711,15 +704,25 @@ pub(crate) fn load_workflow(
     name: &str,
     repo: &Path,
 ) -> OpsResult<Option<crate::engine::workflow::WorkflowDefinition>> {
+    read_workflow_source(store, wave, name, repo)?
+        .map(|content| {
+            crate::engine::workflow::parse_workflow(name, &content, repo).map_err(project_error)
+        })
+        .transpose()
+}
+
+fn read_workflow_source(
+    store: &Store,
+    wave: &crate::id::WaveId,
+    name: &str,
+    repo: &Path,
+) -> OpsResult<Option<String>> {
     if let Some(private) = name.strip_prefix("personal:") {
-        return store
+        store
             .sqlite
             .personal_workflow(wave, private)
-            .map_err(project_error)?
-            .map(|content| {
-                crate::engine::workflow::parse_workflow(name, &content, repo).map_err(project_error)
-            })
-            .transpose();
+            .map_err(project_error)
+    } else {
+        crate::engine::workflow::workflow_source(name, repo).map_err(project_error)
     }
-    crate::engine::workflow::load_workflow(name, repo).map_err(project_error)
 }

@@ -796,6 +796,10 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
     );
     assert_eq!(retained["execution"]["status"], "abandoned");
     assert_eq!(retained["planning_state"], "removed");
+    assert_eq!(
+        retained["execution"]["actions"]["reason"],
+        "Task was deleted; retained history is read-only"
+    );
     let rejected = command(
         repo.path(),
         home.path(),

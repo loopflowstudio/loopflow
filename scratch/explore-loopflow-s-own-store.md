@@ -210,7 +210,7 @@ Implemented operation boundaries:
   steer/progress provenance. Connected mutations retain their Linear writers.
 - `rotate_local_projects` commits all personal destinations, selections, started
   membership and receipts together. The chapter operation retains the existing
-  connected recovery path; mixed-authority retry proof remains with gate.
+  connected recovery path; mixed-authority failure/retry now passes the composed operation fixture.
 
 Use `lf-<12 UUID hex digits>` for the displayed local selector, extending it when
 ambiguous; the full ID always works. Store full IDs in automation. Existing
@@ -498,8 +498,8 @@ Implemented local boundaries (2026-10-08):
   receipt together, preserving backlog. Original input survives for retry checking.
   Public fixtures exercise rotation twice, retained workflow/checkout and creation
   retry across that switch. Multi-Wave rollback, concurrent creation/rotation and
-  conflicting retry input are covered. Mixed-authority recovery remains an affected
-  gate check; a local transaction does not make provider effects atomic.
+  conflicting retry input are covered. Mixed-authority recovery passes ten interrupted provider mutations; a local
+  transaction does not make provider effects atomic.
 - The same migration also retains `pm_items.body` and `pm_projects.body` byte-for-byte
   and parses their historical fixture shapes through current observation readers.
   PR, Session, workflow, move and orphan deletion-recovery preservation still pass.
@@ -543,14 +543,15 @@ in stable order before choosing the current destination. Public fixtures scrub
 inherited Loopflow/Linear authority, and unknown provider/GitHub stub calls fail.
 Personal deletion uses a timestamp on its Task, never Linear's recovery table.
 
-Remaining before publication: the affected gate below, including connected
-planning/rotation recovery and the full headless app/model matrix. Mixed rotation
-needs a dedicated failure/retry fixture: current code commits the personal batch
-before reserving and applying connected transitions. A provider failure can leave
-that local batch settled; retry of the same plan must preserve its receipt and
-started/backlog membership while recovering the connected effect. Existing pure
-personal rollback and connected recovery fixtures do not establish this composition.
-Any failure requires repair in this same PR; acceptance is unchanged.
+Remaining before publication: finish the affected gate below, including connected
+planning/rotation recovery and the full headless app/model matrix. The mixed rotation
+operation fixture now interrupts each of ten provider mutations after personal
+settlement. Retry retains the personal receipt, original started membership and
+backlog even when that backlog starts afterward; connected PR/Flow history survives.
+A second retry creates no Project and performs no provider mutation. This is
+composed operation evidence, not a public CLI crash or live-provider proof.
+Gate also found five SQLite owners missing from the architecture map; its corrected
+owner inventory now passes. Any further failure requires repair in this same PR.
 
 Desktop evidence has two boundaries: public CLI output is compared with the
 shared Task/comment fixture and decoded/rendered in Swift; workflow controls use
@@ -606,6 +607,7 @@ mistaken for local workflow arrival. Remaining choices are in `questions.md`.
 
 Earlier focused storage/migration, DTO and headless Desktop evidence remains at
 `2d4115339:scratch/explore-loopflow-s-own-store.md`; compression changed no schema
-or Swift code. Realignment changes prose only and reuses the focused results below.
+or Swift code. Publication preparation adds the composed recovery regression and repairs the
+architecture map; production behavior is unchanged.
 
 Check (2026-10-08): `git diff --check` passed; reused compression results: `cargo nextest run -p loopflow --test local_planning --test session_lifecycle_tests -E "binary(local_planning) | test(personal_task_launch_resume_and_skill_workflow_keep_native_identity)" --no-fail-fast` — 9 passed; `cargo nextest run -p loopflow --lib -E "test(task_creation_confirmation_failure_retries_without_starting_backlog) | test(changing_the_workflow_keeps_the_projects_krs) | test(connected_fields_match_personal_order_assignment_and_summary)" --no-fail-fast` — 3 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; broader matrix and mixed-authority recovery remain gate-owned.

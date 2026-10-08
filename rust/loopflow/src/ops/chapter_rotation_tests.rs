@@ -7,7 +7,9 @@ use super::{
 };
 use crate::ops::chapter::{rotate, ChapterPlan, WaveChapterPlan};
 
+use crate::planning::NewTask;
 use crate::pm::{PmKr, ProjectContent};
+use crate::work::task::{TaskEventKind, TaskId};
 use crate::work::wave::WaveLocator;
 use serde_json::json;
 
@@ -148,6 +150,151 @@ async fn rotation_recovers_every_mutation_and_partial_repository_settlement() {
                         "unstarted"
                     );
                     assert_eq!(state.projects[old_id(wave)]["status"]["type"], "completed");
+                }
+            })
+            .await;
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn mixed_rotation_retry_preserves_settled_personal_work_after_provider_failure() {
+    for stop in 1..=10 {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = fixture_repo(directory.path());
+        let provider = Arc::new(Mutex::new(provider_fixture()));
+        provider.lock().await.interrupt_after = Some(stop);
+        let (url, server) = serve_fixture(provider.clone()).await;
+        let context = context(&directory.path().join("registry.db"), &repo, &url).await;
+        local_backlog_tasks(&context, &repo).await;
+        let (connected_task, pr, flows) = local_started_task(&context, &repo).await;
+        let project = context
+            .store
+            .sqlite
+            .ensure_personal_project(&repo.to_string_lossy(), "private")
+            .unwrap();
+        let create = |title: &str| {
+            context
+                .store
+                .sqlite
+                .create_local_task(&NewTask {
+                    id: TaskId::new(),
+                    project_id: project.id.clone(),
+                    title: title.into(),
+                    description: String::new(),
+                })
+                .unwrap()
+        };
+        let started = create("Started personal work");
+        let backlog = create("Unreviewed personal backlog");
+        context
+            .store
+            .sqlite
+            .append_task_event(&started.id, &TaskEventKind::Started)
+            .unwrap();
+        context.store.sqlite.mark_task_started(&started.id).unwrap();
+        let started_at = task_started_at(&context.path, &started.id);
+        PM_TEST_CONTEXT
+            .scope(copy_context(&context), async {
+                let mut input = plan(&context, &repo, &["a", "b"]).await;
+                let successor = crate::durable::ProjectId::new();
+                input.waves.push(WaveChapterPlan {
+                    wave_id: project.wave_id.clone(),
+                    successor_id: successor.to_string(),
+                    create: true,
+                    project_name: "Personal successor".into(),
+                    content: input.waves[0].content.clone(),
+                });
+                assert!(
+                    rotate(&repo, &input, None, false).await.is_err(),
+                    "stop {stop}"
+                );
+                let receipt = context
+                    .store
+                    .project_transition(&project.wave_id, successor.as_str())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(receipt.settled_at.is_some());
+                assert_eq!(
+                    read_project_binding(&context.store.sqlite, &project.wave_id).unwrap(),
+                    Some(successor.to_string())
+                );
+                assert_eq!(
+                    context
+                        .store
+                        .get_task(&started.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .project_id,
+                    successor
+                );
+                // A later start must not expand the already committed local membership.
+                context
+                    .store
+                    .sqlite
+                    .append_task_event(&backlog.id, &TaskEventKind::Started)
+                    .unwrap();
+                context.store.sqlite.mark_task_started(&backlog.id).unwrap();
+                provider.lock().await.unavailable = false;
+                rotate(&repo, &input, None, false).await.unwrap();
+                let mutations = provider.lock().await.mutations;
+                rotate(&repo, &input, None, false).await.unwrap();
+                assert_eq!(provider.lock().await.mutations, mutations);
+                let retained = context
+                    .store
+                    .project_transition(&project.wave_id, successor.as_str())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(retained.settled_at, receipt.settled_at);
+                assert_eq!(retained.predecessor_id, receipt.predecessor_id);
+                assert_eq!(
+                    context
+                        .store
+                        .project_transition_items(&project.wave_id, successor.as_str())
+                        .await
+                        .unwrap(),
+                    vec![started.id.to_string()]
+                );
+                assert_eq!(
+                    context
+                        .store
+                        .get_task(&backlog.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .project_id,
+                    project.id
+                );
+                assert_eq!(task_started_at(&context.path, &started.id), started_at);
+                assert_eq!(
+                    context
+                        .store
+                        .list_projects(Some(&project.wave_id))
+                        .await
+                        .unwrap()
+                        .len(),
+                    2
+                );
+                assert_eq!(
+                    context.store.task_prs(&connected_task.id).await.unwrap(),
+                    vec![pr]
+                );
+                assert_eq!(
+                    context.store.sqlite.task_flows(&connected_task.id).unwrap(),
+                    flows
+                );
+                for wave in &input.waves {
+                    assert!(context
+                        .store
+                        .project_transition(&wave.wave_id, &wave.successor_id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .settled_at
+                        .is_some());
                 }
             })
             .await;

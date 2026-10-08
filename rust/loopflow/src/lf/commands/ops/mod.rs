@@ -3,6 +3,7 @@ use crate::engine::config::{load_config_or_default, Config};
 use crate::engine::git::{current_branch, get_default_branch};
 use crate::engine::identity::WorktreeName;
 use crate::engine::naming::git_user;
+use crate::engine::target::{resolve_definition, Target};
 use crate::engine::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
@@ -10,11 +11,10 @@ use crate::engine::worktrees::{
     WorktreeSegment,
 };
 use crate::engine::{
-    prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
+    load_skill, prepare_process_prompt, sync_skills, ContextSourceOverrides, ProcessPromptInput,
     SkillSyncOptions, Surface,
 };
 use crate::lf::commands::util::find_repo_root;
-use crate::lf::discovery::{discover_skill, resolve_definition, Target};
 use crate::lf::output::{column_width, Colors};
 use crate::lf::{CronCommand, PrCommand, ReleaseCommand, RepoCommand, WtCommand};
 use crate::ops::OpsError;
@@ -2354,7 +2354,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(task.worktree);
+                    protected.extend(task.worktree);
                 }
             }
         }
@@ -2563,7 +2563,7 @@ fn process_skill_agent(
     env: Option<&std::collections::BTreeMap<String, String>>,
     config: &Config,
 ) -> Result<()> {
-    let skill = discover_skill(repo_root, skill_name)?;
+    let skill = load_skill(skill_name, repo_root)?;
 
     let message = context.map(|value| value.to_string());
     let prepared = prepare_process_prompt(

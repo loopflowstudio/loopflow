@@ -1,0 +1,7 @@
+{
+  "name": "Keep quoted input",
+  "description": "Retain empty strings and explicit nulls.",
+  "rank": 0,
+  "assignee": "00000000-0000-4000-8000-000000000042",
+  "summary": "One plan, one owner."
+}

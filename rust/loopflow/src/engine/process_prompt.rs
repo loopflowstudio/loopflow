@@ -28,6 +28,8 @@ pub struct ProcessPromptInput {
     pub docs: Vec<String>,
     pub wave: Option<String>,
     pub message: Option<String>,
+    /// Exact invocation arguments; Work direction stays in `message`.
+    pub skill_arguments: String,
     pub no_loopflow: bool,
     pub agent: Option<String>,
     pub cwd: Option<PathBuf>,
@@ -56,11 +58,7 @@ pub fn prepare_process_prompt(
     input: ProcessPromptInput,
 ) -> Result<PreparedProcessPrompt, CoreError> {
     let prepared = preview_process_prompt(config, input)?;
-    crate::engine::context_budget::check_input(
-        &crate::engine::agent::system_prompt_with_structured_replies(&prepared.config),
-        &prepared.config.task_prompt,
-        &prepared.budget_report.budgets,
-    )?;
+    prepared.budget_report.check_input()?;
     Ok(prepared)
 }
 
@@ -82,6 +80,7 @@ pub(crate) fn preview_process_prompt(
         docs: requested_docs,
         wave,
         message,
+        skill_arguments,
         no_loopflow,
         agent,
         cwd,
@@ -134,18 +133,61 @@ pub(crate) fn preview_process_prompt(
 
     let original_system = format_prompt(&components);
     let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
-    budget_report.measure_input(
-        &original_system,
-        INITIAL_TURN_PROMPT,
-        &format_prompt(&components),
-        INITIAL_TURN_PROMPT,
-    );
-    components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
+    // Plain installed skills need no instructions for maintaining absent Work
+    // context. Keep enforcing budgets and disclose any managed context or excerpts.
+    if !components.is_standalone_skill()
+        || !components.budget_decisions.is_empty()
+        || components.docs.iter().any(|doc| {
+            matches!(
+                doc.source,
+                DocumentSource::Scratch | DocumentSource::Wave | DocumentSource::RepoMemory
+            )
+        })
+    {
+        budget_report.measure_input(
+            &original_system,
+            INITIAL_TURN_PROMPT,
+            &format_prompt(&components),
+            INITIAL_TURN_PROMPT,
+        );
+        components.budget_notice = Some(format!("{}\nTotal usage above is before this budget notice and provider reply guidance; the launch ceiling includes both.", budget_report.render()));
+    }
     let prompt = format_prompt(&components);
 
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
 
+    let skill_invocation = components
+        .skill
+        .as_ref()
+        .filter(|skill| {
+            matches!(parse_agent(&agent).0.as_str(), "claude" | "codex")
+                && skill.source.as_ref().is_some_and(|source| {
+                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                })
+        })
+        .map(|skill| crate::engine::skill_invocation::SkillInvocation {
+            skill: skill.clone(),
+            arguments: skill_arguments.clone(),
+        });
+    // Installed skills carry gathered context through their native invocation.
+    // Inline skills and ordinary prompts use the complete system context file.
+    let (system_prompt, task_prompt) = if skill_invocation.is_some() {
+        let mut parts = crate::engine::prompt::format_content_sections(&components);
+        if let Some(message) = components
+            .message
+            .as_deref()
+            .filter(|message| *message != skill_arguments)
+        {
+            parts.push(crate::engine::prompt::render_message(message));
+        }
+        (
+            crate::engine::prompt::format_system_sections(&components).join("\n\n"),
+            parts.join("\n\n"),
+        )
+    } else {
+        (prompt.clone(), INITIAL_TURN_PROMPT.to_string())
+    };
     let action_style = components
         .skill
         .as_ref()
@@ -153,8 +195,9 @@ pub(crate) fn preview_process_prompt(
     let launch = AgentConfig {
         chrome: false,
         session_driver: None,
-        system_prompt: prompt.clone(),
-        task_prompt: INITIAL_TURN_PROMPT.to_string(),
+        system_prompt,
+        task_prompt,
+        skill_invocation,
         agent: Some(agent),
         max_turns,
         resume_token: None,
@@ -177,7 +220,7 @@ pub(crate) fn preview_process_prompt(
         &original_system,
         INITIAL_TURN_PROMPT,
         &effective_system,
-        &launch.task_prompt,
+        &launch.task_input_for_budget(),
     );
     // The source snapshot is stable; the total includes this notice and provider guidance.
     // The notice labels its pre-feedback total; the report measures submitted bytes.
@@ -362,6 +405,7 @@ Test skill body.
 
     #[test]
     fn large_task_launch_stays_within_context_budget_and_preserves_sources() {
+        let _home = crate::journal::TestLedgerGuard::new();
         use crate::engine::context_budget::BudgetKey;
         let goal_tokens = BudgetKey::GoalTokens.default_limit();
         let input_bytes = BudgetKey::InputBytes.default_limit();
@@ -391,6 +435,18 @@ Test skill body.
                 .collect::<String>()
         );
         assert!(message.len() > 1_048_576);
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "infrastructure/release",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {
@@ -468,6 +524,7 @@ Test skill body.
 
     #[test]
     fn repository_ancestor_and_selected_wave_memory_share_one_budget() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         let inherited = "Parent decisions and observations.\n".repeat(8_000);
         let own = "Release decisions and observations.\n".repeat(2_000);
@@ -497,6 +554,18 @@ Test skill body.
             .into(),
             ..default_test_config()
         };
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "infrastructure/delivery/release",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &config,
             ProcessPromptInput {
@@ -578,6 +647,7 @@ Test skill body.
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
                 resolved_skill: Some(Skill {
+                    source: None,
                     content: Some("Follow this instruction. ".repeat(100_000)),
                     ..Skill::named("large")
                 }),
@@ -595,6 +665,7 @@ Test skill body.
         let input = |content: String, has_ui| ProcessPromptInput {
             repo_root: tmp.path().to_path_buf(),
             resolved_skill: Some(Skill {
+                source: None,
                 content: Some(content),
                 ..Skill::named("budget")
             }),
@@ -619,6 +690,7 @@ Test skill body.
 
     #[test]
     fn implement_launch_treats_kickoff_plan_and_intent_as_references() {
+        let _home = crate::journal::TestLedgerGuard::new();
         let tmp = create_repo_fixture();
         fs::create_dir_all(tmp.path().join("scratch/nested")).unwrap();
         let plan = "Jack Heart accepted the design on 2026-09-30. Build Unit 1 first.";
@@ -631,6 +703,18 @@ Test skill body.
             "Jack previously invoked $kickoff.",
         )
         .unwrap();
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "product",
+            )
+            .unwrap();
         let prepared = prepare_process_prompt(
             &default_test_config(),
             ProcessPromptInput {
@@ -961,9 +1045,10 @@ Test skill body.
             &config,
             ProcessPromptInput {
                 repo_root: tmp.path().to_path_buf(),
-                skill: Some("npx/skill-creator".to_string()),
+                skill: Some("team/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
-                    name: "npx/skill-creator".to_string(),
+                    source: None,
+                    name: "team/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
                     action_style: Some("procedural".to_string()),
@@ -981,9 +1066,106 @@ Test skill body.
                 .skill
                 .as_ref()
                 .map(|skill| skill.name.as_str()),
-            Some("npx/skill-creator")
+            Some("team/skill-creator")
         );
         assert_eq!(prepared.config.agent.as_deref(), Some("codex:o3"));
+    }
+
+    #[test]
+    fn standalone_skill_omits_work_guidance_but_keeps_context_and_budget_enforcement() {
+        let tmp = create_repo_fixture();
+        fs::write(tmp.path().join("context.md"), "docs content").unwrap();
+        let source = Skill {
+            content: Some("Audit $ARGUMENTS".into()),
+            source: Some(crate::engine::skill_catalog::SkillOrigin {
+                path: tmp.path().join(".claude/skills/audit/SKILL.md"),
+                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                frontmatter: None,
+            }),
+            ..Skill::named("audit")
+        };
+        let input = ProcessPromptInput {
+            repo_root: tmp.path().into(),
+            resolved_skill: Some(source),
+            docs: vec!["context.md".into()],
+            no_loopflow: true,
+            agent: Some("claude".into()),
+            ..Default::default()
+        };
+        let prepared = prepare_process_prompt(&default_test_config(), input.clone()).unwrap();
+        assert!(prepared.config.system_prompt.is_empty());
+        assert!(prepared.config.task_prompt.contains("docs content"));
+        assert!(!prepared.config.task_prompt.contains("<lf:context-budget>"));
+
+        for key in [
+            crate::engine::context_budget::BudgetKey::InputTokens,
+            crate::engine::context_budget::BudgetKey::InputBytes,
+        ] {
+            let limited = Config {
+                context_budgets: [(key, 1)].into(),
+                ..default_test_config()
+            };
+            assert!(prepare_process_prompt(&limited, input.clone())
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds the input budget"));
+        }
+
+        std::fs::create_dir_all(tmp.path().join("scratch")).unwrap();
+        std::fs::write(tmp.path().join("scratch/plan.md"), "Preserve this decision").unwrap();
+        let prepared = prepare_process_prompt(&default_test_config(), input).unwrap();
+        assert!(prepared.config.task_prompt.contains("<lf:context-budget>"));
+        assert!(prepared
+            .config
+            .task_prompt
+            .contains("Preserve this decision"));
+    }
+
+    #[test]
+    fn native_skill_arguments_stay_separate_from_work_direction() {
+        let tmp = create_repo_fixture();
+        let source = Skill {
+            content: Some("Audit $ARGUMENTS using reference.md".into()),
+            source: Some(crate::engine::skill_catalog::SkillOrigin {
+                path: tmp.path().join(".claude/skills/audit/SKILL.md"),
+                dialect: crate::engine::skill_catalog::SkillDialect::Claude,
+                frontmatter: Some("\nallowed-tools: Read\n".into()),
+            }),
+            ..Skill::named("audit")
+        };
+        for (agent, surface) in [
+            ("claude:sonnet", Surface::Headless),
+            ("codex", Surface::Headless),
+            ("claude", Surface::Cli),
+            ("codex", Surface::Cli),
+        ] {
+            let prepared = prepare_process_prompt(
+                &default_test_config(),
+                ProcessPromptInput {
+                    repo_root: tmp.path().into(),
+                    resolved_skill: Some(source.clone()),
+                    message: Some("Preserve the Task checkout and return the decision".into()),
+                    skill_arguments: "  \"exact arguments\"  ".into(),
+                    agent: Some(agent.into()),
+                    surface,
+                    ..ProcessPromptInput::default()
+                },
+            )
+            .unwrap();
+            let invocation = prepared.config.skill_invocation.as_ref().unwrap();
+            assert_eq!(invocation.skill, source);
+            assert_eq!(invocation.arguments, "  \"exact arguments\"  ");
+            assert!(prepared
+                .config
+                .task_prompt
+                .contains("Preserve the Task checkout"));
+            assert!(!prepared.config.task_prompt.contains("Audit $ARGUMENTS"));
+            assert!(!prepared
+                .config
+                .system_prompt
+                .contains("Preserve the Task checkout"));
+            assert!(prepared.config.task_input_for_budget().contains("Audit"));
+        }
     }
 
     #[test]

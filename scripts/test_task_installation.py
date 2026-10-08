@@ -20,6 +20,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="rust:bookworm")
     parser.add_argument("--test", nargs="+", choices=PROOFS, help="run selected named proofs")
+    parser.add_argument(
+        "--native-titles", action="store_true", help="prove published title hook installation"
+    )
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     # Fail before creating resources when the shared container service is stuck.
@@ -90,6 +93,15 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         '
 """
         command = command.replace("TARGETS", targets)
+        if args.native_titles:
+            command = command.replace(
+                "LOOPFLOW_BUILD_PROVENANCE=development",
+                "LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published",
+            ).replace(
+                "nice -n 10 cargo test -p loopflow --lib --no-run\n"
+                f"        nice -n 10 cargo test -p loopflow {targets} --no-run",
+                "nice -n 10 cargo build -p loopflow --bin lf",
+            )
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
         )
@@ -106,6 +118,12 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file
             migration_preserves_planning_identity_and_removes_snapshot_storage
         CHECKS'
 """.replace("CHECKS", checks)
+        if args.native_titles:
+            isolated = (
+                "cd /source && PYTHONPATH=scripts python3 -c "
+                "'from test_network import _probe; _probe()' && "
+                "python3 tests/e2e/native_title_install.py /source/target/debug/lf"
+            )
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", isolated], check=True, timeout=1800
         )

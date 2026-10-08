@@ -119,7 +119,7 @@ pub fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
 }
 
 /// The builtin Workflow; Flow definitions occupy a separate namespace.
-fn builtin_workflow(name: &str) -> Option<&'static str> {
+pub(crate) fn builtin_workflow(name: &str) -> Option<&'static str> {
     BUILTIN_WORKFLOWS
         .iter()
         .find(|(builtin, _)| *builtin == name)
@@ -150,19 +150,6 @@ pub fn available_workflow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
         }
     }
     Ok(names.into_iter().collect())
-}
-
-/// Copy a builtin Workflow only when the repository has no local definition.
-pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    if let Some(path) = workflow_path(name, repo) {
-        return Ok(path);
-    }
-    let content = builtin_workflow(name)
-        .ok_or_else(|| LoadError::InvalidFlow(format!("Workflow {name} not found")))?;
-    let path = repo.join(format!(".lf/workflows/{name}.yaml"));
-    fs::create_dir_all(path.parent().expect("definition has a parent"))?;
-    fs::write(&path, content)?;
-    Ok(path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,7 +201,11 @@ pub fn load_workflow(name: &str, repo: &Path) -> Result<Option<WorkflowDefinitio
         .map_err(|error| LoadError::InvalidFlow(format!("workflow {name}: {error}")))
 }
 
-fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefinition, String> {
+pub fn parse_workflow(
+    name: &str,
+    content: &str,
+    repo: &Path,
+) -> Result<WorkflowDefinition, String> {
     let authored: AuthoredWorkflow =
         serde_yaml_ng::from_str(content).map_err(|error| error.to_string())?;
     let mut nodes = Vec::new();
@@ -303,7 +294,7 @@ fn parse_workflow(name: &str, content: &str, repo: &Path) -> Result<WorkflowDefi
 #[cfg(test)]
 mod tests {
     use super::workflow_catalog;
-    use super::{customize, load_workflow, names_workflow, END, START};
+    use super::{load_workflow, names_workflow, END, START};
 
     fn write(repo: &std::path::Path, path: &str, content: &str) {
         let path = repo.join(path);
@@ -393,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn a_customized_builtin_is_a_repository_file_that_stays_listed_when_invalid() {
+    fn repository_workflow_overrides_stay_listed_when_invalid() {
         let repo = tempfile::tempdir().unwrap();
         let entry = |name: &str| {
             workflow_catalog(repo.path())
@@ -404,16 +395,13 @@ mod tests {
         let builtin = entry("feature").unwrap();
         assert_eq!(builtin.source, None);
         assert_eq!(builtin.workflow.unwrap().nodes.len(), 2);
-        // Listing creates nothing; customizing writes the builtin once.
+        // Listing creates nothing, including when a repository override is invalid.
         assert!(!repo.path().join(".lf").exists());
-        let path = customize("feature", repo.path()).unwrap();
-        assert_eq!(path, repo.path().join(".lf/workflows/feature.yaml"));
-        std::fs::write(
-            &path,
+        write(
+            repo.path(),
+            ".lf/workflows/feature.yaml",
             "edges:\n  - {from: start, to: end, flow: no-such-flow}\n",
-        )
-        .unwrap();
-        assert_eq!(customize("feature", repo.path()).unwrap(), path);
+        );
         let invalid = entry("feature").unwrap();
         assert_eq!(
             invalid.source.as_deref(),
@@ -421,9 +409,11 @@ mod tests {
         );
         assert!(invalid.workflow.is_none());
         assert!(invalid.unavailable.unwrap().contains("no-such-flow"));
-        assert!(std::fs::read_to_string(&path)
-            .unwrap()
-            .contains("no-such-flow"));
+        assert!(
+            std::fs::read_to_string(repo.path().join(".lf/workflows/feature.yaml"))
+                .unwrap()
+                .contains("no-such-flow")
+        );
 
         let flow = crate::engine::flow::customize("pursue", repo.path()).unwrap();
         assert_eq!(flow, repo.path().join(".lf/flows/pursue.yaml"));
@@ -434,6 +424,5 @@ mod tests {
             .unwrap();
         assert_eq!(pursue.source.as_deref(), Some(".lf/flows/pursue.yaml"));
         assert!(pursue.graph.is_some());
-        assert!(customize("no-such-definition", repo.path()).is_err());
     }
 }

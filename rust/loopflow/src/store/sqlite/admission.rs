@@ -26,8 +26,7 @@ impl SqliteStore {
             .map(|id| self.task(id))
             .transpose()?
             .flatten()
-            .filter(|task| !task.worktree.as_os_str().is_empty())
-            .map(|task| task.worktree)
+            .and_then(|task| task.worktree)
             .into_iter()
             .collect::<Vec<_>>();
         self.lock_checkout_roots(workspaces, &roots)

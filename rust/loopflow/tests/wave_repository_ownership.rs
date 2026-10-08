@@ -1,3 +1,6 @@
+#[path = "support/planning.rs"]
+mod planning;
+
 use std::path::Path;
 use std::process::Command;
 
@@ -61,13 +64,14 @@ fn project(wave: &Wave) -> Project {
     Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
+            summary: String::new(),
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new("project-alpha").unwrap(),
+            linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
             slug: "architecture".to_string(),
             name: "Architecture".to_string(),
             prompt_context: "Keep identity boring.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -83,16 +87,17 @@ fn task(wave: &Wave, project: &Project, repo: &Path) -> (Task, TaskPr) {
     let task = Task {
         id: id.clone(),
         plan: TaskPlan {
-            id: LinearIssueId::new("issue-alpha").unwrap(),
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
             identifier: "LOO-127".to_string(),
             title: "Repository-owned Waves".to_string(),
             description: "Preserve Task history through relocation.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: repo.join("task-worktree"),
+        worktree: Some(repo.join("task-worktree")),
         workspace_slug: "repository-owned-waves".to_string(),
         branch: "jack/repository-owned-waves".to_string(),
         base_commit: "deadbeef".to_string(),
@@ -379,8 +384,15 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         )
         .unwrap();
     let (task, task_pr) = task(&alpha, &project, &repo_a);
+    planning::seed_unplaced_task(&database, &task);
     store
-        .create_task(&task, Some(&task_pr), None)
+        .place_task(
+            &task.id,
+            task.worktree.as_ref().unwrap(),
+            &task.workspace_slug,
+            &task_pr,
+            None,
+        )
         .await
         .unwrap();
     let placement = alpha_placement;
@@ -785,8 +797,15 @@ async fn relocation_refuses_meaningful_destination_history() {
         )
         .unwrap();
     let (owned_task, owned_pr) = task(&project_shadow, &owned_project, &target);
+    planning::seed_unplaced_task(&database, &owned_task);
     store
-        .create_task(&owned_task, Some(&owned_pr), None)
+        .place_task(
+            &owned_task.id,
+            owned_task.worktree.as_ref().unwrap(),
+            &owned_task.workspace_slug,
+            &owned_pr,
+            None,
+        )
         .await
         .unwrap();
 

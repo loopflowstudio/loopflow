@@ -1,3 +1,4 @@
+-- draft: process_names
 -- Rename recorded commands in place; IDs, outcomes and provenance remain unchanged.
 -- SQLite updates references in surviving indexes and triggers during each rename.
 
@@ -160,3 +161,57 @@ BEGIN
 END;
 
 CREATE INDEX session_process_membership ON session_events(session_id,process_lfid) WHERE process_lfid IS NOT NULL;
+
+-- draft: program_status
+ALTER TABLE session_activity ADD COLUMN provider_generation INTEGER;
+ALTER TABLE session_activity ADD COLUMN program_status TEXT CHECK (program_status IS NULL OR json_valid(program_status));
+ALTER TABLE session_activity ADD COLUMN status_stream TEXT;
+ALTER TABLE session_activity ADD COLUMN status_sequence INTEGER;
+-- Prior inference has no provider-generation witness; wait for a fresh reading.
+DROP TRIGGER store_revision_session_activity_update;
+CREATE TRIGGER store_revision_session_activity_update AFTER UPDATE ON session_activity
+WHEN NEW.driver_generation IS NOT OLD.driver_generation
+    OR NEW.provider_generation IS NOT OLD.provider_generation
+    OR NEW.program_status IS NOT OLD.program_status
+    OR (NEW.pending_input > 0) IS NOT (OLD.pending_input > 0)
+    OR (NEW.open_tools = 0) IS NOT (OLD.open_tools = 0)
+    OR NEW.yielded IS NOT OLD.yielded
+    OR (OLD.open_tools = 0 AND NEW.observed_at - OLD.observed_at >= 120)
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+
+-- draft: rename_home_to_machine
+-- Rename the authority, retaining opaque IDs and all placement/history bytes.
+ALTER TABLE homes RENAME TO machines;
+ALTER TABLE work_placements RENAME COLUMN home_id TO machine_id;
+ALTER TABLE pr_landings RENAME COLUMN supervisor_home_id TO supervisor_machine_id;
+
+DROP INDEX idx_homes_route;
+CREATE UNIQUE INDEX idx_machines_route ON machines(route);
+DROP INDEX idx_work_placements_home;
+CREATE INDEX idx_work_placements_machine ON work_placements(machine_id, placed_at);
+
+-- The retired supervisor discriminator and JSON remain historical evidence.
+-- Neither spelling may acquire remote supervision authority.
+DROP TRIGGER pr_landings_no_home_insert;
+DROP TRIGGER pr_landings_no_home_update;
+CREATE TRIGGER pr_landings_no_machine_insert
+BEFORE INSERT ON pr_landings WHEN NEW.supervisor_placement='home'
+BEGIN
+    SELECT RAISE(ABORT, 'Remote machine landing supervision is retired');
+END;
+CREATE TRIGGER pr_landings_no_machine_update
+BEFORE UPDATE OF supervisor_placement ON pr_landings WHEN NEW.supervisor_placement='home'
+BEGIN
+    SELECT RAISE(ABORT, 'Remote machine landing supervision is retired');
+END;
+
+-- draft: machine_connections
+-- Connection removal preserves the machine and every historical reference.
+ALTER TABLE machines ADD COLUMN label TEXT;
+ALTER TABLE machines ADD COLUMN repo TEXT CHECK ((label IS NULL) = (repo IS NULL));
+CREATE UNIQUE INDEX idx_machines_label ON machines(label) WHERE label IS NOT NULL;
+DROP INDEX idx_machines_route;
+CREATE UNIQUE INDEX idx_machines_route ON machines(route)
+WHERE route='local' OR label IS NOT NULL;

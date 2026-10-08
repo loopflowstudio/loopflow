@@ -94,7 +94,8 @@
       "reason": "done",
       "updated_at": "2026-07-14T20:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "wave",
@@ -421,7 +422,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T18:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "task",
@@ -796,7 +798,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "task",
@@ -874,7 +877,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:59:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "user",
@@ -1250,7 +1254,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T23:50:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "task",
@@ -1328,7 +1333,8 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true
+      "started": true,
+      "pending_sync": null
     },
     "next_move": {
       "owner": "user",

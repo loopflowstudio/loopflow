@@ -11,12 +11,10 @@ use std::time::{Duration, Instant};
 use loopflow::id::WaveId;
 use loopflow::lf::commands::waves::{Evidence, RoadmapSnapshot};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
-#[cfg(target_os = "macos")]
-use loopflow::planning::{LinearIssueId, TaskPlan};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{Observation, PmWritebackState, Task, TaskId, TaskPr, TaskPrId};
+use loopflow::work::task::{TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -123,30 +121,9 @@ impl Machine {
         let worktree = repository(&self.path().join("checkout"));
         let head = git(&worktree, &["rev-parse", "HEAD"]);
         let now = time::OffsetDateTime::now_utc();
-        let project = self.store.project_by_project(PROJECT).unwrap().unwrap();
-        let task = Task {
-            id: TaskId::new(),
-            plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
-                identifier: "FIX-1".into(),
-                title: "Task 1".into(),
-                description: String::new(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id: self.wave.id().clone(),
-            project_id: project.id.clone(),
-            worktree: worktree.clone(),
-            workspace_slug: "fix-one".into(),
-            branch: "fix-one".into(),
-            base_commit: head.clone(),
-            parent_pr_id: None,
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: Observation::NotRequired,
-        };
+        let mut task = self.store.task_by_issue("issue-1").unwrap().unwrap();
+        task.worktree = Some(worktree.clone());
+        task.workspace_slug = "fix-one".into();
         let pr = TaskPr {
             id: TaskPrId::new(),
             task_id: task.id.clone(),
@@ -167,7 +144,12 @@ impl Machine {
             updated_at: now,
         };
         self.store
-            .insert_task(task.clone(), Some(&pr), false)
+            .place_task(
+                &task.id,
+                task.worktree.as_ref().unwrap(),
+                &task.workspace_slug,
+                &pr,
+            )
             .unwrap();
         worktree
     }
@@ -206,7 +188,6 @@ impl Machine {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
@@ -220,7 +201,6 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 /// A new repository at `path` holding one commit.
-#[cfg(target_os = "macos")]
 fn repository(path: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(path).unwrap();
     let repo = path.canonicalize().unwrap();
@@ -824,4 +804,135 @@ fn selection_only_commit_reaches_two_open_work_readers() {
         .unwrap();
     await_state(&first, ProjectReadinessState::Unconfigured);
     await_state(&second, ProjectReadinessState::Unconfigured);
+}
+
+#[test]
+fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
+        "headless":false, "task":"FIX-1", "wave":null, "activity":null});
+    watch.request(scope.clone());
+    let await_state = |watch: &Watch, expected| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("saved decision did not reach Desktop");
+            if let WorkContent::Planning(Some(part)) = frame.content {
+                for wave in part.roadmap.waves {
+                    if let Evidence::Ok { items, .. } = wave.tasks {
+                        for task in items {
+                            if let Some(runtime) = task.runtime {
+                                if runtime.status == expected && runtime.pending_sync.is_some() {
+                                    assert_eq!(
+                                        task.task.completed,
+                                        expected == loopflow::durable::TaskState::Done
+                                    );
+                                    assert_eq!(
+                                        task.task.state.as_deref(),
+                                        Some(if task.task.completed {
+                                            "completed"
+                                        } else {
+                                            "unstarted"
+                                        })
+                                    );
+                                    assert_eq!(
+                                        task.task.completed_at.is_some(),
+                                        task.task.completed
+                                    );
+                                    return runtime;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for (node, state) in [
+        ("end", loopflow::durable::TaskState::Done),
+        ("start", loopflow::durable::TaskState::Ready),
+    ] {
+        let output = lf(
+            home.path(),
+            &[
+                "task",
+                "move",
+                "FIX-1",
+                node,
+                "--reason",
+                "Offline decision",
+            ],
+        )
+        .current_dir(home.wave.repo())
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        await_state(&watch, state);
+    }
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    await_state(&reopened, loopflow::durable::TaskState::Ready);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
+}
+
+#[test]
+fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({
+        "action":"scope", "id":1, "repo":home.wave.repo(), "headless":false,
+        "task":"FIX-1", "wave":null, "activity":null,
+    });
+    watch.request(scope.clone());
+    let thread = |watch: &Watch, count: usize| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("comment thread did not reach Desktop");
+            if let WorkContent::Task(Some(part)) = frame.content {
+                if part.comments.comments.len() == count {
+                    return part.comments;
+                }
+            }
+        }
+    };
+    assert!(thread(&watch, 0).pending_sync.is_empty());
+    let output = lf(
+        home.path(),
+        &["task", "comment", "FIX-1", "Saved during outage", "--json"],
+    )
+    .current_dir(home.wave.repo())
+    .env("LF_USER_NAME", "Fixture Person")
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let saved: loopflow::ops::pm::TaskComments = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(saved.comments.len(), 1);
+    assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
+    assert_eq!(thread(&watch, 1), saved);
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    assert_eq!(thread(&reopened, 1), saved);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
 }

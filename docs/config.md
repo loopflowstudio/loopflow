@@ -64,7 +64,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| Interactive terminal | direct TTY, `-i`, or `--tui` | — |
+| Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff patch` | `diff: true` |
@@ -457,11 +457,11 @@ assigned files.
 ### Interactive sessions
 
 ```bash
-lf --tui -a claude audit
+lf -a claude audit
 ```
 
 Interactive skills run in the current terminal. A direct TTY invocation is
-interactive by default; `--tui` also selects the terminal when input is piped.
+interactive by default; `-i` keeps interactive execution when input is piped.
 Use `-b` for headless execution.
 
 ### Summaries
@@ -492,16 +492,50 @@ See [Subscription Management](/docs/subscriptions) for identity storage,
 access profiles, routing, health, selectors, and remote development. See
 [Security](/docs/security) for machine logins and trust boundaries.
 
-### External Skills
-
-Loopflow has one external skill channel plus one compatibility shim. No config needed.
-
-- **`npx/<owner>/<repo>`** — fetched live via [`npx skills`](https://www.npmjs.com/package/skills) and cached under `.agents/skills/`. If the skill is already cached — or `npx skills find` can resolve it — `npx/<name>` often works too. This is the general escape hatch for third-party Claude Skill packages.
-- **`rams/rams`** — legacy single-file compatibility shim. It resolves only when `~/.claude/commands/rams.md` exists.
+### Skill sources
 
 ```bash
-lf npx/vercel-labs/deep-research       # live fetch, cached on first run
-lf rams/rams                           # legacy compatibility alias, if installed
+lf help audit                       # inspect the selected file
+lf list skill                       # list names and sources
 ```
 
-The older `skill_sources` config block and `~/.superpowers` auto-detection have been removed. If you were pointing at a local directory of skill prompts, place the files under `.lf/skills/<namespace>/<skill>.md` (repo-local) or `~/.lf/skills/<namespace>/<skill>.md` (user-global) and invoke them as `lf <namespace>/<skill>`. Namespaced skills use `/`, not `:`.
+Put `audit/SKILL.md` in `.claude/skills`, `.agents/skills`, or `.codex/skills`.
+A bundle wins over a same-named Markdown file in the same folder.
+Single Markdown files also work in `.lf/skills`, `.claude/commands`, and
+`.codex/prompts`. Supporting files inside a skill bundle are not separate skills.
+Namespaces use `/`, such as `lf help team/audit`.
+
+Repository sources win over personal sources, then embedded builtins. Within each
+scope, precedence is `.lf/skills`, `.claude/skills`, `.claude/commands`,
+`.agents/skills`, `.codex/skills`, `.codex/prompts`. Personal Claude and Codex
+folders respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`. Generated Loopflow exports
+never override the current embedded builtin. Help, listing, execution lookup,
+and retained Flow definitions use the same selection. Listings prefer the authored
+`description`, falling back to the first prose line.
+
+Install third-party skills with their own installer, then use their installed
+names. The `npx/` fetch path and `rams/rams` alias are removed; an installed
+`rams.md` is named `rams`.
+
+`lf -b -a claude audit` invokes a Claude bundle directly from its original
+folder through the native command parser, with gathered context separate from
+command arguments. Terminal Claude uses a captured native plugin with the same
+declarations and exact arguments; gathered context stays in its user message.
+Codex sources use explicit native skill links on both surfaces, including sources
+outside Codex's discovered catalog. Cross-harness launches translate argument
+and tool-name instructions, retain declarations and identify the original asset
+directory. Codex custom prompts expand one-based positions and `NAME=value`
+arguments. A warning names declarations the launch does not enforce.
+
+Ordinary third-party launches omit Loopflow operating and conversation guidance.
+Budget enforcement stays active; budget notices appear when managed memory,
+scratch or excerpts need them. Attributed Work and captured Flow steps retain
+their guidance. LF builtins remain inline. Captured Flow definitions survive
+source-file changes or removal: Claude uses a captured native definition, while
+Codex uses captured instructions. Both retain the original resource directory;
+resources removed with the bundle are not preserved.
+
+`lf sync-skills` exports personal sources and builtins, preserves third-party
+files at destination paths, and leaves repository skills local. Cross-harness
+exports retain declarations and report that native controls and argument syntax
+are not yet translated.

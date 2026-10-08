@@ -1,4 +1,4 @@
-//! Task lifecycle composes the provider, PR and checkout owners.
+//! Task decisions commit locally; PR and checkout cleanup retain separate authority.
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::durable::{WorkRef, WorkStatus};
 use crate::engine::git::current_branch;
 use crate::engine::worktrees::main_repo_root;
-use crate::ops::pm::PmResolvedTask;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
 use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
@@ -38,9 +37,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let result = async {
         let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
-        if task.worktree.exists()
-            && std::fs::canonicalize(&task.worktree)? == std::fs::canonicalize(&repo)?
-        {
+        if task.worktree.as_ref().is_some_and(|path| path == &repo) {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
                 task.plan.identifier
@@ -49,8 +46,9 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         }
         let _mutation = task
             .worktree
-            .exists()
-            .then(|| super::lock_task_pr_mutation(&task.worktree))
+            .as_ref()
+            .filter(|path| path.exists())
+            .map(|path| super::lock_task_pr_mutation(path))
             .transpose()?;
         let deletion = match pr.phase() {
             PrPhase::Merged => crate::ops::wt::prepare_landed_delete(
@@ -70,7 +68,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
             }
         };
         crate::ops::wt::apply_delete(deletion, &NullProgress)?;
-        if task.worktree.exists() {
+        if task.worktree.as_ref().is_some_and(|path| path.exists()) {
             return Err(task_error(
                 "checkout is on a different branch; retained it for explicit wt delete",
             ));
@@ -194,30 +192,21 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
 
 async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> {
     let store = task_store().await?;
-    let task = resolve_task(&store, selector).await?;
-    let issue = task.as_ref().map_or(selector, |task| task.plan.id.as_str());
-    // Fresh ownership and outcome before any effects, even for historical Tasks.
-    let resolved = crate::ops::pm::pm_resolve_task_async(repo, issue).await?;
-    if resolved.item.state.as_deref() == Some("completed")
-        || resolved.item.state.as_deref() == Some("duplicate")
-    {
-        return Err(task_error(format!(
-            "{} is already terminal; preserving its outcome",
-            resolved.item.identifier
-        )));
-    }
-    if let Some(task) = &task {
-        if super::task_work_status(&store, task).await? == WorkStatus::Done {
-            return Err(task_error("completed Tasks cannot be abandoned"));
+    let task = match resolve_task(&store, selector).await? {
+        Some(task) => task,
+        None => {
+            // An unseen provider alias needs acquisition before there is a local
+            // record to decide. Existing Tasks never depend on this lookup.
+            let resolved = crate::ops::pm::pm_resolve_task_async(repo, selector).await?;
+            resolve_task(&store, &resolved.item.id)
+                .await?
+                .ok_or_else(|| task_error("Task was not retained after acquisition"))?
         }
-    }
-    let outcome = apply_abandon(repo, &store, task.as_ref(), &resolved, Vec::new()).await?;
-    // The decision is durable before cleanup. A retained checkout or PR never
-    // turns cancellation into a failed decision or authorizes process control.
+    };
+    save_abandon(&store, &task).await?;
+    // Failed cleanup cannot undo the decision or grant control over live work.
     let cleanup = async {
-        for deletion in
-            prepare_abandon(repo, &store, task.as_ref(), &resolved.item.id, force, false).await?
-        {
+        for deletion in prepare_abandon(repo, &store, Some(&task), selector, force, false).await? {
             crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
         }
         Ok::<(), crate::ops::OpsError>(())
@@ -226,37 +215,36 @@ async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> 
     if let Err(error) = cleanup {
         eprintln!(
             "{} is canceled; retained checkout/PR: {error}",
-            resolved.item.identifier
+            task.plan.identifier
         );
     }
-    Ok(outcome)
+    Ok(task.plan.identifier)
 }
 
-/// Trash the issue after its placed work has been canceled or completed.
+async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    store
+        .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
+        .await
+        .map_err(task_error)?;
+    Ok(())
+}
+
+/// Remove planning immediately, retaining execution and pending provider delivery.
 pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     let repo = task_repository(repo, Some(issue))?;
     block_on_task(async {
         let store = task_store().await?;
-        if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
-            let deleted = store
-                .task_deletion(&task.wave_id, task.plan.id.as_str())
-                .await
-                .map_err(task_error)?
-                .is_some();
-            if !deleted {
-                if super::task_work_status(&store, &task).await? == WorkStatus::Done {
-                    cleanup_completed_task(&store, &task).await?;
-                } else {
-                    abandon(&repo, issue, false).await?;
-                }
+        let task = match resolve_task(&store, issue).await? {
+            Some(task) => task,
+            None => {
+                let resolved = crate::ops::pm::pm_resolve_task_async(&repo, issue).await?;
+                resolve_task(&store, &resolved.item.id)
+                    .await?
+                    .ok_or_else(|| task_error("Task was not retained after acquisition"))?
             }
-        }
-        crate::ops::pm::delete_task(&repo, issue).await
-    })
-    .map_err(|error| {
-        task_error(format!(
-            "{error}. Removal is incomplete; retry `lf task delete {issue}`."
-        ))
+        };
+        store.sqlite.delete_task(&task.id).map_err(task_error)?;
+        Ok(task.plan.identifier)
     })
 }
 
@@ -279,7 +267,6 @@ async fn prepare_abandon(
             .collect(),
         None => Vec::new(),
     };
-    require_known_prs(repo, &prs, issue).await?;
     let mut deletions = Vec::new();
     if let Some(task) = task {
         if store
@@ -291,63 +278,38 @@ async fn prepare_abandon(
             return Err(task_error("completed Tasks cannot be abandoned"));
         }
         require_idle(store, task)?;
-        for pr in &prs {
-            // Merged history is never recast as abandonment.
-            if pr.merge_commit.is_none() {
-                let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
-                let prs = crate::ops::abandon::branch_prs(repo, &pr.branch)?;
-                if sweep && prs.iter().any(|(_, state)| state == "OPEN") {
-                    return Err(task_error(format!(
-                        "{} has an open PR; excluded from chapter sweep",
-                        pr.branch
-                    )));
-                }
-                if prs.iter().any(|(_, state)| state == "MERGED") && pr.is_active() {
-                    return Err(task_error(format!(
-                        "{} merged outside Loopflow; reconcile its Task before abandoning",
-                        pr.branch
-                    )));
-                }
-                deletions.push(deletion);
+    }
+    if sweep || !prs.is_empty() {
+        let issue = match task {
+            Some(task) => task.plan.linear_id.as_ref().map(|id| id.as_str()),
+            None => Some(issue),
+        };
+        if let Some(issue) = issue {
+            require_known_prs(repo, &prs, issue).await?;
+        }
+    }
+
+    for pr in &prs {
+        // Merged history is never recast as abandonment.
+        if pr.merge_commit.is_none() {
+            let deletion = crate::ops::wt::prepare_delete(repo, &pr.branch, force)?;
+            let prs = crate::ops::abandon::branch_prs(repo, &pr.branch)?;
+            if sweep && prs.iter().any(|(_, state)| state == "OPEN") {
+                return Err(task_error(format!(
+                    "{} has an open PR; excluded from chapter sweep",
+                    pr.branch
+                )));
             }
+            if prs.iter().any(|(_, state)| state == "MERGED") && pr.is_active() {
+                return Err(task_error(format!(
+                    "{} merged outside Loopflow; reconcile its Task before abandoning",
+                    pr.branch
+                )));
+            }
+            deletions.push(deletion);
         }
     }
     Ok(deletions)
-}
-
-async fn apply_abandon(
-    repo: &Path,
-    store: &SharedStore,
-    task: Option<&Task>,
-    resolved: &PmResolvedTask,
-    deletions: Vec<BranchDeletion>,
-) -> OpsResult<String> {
-    if let Some(task) = task {
-        store
-            .begin_task_abandon(&task.id)
-            .await
-            .map_err(task_error)?;
-    }
-    crate::ops::pm::issue_client(repo)
-        .await?
-        .cancel_item(&resolved.item.id)
-        .await
-        .map_err(task_error)?;
-    if let Some(task) = task {
-        let work = WorkRef::Task(task.id.clone());
-        if store.work_status(&work).await.map_err(task_error)? != WorkStatus::Abandoned {
-            store
-                .abandon(&work, "explicit Task abandonment")
-                .await
-                .map_err(task_error)?;
-        }
-        for deletion in deletions {
-            crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
-        }
-    }
-    let context = crate::ops::pm::resolve_context(repo, &resolved.wave).await?;
-    crate::ops::pm::refresh_pm_snapshot(repo, &resolved.wave, &context).await?;
-    Ok(resolved.item.identifier.clone())
 }
 
 async fn require_known_prs(repo: &Path, prs: &[TaskPr], issue: &str) -> OpsResult<()> {
@@ -436,6 +398,11 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
             .collect();
         for (wave, project, item) in sweep.candidates {
             let task = resolve_task(&store, &item.id).await?;
+            if let Some(task) = &task {
+                if super::task_work_status(&store, task).await? != WorkStatus::Ready {
+                    continue;
+                }
+            }
             let outcome = match prepare_abandon(repo, &store, task.as_ref(), &item.id, false, true)
                 .await
             {
@@ -446,14 +413,30 @@ pub fn task_sweep(repo: &Path, apply: bool) -> OpsResult<Vec<SweepEntry>> {
                     match crate::ops::pm::require_outside_current_chapter(repo, &item.id).await {
                         Err(error) => format!("skipped: {error}"),
                         Ok(resolved) => {
-                            match apply_abandon(repo, &store, task.as_ref(), &resolved, deletions)
-                                .await
-                            {
-                                Ok(_) => "canceled".into(),
+                            let task = resolve_task(&store, &resolved.item.id).await?.ok_or_else(
+                                || task_error("Task was not retained after acquisition"),
+                            )?;
+                            match save_abandon(&store, &task).await {
                                 Err(error) => format!(
                                     "incomplete: {error}; retry task abandon {}",
                                     item.identifier
                                 ),
+                                Ok(()) => {
+                                    let mut outcome = "canceled".to_string();
+                                    for deletion in deletions {
+                                        if let Err(error) = crate::ops::abandon::abandon_prepared(
+                                            deletion,
+                                            &NullProgress,
+                                        )
+                                        .await
+                                        {
+                                            outcome =
+                                                format!("canceled; retained checkout/PR: {error}");
+                                            break;
+                                        }
+                                    }
+                                    outcome
+                                }
                             }
                         }
                     }

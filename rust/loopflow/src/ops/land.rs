@@ -59,6 +59,13 @@ fn prepare_pr(
     inherit_pr: &impl Fn(&mut Command),
 ) -> OpsResult<Option<PrInfo>> {
     let (repo_root, main_repo) = resolve_repos(repo, options.worktree.as_deref())?;
+    // Establish the Task's commit range before delivery availability checks.
+    crate::ops::task::verify_task_pr_range(&repo_root)?;
+    if !options.local && !crate::engine::git::has_origin(&repo_root)? {
+        return Err(OpsError::Message(
+            "hosted delivery requires an origin remote".to_string(),
+        ));
+    }
     crate::ops::pr::reject_control_plane_pr(&repo_root)?;
     crate::ops::commit::prepare_persistent_publication(&repo_root)?;
     if !options.local && !crate::ops::pr::gh_available() {
@@ -71,9 +78,6 @@ fn prepare_pr(
     };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    // Prove the Task PR range before preparing the exact local tree. Submit and
-    // land make no remote mutation until the owned integration pushes once.
-    crate::ops::task::verify_task_pr_range(&repo_root)?;
     {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {

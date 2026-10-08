@@ -5,14 +5,40 @@ use std::sync::Arc;
 use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
-    LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
+    LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
+    TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
+    pub(crate) async fn create_task(
+        &self,
+        input: &crate::planning::NewTask,
+        acquisition: Arc<super::PlanningLocks>,
+    ) -> StoreResult<Task> {
+        let input = input.clone();
+        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
+            store.create_task(&input)
+        })
+        .await
+    }
+
+    pub async fn edit_task(
+        &self,
+        id: &TaskId,
+        expected_revision: u64,
+        patch: &crate::pm::PmItemUpdate,
+    ) -> StoreResult<Task> {
+        let id = id.clone();
+        let patch = patch.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.edit_task(&id, expected_revision, &patch)
+        })
+        .await
+    }
+
     pub(crate) async fn task_checkouts(&self) -> StoreResult<Vec<super::sqlite::TaskCheckout>> {
         run_sqlite(&self.sqlite, |store| store.task_checkouts()).await
     }
@@ -28,30 +54,20 @@ impl Store {
         .await
     }
 
-    pub async fn create_task(
+    pub async fn place_task(
         &self,
-        task: &Task,
-        pr: Option<&TaskPr>,
+        task_id: &TaskId,
+        worktree: &std::path::Path,
+        workspace_slug: &str,
+        pr: &TaskPr,
         acquisition: Option<Arc<super::PlanningLocks>>,
     ) -> StoreResult<Task> {
-        let task = task.clone();
-        let pr = pr.cloned();
+        let task_id = task_id.clone();
+        let worktree = worktree.to_path_buf();
+        let workspace_slug = workspace_slug.to_string();
+        let pr = pr.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(task, pr.as_ref(), false)
-        })
-        .await
-    }
-
-    pub async fn create_task_with_worktree(
-        &self,
-        task: &Task,
-        pr: Option<&TaskPr>,
-        acquisition: Option<Arc<super::PlanningLocks>>,
-    ) -> StoreResult<Task> {
-        let task = task.clone();
-        let pr = pr.cloned();
-        run_planning_write(&self.sqlite, acquisition, move |store| {
-            store.insert_task(task, pr.as_ref(), true)
+            store.place_task(&task_id, &worktree, &workspace_slug, &pr)
         })
         .await
     }
@@ -61,20 +77,6 @@ impl Store {
         let agent = agent.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.set_task_agent(&task_id, &agent)
-        })
-        .await
-    }
-
-    pub async fn update_task_pm_writeback(
-        &self,
-        task_id: &TaskId,
-        state: &PmWritebackState,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let state = state.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_pm_writeback(&task_id, &state, updated_at)
         })
         .await
     }
@@ -263,24 +265,13 @@ impl Store {
 
     pub async fn apply_linear_observation(
         &self,
-        apply: LinearObservationApply,
-    ) -> StoreResult<LinearObservationOutcome> {
-        run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_observation(&apply)
-        })
-        .await
-    }
-
-    pub async fn apply_linear_comment(
-        &self,
         task_id: &TaskId,
-        comment_id: String,
-        text: String,
+        observation: crate::pm::IssueObservation,
         observed_at: OffsetDateTime,
-    ) -> StoreResult<Option<i64>> {
+    ) -> StoreResult<LinearObservationOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.apply_linear_comment(&task_id, &comment_id, &text, observed_at)
+            store.apply_linear_observation(&task_id, &observation, observed_at)
         })
         .await
     }
@@ -383,5 +374,12 @@ impl Store {
             store.project_events_after(&project_id, cursor)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+impl Store {
+    pub(crate) async fn seed_task(&self, task: &Task, pr: &TaskPr) -> StoreResult<Task> {
+        self.sqlite.seed_task(task, pr)
     }
 }

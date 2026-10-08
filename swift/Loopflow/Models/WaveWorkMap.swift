@@ -123,6 +123,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let status: TaskState
     /// A durable completion request awaiting settlement.
     public let completionPending: String?
+    public let pendingSync: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -133,6 +134,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
         case status, reason, provider, started
         case workId = "work_id"
         case completionPending = "completion_pending"
+        case pendingSync = "pending_sync"
         case updatedAt = "updated_at"
     }
 }

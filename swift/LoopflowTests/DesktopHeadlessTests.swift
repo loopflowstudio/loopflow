@@ -38,7 +38,92 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("A Task's work, a Workflow move and a new Flow process arrive from the stream, with no lf read")
+    @Test("Workflows render and save through the store without creating a repository file")
+    func storedWorkflow() async throws {
+        var roadmap = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
+            fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
+        var waves = try #require(roadmap["waves"] as? [[String: Any]])
+        var waveObject = try #require(waves[0]["wave"] as? [String: Any])
+        waveObject["name"] = "inbox"
+        waves[0]["wave"] = waveObject
+        roadmap["waves"] = waves
+        let snapshot = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
+        let wave = try JSONDecoder().decode(WaveSnapshot.self, from: JSONSerialization.data(withJSONObject: waveObject))
+        var entries = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
+            fixtures.appendingPathComponent("workflow_catalog.json"))) as? [[String: Any]])
+        entries[0]["name"] = "code"
+        entries[0]["source"] = "stored"
+        let catalog = String(decoding: try JSONSerialization.data(withJSONObject: entries), as: UTF8.self)
+        actor Source {
+            var content = "nodes: {}\nedges: []\n"
+            func save(_ content: String) throws {
+                if content == "invalid" { throw RegistryQueryError("Invalid workflow") }
+                self.content = content
+            }
+        }
+        let source = Source()
+        let model = WorkModel(query: RegistryQuery(runWithInput: { args, _, content in
+            guard args.prefix(3) == ["project", "workflow", "set"], args.contains("code") else {
+                throw RegistryQueryError("Unexpected write: \(args)")
+            }
+            try await source.save(content)
+            return ""
+        }, run: { args, _ in
+            if args.first == "roadmap" { return snapshot }
+            if args.prefix(3) == ["project", "workflow", "list"] { return catalog }
+            if args.prefix(3) == ["project", "workflow", "source"] { return await source.content }
+            throw RegistryQueryError("Unexpected command: \(args)")
+        }))
+        await model.refresh()
+        model.select(.wave(id: wave.id))
+        await model.loadWorkflowCatalog()
+        let view = WaveWorkflowView(model: model, wave: wave, name: "code")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "Stored in this Wave")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
+        _ = try view.inspect().find(button: "Edit")
+        let updated = "nodes: {review: demo}\nedges: []\n"
+        try await model.saveWorkflow("code", content: updated, wave: wave)
+        #expect(try await model.workflowSource("code", wave: wave) == updated)
+        do {
+            try await model.saveWorkflow("code", content: "invalid", wave: wave)
+            Issue.record("Invalid content must not replace the stored workflow")
+        } catch { #expect(error.localizedDescription == "Invalid workflow") }
+        #expect(try await model.workflowSource("code", wave: wave) == updated)
+    }
+
+    @Test("An unplaced Task and its CLI comment thread render without a display")
+    func storedTaskComments() async throws {
+        struct Proof: Decodable {
+            let task: RoadmapTask
+            let comments: TaskComments
+        }
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("local_task.json"))
+        let proof = try JSONDecoder().decode(Proof.self, from: data)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let thread = String(decoding: try JSONSerialization.data(withJSONObject: #require(object["comments"])), as: UTF8.self)
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
+        let wave = try #require(roadmap.waves.first).wave
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.prefix(2) == ["task", "comment"] else {
+                throw RegistryQueryError("Unexpected command: \(args)")
+            }
+            return thread
+        })
+        #expect(proof.task.reference.workspace == nil)
+        #expect(proof.task.task.id == "task_0123456789ab40008000000000000001")
+        #expect(proof.task.runControl.unavailable == nil)
+        await model.loadComments(task: proof.task, wave: wave)
+        #expect(model.comments[proof.task.id].value == proof.comments)
+        model.navigation.expandedComments.insert(proof.task.id)
+        let view = TaskCommentsView(model: model, task: proof.task, wave: wave)
+        _ = try view.inspect().find(text: "Fixture Person")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier:
+            "task-comment-00000000-0000-4000-8000-000000000001")
+        #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
+    }
+
+    @Test("A Task's work, comments and pending delivery arrive from the stream, with no lf read")
     func taskWorkFollowsTheStream() async throws {
         func object(_ name: String) throws -> [String: Any] {
             try #require(JSONSerialization.jsonObject(
@@ -58,9 +143,14 @@ struct DesktopHeadlessTests {
         let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
 
         let calls = Recorder()
+        let (oldReads, releaseOldReads) = AsyncStream<Void>.makeStream()
         let feed = Feed()
         let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             await calls.add(args)
+            if args.prefix(2) == ["task", "comment"] {
+                for await _ in oldReads { }
+                return #"{"identifier":"old","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
+            }
             return ""
         })
         let keeping = Task { await model.keepWorkCurrent() }
@@ -85,7 +175,7 @@ struct DesktopHeadlessTests {
         #expect(scope.task == task.task.identifier)
 
         feed.send(try frame("task", sequence: 2, answers: 2,
-                            body: ["task": task.task.identifier, "work": work, "flow_processes": [run]]))
+                            body: ["task": task.task.identifier, "work": work, "flow_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
         let view = TaskWorkView(model: model, task: task)
@@ -112,6 +202,9 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
+        let oldRead = Task { await model.loadComments(task: task, wave: wave) }
+        try await eventually { model.comments.inFlight.contains(task.id) }
+
         // Desktop's own write asks the reader again and shows what it answers.
         let moving = Task { await model.moveTask(to: "demo", task: task, wave: wave) }
         try await eventually { feed.requests.last == .refresh(id: 3) }
@@ -123,10 +216,14 @@ struct DesktopHeadlessTests {
         second["name"] = "pursue"
         var secondRun = run
         secondRun["entry"] = second
+        var incomingComments = try object("task_comments.json")
+        incomingComments["identifier"] = task.task.identifier
+        incomingComments["pending_sync"] = ["c-1"]
         let moved: [String: Any] = [
             "task": task.task.identifier,
             "work": work.merging(["flow_processes": [try #require((work["flow_processes"] as? [[String: Any]])?.first), second]]) { $1 },
             "flow_processes": [run, secondRun],
+            "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 3, answers: 2, body: moved))
@@ -137,9 +234,19 @@ struct DesktopHeadlessTests {
         await moving.value
         try await eventually { model.taskWork[task.id].value?.flowProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.workflow?.position == .node("demo"))
+        releaseOldReads.finish()
+        await oldRead.value
+        #expect(model.comments[task.id].value?.comments.count == 3)
+        #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
+        model.navigation.expandedComments.insert(task.id)
+        let comments = TaskCommentsView(model: model, task: task, wave: wave)
+        _ = try comments.inspect().find(text: "Pending sync")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.flowProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
-        #expect(await calls.calls == [["task", "move", task.task.identifier, "demo"]])
+        #expect(await calls.calls == [
+            ["task", "comment", task.id, "--wave", wave.name, "--json"],
+            ["task", "move", task.task.identifier, "demo"],
+        ])
     }
 
     @Test("Same-name definitions keep separate destinations and a failed refresh retains visible stale data")
@@ -189,7 +296,6 @@ struct DesktopHeadlessTests {
         let model = WorkModel(query: RegistryQuery { args, _ in
             await calls.add(args)
             if args.prefix(3) == ["project", "workflow", "list"] { return catalog }
-            if args.prefix(3) == ["project", "workflow", "customize"] { return "/repo/.lf/workflows/\(args[3]).yaml\n" }
             if args.prefix(3) == ["project", "workflow", "set"], args.last == "broken" {
                 throw RegistryQueryError("broken does not load")
             }
@@ -205,8 +311,7 @@ struct DesktopHeadlessTests {
         _ = try builtin.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-node-demo")
         #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-source").text().string() == "builtin workflow")
         #expect(try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().labelView().text().string() == "Customize")
-        let entry = try #require(model.workflowCatalog.value?.first { $0.name == "code" })
-        #expect(await model.definitionSource(entry, wave: wave)?.path == "/repo/.lf/workflows/code.yaml")
+        try builtin.inspect().find(viewWithAccessibilityIdentifier: "wave-workflow-edit").button().tap()
 
         // An invalid repository file stays listed with its reason and can still be opened.
         let invalid = view("proof")
@@ -421,6 +526,10 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
+        let task = try #require(roadmap.waves.first?.tasks.items.first)
+        model.select(.task(id: task.id))
+        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "task-pending-sync").text().string()
+        #expect(pending == "Saved locally; pending Linear synchronization")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

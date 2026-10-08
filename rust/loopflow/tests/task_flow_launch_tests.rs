@@ -35,7 +35,15 @@ const LAUNCHES: [&[&str]; 3] = [
 
 #[test]
 fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
-    for condition in ["valid", "invalid", "removed", "terminal", "moved"] {
+    for condition in [
+        "valid",
+        "invalid",
+        "invalid_without_inventory",
+        "removed",
+        "terminal",
+        "moved",
+        "team",
+    ] {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
         repo.create_branch("launch-proof");
@@ -76,6 +84,9 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         if condition == "terminal" {
             record.item.state = Some("canceled".into());
         }
+        if condition == "team" {
+            record.item.team_id = Some("another-team".into());
+        }
         if condition == "moved" {
             // The retained parent still selects feature; give that Workflow a proof edge
             // so this fixture reaches the planning mismatch admission check.
@@ -102,20 +113,27 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
                 "UPDATE pm_items SET observed_at=1; UPDATE pm_projects SET observed_at=1;",
             )
             .unwrap();
-        if condition == "invalid" || condition == "removed" {
+        if condition.starts_with("invalid") || condition == "removed" {
             runtime
                 .block_on(registered.store.observe_pm_issue_change(
-                    registered.task.plan.id.as_str(),
+                    registered.task.plan.linear_id.as_ref().unwrap().as_str(),
                     None,
                     condition == "removed",
                 ))
+                .unwrap();
+        }
+        if condition == "invalid_without_inventory" {
+            rusqlite::Connection::open(home.path().join("loopflow.db"))
+                .unwrap()
+                .execute("DELETE FROM pm_items", [])
                 .unwrap();
         }
         let run = |args: &[&str]| command(repo.path(), home.path(), args).output().unwrap();
         if condition != "valid" {
             let expected = match condition {
                 "terminal" => "terminal",
-                "moved" => "no longer matches",
+                "moved" | "team" => "no longer matches",
+                "removed" => "deleted",
                 _ => "planning",
             };
             for launch in LAUNCHES {
@@ -134,6 +152,8 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // Flow; none continues another.
         for (launched, launch) in LAUNCHES.iter().enumerate() {
             let output = run(launch);
+            assert!(!String::from_utf8_lossy(&output.stderr)
+                .contains("Started requires recorded Task work"));
             assert!(
                 output.status.success(),
                 "{launch:?}: {}",
@@ -144,6 +164,9 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             assert!(flows
                 .iter()
                 .all(|(outcome, _)| outcome.as_deref() == Some("succeeded")));
+            assert!(runtime
+                .block_on(registered.store.task_started(&registered.task.id))
+                .unwrap());
         }
         // However the Task was named, the Flow left the same Processes.
         let recorded = support::recorded_flows(home.path());
@@ -440,7 +463,6 @@ impl WorkflowTask {
     fn new() -> Self {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
-        repo.create_branch("launch-proof");
         let home = tempfile::tempdir().unwrap();
         let env = support::EnvGuard::new(&[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -486,12 +508,14 @@ impl WorkflowTask {
             "launch-proof",
             &repo.head_sha(),
         );
-        Self {
+        let fixture = Self {
             repo,
             home,
             registered,
             _env: env,
-        }
+        };
+        fixture.ok(&["task", "checkout", "INF-123"]);
+        fixture
     }
 
     fn publish(&self, merged: bool) {
@@ -607,6 +631,56 @@ fn moves(workflow: &serde_json::Value) -> Vec<(String, Option<u64>)> {
 fn refusal(output: std::process::Output) -> String {
     assert!(!output.status.success());
     String::from_utf8_lossy(&output.stderr).to_string()
+}
+
+#[test]
+fn checkout_leaves_workflow_selection_to_the_first_run() {
+    let fixture = WorkflowTask::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = &fixture.registered.store;
+    let sqlite =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+            .unwrap();
+    let mut snapshot = runtime
+        .block_on(store.pm_snapshot(&fixture.registered.task.wave_id))
+        .unwrap()
+        .unwrap();
+    let mut item = snapshot.snapshot.items[0].clone();
+    item.id = "unplaced-issue".into();
+    item.identifier = "INF-124".into();
+    item.name = "Workflow chosen at first run".into();
+    item.branch_name = None;
+    snapshot.snapshot.items.push(item);
+    runtime
+        .block_on(store.put_pm_snapshot(snapshot, None))
+        .unwrap();
+    let task = runtime
+        .block_on(store.get_task_by_issue("INF-124"))
+        .unwrap()
+        .unwrap();
+    let select = |name: &str| {
+        sqlite.select_project_workflow(
+            &task.project_id,
+            name,
+            "nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n",
+        ).unwrap();
+    };
+    select("before-checkout");
+    fixture.ok(&["task", "checkout", "INF-124"]);
+    assert!(sqlite.task_work(&task.id).unwrap().workflow.is_none());
+    select("at-first-run");
+    fixture.ok(&["-b", "task", "run", "INF-124"]);
+    let captured = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
+    assert_eq!(captured.definition.name, "at-first-run");
+    assert_eq!(
+        serde_json::to_value(&captured.position).unwrap(),
+        at("review")
+    );
+    select("after-first-run");
+    fixture.ok(&["-b", "task", "run", "INF-124"]);
+    let retained = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
+    assert_eq!(retained.definition, captured.definition);
+    assert_eq!(serde_json::to_value(&retained.position).unwrap(), at("end"));
 }
 
 #[test]

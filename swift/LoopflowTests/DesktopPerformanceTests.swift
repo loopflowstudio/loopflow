@@ -1213,7 +1213,7 @@ private final class PerformanceReader {
             }
         }
         send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"flow_processes":\#(flows),"processes":[],"workflow":null},"flow_processes":\#(runs)}
+            {"task":"\#(task)","work":{"sessions":[],"flow_processes":\#(flows),"processes":[],"workflow":null},"flow_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}}
             """#)
     }
 

@@ -6,6 +6,10 @@ pub type OpsResult<T> = Result<T, OpsError>;
 
 #[derive(Debug, Error)]
 pub enum OpsError {
+    #[error(transparent)]
+    Planning(#[from] crate::planning::PlanningError),
+    #[error(transparent)]
+    TaskData(#[from] crate::work::task::TaskDataError),
     #[error("git error: {0}")]
     Git(#[from] GitError),
     #[error("core error: {0}")]
@@ -29,8 +33,6 @@ pub enum OpsError {
         reason: String,
         continuation: String,
     },
-    #[error("Task {issue} is {state} and cannot be completed")]
-    TaskCompletionConflict { issue: String, state: String },
     #[error("sync onto {onto} failed ({detail})")]
     SyncConflict {
         onto: String,

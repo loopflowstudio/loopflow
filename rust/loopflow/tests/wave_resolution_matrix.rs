@@ -247,7 +247,7 @@ fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     }
 
     if env.id == "absent" {
-        if cmd.global_default {
+        if cmd.global_default || cmd.id == "task create" {
             return Outcome::Resolved;
         }
         return Outcome::NoContext;

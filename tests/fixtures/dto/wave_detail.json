@@ -134,7 +134,8 @@
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",
-          "started": true
+          "started": true,
+          "pending_sync": "Saved locally; pending Linear synchronization"
         },
         "directive": {
           "version": 2,

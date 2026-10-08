@@ -1,32 +1,10 @@
 pub mod linear;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::str::FromStr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PmProviderKind {
-    Linear,
-}
-
-impl PmProviderKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-        }
-    }
-
-    pub fn initiative_key(self) -> &'static str {
-        match self {
-            Self::Linear => "linear_initiative",
-        }
-    }
-}
 
 /// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
@@ -35,25 +13,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-impl std::fmt::Display for PmProviderKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for PmProviderKind {
-    type Err = PmError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "linear" => Ok(Self::Linear),
-            other => Err(PmError::Message(format!(
-                "unsupported PM provider {other:?}; expected \"linear\""
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,26 +77,6 @@ pub struct PmProject {
     pub team_ids: Vec<String>,
 }
 
-impl PmProject {
-    pub(crate) fn prompt_context(&self) -> String {
-        let mut context = format!(
-            "Project metric targets:\n{}",
-            serde_json::to_string(&self.metric_targets).expect("metric targets serialize")
-        );
-        if !self.workflow.trim().is_empty() {
-            context.push_str(&format!("\n\nProject Task workflow: {}", self.workflow));
-        }
-        if !self.krs.is_empty() {
-            context.push_str("\n\nKRs:");
-            for kr in &self.krs {
-                let mark = if kr.holds { "x" } else { " " };
-                context.push_str(&format!("\n- [{mark}] {}", kr.text));
-            }
-        }
-        context
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmWave {
     pub id: String,
@@ -170,7 +109,7 @@ pub struct PmItem {
     /// Canonical Project slug for display only.
     pub project: Option<String>,
     /// Stable owning repository Team id.
-    pub team_id: String,
+    pub team_id: Option<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
 }
@@ -300,11 +239,11 @@ fn validate_snapshot_ownership(
                 item.identifier, item.project, project.id, project.slug
             )));
         }
-        if project.team_ids.as_slice() != [item.team_id.as_str()] {
+        if project.team_ids.len() != 1 || item.team_id.as_ref() != project.team_ids.first() {
             return Err(PmError::Message(format!(
                 "Linear task {} in wave/{wave} belongs to Team {}, but Project {} belongs to Teams [{}]",
                 item.identifier,
-                item.team_id,
+                item.team_id.as_deref().unwrap_or("unmapped"),
                 project.id,
                 project.team_ids.join(", ")
             )));
@@ -347,17 +286,12 @@ pub(crate) fn validate_project_ownership(
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PmItemCreate {
-    pub name: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PmItemUpdate {
-    #[serde(default)]
+    pub rank: Option<u32>,
+    /// Omitted preserves assignment; explicit None clears it.
+    pub assignee: Option<Option<String>>,
     pub name: Option<String>,
-    #[serde(default)]
     pub description: Option<String>,
 }
 
@@ -378,7 +312,7 @@ pub struct IssueObservation {
 /// from Loopflow's own writeback. `author_id` is the provider user id; `None`
 /// for an integration/bot actor with no backing user, which is never treated
 /// as participant direction.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueComment {
     pub id: String,
     /// Provider creation time; display order. `revision` orders direction.
@@ -388,25 +322,6 @@ pub struct IssueComment {
     pub author_id: Option<String>,
     /// Provider display name for attribution, independent of the provider user ID.
     pub author_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PmTextUpdate<'a> {
-    pub(crate) name: Option<&'a str>,
-    pub(crate) description: Option<&'a str>,
-}
-
-impl PmItemUpdate {
-    pub(crate) fn text_update(&self) -> Option<PmTextUpdate<'_>> {
-        if self.name.is_none() && self.description.is_none() {
-            return None;
-        }
-
-        Some(PmTextUpdate {
-            name: self.name.as_deref(),
-            description: self.description.as_deref(),
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -563,21 +478,31 @@ impl ProjectContent {
 }
 
 pub fn render_project_content(project: &ProjectContent) -> String {
-    let mut content = format!(
-        "## Metric targets\n\n```json\n{}\n```",
-        serde_json::to_string_pretty(&project.metric_targets)
-            .expect("validated metric targets serialize")
-    );
+    let mut content = render_metric_targets(project);
     let workflow = project.workflow.trim();
     if !workflow.is_empty() {
         content.push_str(&format!("\n\nworkflow: {workflow}"));
     }
-    content.push_str("\n\n## KRs");
+    content.push_str("\n\n");
+    content.push_str(&render_krs(project));
+    content.push('\n');
+    content
+}
+
+fn render_metric_targets(project: &ProjectContent) -> String {
+    format!(
+        "## Metric targets\n\n```json\n{}\n```",
+        serde_json::to_string_pretty(&project.metric_targets)
+            .expect("validated metric targets serialize")
+    )
+}
+
+fn render_krs(project: &ProjectContent) -> String {
+    let mut content = String::from("## KRs");
     for kr in &project.krs {
         let marker = if kr.holds { "x" } else { " " };
         content.push_str(&format!("\n\n- [{marker}] {}", kr.text.trim()));
     }
-    content.push('\n');
     content
 }
 
@@ -738,29 +663,6 @@ pub(crate) mod test_server {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pm_item_update_text_update_skips_empty_changes() {
-        let update = PmItemUpdate::default();
-
-        assert_eq!(update.text_update(), None);
-    }
-
-    #[test]
-    fn pm_item_update_text_update_preserves_name_and_description() {
-        let update = PmItemUpdate {
-            name: Some("Ship roadmap".to_string()),
-            description: Some("Build the roadmap client".to_string()),
-        };
-
-        assert_eq!(
-            update.text_update(),
-            Some(PmTextUpdate {
-                name: Some("Ship roadmap"),
-                description: Some("Build the roadmap client"),
-            })
-        );
-    }
 
     #[test]
     fn project_slug_is_deterministic() {

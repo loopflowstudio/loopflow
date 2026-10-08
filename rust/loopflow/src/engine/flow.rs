@@ -1,20 +1,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
 use crate::engine::error::LoadError;
+use crate::engine::skill_catalog::{SkillCatalog, SkillOrigin};
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
 use crate::engine::workflow::names_workflow;
-
-static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Skill {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<SkillOrigin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -29,6 +29,7 @@ impl Skill {
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            source: None,
             agent: None,
             default_agent: None,
             action_style: None,
@@ -509,80 +510,14 @@ pub fn human_occurrence_ids(flow: &FlowDefinition, repo: &Path) -> Result<Vec<St
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
-    // Try file-based lookup first (repo-local, then global)
-    if let Ok(skill_path) = find_skill_path(name, repo) {
-        return load_skill_from_path(name, &skill_path);
-    }
-
-    // Fall back to built-in skills — exact match, then unique bare-name match
-    // across namespaces.
-    if let Some(key) = crate::engine::builtins::resolve_builtin_skill(name) {
-        if let Ok(path) = find_skill_path(key, repo) {
-            return load_skill_from_path(key, &path);
-        }
-        let content = crate::engine::builtins::get_builtin_skill(key)
-            .expect("resolve_builtin_skill returned a known key");
-        return skill_from_content(key, content);
-    }
-
-    // Fall back to .agents/skills/<name>/SKILL.md (user-installed, not loopflow-injected)
-    if let Some(content) = load_agent_skill(name, repo) {
-        warn_retired_interactive(name, &content);
-        return skill_from_content(name, &content);
-    }
-
-    Err(LoadError::SkillNotFound(name.to_string()))
+    let catalog = SkillCatalog::discover(Some(repo))?;
+    let source = catalog
+        .resolve(name)
+        .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
+    source.load()
 }
 
-pub(crate) fn load_skill_from_path(name: &str, skill_path: &Path) -> Result<Skill, LoadError> {
-    let content = fs::read_to_string(skill_path)?;
-    warn_retired_interactive(name, &content);
-    skill_from_content(name, &content)
-}
-
-fn warn_retired_interactive(name: &str, content: &str) {
-    let has_interactive = split_frontmatter(content).is_some_and(|(frontmatter, _)| {
-        serde_yaml_ng::from_str::<Value>(&frontmatter)
-            .ok()
-            .and_then(|value| value.as_mapping().cloned())
-            .is_some_and(|map| map.contains_key(key("interactive")))
-    });
-    if has_interactive && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed) {
-        eprintln!(
-            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface"
-        );
-    }
-}
-
-#[derive(Debug, Default)]
-struct SkillFrontmatter {
-    agent: Option<String>,
-    default_agent: Option<String>,
-    action_style: Option<String>,
-}
-
-fn parse_skill_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), LoadError> {
-    let Some((frontmatter, body)) = split_frontmatter(content) else {
-        return Ok((SkillFrontmatter::default(), content.to_string()));
-    };
-
-    let value: Value = serde_yaml_ng::from_str(&frontmatter)
-        .map_err(|err| LoadError::InvalidSkill(err.to_string()))?;
-    Ok((parse_frontmatter_value(&value), body))
-}
-
-fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
-    let (frontmatter, body) = parse_skill_frontmatter(content)?;
-    Ok(Skill {
-        name: name.to_string(),
-        agent: frontmatter.agent,
-        default_agent: frontmatter.default_agent,
-        action_style: frontmatter.action_style,
-        content: Some(body),
-    })
-}
-
-pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
+pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     if !content.starts_with("---") {
         return None;
     }
@@ -590,39 +525,8 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     let _ = parts.next();
     let frontmatter = parts.next()?;
     let rest = parts.next()?;
-    let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
-    Some((frontmatter.to_string(), body))
-}
-
-fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
-    let map = match value.as_mapping() {
-        Some(map) => map,
-        None => return SkillFrontmatter::default(),
-    };
-
-    let agent = parse_optional_string(map, "agent");
-    let default_agent = parse_optional_string(map, "default_agent");
-    let action_style = parse_optional_string(map, "action_style");
-    SkillFrontmatter {
-        agent,
-        default_agent,
-        action_style,
-    }
-}
-
-fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
-    paths.into_iter().find(|path| path.exists())
-}
-
-fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<PathBuf> {
-    extensions
-        .iter()
-        .map(|extension| dir.join(format!("{name}.{extension}")))
-        .collect()
-}
-
-fn markdown_path(dir: &Path, name: &str) -> PathBuf {
-    dir.join(format!("{name}.md"))
+    let body = rest.strip_prefix('\n').unwrap_or(rest);
+    Some((frontmatter, body))
 }
 
 fn collect_flow_names(
@@ -668,86 +572,11 @@ pub fn find_flow_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
 }
 
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // 1. Repo-local flows
-    if let Some(path) = first_existing_path(paths_with_extensions(
-        &repo.join(".lf/flows"),
-        name,
-        &["yaml", "yml", "json"],
-    )) {
-        return Ok(path);
-    }
-
-    // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
-    if let Some((prefix, flow_name)) = name.split_once('/') {
-        if let Some(path) = first_existing_path(paths_with_extensions(
-            &repo.join(".lf/flows").join(prefix),
-            flow_name,
-            &["yaml", "yml"],
-        )) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::FlowNotFound(name.to_string()))
-}
-
-fn find_skill_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // Namespaced skills: "team/review" → <dir>/.lf/skills/team/review.md
-    // Check repo first, then home (so users can override namespaced builtins).
-    if let Some((prefix, skill_name)) = name.split_once('/') {
-        let repo_ns = markdown_path(&repo.join(".lf/skills").join(prefix), skill_name);
-        if repo_ns.exists() {
-            return Ok(repo_ns);
-        }
-        if let Some(home) = home_dir() {
-            let home_ns = markdown_path(&home.join(".lf/skills").join(prefix), skill_name);
-            if home_ns.exists() {
-                return Ok(home_ns);
-            }
-        }
-    }
-
-    // 1. Check repo-local paths
-    if let Some(path) = first_existing_path([
-        markdown_path(&repo.join(".lf/skills"), name),
-        markdown_path(&repo.join(".claude/commands"), name),
-    ]) {
-        return Ok(path);
-    }
-
-    // 2. Check global paths
-    if let Some(home) = home_dir() {
-        if let Some(path) = first_existing_path([
-            markdown_path(&home.join(".lf/skills"), name),
-            markdown_path(&home.join(".claude/commands"), name),
-        ]) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::SkillNotFound(name.to_string()))
-}
-
-/// The editable file that supplied a file-backed skill. Built-in skills return
-/// `None`: their embedded content has no source file in an installed binary.
-pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
-    if let Ok(path) = find_skill_path(name, repo) {
-        return Some(path);
-    }
-    if crate::engine::builtins::resolve_builtin_skill(name).is_some() {
-        return None;
-    }
-    let path = agent_skill_path(name, repo);
-    path.is_file().then_some(path)
-}
-
-/// Load a skill from `.agents/skills/<name>/SKILL.md` if it exists.
-fn load_agent_skill(name: &str, repo: &Path) -> Option<String> {
-    fs::read_to_string(agent_skill_path(name, repo)).ok()
-}
-
-fn agent_skill_path(name: &str, repo: &Path) -> PathBuf {
-    repo.join(".agents/skills").join(name).join("SKILL.md")
+    ["yaml", "yml", "json"]
+        .map(|extension| repo.join(".lf/flows").join(format!("{name}.{extension}")))
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))
 }
 
 // -----------------------------------------------------------------------------
@@ -1157,11 +986,6 @@ fn compile_steps(
     Ok(items)
 }
 
-/// Machine directory for global lookups. Can be overridden for testing.
-fn home_dir() -> Option<PathBuf> {
-    dirs::home_dir()
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1170,9 +994,8 @@ mod tests {
     use serde_yaml_ng::Value;
 
     use super::{
-        build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader,
-        FlowDefinition, Skill, Step, XorDef, XorPath,
+        build_xor_routing_suffix, compile_branch, compile_flow, human_occurrence_ids, load_flow,
+        load_skill, ConcreteStep, DefinitionLoader, FlowDefinition, Skill, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1530,19 +1353,6 @@ Design the feature.
         let skill = load_skill("my-tool", tmp.path()).unwrap();
         assert_eq!(skill.name, "my-tool");
         assert!(skill.content.unwrap().contains("Do the thing."));
-    }
-
-    #[test]
-    fn find_skill_source_path_finds_agent_skills() {
-        let tmp = TempDir::new().unwrap();
-        let skill_path = tmp.path().join(".agents/skills/my-tool/SKILL.md");
-        fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
-        fs::write(&skill_path, "Do the thing.").unwrap();
-
-        assert_eq!(
-            find_skill_source_path("my-tool", tmp.path()),
-            Some(skill_path)
-        );
     }
 
     #[test]

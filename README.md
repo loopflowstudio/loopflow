@@ -73,8 +73,9 @@ Omit owners or abbreviate commands when the result is unique. Commands take prec
 and list stay local.
 A same-named flow takes precedence in untyped execution; invalid flows report
 an error. Use `lf skill NAME` to select the skill explicitly.
-External skills honor the same frontmatter as local skills, on first fetch and
-when read from cache. Malformed definitions report their parse error.
+Skills resolve from repository and personal Claude, Codex, and Loopflow folders.
+Help names the selected source; bundled reference files stay inside their skill.
+See [skill sources](docs/config.md#skill-sources) for precedence and export behavior.
 
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
@@ -157,6 +158,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 lf session list
 lf resume                         # last interactive Session in this worktree
 lf resume SESSION                 # Loopflow, Claude, or Codex ID
+lf -b resume SESSION "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
 lf session connect SESSION
 lf session history SESSION --json
@@ -166,6 +168,21 @@ lf session bind SESSION --task INF-123
 
 Claude and Codex terminal Sessions load assembled context from a system instructions
 file, keeping the initial command-line message short even with large Wave memory.
+New Session names use a short excerpt of the request, or the invoked skill when
+no request was supplied. Task conversations use the Task title when no specific
+purpose was supplied. Human-assigned names survive reconnects and suggestions.
+Interactive terminal titles use the Session name, with the Task identifier first
+and a short purpose for Task work. In cmux, the attached workspace and tab follow
+`lf session rename`; other terminals pick up a changed name on reconnect.
+
+Published installs also add native naming hooks, preserving existing hooks. In
+repositories with `.lf`, plain Claude and Codex use the first request as a short
+name when unnamed. Existing names stay, including instruction-derived titles;
+preservation during concurrent renames remains unproved. Review the installed
+hooks with Codex's `/hooks`.
+Claude naming also works with `claude -p`. Codex naming requires its shared
+app-server; embedded launches and `codex exec` lack that naming endpoint.
+No resume hooks repair old conversations. Native providers own their terminal output.
 
 A Session keeps the conversation's identity, name, feedback and native history
 across commands. Interactive and headless work use the same model. Default lists
@@ -176,6 +193,8 @@ ones, and `--waiting` keeps those waiting on you. `--all` means all repositories
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
 order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
+Headless continuation reads the saved workspace's context and native history,
+even from another directory, without re-running the original skill.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 

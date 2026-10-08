@@ -1,3 +1,5 @@
+mod support;
+
 use std::process::{Command, Output};
 
 fn command(home: &std::path::Path, args: &[&str]) -> Command {
@@ -276,7 +278,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             let rejected = bin.join("rejecting-lf");
             std::fs::write(
                 &rejected,
-                "#!/bin/sh\necho 'unexpected argument --tui' >&2\nexit 2\n",
+                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
             )
             .unwrap();
             std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -431,6 +433,52 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
 
 const CALLER: &str = "run_00000000000000000000000000000002";
 
+#[test]
+fn native_title_callback_keeps_lf_as_the_naming_owner() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".lf")).unwrap();
+    let (id, _, _) = prepare_conversation(home.path(), home.path(), "claude", "Original purpose");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='native-owned' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    for thread in ["native-owned", "native-plain"] {
+        let mut child = command(home.path(), &["__session-title", "claude"])
+            .env("HOME", home.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        write!(
+            child.stdin.take().unwrap(),
+            "{}",
+            serde_json::json!({
+                "cwd": home.path(), "session_id": thread, "hook_event_name":"UserPromptSubmit",
+                "prompt":"A different request entirely"
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{output:?}");
+        if thread == "native-owned" {
+            assert!(output.stdout.is_empty(), "{output:?}");
+        } else {
+            let title: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                title["hookSpecificOutput"]["sessionTitle"],
+                "different request entirely"
+            );
+        }
+    }
+}
+
 /// A prepared conversation, before a provider has started.
 fn prepare_conversation(
     home: &std::path::Path,
@@ -490,6 +538,214 @@ fn prepare_conversation(
         )
         .unwrap();
     (session.id, input, dir)
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for harness in ["claude", "codex"] {
+        let home = tempfile::tempdir().unwrap();
+        let cwd = home.path().join("work");
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&cwd).unwrap();
+        std::fs::create_dir(&bin).unwrap();
+        let provider = bin.join(harness);
+        std::fs::write(
+            &provider,
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\necho unexpected-provider-launch >&2\nexit 97\n",
+        ).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (id, input, dir) =
+            prepare_conversation(home.path(), &cwd, harness, "Preserve this draft");
+        let manifest = std::fs::read(dir.join("manifest.json")).unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let process = loopflow::id::ProcessLfid::new();
+        rusqlite::Connection::open(home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
+            .unwrap();
+        let driver = store
+            .claim_session_driver(&id, None, &process, true)
+            .unwrap();
+        let before = store.session(&id).unwrap().unwrap();
+        let history = store.session_history(&id, 0, 0).unwrap();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        let output = command(
+            home.path(),
+            &[
+                "--batch",
+                "--no-loopflow",
+                "session",
+                "resume",
+                &id,
+                "another instruction",
+            ],
+        )
+        .current_dir(&cwd)
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("HOME", home.path())
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("already has a driver"), "{harness}: {error}");
+        assert!(!error.contains("unexpected-provider-launch"), "{error}");
+        assert_eq!(store.session(&id).unwrap().unwrap(), before);
+        assert_eq!(store.session_driver(&id).unwrap(), Some(driver));
+        assert_eq!(store.session_history(&id, 0, 0).unwrap(), history);
+        assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), manifest);
+        assert!(dir.join("prepared").exists());
+        assert_eq!(store.session(&id).unwrap().unwrap().artifact_key, input);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "${1:-}" = --version ]; then exit 0; fi
+pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
+printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
+printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
+while [ "$#" -gt 0 ]; do
+    if [ "$1" = --append-system-prompt-file ]; then
+        cat "$2" > "$LF_TEST_RESUME_PROOF.context"
+        break
+    fi
+    shift
+done
+cat > "$LF_TEST_RESUME_PROOF.input"
+printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',skill='missing-original-skill' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let original = std::fs::read(dir.join("manifest.json")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "caller-wave".into(),
+        caller.to_str().unwrap().into(),
+    );
+    store.create_wave(&wave).unwrap();
+    std::fs::create_dir_all(saved.join("wave/caller-wave")).unwrap();
+    std::fs::write(
+        saved.join("wave/caller-wave/GOAL.md"),
+        "CALLER_WAVE_CONTEXT",
+    )
+    .unwrap();
+    let before = store.session(&id).unwrap().unwrap();
+    let history = store.session_history(&id, 0, 0).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(
+        home.path(),
+        &[
+            "-b",
+            "--no-loopflow",
+            "session",
+            "resume",
+            &id,
+            "Continue here",
+        ],
+    )
+    .current_dir(&caller)
+    .env("PATH", path)
+    .env("HOME", home.path())
+    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+    // A calling agent's Wave must not supply a different conversation's context.
+    .env("LF_WAVE_ID", wave.id().as_str())
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent = std::fs::read_to_string(home.path().join("proof.context")).unwrap();
+    assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
+    assert!(sent.contains("Continue here"), "{sent}");
+    assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
+    assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
+    assert!(!sent.contains("missing-original-skill"), "{sent}");
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        saved.canonicalize().unwrap().to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd, before.cwd);
+    assert_eq!(after.skill, before.skill);
+    assert_eq!(after.task_id, before.task_id);
+    assert_eq!(after.wave_id, before.wave_id);
+    assert_ne!(after.artifact_key, input);
+    assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+    assert!(store
+        .session_history(&id, 0, 0)
+        .unwrap()
+        .starts_with(&history));
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            home.path()
+                .join("runs")
+                .join(&after.artifact_key[..2])
+                .join(&after.artifact_key)
+                .join("manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["cwd"], saved.to_str().unwrap());
+    let agent_caller: loopflow::process::AgentCaller =
+        serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
+    assert_eq!(agent_caller.session_id, id);
+    let process_cwd = store
+        .process(&agent_caller.origin_process_lfid)
+        .unwrap()
+        .unwrap()
+        .cwd
+        .unwrap();
+    assert_eq!(
+        std::path::Path::new(&process_cwd).canonicalize().unwrap(),
+        caller.canonicalize().unwrap()
+    );
 }
 
 #[test]
@@ -585,6 +841,281 @@ fn session_names_are_shared_and_human_names_win() {
     assert!(!dir.join("provider-clients").exists());
     assert!(!dir.join("events.jsonl").exists());
     assert!(dir.join("prepared").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_titles_follow_session_rename_and_reconnect_without_provider_accounts() {
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::os::fd::FromRawFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    for (provider, host, bound) in [
+        ("claude", "cmux", true),
+        ("claude", "cmux", false),
+        ("codex", "cmux", true),
+        ("claude", "absent", false),
+        ("claude", "missing", false),
+        ("codex", "failure", false),
+        ("claude", "timeout", false),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir(&bin).unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        repo.create_file(
+            "AGENTS.md",
+            "# Loopflow operating guide\nFollow the repository instructions.",
+        );
+        let task = bound.then(|| {
+            support::register_unrun_task(
+                home.path(),
+                &repo.path().canonicalize().unwrap(),
+                "main",
+                &repo.head_sha(),
+            )
+        });
+        let title = |name: &str| match &task {
+            Some(task) => format!("{} {name}", task.task.plan.identifier),
+            None => name.to_string(),
+        };
+        let mut id = String::new();
+        let native = uuid::Uuid::new_v4().to_string();
+        let transcript = if provider == "codex" {
+            home.path()
+                .join("codex/sessions")
+                .join(format!("rollout-{native}.jsonl"))
+        } else {
+            home.path()
+                .join("claude/projects/test")
+                .join(format!("{native}.jsonl"))
+        };
+        fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        fs::write(
+            transcript,
+            serde_json::json!({"cwd": repo.path()}).to_string(),
+        )
+        .unwrap();
+        let isolated_command = |args: &[&str]| {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+            command
+                .env_clear()
+                .args(args)
+                .current_dir(repo.path())
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("RUST_LOG", "off")
+                .env("HOME", home.path())
+                .env("CLAUDE_CONFIG_DIR", home.path().join("claude"))
+                .env("CODEX_HOME", home.path().join("codex"));
+            command
+        };
+        let inspect = |args: &[&str]| {
+            let output = isolated_command(args).output().unwrap();
+            assert!(output.status.success(), "{provider}/{host}: {output:?}");
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        let write_script = |name: &str, script: &str| {
+            let path = bin.join(name);
+            fs::write(&path, script).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write_script(
+            provider,
+            r#"#!/bin/sh
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
+printf '%s\n' "$@" > "$LF_HOME/args"
+printf '%s' "${CLAUDE_CODE_DISABLE_TERMINAL_TITLE-}" > "$LF_HOME/title-disabled"
+touch "$LF_HOME/ready"
+IFS= read -r answer
+printf 'latest agent message: %s\n' "$answer"
+"#,
+        );
+        write_script(
+            "cmux",
+            r#"#!/bin/sh
+case "$TITLE_HOST" in failure) exit 2;; timeout) exec /bin/sleep 10;; esac
+kind=$1
+shift
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --workspace) [ "$2" = fixture-workspace ] || exit 3; shift 2;;
+        --surface) [ "$2" = fixture-surface ] || exit 4; shift 2;;
+        --) shift; break;;
+        *) exit 5;;
+    esac
+done
+printf '%s' "$1" > "$LF_HOME/$kind.tmp"
+mv "$LF_HOME/$kind.tmp" "$LF_HOME/$kind"
+"#,
+        );
+        if host == "missing" {
+            fs::remove_file(bin.join("cmux")).unwrap();
+        }
+
+        for name in ["Plan store migration", "Release notes"] {
+            let first = id.is_empty();
+            let expected = title(name);
+            let mut master = -1;
+            let mut slave = -1;
+            // SAFETY: valid output pointers, null selects default PTY settings.
+            assert_eq!(
+                unsafe {
+                    libc::openpty(
+                        &mut master,
+                        &mut slave,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    )
+                },
+                0
+            );
+            // SAFETY: openpty returned two independently owned descriptors.
+            let mut master = unsafe { fs::File::from_raw_fd(master) };
+            // SAFETY: the fresh slave descriptor is owned only by this File.
+            let slave = unsafe { fs::File::from_raw_fd(slave) };
+            let mut launch = if first {
+                isolated_command(&[
+                    "-i",
+                    "--agent",
+                    provider,
+                    ":",
+                    "Plan store migration for archived tasks",
+                ])
+            } else {
+                isolated_command(&["session", "connect", &id])
+            };
+            launch
+                .env("TITLE_HOST", host)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::from(slave));
+            if host != "absent" {
+                launch
+                    .env("CMUX_WORKSPACE_ID", "fixture-workspace")
+                    .env("CMUX_SURFACE_ID", "fixture-surface");
+            }
+            let _ = fs::remove_file(home.path().join("ready"));
+            let mut child = launch.spawn().unwrap();
+            drop(launch);
+            let output_reader = std::thread::spawn(move || {
+                let mut output = Vec::new();
+                // Linux reports EIO when the last PTY slave closes; retain bytes.
+                let _ = master.read_to_end(&mut output);
+                String::from_utf8_lossy(&output).into_owned()
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !home.path().join("ready").exists()
+                && Instant::now() < deadline
+                && child.try_wait().unwrap().is_none()
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let started = home.path().join("ready").exists();
+            if !started {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "{provider}/{host} failed to start: {}",
+                    output_reader.join().unwrap()
+                );
+            }
+            if first {
+                let listed = inspect(&["session", "list", "--all", "--json"]);
+                assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
+                id = listed[0]["id"].as_str().unwrap().to_string();
+                assert_eq!(listed[0]["title"], name);
+                if let Some(task) = &task {
+                    assert!(
+                        listed[0]["task_ids"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == task.task.id.as_str()),
+                        "{listed}"
+                    );
+                }
+            }
+            let args = fs::read_to_string(home.path().join("args")).unwrap();
+            if provider == "claude" {
+                assert!(args.contains(&format!("--name\n{expected}\n")), "{args}");
+                assert_eq!(
+                    fs::read_to_string(home.path().join("title-disabled")).unwrap(),
+                    "1"
+                );
+            } else {
+                assert!(args.contains("tui.terminal_title=[]"), "{args}");
+            }
+            if host == "cmux" {
+                for path in ["rename-workspace", "rename-tab"] {
+                    assert_eq!(
+                        fs::read_to_string(home.path().join(path)).unwrap(),
+                        expected
+                    );
+                }
+            }
+            if first {
+                let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);
+                assert_eq!(renamed["title"], "Release notes");
+            } else {
+                assert!(
+                    args.lines().any(|arg| matches!(arg, "resume" | "--resume")),
+                    "{args}"
+                );
+            }
+            let host_named = || {
+                ["rename-workspace", "rename-tab"].iter().all(|path| {
+                    fs::read_to_string(home.path().join(path)).unwrap_or_default()
+                        == title("Release notes")
+                })
+            };
+            if host == "cmux" {
+                while !host_named() && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+            if first {
+                let store =
+                    loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db"))
+                        .unwrap();
+                let input = store.session(&id).unwrap().unwrap().artifact_key;
+                record_native(home.path(), &id, &input, &native);
+            }
+            child.stdin.take().unwrap().write_all(b"done\n").unwrap();
+            let result = child.wait_with_output().unwrap();
+            let terminal = output_reader.join().unwrap();
+            assert!(result.status.success(), "{provider}/{host}: {terminal}");
+            assert!(
+                terminal.contains(&format!("\x1b]0;{expected}\x07")),
+                "{terminal:?}"
+            );
+            assert_eq!(
+                terminal.matches("\x1b]0;").count(),
+                1,
+                "no OSC writer alongside native output"
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("latest agent message: done"));
+            assert!(host != "cmux" || host_named());
+            let listed = inspect(&["session", "list", "--all", "--history", "--json"]);
+            assert_eq!(
+                listed
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == id)
+                    .unwrap()["title"],
+                "Release notes"
+            );
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -800,10 +1331,11 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let retry = open(&["session", "resume"]);
     assert!(retry.status.success(), "{retry:?}");
 
-    // --version succeeds, then the executable disappears before the actual spawn.
-    write_provider(
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then /bin/rm -- \"$0\"; exit 0; fi\nexit 93\n",
-    );
+    // Discovery finds an executable, but its absent interpreter prevents spawn.
+    write_provider(&format!(
+        "#!{}\n",
+        home.path().join("missing-interpreter").display()
+    ));
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
     assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));
@@ -903,10 +1435,8 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
     let provider = bin.join("codex");
     std::fs::write(&provider, "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' \"$LF_CAPTURE_KEY\" > \"$CODEX_HOME/opened\"\n").unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    )))
-    .unwrap();
+    // An unavailable fixture must never fall through to a real provider.
+    let path = std::env::join_paths([bin, "/usr/bin".into(), "/bin".into()]).unwrap();
     let resume = |args: &[&str]| {
         command(home.path(), args)
             .current_dir(repo.join("subdir"))
@@ -940,7 +1470,7 @@ fn resume_selects_human_input_in_the_physical_worktree_and_records_opening() {
         );
     }
     // An unavailable provider must not add another opening receipt.
-    std::fs::write(&provider, "#!/bin/sh\nexit 1\n").unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o644)).unwrap();
     let before: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();
     assert!(!resume(&["resume", &b]).status.success());
     let after: i64 = db.query_row("SELECT count(*) FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened'", [], |row| row.get(0)).unwrap();

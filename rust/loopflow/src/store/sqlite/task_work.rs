@@ -311,6 +311,9 @@ fn set_node_in(
         by,
         note,
     )?;
+    if from == END && node != END {
+        super::task_state_delivery::queue_in(tx, task, "unstarted")?;
+    }
     Ok(true)
 }
 

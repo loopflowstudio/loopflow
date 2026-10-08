@@ -89,7 +89,11 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                     .unwrap();
             assert_eq!(resolved.wave, "product");
             assert_eq!(resolved.item, record.item);
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
             assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
             assert!(fixture
                 .store
@@ -665,7 +669,11 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -730,7 +738,11 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -780,7 +792,11 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -918,7 +934,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
             fixture.store.put_pm_snapshot(list, None).await.unwrap();
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -1065,7 +1085,6 @@ async fn cancelled_acceptance(detail: bool) {
                 Some("team-1".into()),
                 url.clone(),
             ),
-            provider: crate::pm::PmProviderKind::Linear,
             repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
             team_id: "team-1".into(),
         },
@@ -1162,7 +1181,7 @@ async fn cold_detail_rechecks_team_after_acquiring_wave() {
         )
         .await
         .unwrap();
-    assert_eq!(record.item.team_id, "team-1");
+    assert_eq!(record.item.team_id.as_deref(), Some("team-1"));
     assert_eq!(record.project.unwrap().team_ids, ["team-1"]);
 }
 
@@ -1231,141 +1250,6 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                 inspection.observation.record.unwrap().item.identifier,
                 "FIX-2"
             );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn project_binding_preserves_exact_backlog_identity_and_retries() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed(now() + 3600).await;
-    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-    let mut existing = project();
-    existing["id"] = id.into();
-    existing["name"] = "Summer work — customer requests".into();
-    existing["status"]["type"] = "backlog".into();
-    existing["content"] = "## KRs\n\n- [ ] Preserve work\n".into();
-    let response = json!({"data":{"projects":{"nodes":[existing],"pageInfo":{"hasNextPage":false,"endCursor":null}}}});
-    let (url, _) = spawn(vec![
-        team_response(),
-        json_response(StatusCode::OK, response.clone()),
-        team_response(),
-        json_response(StatusCode::OK, response),
-    ])
-    .await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            let first = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap();
-            let repeated = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap();
-            assert_eq!(first, repeated);
-            assert_eq!(first.status, crate::pm::ProjectStatus::Backlog);
-            assert_eq!(first.name, "Summer work — customer requests");
-            assert!(first.workflow.is_empty());
-            assert_eq!(first.krs.len(), 1);
-            assert_eq!(first.krs[0].text, "Preserve work");
-            assert!(!first.krs[0].holds);
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap()
-                .as_deref(),
-                Some(id)
-            );
-            assert_eq!(
-                fixture
-                    .store
-                    .list_projects(Some(wave.id()))
-                    .await
-                    .unwrap()
-                    .len(),
-                1
-            );
-            assert!(crate::ops::project::bind_project(
-                &repo,
-                "product",
-                "218967b6-a760-4b7c-9a46-11d9d61a42c2"
-            )
-            .await
-            .is_err());
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap()
-                .as_deref(),
-                Some(id)
-            );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn project_binding_rejects_delayed_backlog_after_accepted_completion() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed(now() + 3600).await;
-    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-    let mut old = project();
-    old["id"] = id.into();
-    old["status"]["type"] = "backlog".into();
-    let response = json!({"data":{"projects":{"nodes":[old],"pageInfo":{"hasNextPage":false,"endCursor":null}}}});
-    let completed = crate::pm::PmProject {
-        id: id.into(),
-        revision: Some("2026-10-05T12:00:00Z".into()),
-        slug: "completed".into(),
-        name: "Completed plan".into(),
-        summary: String::new(),
-        metric_targets: vec![],
-        workflow: String::new(),
-        status: crate::pm::ProjectStatus::Completed,
-        krs: vec![],
-        initiative_ids: vec!["initiative-1".into()],
-        team_ids: vec!["team-1".into()],
-    };
-    fixture
-        .store
-        .put_pm_project(wave.id(), "linear", "initiative-1", completed, 17, None)
-        .await
-        .unwrap();
-    let (url, _) = spawn(vec![
-        team_response(),
-        json_response(StatusCode::OK, response),
-    ])
-    .await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            let error = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap_err();
-            assert!(
-                error.to_string().contains("completed Project history"),
-                "{error}"
-            );
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap(),
-                None
-            );
-            assert!(!fixture.directory.path().join("waves").exists());
-            let retained = fixture
-                .store
-                .get_project_by_project(id)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(retained.plan.status, crate::pm::ProjectStatus::Completed);
-            assert_eq!(retained.plan.pm_snapshot_synced_at, 17);
         })
         .await;
 }

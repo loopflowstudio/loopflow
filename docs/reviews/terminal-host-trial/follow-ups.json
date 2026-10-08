@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-07 America/Los_Angeles",
+  "reads": [
+    "lf wave status product --sync --json",
+    "lf wave status infrastructure --sync --json",
+    "lf task comment LOO-421 --json",
+    "lf task comment LOO-422 --json",
+    "lf task comment LOO-423 --json",
+    "lf task status ISSUE --json"
+  ],
+  "tasks": [
+    {
+      "identifier": "LOO-422",
+      "id": "f3211cf5-ab44-41cb-a3e9-b2a0a29eb244",
+      "title": "Hosts such as herdr and cmux see an lf-launched agent's status as well as one launched directly",
+      "url": "https://linear.app/loopflow/issue/LOO-422/hosts-such-as-herdr-and-cmux-see-an-lf-launched-agents-status-as-well",
+      "revision": "2026-10-08T05:33:57.102Z",
+      "observed_at": 1791437637,
+      "description_sha256": "6c70fde5e671b01f6268702bbd1c61fe21760e581c962091cb8a9cadc9be2683",
+      "action": "appended trial findings; prior brief verified intact"
+    },
+    {
+      "identifier": "LOO-423",
+      "id": "b1c0b3ea-4013-40b4-b1cb-b93a32048af4",
+      "title": "Fix what the herdr and cmux trial finds",
+      "url": "https://linear.app/loopflow/issue/LOO-423/fix-what-the-herdr-and-cmux-trial-finds",
+      "revision": "2026-10-08T05:34:19.219Z",
+      "observed_at": 1791437659,
+      "description_sha256": "dfd25839ce55ad080cf9c89ccf2b82a6db51d1bb97a63f30b5b42f6eee6bf559",
+      "action": "appended trial findings; prior brief verified intact"
+    },
+    {
+      "identifier": "LOO-428",
+      "id": "381fc6ee-b887-4d48-ab21-e1442f6ea3f4",
+      "title": "Make lf sessions start and read cleanly inside cmux",
+      "url": "https://linear.app/loopflow/issue/LOO-428/make-lf-sessions-start-and-read-cleanly-inside-cmux",
+      "revision": "2026-10-08T04:51:53.084Z",
+      "observed_at": 1791437294,
+      "description_sha256": "bbddece28fae66cf62c8c79342c1e989f895644817c6fe4965ea70f4671bc541",
+      "action": "existing owner; no edit"
+    },
+    {
+      "identifier": "LOO-406",
+      "id": "64adeb1d-6422-4724-9fdc-8d3d1609ba64",
+      "title": "Explore loopflow's own store as the home of the plan, with Linear optional",
+      "url": "https://linear.app/loopflow/issue/LOO-406/explore-loopflows-own-store-as-the-home-of-the-plan-with-linear",
+      "revision": "2026-10-08T05:27:36.827Z",
+      "observed_at": 1791437294,
+      "description_sha256": "8cc348a695340355001a43ad09603279a9a81d440203eb961fbe5c61b7051646",
+      "action": "existing owner; no edit"
+    }
+  ],
+  "write_reconciliation": "LOO-422 first edit reported remote success and local database lock; identical edit succeeded. LOO-423 edit succeeded. Both additions and prior briefs verified on status readback. No comments, new Tasks, workers or lifecycle changes."
+}

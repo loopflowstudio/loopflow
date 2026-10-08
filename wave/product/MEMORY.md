@@ -4,6 +4,30 @@ Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wav
 scope widened past the Mac app: product now owns the shared API and every surface
 (CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
+## Terminal-host adoption (2026-10-07)
+
+Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
+Jack starts real providers in dedicated windows. No host code is lifted.
+
+Herdr/PTY fixtures passed taskless paths. Fresh Tasks require Linear; seeded Tasks
+accounts: refusal is not adoption. Original lf
+0.13.9's revision is unknown; source fixes cannot rebut release reports.
+Owners: LOO-422 status/titles, LOO-428 launch/Flow noise, LOO-423 account/polish,
+LOO-406 no-Linear planning; LOO-429 prompt placement overlaps 428's transport.
+
+Jack prioritizes native interaction. The trial exposed forced batch steps
+(introduced #1283); this branch forwards mode through skills and Task launches.
+28 Flow tests pass. Jack saw native step two in cmux and confirmed herdr's Flow,
+background question/clearing and resize/input trials. Successful provider exit
+advances; a deliberate Continue/Stop action remains unresolved. Native resume
+and herdr Task publication remain unproven. No host integration was added.
+
+Native resume's **Loopflow operating guide** is one repeated observation;
+first-content naming stays a hypothesis. Preserve native hooks/titles before
+adding outer Flow metadata that could obscure attention. Jack authorized landing
+the fix after these demos; remaining trials keep LOO-421 open. [Findings](../../docs/reviews/terminal-host-trial.md)
+preserve evidence and limits. No external-progress proof.
+
 ## Live Home reconciliation (2026-10-05)
 
 Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
@@ -272,9 +296,12 @@ Desktop Session navigation (LOO-372). Task association still includes all work.
 Filtered absence cannot release native surfaces or clear drafts and selection.
 Explicit completion remains separate from turn completion.
 
-Waiting can only come from a stream `lf` owns, so a native `claude` or
-`opencode` terminal never shows it (LOO-384). Reading Claude's transcript is
-Jack's open choice. Tests replay recorded streams, no live provider.
+October 7's #1490 (`d8ec7c4fe`) supersedes stream-only Waiting: validated OSC 7501
+reports observed by Desktop override stream inference in Rust. LOO-384 remains
+for non-reporters; reading Claude's transcript is Jack's open choice. Detached
+observation and lf emission remain unfinished (Infrastructure's LOO-398/394).
+Provider adoption and composed native-pane acceptance remain unproven; this does
+not establish status in cmux or herdr.
 
 ## Current Tasks and completion history (2026-10-02)
 
@@ -429,58 +456,36 @@ view yet (LOO-353).
 
 ## Skill reduction decisions (2026-09-28)
 
-Jack reported uncertainty among repair and implementation entry points and
-requested a smaller library. Preserve useful operations before composing
-process, consistent with Intelligence's
-[realign direction](../intelligence/MEMORY.md#reconciliation-and-reusable-skills-branch-evidence-2026-09-28).
-Design draws out intent; kickoff turns that intent into an implementation plan
-and remains the first product-Task step. Jack confirmed code stops locally,
-pursue at reviewed progress, and feature after kickoff/design review, pursue,
-queue and Task-completing landing. These endpoints must stay distinguishable.
+Jack requested a smaller library, then restored debug as the default in examples.
+Debug investigates and fixes a cause; unbreak restores a workflow. That distinction
+is the implementation interpretation, not Jack's explicit wording. Neither needs
+clipboard input. 5whys remains explicit systemic investigation; reduce and polish
+remain optional surveys, with no accepted removal. Research includes conversational
+codebase questions. Realign reconciles memory; pr-message owns PR authorship.
 
-Jack subsequently requested bringing debug back and making it the default in
-demos and examples. Debug investigates a reported failure and fixes its cause;
-unbreak prioritizes restoring the broken workflow.
-This distinction is the implementation interpretation of that request, not a
-new distinction explicitly stated by Jack. Neither requires clipboard input.
-Explicit systemic causal investigation stays 5whys. Incident composes
-unbreak → 5whys → launch-plan; launch-plan is a planning skill, with no same-named
-landing Flow. Expand is removed. Reduce and polish stay optional surveys; Jack
-has not selected their removal or conversion into editing passes. Research also
-answers conversational codebase questions. Realign owns memory reconciliation;
-PR authorship belongs to pr-message and delivery commands consume it.
+The September 28 Flow recipes and consolidation detail are historical at
+`c7359a7415f29c181b8e5bf2383cb5ba683d0586:wave/product/MEMORY.md`, this heading.
+October 6–7's Workflow decisions above supersede those endpoint descriptions.
+The consolidation retired duplicate memory skills (PR #1319), expand, and older
+Task/governance report pipelines. QA repairs authorized defects while independent
+audits stay read-only. Delivery retains distinct publication, reviewer merge,
+bare landing and Task-completing landing. Missing launch history proves neither
+disuse nor caller authorship.
 
-The local consolidation applies
-[Retire duplicate memory skills · PR #1319](https://github.com/loopflowstudio/loopflow/pull/1319)
-and removes the older Task-specific and governance report pipelines. QA selects
-proof from the affected behavior and repairs authorized defects; an independent
-audit stays read-only. Delivery skills leave mechanics to lf and retain separate
-publication, reviewer-owned merge, bare landing and Task-completing landing.
-Retained launch history supports prioritizing code, queue, design, ci-fix and
-review-open-work; missing history does not establish disuse or caller authorship.
+Jack requested single S1–S5 skills and identified their sequence as VSM. The
+`vsm-operate` design composes delivery, coordination, capacity, adaptation and
+identity with one shared pass note; each skill can act independently. Repository
+scope is default unless the request narrows it. Whether wave/operate uses that
+sequence remained open. Jack's “soften, dont harden” rejects numeric move caps;
+October 5's pairs decision requires covering started work before choosing no action.
+Task findings may challenge Wave purpose and Wave findings repository direction;
+accepted decisions return to owners without adding control authority or making
+operation a prerequisite for independent Tasks.
 
-Jack requested single S1–S5 skills and clarified that their sequence is VSM.
-The source `vsm-operate` Flow composes five sequential agent invocations for
-delivery, coordination, capacity, adaptation and identity. Each skill can
-investigate and act independently; one shared pass note carries evidence forward.
-Repository scope remains the default despite ambient Wave attribution, unless
-the request narrows it. Whether `wave/operate` uses that sequence remains open;
-its separate operation is retained. Jack's “soften, dont harden” correction
-rejects a numeric cap on moves. The October 5 pairs decision above replaces
-“one or two useful moves”: no action is valid only once started work is covered.
-Task findings can challenge Wave purpose and Wave findings repository direction;
-accepted decisions return to affected owners without acquiring another control
-authority or making operation a prerequisite for independent Tasks.
-
-The September 28 finite passes ran without chapter/Task reads: incomplete
-planning evidence, not an empty backlog. Their account is at
-`f9e74029e:wave/product/MEMORY.md` under this heading.
-
-The [committed design](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation.md)
-and [evidence record](https://github.com/loopflowstudio/loopflow/blob/9619d803ee9765de907cc529791507e822c21b57/scratch/skill-consolidation-evidence.md)
-preserve the source decisions, simulations and verification limits. Recorded
-branch checks only: five-step VSM handoff, the incident handoff, installed
-adoption and delivery lack configured proof; no KR or external progress is earned.
+The design and evidence linked in that archive
+retain decisions and simulations. September 28 passes lacked planning reads, not
+backlog; five-step VSM/incident handoffs, installed adoption and delivery lack
+configured proof. No KR or external progress is earned.
 
 ## Named participants and review feedback (curated 2026-09-25)
 

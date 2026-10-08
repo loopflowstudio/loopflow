@@ -42,9 +42,9 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Model to use (harness or harness:model)
-    #[arg(short = 'm', long = "model")]
-    pub model: Option<String>,
+    /// Agent to use (harness or harness:model)
+    #[arg(short = 'a', long = "agent")]
+    pub agent: Option<String>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -89,13 +89,9 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
-    /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
-    #[arg(long, conflicts_with_all = ["ide", "batch"])]
-    pub tui: bool,
-
-    /// Hand off Claude or Codex to the vendor app (overrides session.launch)
+    /// Hand off Claude, Codex, or OpenCode to the terminal
     #[arg(long, conflicts_with = "batch")]
-    pub ide: bool,
+    pub tui: bool,
 
     /// Override Chrome integration; omission inherits configuration
     #[arg(long, value_enum)]
@@ -181,8 +177,11 @@ impl Cli {
     /// definition remain captured; Work resolves from the declaration or checkout.
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
-        let mut args = vec!["--batch".to_string()];
+        let mut args = Vec::new();
         for (flag, enabled) in [
+            ("--batch", self.batch),
+            ("--interactive", self.interactive),
+            ("--tui", self.tui),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
             ("--no-loopflow", self.no_loopflow),
@@ -216,8 +215,8 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
-        if let Some(model) = &self.model {
-            args.extend(["--model".to_string(), model.clone()]);
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".to_string(), agent.clone()]);
         }
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
@@ -235,7 +234,7 @@ impl Cli {
             command: None,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
-            model: self.model.clone(),
+            agent: self.agent.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
             isolate: self.isolate,
@@ -244,7 +243,6 @@ impl Cli {
             interactive: self.interactive,
             batch: self.batch,
             tui: self.tui,
-            ide: self.ide,
             chrome: self.chrome,
             diff: self.diff,
             max_turns: self.max_turns,
@@ -281,24 +279,6 @@ impl Cli {
             .map(|task| format!("task:{task}"))
             .or_else(|| self.wave.as_ref().map(|wave| format!("wave:{wave}")))
     }
-}
-
-#[derive(Args, Debug, Clone)]
-pub struct ScreenshotArgs {
-    /// URL or local HTML file to capture
-    pub source: String,
-
-    /// PNG destination
-    #[arg(short = 'o', long = "output")]
-    pub output: PathBuf,
-
-    /// Viewport width in pixels
-    #[arg(long, default_value_t = 1440)]
-    pub width: u32,
-
-    /// Viewport height in pixels
-    #[arg(long, default_value_t = 900)]
-    pub height: u32,
 }
 
 #[derive(Subcommand, Debug)]
@@ -345,12 +325,6 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal owner-loss supervisor for one browser capture.
-    #[command(name = "__screenshot-supervisor", hide = true)]
-    ScreenshotSupervisor {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
     /// Internal provider callback that records one native interactive session.
     #[command(name = "__provider-session", hide = true)]
     ProviderSession,
@@ -381,10 +355,18 @@ pub enum Commands {
         cmd: RepoCommand,
     },
     /// Manage the installed Loopflow release and exported skills
-    Installation {
+    #[command(name = "self")]
+    Self_ {
         #[command(subcommand)]
-        cmd: InstallationCommand,
+        cmd: SelfCommand,
     },
+    /// Read Loopflow configuration
+    Config {
+        #[command(subcommand)]
+        cmd: ConfigCommand,
+    },
+    /// Open or focus Loopflow.app
+    Open,
     /// Name and connect to machines
     Machine {
         #[command(subcommand)]
@@ -1161,8 +1143,9 @@ pub enum PrCommand {
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
-        #[arg(short = 'm', long = "model")]
-        model: Option<String>,
+        /// Agent to use (harness or harness:model)
+        #[arg(short = 'a', long = "agent")]
+        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1171,8 +1154,9 @@ pub enum PrCommand {
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
-        #[arg(short = 'm', long = "model")]
-        model: Option<String>,
+        /// Agent to use (harness or harness:model)
+        #[arg(short = 'a', long = "agent")]
+        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1456,7 +1440,16 @@ pub enum RepoCommand {
 
 /// Manage the installed artifacts and exported skills.
 #[derive(Debug, Subcommand)]
-pub enum InstallationCommand {
+pub enum SelfCommand {
+    /// Diagnose installation, storage, Process integrity and scheduled receipts
+    Doctor {
+        /// Diagnose repository planning without changing it
+        #[arg(long)]
+        planning: bool,
+        /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Install the latest published Loopflow release from any directory
     Install {
         #[command(subcommand)]
@@ -1474,25 +1467,19 @@ pub enum InstallationCommand {
     },
 }
 
-/// Inspect and observe durable Machines.
+/// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
-pub enum MachineCommand {
-    /// Open or focus Loopflow.app
-    Desktop,
-    /// Capture a URL or local HTML file without claiming the user's browser
-    Screenshot {
-        #[command(flatten)]
-        screenshot: ScreenshotArgs,
-    },
-    /// Diagnose installation, storage, Process integrity and scheduled receipts
-    Doctor {
-        /// Diagnose repository planning without changing it
-        #[arg(long)]
-        planning: bool,
-        /// Emit the audit as JSON
+pub enum ConfigCommand {
+    /// Print the configured participant display name.
+    User {
         #[arg(long)]
         json: bool,
     },
+}
+
+/// Name and connect to machines.
+#[derive(Debug, Subcommand)]
+pub enum MachineCommand {
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
@@ -1505,11 +1492,6 @@ pub enum MachineCommand {
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
-    },
-    /// Print the configured participant display name.
-    User {
-        #[arg(long)]
-        json: bool,
     },
     /// Print this machine's stable local Machine identity.
     Id {
@@ -1789,6 +1771,13 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn retired_ide_flag_is_rejected_for_a_valid_skill_command() {
+        let error = Cli::try_parse_from(["lf", "--ide", "skill", "debug"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+        assert!(error.to_string().contains("--ide"));
+    }
+
+    #[test]
     fn orphan_selects_inventory_and_cannot_opt_out_at_launch() {
         let cli = Cli::try_parse_from(["lf", "session", "list", "--orphan", "--json"]).unwrap();
         assert!(matches!(
@@ -1855,7 +1844,7 @@ mod tests {
                 "home_00000000000000000000000000000001",
             ],
             vec!["lf", "discord", "serve", "product"],
-            vec!["lf", "machine", "doctor", "--planning", "--json"],
+            vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
@@ -1880,36 +1869,9 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_requires_an_output_and_accepts_a_viewport() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "machine",
-            "screenshot",
-            "page.html",
-            "--output",
-            "capture.png",
-            "--width",
-            "390",
-            "--height",
-            "844",
-        ])
-        .expect("parse screenshot");
-        let Some(Commands::Machine {
-            cmd: crate::lf::MachineCommand::Screenshot { screenshot },
-        }) = cli.command
-        else {
-            panic!("expected screenshot command");
-        };
-        assert_eq!(screenshot.source, "page.html");
-        assert_eq!(screenshot.output, PathBuf::from("capture.png"));
-        assert_eq!((screenshot.width, screenshot.height), (390, 844));
-        assert!(Cli::try_parse_from(["lf", "machine", "screenshot", "page.html"]).is_err());
-    }
-
-    #[test]
     fn install_exposes_refresh_and_schedule_but_hides_transaction_commands() {
         let mut command = Cli::command();
-        let installation = command.find_subcommand_mut("installation").unwrap();
+        let installation = command.find_subcommand_mut("self").unwrap();
         assert!(installation
             .render_long_help()
             .to_string()
@@ -1922,17 +1884,17 @@ mod tests {
         assert!(help.contains("schedule"));
         assert!(!help.contains("preflight"));
         assert!(matches!(
-            Cli::try_parse_from(["lf", "installation", "install"])
+            Cli::try_parse_from(["lf", "self", "install"])
                 .unwrap()
                 .command,
-            Some(Commands::Installation {
-                cmd: crate::lf::InstallationCommand::Install { cmd: None }
+            Some(Commands::Self_ {
+                cmd: crate::lf::SelfCommand::Install { cmd: None }
             })
         ));
         assert!(Cli::try_parse_from(["lf", "machine", "install"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "schedule"]).is_ok());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "status"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "installation", "install", "preflight"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
     }
 
     #[test]
@@ -2677,34 +2639,49 @@ mod tests {
     }
 
     #[test]
-    fn pr_open_accepts_model_override() {
-        let cli = Cli::try_parse_from(["lf", "pr", "open", "-m", "codex"]).expect("parse");
+    fn pr_open_accepts_agent_override() {
+        for flag in ["--agent", "-a"] {
+            let cli = Cli::try_parse_from(["lf", "pr", "open", flag, "codex"]).expect("parse");
+            let Some(Commands::Pr {
+                cmd: Some(PrCommand::Open { agent, title, body }),
+            }) = cli.command
+            else {
+                panic!("expected pr command");
+            };
+
+            assert_eq!(agent.as_deref(), Some("codex"));
+            assert_eq!(title, None);
+            assert_eq!(body, None);
+        }
+    }
+
+    #[test]
+    fn top_level_agent_reaches_pr_open() {
+        let cli = Cli::try_parse_from(["lf", "-a", "codex", "pr", "open"]).expect("parse");
         let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
+            cmd: Some(PrCommand::Open { agent, title, body }),
         }) = cli.command
         else {
             panic!("expected pr command");
         };
 
-        assert_eq!(model.as_deref(), Some("codex"));
+        assert_eq!(cli.agent.as_deref(), Some("codex"));
+        assert_eq!(agent, None);
         assert_eq!(title, None);
         assert_eq!(body, None);
     }
 
     #[test]
-    fn top_level_model_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-m", "codex", "pr", "open"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { model, title, body }),
-        }) = cli.command
-        else {
-            panic!("expected pr command");
-        };
-
-        assert_eq!(cli.model.as_deref(), Some("codex"));
-        assert_eq!(model, None);
-        assert_eq!(title, None);
-        assert_eq!(body, None);
+    fn flow_children_keep_the_selected_agent() {
+        for flag in ["--agent", "-a"] {
+            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "run", "code"])
+                .expect("parse agent selection");
+            let args = std::iter::once("lf".to_owned())
+                .chain(cli.process_options().step_args())
+                .chain(["skill".to_owned(), "debug".to_owned()]);
+            let child = Cli::try_parse_from(args).expect("parse child invocation");
+            assert_eq!(child.agent.as_deref(), Some("claude:opus"));
+        }
     }
 }
 

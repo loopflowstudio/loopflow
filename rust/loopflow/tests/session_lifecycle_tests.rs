@@ -215,7 +215,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
 /// An upper bound only: a debug `lf` on a busy machine takes tens of seconds to launch.
 const PATIENCE: Duration = Duration::from_secs(180);
 
-const LAUNCH: [&str; 5] = ["--tui", "--model", "opencode", ":", "Review the parser"];
+const LAUNCH: [&str; 5] = ["--tui", "--agent", "opencode", ":", "Review the parser"];
 
 #[test]
 fn task_conversation_reopens_after_terminal_startup_failure() {
@@ -741,7 +741,7 @@ fn binding_starts_the_task_once_without_reattributing_prior_work() {
         "--task",
         "INF-123",
         "--tui",
-        "--model",
+        "--agent",
         "opencode",
         ":",
         "Review the parser",
@@ -999,13 +999,13 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
     let y = fixture.repo.create_named_worktree("task-y");
     let sibling = support::register_sibling_task(&task, "INF-124", "task-y", &y);
     std::fs::write(fixture.home.path().join("tool-command.json"), serde_json::to_vec(&serde_json::json!({
-        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--model", "opencode", ":", "Work in Y"], "cwd": y,
+        "argv": [env!("CARGO_BIN_EXE_lf"), "--tui", "--agent", "opencode", ":", "Work in Y"], "cwd": y,
     })).unwrap()).unwrap();
     let output = fixture.run(&[
         "--task",
         "INF-123",
         "--tui",
-        "--model",
+        "--agent",
         "opencode",
         ":",
         "Call a tool in Y",
@@ -1089,7 +1089,7 @@ fn declared_agent_can_start_another_tasks_flow() {
     .unwrap();
     let output = fixture
         .command(&[
-            "--task", "INF-124", "--tui", "--model", "opencode", ":", "Start Y",
+            "--task", "INF-124", "--tui", "--agent", "opencode", ":", "Start Y",
         ])
         .env("LF_BIN", bin.join("lf"))
         .output()
@@ -1124,7 +1124,7 @@ const BOUND_LAUNCH: [&str; 7] = [
     "--task",
     "INF-123",
     "--tui",
-    "--model",
+    "--agent",
     "opencode",
     ":",
     "Review the parser",
@@ -1168,7 +1168,7 @@ fn failed_process_observation_cannot_admit_a_provider() {
         .unwrap();
     for args in [
         LAUNCH.as_slice(),
-        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
+        &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
     ] {
         let output = fixture.run(args);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
@@ -1189,7 +1189,7 @@ fn malformed_caller_cannot_use_library_agent_admission() {
     let fixture = Fixture::new(false);
     for args in [
         LAUNCH.as_slice(),
-        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
+        &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
     ] {
         let output = fixture
             .command(args)
@@ -1225,9 +1225,9 @@ fn unavailable_store_starts_no_provider() {
     let store = LockedStore::new(&fixture);
     for args in [
         LAUNCH.as_slice(),
-        &["--batch", "--model", "opencode", ":", "Tidy the parser"],
+        &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
         &[
-            "--model",
+            "--agent",
             "opencode",
             "flow",
             "work-then-decide",
@@ -1272,7 +1272,7 @@ fn headless_history_is_discoverable_without_entering_the_interactive_list() {
         "--wave",
         "task-pr-tests",
         "--batch",
-        "--model",
+        "--agent",
         "opencode",
         ":",
         "Tidy the parser",
@@ -1332,7 +1332,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         )
         .unwrap();
         let output = fixture.run(&[
-            "--model",
+            "--agent",
             "opencode",
             "flow",
             "work-then-decide",
@@ -1417,7 +1417,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
     let mut command = fixture.command(&[
-        "--model",
+        "--agent",
         "opencode",
         "flow",
         "work-then-decide",
@@ -1485,7 +1485,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     std::fs::write(fixture.repo.path().join(".lf/flows/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
     let output = fixture.run(&[
-        "--model",
+        "--agent",
         "opencode",
         "flow",
         "choose",
@@ -1525,7 +1525,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("remaining-passes"), "2").unwrap();
     let output = fixture.run(&[
-        "--model",
+        "--agent",
         "opencode",
         "flow",
         "work-then-decide",
@@ -1572,7 +1572,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
     let output = fixture.run(&[
-        "--model",
+        "--agent",
         "opencode",
         "flow",
         "work-then-decide",
@@ -1609,7 +1609,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
     let output = fixture.run(&[
-        "--model",
+        "--agent",
         "opencode",
         "flow",
         "work-then-decide",

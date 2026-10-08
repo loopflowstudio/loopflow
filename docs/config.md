@@ -5,7 +5,8 @@ lf user                                # show the resolved display name
 lf user --json                         # name as a JSON string, or null when unavailable
 ```
 
-Returns a display name, such as `Jack Heart`, using Git's configured `user.name`,
+`user` is the unique shortcut for `lf config user`. It returns a display name,
+such as `Jack Heart`, using Git's configured `user.name`,
 including repository overrides. Agents can use a familiar name such as `Jack`
 in prose. No first name or username is derived from this value. Override it
 in personal Loopflow configuration (`$LF_HOME/config.yaml`, or
@@ -45,7 +46,7 @@ Start with a one-run override; keep it in repo config only when the choice
 should apply to everyone:
 
 ```bash
-lf gate -m codex --docs docs/api.md
+lf gate -a codex --docs docs/api.md
 ```
 
 ```yaml
@@ -62,8 +63,8 @@ config files.
 
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
-| Model | `-m claude:opus` | `agent: claude:opus` |
-| Interactive TUI | direct TTY or `-i` | `session.launch: tui` |
+| Agent | `-a claude:opus` | `agent: claude:opus` |
+| Interactive terminal | direct TTY, `-i`, or `--tui` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
 | Include raw diff | `--diff patch` | `diff: true` |
@@ -73,7 +74,6 @@ config files.
 | Chrome automation | `--chrome` | `chrome: true` |
 | Yolo mode (skip permissions) | — | `yolo: true` |
 | Account's own provider home | `--isolate` / `--shared` | `isolate: true` |
-| Claude/Codex/OpenCode launch surface | `--tui` / `--ide` | `session.launch: tui` |
 | Review FlowStep terminal | — | global-only `session.terminal: Ghostty` |
 
 ## Context budgets
@@ -181,9 +181,6 @@ Example repo config:
 
 ```yaml
 agent: claude:opus
-
-session:
-  launch: tui
 
 context:
   - src/schema.py
@@ -351,7 +348,7 @@ Set the default harness, with an optional model.
 
 | | |
 |---|---|
-| **CLI** | `lf gate -m codex:o3` |
+| **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
 | **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
 
@@ -457,19 +454,15 @@ runs mechanical `lf` commands. Durable Task provider turns do not add the main
 repo. Loopflow owns their Git mutations after the provider edits and tests the
 assigned files.
 
-### Session Launch
+### Interactive sessions
 
-Pick where directly invoked interactive skills open.
-
-```yaml
-session:
-  launch: tui          # tui | ide
+```bash
+lf --tui -a claude audit
 ```
 
-`tui` opens Claude, Codex, or OpenCode in the current terminal. `ide` opens the
-Codex or Claude app by URL scheme and falls back to `tui` if no app handles the
-link. OpenCode is terminal-only. The per-run flags `--tui` / `--ide` override
-this default.
+Interactive skills run in the current terminal. A direct TTY invocation is
+interactive by default; `--tui` also selects the terminal when input is piped.
+Use `-b` for headless execution.
 
 ### Summaries
 

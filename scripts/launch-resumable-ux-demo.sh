@@ -26,7 +26,7 @@ run_lf() {
 case "${1:-claude}" in
   claude|codex|opencode)
     agent="${1:-claude}"
-    run_lf --tui -m "$agent" : "test"
+    run_lf --tui -a "$agent" : "test"
     echo
     echo "Session saved. List it with:"
     echo "  scripts/launch-resumable-ux-demo.sh list"

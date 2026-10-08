@@ -164,13 +164,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
         let mut cmd = command(
             home.path(),
             cwd,
-            &[
-                "installation",
-                "install",
-                "promote",
-                "--cli-target",
-                "/unused/lf",
-            ],
+            &["self", "install", "promote", "--cli-target", "/unused/lf"],
         );
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
@@ -195,7 +189,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
         home.path(),
         repo.path(),
         &[
-            "installation",
+            "self",
             "install",
             "promote",
             "--cli-target",
@@ -366,16 +360,12 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
     let run = |args: &[&str]| {
         success(
-            command(
-                home.path(),
-                cwd.path(),
-                &["installation", "install", "schedule"],
-            )
-            .args(args)
-            .env("PATH", &bin)
-            .env("LF_INSTALL_DIR", home.path().join("installed & current"))
-            .output()
-            .unwrap(),
+            command(home.path(), cwd.path(), &["self", "install", "schedule"])
+                .args(args)
+                .env("PATH", &bin)
+                .env("LF_INSTALL_DIR", home.path().join("installed & current"))
+                .output()
+                .unwrap(),
         )
     };
     assert!(run(&[]).contains("weekly"));
@@ -438,7 +428,7 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["installation", "install", "schedule", "monthly"],
+        &["self", "install", "schedule", "monthly"],
     )
     .env("PATH", &bin)
     .output()

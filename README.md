@@ -37,7 +37,7 @@ cargo install --git https://github.com/loopflowstudio/loopflow --bin lf
 
 The Mac app — Sessions, the roadmap, every Task's worktree — is
 [`Loopflow-latest.dmg`](https://downloads.loopflow.studio/Loopflow-latest.dmg).
-It bundles `lf`; open it explicitly with `lf desktop`. Bare `lf` starts the
+It bundles `lf`; open it explicitly with `lf open`. Bare `lf` starts the
 general-purpose terminal conversation. On canonical main, it first carries local
 commits and uncommitted files into an author-scoped sibling worktree so the
 conversation cannot dirty main.
@@ -135,7 +135,7 @@ Watch this repository and the current Machine:
 
 ```bash
 lf wave list                  # every durable Wave and its Machine/runtime evidence
-lf user           # display name from Git or a personal Loopflow override
+lf user           # read config: display name from Git or a personal override
 lf roadmap             # every open Task across this repository's Waves
 lf roadmap --all       # every repository on this machine
 lf wave status designer     # one Wave's current chapter and Tasks

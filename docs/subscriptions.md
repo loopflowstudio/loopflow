@@ -288,11 +288,11 @@ exit, including logins installed on a remote machine.
 ## Switch the shared account
 
 ```bash
-lf -m codex : "say hi"                    # runs in ~/.codex as the active account
+lf -a codex : "say hi"                    # runs in ~/.codex as the active account
 codex resume                              # plain Codex sees that conversation
 lf account codex use work@                # ~/.codex is now work@, for lf and codex
 lf account route                          # shows the mode and the active account
-lf --isolate --account codex=work@ -m codex : "say hi"   # stays in work@'s own home
+lf --isolate --account codex=work@ -a codex : "say hi"   # stays in work@'s own home
 lf account claude use work@               # the same for ~/.claude and plain claude
 ```
 

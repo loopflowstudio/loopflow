@@ -91,7 +91,7 @@ impl<'a> PlanningChanges<'a> {
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
-            "SELECT id,field,value_json,base_json,conflict_json FROM {owner}_changes c
+            "SELECT id,field,value_json,base_json FROM {owner}_changes c
              WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
                  WHERE {owner}_id=c.{owner}_id AND field=c.field) ORDER BY seq"
         ))?;
@@ -101,17 +101,15 @@ impl<'a> PlanningChanges<'a> {
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
             ))
         })?;
         rows.map(|row| {
-            let (id, field, value, base, conflict) = row?;
+            let (id, field, value, base) = row?;
             Ok(PlanningChange {
                 id,
                 field,
                 value: serde_json::from_str(&value)?,
                 base: base.map(|v| serde_json::from_str(&v)).transpose()?,
-                conflict: conflict.map(|v| serde_json::from_str(&v)).transpose()?,
             })
         })
         .collect()

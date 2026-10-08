@@ -145,19 +145,27 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         .to_string();
     let waves = store.list_waves(None).await.map_err(project_error)?;
     let projects = store.list_projects(None).await.map_err(project_error)?;
-    let mut matches = projects.into_iter().filter(|project| {
-        waves
-            .iter()
-            .any(|wave| wave.id() == &project.wave_id && wave.repo() == repo)
-            && (project.id.as_str() == selector
-                || project
-                    .plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| id.as_str() == selector)
-                || project.plan.slug == selector
-                || project.plan.name == selector)
-    });
+    let projects: Vec<_> = projects
+        .into_iter()
+        .filter(|project| {
+            waves
+                .iter()
+                .any(|wave| wave.id() == &project.wave_id && wave.repo() == repo)
+        })
+        .collect();
+    if let Some(project) = projects.iter().find(|project| {
+        project.id.as_str() == selector
+            || project
+                .plan
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == selector)
+    }) {
+        return Ok(project.clone());
+    }
+    let mut matches = projects
+        .into_iter()
+        .filter(|project| project.plan.slug == selector || project.plan.name == selector);
     let project = matches
         .next()
         .ok_or_else(|| project_error(format!("Project {selector:?} not found")))?;

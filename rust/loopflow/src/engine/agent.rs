@@ -1222,10 +1222,10 @@ pub fn run_agent(
         launch.env.extend(capture.0.environment());
         capture.0.mark_spawn_requested();
     }
-    let _comments = process
+    let _planning_sync = process
         .task_input
         .as_ref()
-        .map(crate::ops::task_input::TaskInput::refresh)
+        .map(crate::ops::task_input::TaskInput::start_planning_sync)
         .transpose()
         .map_err(|error| {
             CoreError::ExecutionFailed(format!("cannot start planning sync: {error}"))

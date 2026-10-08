@@ -57,7 +57,6 @@ pub(super) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed: &crate::pm::PmItem,
-    expected: Option<&str>,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
         "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
@@ -78,9 +77,8 @@ pub(super) fn reconcile_in(
         attempted,
         ..
     } = delivery;
-    if expected.is_some_and(|expected| expected != id)
-        || super::planning::revision_nanos(observed.revision.as_deref())?
-            < super::planning::revision_nanos(revision.as_deref())?
+    if super::planning::revision_nanos(observed.revision.as_deref())?
+        < super::planning::revision_nanos(revision.as_deref())?
     {
         return Ok(false);
     }
@@ -173,7 +171,7 @@ impl SqliteStore {
         )? {
             return Ok(false);
         }
-        let pending = reconcile_in(&tx, &delivery.task_id, observed, Some(&delivery.id))?;
+        let pending = reconcile_in(&tx, &delivery.task_id, observed)?;
         tx.commit()?;
         Ok(pending)
     }

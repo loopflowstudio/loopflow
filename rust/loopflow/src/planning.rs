@@ -2,14 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A saved field edit and retained provider evidence, independent of connection state.
+/// A pending field edit and its provider baseline, independent of connection state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanningChange {
     pub id: String,
     pub field: String,
     pub value: serde_json::Value,
     pub base: Option<serde_json::Value>,
-    pub conflict: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

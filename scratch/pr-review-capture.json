@@ -1,0 +1,102 @@
+{
+  "head": "dfe18ab6060901992b55e64842e23c4295673b08",
+  "binary_sha256": "3e7faca3696493b7b69d45e9e35d2eb963330a73d37e763845a77dd3e045f927",
+  "identity": "task_3e34a19a2658499eb5742ef623a22b2f",
+  "captures": [
+    {
+      "args": [
+        "--version"
+      ],
+      "code": 0,
+      "stdout": "lf 0.13.9+dfe18ab60.dirty\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "task",
+        "create",
+        "--wave",
+        "personal:review",
+        "--title",
+        "Fix the parser",
+        "--notes",
+        "Keep quoted input",
+        "--creation-id",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "--json"
+      ],
+      "code": 0,
+      "stdout": "{\n  \"revision\": null,\n  \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n  \"identifier\": \"lf-3e34a19a2658\",\n  \"branch_name\": null,\n  \"url\": null,\n  \"name\": \"Fix the parser\",\n  \"description\": \"Keep quoted input\",\n  \"rank\": 0,\n  \"completed\": false,\n  \"completed_at\": null,\n  \"state\": \"unstarted\",\n  \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n  \"project\": \"review\",\n  \"team_id\": null,\n  \"assignee\": null\n}\n",
+      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\n"
+    },
+    {
+      "args": [
+        "task",
+        "edit",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "--title",
+        "Preserve quoted input"
+      ],
+      "code": 0,
+      "stdout": "personal:review: updated task task_3e34a19a2658499eb5742ef623a22b2f\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "task",
+        "create",
+        "--wave",
+        "personal:review",
+        "--title",
+        "Fix the parser",
+        "--notes",
+        "Keep quoted input",
+        "--creation-id",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "--json"
+      ],
+      "code": 0,
+      "stdout": "{\n  \"revision\": null,\n  \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n  \"identifier\": \"lf-3e34a19a2658\",\n  \"branch_name\": null,\n  \"url\": null,\n  \"name\": \"Preserve quoted input\",\n  \"description\": \"Keep quoted input\",\n  \"rank\": 0,\n  \"completed\": false,\n  \"completed_at\": null,\n  \"state\": \"unstarted\",\n  \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n  \"project\": \"review\",\n  \"team_id\": null,\n  \"assignee\": null\n}\n",
+      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\n"
+    },
+    {
+      "args": [
+        "task",
+        "create",
+        "--wave",
+        "personal:review",
+        "--title",
+        "Different request",
+        "--creation-id",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "--json"
+      ],
+      "code": 1,
+      "stdout": "",
+      "stderr": "Creation identity: task_3e34a19a2658499eb5742ef623a22b2f; retain --creation-id task_3e34a19a2658499eb5742ef623a22b2f when retrying this request\nError: invalid data: creation identity already belongs to a different request\n"
+    },
+    {
+      "args": [
+        "task",
+        "comment",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "Keep the escaped quote",
+        "--json"
+      ],
+      "code": 0,
+      "stdout": "{\"identifier\":\"lf-3e34a19a2658\",\"comments\":[{\"id\":\"17d100ed-ad86-42cb-a863-bb6ac699de20\",\"body\":\"Keep the escaped quote\\n\\n<!-- loopflow-steer:17d100ed-ad86-42cb-a863-bb6ac699de20 -->\",\"author\":{\"kind\":\"person\",\"name\":\"Review fixture\"},\"created_at\":\"2026-10-08T11:31:40.475345Z\"}]}\n",
+      "stderr": ""
+    },
+    {
+      "args": [
+        "task",
+        "status",
+        "task_3e34a19a2658499eb5742ef623a22b2f",
+        "--json"
+      ],
+      "code": 0,
+      "stdout": "{\n  \"planning\": {\n    \"item\": {\n      \"revision\": null,\n      \"id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n      \"identifier\": \"lf-3e34a19a2658\",\n      \"branch_name\": null,\n      \"url\": null,\n      \"name\": \"Preserve quoted input\",\n      \"description\": \"Keep quoted input\",\n      \"rank\": 0,\n      \"completed\": false,\n      \"completed_at\": null,\n      \"state\": \"unstarted\",\n      \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n      \"project\": \"review\",\n      \"team_id\": null,\n      \"assignee\": null\n    },\n    \"project\": {\n      \"id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n      \"revision\": null,\n      \"slug\": \"review\",\n      \"name\": \"review\",\n      \"summary\": \"\",\n      \"metric_targets\": [],\n      \"workflow\": \"\",\n      \"status\": \"started\",\n      \"krs\": [],\n      \"initiative_ids\": [],\n      \"team_ids\": []\n    },\n    \"observed_at\": 1791459100\n  },\n  \"planning_error\": null,\n  \"planning_stale\": false,\n  \"planning_state\": \"available\",\n  \"execution\": {\n    \"machine_id\": null,\n    \"issue_id\": null,\n    \"issue_identifier\": \"lf-3e34a19a2658\",\n    \"task_id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n    \"external_project_id\": null,\n    \"project\": \"review\",\n    \"pm_snapshot_synced_at\": null,\n    \"pm_writeback\": {\n      \"state\": \"current\"\n    },\n    \"wave\": \"personal:review\",\n    \"project_id\": \"proj_8f1eab9d042c43abb5cd477201c6921d\",\n    \"status\": \"not_ready\",\n    \"planning_conflict\": null,\n    \"execution\": {\n      \"state\": \"idle\",\n      \"reason\": \"No Task Flow has run; independent Sessions may still be active\",\n      \"step\": null,\n      \"captured\": null\n    },\n    \"work\": {\n      \"sessions\": [],\n      \"flow_processes\": [],\n      \"processes\": [],\n      \"workflow\": null\n    },\n    \"worktree\": null,\n    \"workspace_slug\": \"\",\n    \"agent\": null,\n    \"provider\": \"codex\",\n    \"prs\": [],\n    \"active_pr\": null,\n    \"latest_event\": {\n      \"id\": 1,\n      \"task_id\": \"task_3e34a19a2658499eb5742ef623a22b2f\",\n      \"kind\": {\n        \"kind\": \"steer\",\n        \"author\": {\n          \"kind\": \"user\"\n        },\n        \"text\": \"Comment 17d100ed-ad86-42cb-a863-bb6ac699de20 by Review fixture:\\n\\nKeep the escaped quote\\n\\n<!-- loopflow-steer:17d100ed-ad86-42cb-a863-bb6ac699de20 -->\"\n      },\n      \"created_at\": [\n        2026,\n        281,\n        11,\n        31,\n        40,\n        0,\n        0,\n        0,\n        0\n      ]\n    },\n    \"created_at\": [\n      2026,\n      281,\n      11,\n      31,\n      39,\n      0,\n      0,\n      0,\n      0\n    ],\n    \"updated_at\": [\n      2026,\n      281,\n      11,\n      31,\n      40,\n      0,\n      0,\n      0,\n      0\n    ],\n    \"observation\": {\n      \"freshness\": \"not_required\"\n    },\n    \"actions\": {\n      \"recommended\": \"resume\",\n      \"reason\": \"run the next work with `lf task run`; inspect earlier Flows and independent Sessions first\"\n    }\n  }\n}\n",
+      "stderr": ""
+    }
+  ]
+}

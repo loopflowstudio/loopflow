@@ -100,7 +100,9 @@ impl TaskInput {
         );
     }
 
-    pub(crate) fn refresh(&self) -> std::io::Result<crate::ops::linear_observe::PlanningSync> {
+    pub(crate) fn start_planning_sync(
+        &self,
+    ) -> std::io::Result<crate::ops::linear_observe::PlanningSync> {
         crate::ops::linear_observe::PlanningSync::start(self.store.clone(), self.task.clone())
     }
 

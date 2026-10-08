@@ -583,15 +583,9 @@ fn project_accepted_planning(
     drop(query);
     for (id, body, observed_at, project) in updates {
         let item: PmItem = serde_json::from_str(&body)?;
-        super::task_state_delivery::reconcile_in(
-            tx,
-            &crate::durable::TaskId::from_raw(&id),
-            &item,
-            None,
-        )?;
-        let item =
-            super::planning_changes::PlanningChanges::Task(&crate::durable::TaskId::from_raw(&id))
-                .reconcile(tx, &item)?;
+        let task_id = crate::durable::TaskId::from_raw(&id);
+        super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
+        let item = super::planning_changes::PlanningChanges::Task(&task_id).reconcile(tx, &item)?;
         let project: String = match item.project_id.as_deref() {
             Some(selected) => tx.query_row(
                 "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",

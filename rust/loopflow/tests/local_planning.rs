@@ -1299,6 +1299,13 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 )
                 .unwrap();
         }
+        // Exact identities still resolve when another Project's name/slug shadows them.
+        let mut shadow = store.project(&id).unwrap().unwrap();
+        shadow.id = loopflow::durable::ProjectId::new();
+        shadow.plan.linear_id = None;
+        shadow.plan.name = id.to_string();
+        shadow.plan.slug = project.id.clone();
+        store.insert_project(&shadow).unwrap();
         // Both repositories use an ordinary Wave, with optional mapping and no credentials.
         let source = home.path().join("workflow.yaml");
         std::fs::write(&source, "nodes: {}\nedges: [{from: start, to: end}]\n").unwrap();
@@ -1358,6 +1365,17 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["workflow"], "review");
         assert_eq!(saved["krs"][0]["text"], "Retain the proof");
         assert_eq!(saved["sync_enabled"], connected);
+        if mapped {
+            assert_eq!(
+                lf(
+                    repo.path(),
+                    home.path(),
+                    &["project", "workflow", "show", &project.id, "--json"]
+                ),
+                saved
+            );
+        }
+        assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
         assert_eq!(saved["pending_changes"].as_array().unwrap().len(), 3);
         let changes = saved["pending_changes"].clone();
         lf(

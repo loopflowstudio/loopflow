@@ -1,623 +1,527 @@
-# Loopflow owns the plan
+# One plan, optional Linear synchronization
 
-Implementation direction for LOO-406 — 2026-10-07, owned by Infrastructure.
-Jack Heart selected the complete local lifecycle, echoing Linear APIs and fields
-for compatibility with particular attention to ID generation, then requested
-“move towards pursuit”. Deliver one coherent PR through publication for review.
-Landing, installation, callbacks, Git synchronization and Linear export are outside
-this slice. Reconciled on 2026-10-08: the local lifecycle is implemented, with
-focused public CLI, migration and headless Desktop proofs in disposable stores.
-The affected acceptance matrix passes; the change is ready for publication for review.
-The earlier execution feedback is superseded by native launch/import checkpoint
-`817ec2634`, lifecycle/Desktop checkpoint `2d4115339`, and compression checkpoint
-`b8abd3c9a`. `require_provider_session_process` now uses the authority-aware
-deletion reader without requiring a Linear mapping. Retaining deletion-recovery
-evidence is an engineering correction within Jack's preservation constraint,
-not an additional product approval boundary.
+LOO-406 · Infrastructure · revised 2026-10-08.
 
-## Direction
+Jack Heart authorized implementation through publication for review, not landing
+or installation. His relaunch comment `ee5f29c0-c176-4f15-815d-cdd07e7ddffd`
+selects the coherent Wave schema/definitions and deletion cut, preserving the
+ship-decomposed direction. Full synchronization remains unfinished. The older Task
+brief's exclusion of export/sync and mandatory one-PR shape are superseded by the
+October 8 decisions below. LOO-412 owns transport, not a second planning owner.
 
-Build the single-machine lifecycle first; it remains useful if synchronization
-stops there. The reported repeated five-second planning-refresh failures motivate
-removing Linear from local work but have not been reproduced in this exploration.
+## Common ownership cut — 2026-10-08 (`84664e661`)
 
-Jack Heart's later leaning is “the git remote as the true 'master'”, allowing
-pending local data without overloading the remote. The laptop remains the ordinary
-authoring surface: “My mini is always on, but it feels like my laptop should be the
-'master'. Dev machines are supposed to be disposable.” A designated SSH server
-would tie recovery to that server; a hosted Loopflow service adds an operational
-dependency without a selected benefit. Neither is recommended. Proposed Git
-publication gives eventual visibility without code merges; that qualification
-still needs acceptance.
+All Waves now use ordinary hierarchical addresses and the existing durable rows.
+The one migration draft removes `personal_plans`, `PlanId`, personal Wave storage,
+`PlanningAuthority` and `project_authority_on`. `sqlite/wave_documents.rs` stores
+all imported top-level Markdown and custom Workflow definitions. Explicit ensure
+creates ancestors and imports missing documents atomically; retries preserve stored
+edits and source bytes. Existing authored IDs survive. The released-frontier
+migration imports available definitions for registered Waves in its transaction;
+missing directories leave identity intact for later explicit import. No file-backed
+reader or personal namespace remains.
 
-## Three situations
+Wave config, goal/memory editing, inherited prompt context and CLI/Desktop planning
+read stored definitions. Project ensure and default inbox creation use the same
+Wave writer. Relocation changes stored addresses while definitions remain attached
+to identity. It neither moves repository sources nor rewrites execution placement.
+The old Git relocation/cleanup sequence and directory-driven identity reconciler
+are deleted. Historical relocation receipts remain; recovery of previously uncertain
+effects is not established by this cut.
 
-| Situation | Official plan and writers | What others see |
-| --- | --- | --- |
-| One developer, several machines | Initially one SQLite store; later one personal Git plan ref, written by the developer's authorized clients | Named authoring machines fetch the plan; a worker receives only its Task and needed context |
-| Startup using Linear | Linear owns connected Waves' Projects, Tasks, rank, text and comments; everyone with Linear permission can edit | Loopflow projects the same shared facts; a personal Git plan must not compete for these fields |
-| Independent developers in a company | Each has a separate local/personal Git plan and stable plan ID; company code remote need not accept plan writes | Colleagues see shared code/PRs, not another person's private plan unless access is deliberately granted |
+Task deletion now commits local removal, planning revision and a stable pending
+`deleted` field receipt together. Retry preserves the receipt; rollback preserves
+both plan and history. Workflow, Session, Process, PR, checkout and completion
+records remain intact. The provider-first delete/trash/readback writer, authority
+selector and exclusive fixtures are deleted. Historical provider deletion tables
+and retained identity evidence survive. Connected deletion reports pending sync;
+provider deletion delivery remains unimplemented.
 
-Jack's latest tentative direction separates authority and route: when Linear is
-connected, planning should go through Linear, while X still routes through the
-originating host when online. Direct Linear fallback after host loss remains open.
-Connecting a scope means transferring its shared planning authority, not adding a
-second master. Personal Waves can coexist. Linear is the recommended collaboration
-surface for this series; a Git-backed multi-person product, permissions UI and
-notifications are out of scope. Repository access, not a name in a ref, controls
-confidentiality. A per-person namespace on a shared remote separates writes but
-does not make the content private. Use a separate approved personal plan remote
-where company policy permits; otherwise remain local. Do not default-push private
-plan material to the code remote.
+Paired public CLI fixtures cover connected/offline and unconnected definitions,
+source removal, ancestor context, stored Workflow source, relocation and deletion.
+Deletion retains active execution and provider mapping, and verifies rollback,
+retry and store reopen. Sixteen local-planning tests pass. Source checks also
+cover released-frontier definition/link preservation, atomic ancestor rollback,
+relocation collisions/cycles and direct/Task prompt context. These establish local
+behavior, not installed conversion, composed provider reconnect or full Desktop
+acceptance. Gate owns the broader and materialized migration checks.
 
-## First showable slice
+Review aligned the Project Workflow catalog with stored selection, removed an
+unnecessary Git lookup from Wave snapshots and fixed test setup
+that stored a noncanonical repository path. The configured source remains canonical;
+fixtures import definitions explicitly rather than restoring implicit file reads.
 
-Accepted target behavior. Public fixtures cover planning, placement, native
-launch/resume, skill-Flow execution, rotation and GitHub delivery through confirmed
-merge reconciliation. Provider/GitHub effects are contained stubs. Shared CLI
-fixtures pass headless Desktop reading and workflow controls; no installation or
-live-provider acceptance is claimed.
+Commit `84664e661` is the coherent source boundary for LOO-412 to review and consume.
+It is not an independently shippable connected product yet: export, field/deletion
+and cancellation delivery, pending presentation
+and composed reconnect remain. No feature flag, adapter or rejected ownership
+mode makes that missing behavior acceptable. Publication belongs to the authored
+pursuit boundary; this implementation step neither lands nor completes the Task.
 
-In a repository with no Linear configuration or credentials, run
-`lf task create --title "Fix the parser"`. It creates a durable Task immediately. With no
-Wave selected, explicit creation provisions a personal `inbox` Wave and ordinary
-Project with no chapter or default workflow. Reads provision nothing. Explicit
-Wave selection still works. Task creation needs no checkout, agent or remote.
+Reconciliation on October 8 inspected `dd91ddb83` plus the local compression diff.
+The merged LOO-436 startup changes do not implement planning synchronization.
+Compression is checkpointed at `05d36d79f`; `84664e661` remains the original
+consumable ownership boundary. The retained `pr-review.html` labels its older split implementation as
+superseded and is historical review evidence, not a walkthrough of this cut.
 
-`lf task edit`, `lf task comment` and `lf task status` use SQLite. `lf checkout`
-places the Task. `lf project workflow set <project-id> <workflow>` selects the
-Project workflow; `lf task run <id>` takes it up and chooses an edge. Work, commits
-and delivery use existing commands. In a GitHub-backed
-repository, `lf land -c` and later reconciliation demonstrate verified delivery
-and completion with no Linear call. Bare `lf land` retains its existing completion
-semantics. Without a code remote, local work still succeeds; hosted landing is
-unavailable and is never simulated as success.
+## Preserved common writers
 
-Desktop shows the same Task and comments, including unplaced Tasks. Personal Wave
-creation changes no tracked `wave/` or `.lf/` file. Existing connected repositories
-continue to use Linear until explicitly migrated; this slice does not silently
-switch their authority or claim cross-machine durability.
+The saved-plan reader (`459331192`), comments (`b3cd894f3`), abandonment
+(`783305284`), Task creation/editing (`b6e291dd4`), shared field receipts
+(`71c8e445c`), Project creation/selection (`764e90ae3`, `6570ee0f7`), rotation
+(`4be12b5c8`) and refiling (`fa35cfd88`) retain one local transaction path.
+Placement keeps its Wave locks and winning PR/checkout; captured Workflows survive
+missing source definitions. Started work, unreviewed backlog and uncertain provider
+transitions keep their identities and evidence. Local settlement proves no delivery.
+Earlier implementation detail and preservation counterexamples remain at
+`fa35cfd88:scratch/explore-loopflow-s-own-store.md` and
+`f027890ab:wave/infrastructure/MEMORY.md`.
 
-## Current system and earlier attempts
+The existing migration draft starts at integrated v0.13.10 (`fc0bb97f7`). No second
+draft or installed-store experiment was added. Release's complete immediate-child
+goal and memory were read: its operation-entry recovery lesson remains applicable;
+helper success cannot establish public reconnect or installed acceptance.
 
-Initial inventory: `35e759aaf4e79e7dc8eef2e8d30048f10172b45a`; planning types,
-registration and deletion recovery rechecked at `bc6d11661`. The storage cut below
-now supersedes that inventory where noted. Integrated #1497 changes harness selection to `--agent`/`-a`
-and removes `--ide` app launch; acceptance uses terminal/headless execution and
-headless Desktop readers, without restoring that launcher.
+## Accepted conflict policy — Jack Heart, 2026-10-08
 
-- `planning.rs`: Task and Project retain their existing durable IDs; nested plans
-  now carry optional `linear_id` mappings and optional provider observation times.
-  `Task.worktree` is optional. Accepted owned issues import into durable Tasks
-  without placement; unresolved observations remain in `pm_items`.
-- `store/sqlite/planning.rs` accepts normalized provider facts and projects them
-  into durable rows. The `local_planning` draft makes external mappings nullable
-  while retaining uniqueness. Local create/edit/read use the existing Task rows;
-  local operations and public projections now select explicit personal authority;
-  owned Linear issues import transactionally with their mappings. `store/sqlite.rs::task_issue_identity` separately reads
-  deletion-recovery evidence; its only operation caller is `ops/pm.rs::delete_task`.
-- `ops/task_pm.rs` resolves Team/Initiative ownership and delegates creation and
-  completion to `ops/pm.rs`. `pm_create_task_idempotent` searches UUID operation
-  markers around a provider create. Connected comments require a Linear observation;
-  personal comments now have a transactional local writer.
-- `ops/task.rs::create_prepared_task` first reuses an external-issue mapping under
-  the Wave lock, then calls `TaskId::new()` when absent. Project ingestion likewise
-  reuses a mapping or calls `ProjectId::new()`. Both mint UUID v4; the earlier
-  claimed deterministic import mapping from machine work is absent in this tree.
-- `ops/project.rs::{ensure,update_plan}` and `ops/chapter.rs::apply_rotation`
-  coordinate provider writes. `ops/task.rs`, `ops/task/lifecycle.rs` and
-  `ops/linear_observe.rs` connect planning to delivery and steering. Preserve
-  these behavioral boundaries when changing the planning owner.
-- Historical file planning: `f407deb93` rewrote numbered Wave Markdown from PM;
-  `c113ef04b` deleted `ops/ingest.rs`, the mirrors and pull/export/push-diff loop.
-  Its predecessor selected local Tasks by filename order. Jack's reason for
-  abandoning Tasks in Git was needing a merge to see new work. Those paths are
-  already deleted; do not restore them around the new ref transport.
-- Asana: `43a1f85ce` deleted the client, HTML conversion, OAuth and exclusive
-  tests/scripts after `8f34be5e8` switched to Linear. The single-variant
-  `pm/mod.rs::PmProviderKind` routing is now deleted; Linear operations use their
-  concrete client. No provider registry is needed.
-- LOO-393: `57a92b1c2:scratch/loo-393-checkpoint.patch` preserves the draft
-  `task_record.rs`, `task_record_sync.sql` and Linear attachment methods. They
-  are absent from this tree. The sketch carried Task/PR identity and agent
-  selection, excluded execution, and published content-addressed attachment
-  revisions. It is evidence, not a second implementation to revive. LOO-394's
-  later machine work remains independent; its historical `lf ssh` spelling is
-  superseded by global `--machine`.
+Jack Heart clarified: “If you are using Linear, then we want to defer to linear
+in any conflict scenarios.” Linear wins all planning conflicts: status, text,
+membership, rank and edits to an existing comment. Saves still commit locally
+and show pending sync. Compare incoming facts with the saved delivery baseline;
+an unchanged provider value is not itself a conflict. On a conflicting provider
+change, adopt Linear's value, retain the superseded local intention in history,
+and stop retrying that intention. Independent new comments remain additions.
+Mandatory manual winner selection and local-wins conflict resolution are superseded.
 
-## Keystone data and operations
+Without Linear: “we want to defer to the host if possible, but also last write
+wins and have try-not-to-clobber policy.” LOO-412 owns host preference, ordering
+and transport. Prefer the host when available; otherwise last-write-wins with
+best-effort avoidance of clobbering and recoverable losing edits. Exact host
+selection and ties remain transport design details, not a new local storage mode.
 
-Use the same supported planning vocabulary, field semantics and operations as the
-Linear path: issue create/read/list/update, Project management, comments, state,
-ordering, assignees and PR links. Local storage implements those operations in
-transactions. Reuse the existing Linear-shaped domain values where correct;
-audit differences before introducing replacements. Compatibility means preserving
-meaning, nullability and relationship IDs, not just matching field names. It does
-not require a local GraphQL server or implementing unrelated Linear features.
+Jack explicitly reaffirmed: “exec state though *doesnt go into linear*”. Only
+planning synchronizes. Sessions, Processes, Flow progress, captured Workflow
+position, reservations, checkouts and execution/cleanup authority stay local.
+Execution may produce a planning outcome; importing that outcome never moves a
+Workflow, stops a Process or cleans a checkout. Linear's conflict precedence
+confers no execution authority. LOO-412 excludes the same execution state.
 
-For each supported field, fixtures must cover both local operations and Linear
-observation: title/name, description, identifier, Project/Team relationships,
-state category, completion timestamp, rank, assignee, branch name, URL and comments.
-Separate authored values from provider observations; local revisions must not pose
-as Linear `updatedAt`. Missing external URL/Team/account mapping remains explicit,
-not a fabricated Linear value. KRs, targets and workflow preserve their current
-Project-content encoding at the Linear boundary. Add Loopflow-specific placement,
-execution and synchronization metadata beside this planning shape.
+Jack's try-not-to-clobber policy supersedes the absolute zero-overwrite
+requirement. The unseen-write regression remains enabled as contrary evidence;
+its failure is neither an unanswered product choice nor proof of atomicity.
+Acceptance still requires Linear precedence for observed conflicts, recoverable
+losing edits and honest pending/uncertain outcomes.
 
-### Identity contract
+Commit `185de5fbf` reconciles accepted Task/Project observations against
+field baselines in the same transaction. A changed Linear value adopts locally and
+retires the losing intention; an unchanged baseline preserves pending saves. Receipts
+keep both values and stable IDs. State ingestion and delivery share this rule,
+including uncertain completion followed by reopening. Old responses cannot settle a
+newer local decision. Workflow position and execution records remain untouched.
+Comment collisions adopt Linear's body, author and time, retaining the complete
+local comment and first conflicting observation. CLI/Desktop show the saved local
+body beside the current provider text; no replacement or repeated local direction.
+Manual winner selection, its command flags, replacement-comment schema and exclusive
+tests are deleted. Export and outbound field/cancellation/deletion delivery remain.
 
-- Generate a random UUID v4 once for each locally born Task at creation, including
-  before checkout. Projects and comments likewise need stable independently minted
-  IDs. Never derive identity from title, rank, branch, hostname or a counter.
-- Preserve existing IDs byte-for-byte. `durable.rs` already uses UUID v4 inside
-  `task_<hex>`/`proj_<hex>`; that wrapper is Loopflow serialization, not a Linear
-  UUID. Keep UUID value, persisted spelling and display selector distinct. The
-  existing wrapper can stay; bare-UUID wire spelling is not selected by this draft.
-- Retain identity before any external effect. An interrupted retry of the same
-  creation operation reuses its ID; a separate create with the same title gets a
-  distinct ID. Cloning, synchronization and host routing carry the established ID,
-  never mint replacements. Use explicit creation identity, not title deduplication.
-- External issue UUID and ticket identifier are separate optional fields. Ticket
-  aliases can change on Team moves without changing Task identity or branch.
-  Importing a Linear-born issue first reuses its established mapping; when absent,
-  mint one durable ID and commit it with the unique provider mapping in the same
-  transaction. Repeat imports reuse that ID. Conflicting existing mappings need
-  explicit reconciliation, not renumbering execution history. Independent-machine
-  import convergence belongs to the synchronization follow-up.
-- A local UUID does not prove Linear accepts it on creation. Preserve the mapping
-  even if Linear assigns a different UUID; provider idempotency remains a separate
-  contract. Enforce uniqueness in storage; full-ID conflicts preserve both inputs
-  and report the conflict rather than silently replacing a Task.
+Jack invoked `ship-decomposed`: inspect existing seams and prepare independently
+shippable changes. This supersedes the mandatory one-PR delivery shape. No seam
+is accepted merely because a partial cut compiles; each slice must preserve
+connected behavior and remove the obsolete path it replaces.
 
-Implemented ownership replaces the earlier `PlanBinding`/`TaskPlacement` sketch:
+## User-keyed and shared planning — Jack Heart, 2026-10-08
 
-| Owner | Retained facts |
-| --- | --- |
-| `personal_plans` and `waves.personal_plan_id` | Stable personal plan ID, canonical repository and explicit authority |
-| Existing `Task` and `Project` | Durable identity and relationships; nested plans hold authored/provider fields and optional Linear mappings |
-| `Task.worktree` and existing PR rows | Optional machine placement and delivery chain, allocated together before filesystem work |
-| `task_creation_intents` | Original creation identity, Project and input across edits and rotation |
-| Personal definition/workflow rows | Wave documents and private workflow source; no tracked definition files |
-| Provider evidence and deletion-recovery rows | Accepted observations, revisions, removals and unresolved effects; no competing local plan |
+Jack Heart selected: “default to user-keyed planning, but then make it possible
+to all choose to share one, and make a good experience for those using that in
+an approporiate way”. A common code remote never implicitly combines developers'
+plans. Each user's machines select that user's planning destination by default;
+collaborators can explicitly select one common destination. This is synchronization
+selection using the same records, writers and APIs, not personal/shared model types.
 
-`PlanId` identifies the personal repository binding; there is no `PlanBinding`
-projection or fourth navigation level. Personal Wave objectives, memory,
-cadence/budget and instruments belong in the store. Existing explicitly shared repository Wave
-files remain Git-owned definitions: retain a reference to that owner, not an
-independently editable SQLite copy. Personal definitions resolve from the store;
-shared definitions resolve from Git. An explicit scope-qualified lookup resolves
-same-named Waves; no shadowing. Personal workflow customization follows the same
-rule. Never materialize personal definitions into tracked repository files.
-Schedules' *definitions* can travel later; their activation, receipts and execution
-ownership cannot. Fetching a cadence must not install a job on a worker.
+LOO-412 owns stable user-key selection, planning remote/ref binding and shared-plan
+exchange. User keys must survive machine replacement; do not infer identity from
+Git display names or silently mint a different user identity on every machine.
+Key provisioning/recovery remains a transport design detail. Joining an existing
+plan must not silently publish or merge existing local planning into it.
 
-Planning creation now permits absent placement, retaining existing bytes and Task
-foreign keys. One optional placement per Task per machine suffices. PR chains,
-histories, native Session IDs, usage and process authority retain their owners.
-Existing `pm_*` data remains Linear acquisition evidence, never a second local
-planning owner. Import planning-only cached issues into Tasks; preserve accepted
-revisions, removal evidence and timestamps. Conflicting ownership stays unresolved.
+The proposed shared experience shows the selected plan, authorship, assignees and
+pending changes. Stable Task IDs preserve identity across people; branch naming
+retains that identity and prefix ambiguity remains explicit. Separate creations
+and comments accumulate; different-field edits survive. A worker's initiating host
+must not gain blanket precedence over other collaborators. Shared conflict ordering
+needs a deterministic rule under the accepted last-write-wins policy.
 
-Implemented operation boundaries:
+Planning selection is local connection configuration. Tracked `wave/` and `.lf/`
+files remain shared repository content; personal planning must not silently rewrite
+them. Ref separation avoids accidental mixing, not access control: private planning
+requires a separately access-controlled remote. No real plan publication is selected.
+Execution remains local even when developers deliberately share the plan.
 
-- `ops::task::task_create` requires the caller's retained `TaskId`; personal
-  creation selects its Project under the Wave lock and commits through
-  `Store::create_local_task`. Connected creation retains the provider marker path.
-- `SqliteStore::task_by_issue` resolves durable IDs, local prefixes and provider
-  aliases in the existing Task rows; ambiguity is explicit.
-- `edit_local_task` applies `PmItemUpdate` with an expected revision. Local
-  comments use a transactional writer with named or unresolved authors and
-  steer/progress provenance. Connected mutations retain their Linear writers.
-- `rotate_local_projects` commits all personal destinations, selections, started
-  membership and receipts together. The chapter operation retains the existing
-  connected recovery path; mixed-authority failure/retry now passes the composed operation fixture.
+Acceptance must include two independent developers in one code repo, one developer
+on two machines, and two developers explicitly sharing a plan: no accidental
+mixing, duplicate IDs, silent replacement on join or execution-state replication.
 
-Use `lf-<12 UUID hex digits>` for the displayed local selector, extending it when
-ambiguous; the full ID always works. Store full IDs in automation. Existing
-`LOO-*` aliases remain accepted and displayed alongside the local selector when
-connected. Connecting never renames a checkout or branch. New branches use
-`lf/<full-task-uuid>/<slug>` so people and offline machines need no shared counter.
-No collision is silently resolved by selecting one Task.
+## Retained synchronization race evidence — 2026-10-08
 
-Task workflow position stays machine-local and still derives local work status.
-Portable completion/cancellation is a **planning observation**, carrying its
-original decision identity; it grants no cursor movement, process signal or cleanup.
-Local completion commits its decision and local workflow arrival together; the
-later outbound observation derives from that event, not another editable status.
-Inbound terminal planning can stop admission and surface a conflict with active
-work, as today. It cannot claim a local Flow reached `end`. Reopening requires
-an explicit new decision; a stale offline edit cannot undo completion.
+`task_completion_preserves_linear_reopening_during_delivery` drives the real
+`sync_task_state` writer against the existing loopback Linear fixture. Local
+completion saves first; after the ownership read, while the client resolves the
+completed state, another Linear client completes and explicitly reopens the issue.
+Loopflow's unconditional mutation then overwrites that reopening with `completed`.
+Readback agrees with its own write, so synchronization returns success and settles
+the receipt. The new regression requires `unstarted` plus a retained local decision;
+it fails. No sleep, clock ordering, live provider or installed store is involved.
+This establishes a protocol failure, not composed CLI/Desktop acceptance.
 
-## Callback follow-up — separate design before implementation
+Linear's [published schema at 7d2bc4279f](https://github.com/linear/linear/blob/7d2bc4279f1887cf763c59f9a173d9c590620023/packages/sdk/src/schema.graphql)
+was inspected on October 8. `issueUpdate` accepts `id` and `IssueUpdateInput`;
+neither it nor `issueBatchUpdate` exposes an expected revision/state condition.
+`lastSyncId` is output, not a write precondition. No documented provider fence
+was found. Another pre-write read only moves the race; readback, event history
+and webhooks cannot prevent an already-issued write from replacing reopening.
+This does not establish that every undocumented provider capability is absent.
 
-Jack Heart proposed a backwards connection from `lf --machine X` to the host task
-store. This draft interprets *host* as the originating machine. Explore this before
-replicating entire plans onto workers. Jack called pending updates “sorta correct”
-but potentially tricky; disconnect policy remains open.
+The earlier design treated automatic propagation and zero concurrent overwrite as
+an unresolved product choice. The accepted Linear-wins policy above replaces
+that choice. The fixture remains contrary evidence about an unseen intervening
+write, not proof that conflict precedence is unimplementable. Delivery must
+honor observed Linear conflicts, preserve uncertain effects, and state the
+remaining race honestly. Conditional-write research is no longer an unbounded
+prerequisite to the local ownership cut.
 
-`--machine X` parses and executes on X. The proposed callback selects the origin's
-planning scope and authority; checkouts, Sessions, Processes, workflows, machine registry and account operations
-stay on X. Remote `task create` can author on the laptop without allocating
-execution there; `machine add` still edits X. Never route `LF_HOME` to the laptop
-or expose SQLite over a network filesystem.
+The October 8 follow-up inspected Linear's [mutation documentation](https://linear.app/developers/sdk-fetching-and-modifying-data),
+[GraphQL guide](https://linear.app/developers/graphql) and [webhook contract](https://linear.app/developers/webhooks).
+These document updates and after-change notifications, not a conditional-write
+guarantee. The GraphQL guide also says changes during an issue's first three
+minutes are omitted from its activity log; activity history cannot be assumed
+complete evidence of intervening reopening. This narrows the history-based
+alternative without exhausting provider capabilities. No live mutation probe,
+provider confirmation, or changed product requirement is established.
 
-The origin calls its ordinary planning writer: local SQLite, or Linear followed
-by accepted observation. Colleagues' independent Linear edits remain authoritative
-without the origin online. Queued local text cannot count as a confirmed Linear
-write. Direct Linear fallback on X would require separately authorized credentials
-and settlement of unknown host writes; it remains undecided.
+The subsequent Project-writer investigation inspected `projectUpdate` and
+`ProjectUpdateInput` in the same pinned schema: only the ID and partial field input
+are exposed, with no expected revision. This extends the unresolved concurrency
+boundary to Project edits; no provider contact or live mutation probe occurred.
 
-Candidate transport is an origin Unix socket, served for the invoking `lf` process
-and carried over OpenSSH remote Unix-socket forwarding, without an inbound network
-listener on the laptop. [OpenSSH forwarding](https://man.openbsd.org/ssh).
-Expose typed planning operations with persisted operation IDs and expected
-revisions, never SQL or shell execution. An invocation capability scopes access
-to the selected plan and conveys no process authority. Nested dispatch retains
-that origin; missing forwarding reports unavailable instead of selecting X's store.
+The same schema verifies UUID-v4 `id` inputs for `IssueCreateInput` and
+`ProjectCreateInput`. Creation can retain a caller-generated UUID through retries;
+exact readback and concurrent-create behavior still need implementation and proof.
 
-Revoke the capability and cancel forwarding on invocation exit, even with a
-surviving SSH control master. No resident service or cross-version protocol.
-`lf/commands/ssh.rs` has an account-lease broker at the inspected base, but it is
-only transport precedent; LOO-413 owns credential routing. Do not couple plan
-operations to account leases.
+## What to build
 
-Proposed write/disconnect contract:
+One locally owned plan with the same schema, APIs and behavior in every repository,
+and optional repository-wide, two-way Linear synchronization.
 
-- Local writes commit operation ID, mutation and result together. Linear persists
-  intent before the call and retains provider readback; SQLite cannot commit that
-  external effect atomically. A lost reply is unconfirmed. Reconnect queries the
-  same ID; absent results do not permit another submission while the first can
-  still commit. Serialize duplicates rather than minting another identity.
-- Disconnected edits report unavailable and retain authored text for deliberate
-  retry. Cached reads retain observation age. Started work continues under its
-  existing rules and records outcomes on X; fresh-planning boundaries stop. Add
-  no offline launch, detachment capability, automatic replay or turn/Flow retry.
-- Reconnection inspects uncertain writes and outcomes under their original IDs
-  and current completion rules. Process exit cannot complete a Task; stale title,
-  rank and Project edits are not replayed automatically. Losing X may lose
-  undelivered outcomes; losing the laptop still needs publication or backups.
-  The callback supplies neither disaster recovery nor independent offline planning.
+Jack's accepted direction:
 
-Acceptance on a blank X: create/edit/comment through the origin and observe one
-plan immediately on the laptop. Lose an accepted write's reply, reconnect and prove
-one mutation. Show disconnected text retained and an outcome recorded without
-claiming plan acceptance. Preserve X's Sessions, workflow and unrelated plans.
-Real loopback SSH must prove socket cleanup with a surviving control master.
+> either everything synced to linear or nothing
+>
+> on disk and code reads the same either way, with hooks for linear syncing,
 
-## Git follow-up: intended contract, separate design before implementation
+Jack explicitly requested deleting `project_authority_on` and rejected the
+`personal_plans` and `personal_workflows` split. Asked how a connected repository
+behaves during an outage, Jack selected: “Save locally; show pending sync”.
+Jack also requested Task ID prefixes matching Git more closely.
 
-The follow-up needs an explicit publication binding for a Git destination and exact
-ref `refs/loopflow/plans/<plan-uuid>`; no such binding exists in this slice.
-Destination is independently configured from the code remote. A dedicated object
-store writes canonical JSON objects keyed by full
-IDs plus a manifest: schema, plan/repository identity and current Wave selections.
-One commit updates one plan ref atomically. No SQLite database, WAL or working-tree
-snapshot is uploaded. Explicit refspecs fetch this ref; ordinary branch fetches
-must not be assumed to include it.
+## Scope and placement
 
-Each local transaction records an operation ID, base revision and pending patch.
-A publisher fetches, reconciles and compares the exact previously read remote OID
-on push. On conflict it retains local intent and rereads; it never force-overwrites
-an unseen head. Unknown push success is settled by fetching the manifest/operation
-IDs, without inventing a new mutation. Git documents exact-value leases and
-explicit fetch refspecs; host acceptance of this namespace remains unproved.
-[Push contract](https://git-scm.com/docs/git-push),
-[fetch contract](https://git-scm.com/docs/git-fetch).
+Infrastructure owns the local planning and synchronization boundary. A repository
+has one plan. Its Linear connection applies to all its Waves, Projects and Tasks;
+there is no personal/shared selector, per-Wave planning authority, or alternate
+local writer. Optional Linear mappings retain identity and existing ticket aliases.
+Linear-compatible fields and operations remain the public shape.
 
-Proposed visibility policy:
+Cross-machine replication, Git plan refs, reverse host callbacks, account sharing
+and a hosted service remain outside this PR. The earlier three-situation analysis
+and Git-ref/callback proposals survive at
+`dfe18ab6060901992b55e64842e23c4295673b08:scratch/explore-loopflow-s-own-store.md`.
+A single local store is not a backup or cross-machine durability claim.
 
-- CLI: commit locally first; attempt one bounded publication of the pending batch
-  before a planning mutation returns. Report “saved locally; publication pending”
-  on failure. No resident or work retry is created.
-- Desktop: save immediately, publish after five seconds of quiet with a thirty-second
-  maximum delay while the app is running and online. Refresh an open plan at most
-  once per thirty seconds and on explicit refresh/open. One in-flight sync per plan;
-  no network call per token, paint, status poll or unchanged read.
-- Offline, closed or suspended: no finite publication guarantee. Retain pending
-  edits until the next command/app opportunity or explicit sync. Show oldest pending
-  age and last successful observation, not a misleading “synced” badge.
+## The demo
 
-The timings are proposed product policy, not accepted performance targets. Named
-machines alone grant no Git credentials or plan replication. Worker dispatch
-carries Task ID, accepted plan revision, brief, needed Wave/workflow context and
-branch/PR references. It need not fetch the whole plan. Outcome publication is an
-explicit planning write through an authorized route; execution stays on the worker.
+In a disposable repository with no Linear connection, create an inbox Task, edit
+its title, comment, select a workflow, place the Task and run work. Its records and
+normal read APIs require no provider. Publication and verified GitHub merge use
+the existing PR lifecycle; requesting a merge alone never means done.
 
-Reconcile different fields/Tasks automatically against their common base. Concurrent
-same-field text edits retain both alternatives for resolution; wall-clock “latest”
-cannot safely order offline edits. Comments union by immutable ID. Rank changes
-carry expected list revision and before/after neighbor IDs; competing reorders
-require resolution. Project rotation compares the selected Project and affected
-membership as one unit. Done versus abandoned is a conflict, never a lexical winner.
-These conflicts need a small inspection/resolution surface before sync can ship.
-No manual code-branch merge is required, but semantic conflicts cannot be wished away.
-
-Only changed authored planning objects, personal definitions/memory, comments and
-portable decision/PR references go to Git. Exclude transcripts, progress telemetry,
-Sessions, Processes, workflow instances/cursors, locks, tokens, machine paths,
-artifacts and binaries. Coalesce unpublished edits; reuse unchanged blobs; no-op
-refresh writes nothing. Retain published history initially. This is **small incremental
-traffic**, not a bounded-storage promise: history and comments grow. Measure bytes,
-object count and requests in fixtures before choosing compaction or retention.
-Never rewrite a published plan merely to meet an invented size target.
-
-Losing any worker preserves published planning and pushed code, but can lose its
-unpublished code, native conversation and execution evidence. Losing the laptop
-preserves every remotely confirmed plan commit; unpushed edits can be lost. A fresh
-client restores from the independently configured plan remote, including personal
-Wave definitions, without requiring the laptop. A single local-only installation
-has only its backup. Losing the remote leaves fetched copies but requires explicit
-selection of a replacement authority; never elect a new master automatically.
-
-## Linear follow-up
-
-Recommend full two-way **planning** in connected scopes, including colleagues'
-reorders and Project moves. Linear owns supported fields; Loopflow retains local
-execution and Wave definitions. Preserve provider revision, transfer, removal and
-stale-read rules. API success is not local execution completion.
-
-Connection first previews scope and export, then retains an exact mapping and
-per-object creation intent before publishing Tasks, Projects, comments and PR links.
-Do not export all private Waves implicitly. Pause new shared mutations during an
-explicit recoverable authority transfer; reads/local execution remain available.
-Do not declare the switch complete until mappings and provider readback agree.
-Afterward Git retains history/Loopflow-only definitions, not a competing shared plan.
-Disconnection likewise requires an explicit snapshot/authority decision.
-
-A write-once Linear ID alone does **not** prevent two creators racing before that
-field exists. The connection design must prove single issue creation after response
-loss and concurrent machines: shared export ownership plus provider-supported
-idempotent identity/readback. Existing description-marker lookup is not proof of
-concurrent uniqueness. Client-supplied issue UUID support and its retry semantics
-remain an API validation requirement; do not assume them from the local UUID design.
-Until proved, the exporter must retain an unresolved create rather than retry it
-with a new identity. Local identity survives connection; Linear IDs are aliases.
+Use the same commands in a Linear-connected fixture. Disconnect the provider,
+edit the Task and append a comment: both commands succeed, and CLI/Desktop show
+the saved values and pending sync. Restart the CLI and restore the provider while
+the connection is active. Catch-up proceeds without a manual refresh or new agent
+turn. The existing Task maps to one Linear issue; pending work settles without
+losing later edits or duplicating comments. Complete and reopen from either side;
+the same stored Task and UI reflect accepted changes while delayed completion
+preserves newer reopening. This is fixture acceptance;
+configured Linear and installed acceptance remain separately identified evidence.
 
 ## Delete — do not maintain
 
-The core types now permit absent Linear mappings and checkout placement. Public
-personal creation already commits without placement; Task preparation resolves
-existing durable Tasks before entering `ops/task_pm.rs`'s connected resolver.
-That resolver still requires Initiative/Team ownership. Native launch now selects planning authority; connected registration places the
-already-imported Task and retains provider branch identity. Task rows own ordinary external-ID alias resolution.
-**Preservation correction (2026-10-07):** retain `task_issue_identities` solely as
-Linear deletion-recovery evidence, with its existing reader limited to that
-operation. It is not a second Task resolver or current ownership authority.
-Removed the single-variant `PmProviderKind` and its context, client and credential
-parameters. Linear operations retain concrete `LinearClient` calls, repository
-configuration validation and existing snapshot/wire provider values. Personal scope
-still selects Local authority from stored ownership; no fake Local PM provider.
-Also removed the unused `PlanBinding` projection/reader and duplicate
-`edit_personal_wave_definition` writer. Personal definitions now have one document
-writer, exercised by the preservation fixture; stable plan IDs remain in SQLite.
+The ownership cut deletes personal namespaces/types/schema, authority dispatch,
+file-backed Wave reads/edits, Git relocation rewriting, provider-first Task deletion
+and their exclusive fixtures. Common content, comments, placement, selection,
+rotation and refiling writers remain. Historical deletion identities/confirmations,
+uncertain transitions, registered Wave IDs, source files and execution survive.
+Repository definitions are explicit ingestion sources; builtins remain available.
+No intermediate schema or compatibility writer is retained.
 
-Compression (2026-10-08): removed `task_was_deleted`; Task status and native
-launch now use the same authority-aware deletion reader. The duplicate treated
-retained Linear deletion evidence as personal authority and missed personal
-tombstones. Public fixtures cover both cases. Removed the identity-minting
-`task_create` wrapper used only by tests; the single creation API now requires
-the caller's retained identity. Workflow inspection and execution share source
-selection. Project summaries project retained Projects directly instead of
-building every Task's plan and discarding it. No further obsolete owner was
-found; provider acquisition and deletion-recovery evidence remain necessary.
+The compression pass removes the unused `SqliteStore::import_wave_documents`
+entry and `engine::workflow::workflow_source` wrapper. Explicit ensure and migration
+retain the import transaction. Config parsing shares `parse_wave_config`; config
+and status read one document instead of materializing all Wave memory. Hierarchy
+imports reuse one repository Workflow read, and Project catalogs use the definitions
+already acquired. Prompt assembly resolves the repository once for ancestor reads.
+The existing minimal-schema observation fixture had five values for four columns;
+its corrected insert retains the same identity assertions. The Wave projection test
+now expects the owned empty plan without provider inventory and retains saved
+fields beside malformed provider evidence; metric evaluation still reports that
+evidence unavailable. These reductions change
+neither synchronization policy nor the known provider race. Planning documentation
+removes the obsolete split-writer claim; the conflict cut below implements observed
+Linear precedence while retaining the unseen-write limit.
 
-Personal fixtures no longer require a Team, Initiative or issue. Connected
-ownership assertions remain in `ops/pm/task_planning_tests.rs` and
-`tests/task_initialization_tests.rs`, alongside provider observation, chapter
-recovery and deletion tests. `pm_items`/`pm_projects` acquisition evidence remains
-necessary. The historical Asana/file/attachment paths stay deleted; there is no
-parallel Task type or resolver to finish removing.
+The conflict cut removes `PlanningChanges::retain`, `resolve_task_state`,
+`resolve_task_comment`, `--resolve`, `--comment` on Task sync, and the comment
+resolution/replacement columns from the existing draft. The common reconciliation
+paths replace their exclusive tests. The enabled unseen-write regression remains.
+Review exposed exact provider Project IDs losing to duplicate slugs; lookup now
+orders exact IDs first, covered by public refiling with the duplicate slug retained.
 
-### Preservation counterexample: deletion before Task registration
+## Data and APIs
 
-At `e7f8c4922`, `ops/pm.rs::delete_task` records an issue's UUID, ticket and Wave
-before contacting Linear. A successful provider deletion can lose its response;
-refresh and chapter replacement can then remove ordinary issue/Project membership.
-The identity remains necessary to query trash and confirm the original effect.
-It does not prove the effect succeeded or authorize another deletion.
+- Existing `Task`, `Project` and `Wave` rows own the plan. Stable UUIDs precede
+  placement and optional Linear mappings. Creation receipts preserve original
+  input and Project through edits/rotation. Workflows, Sessions, Processes and
+  PR chains retain their existing owners and controls.
+- Wave goal/memory and custom workflow definitions use the same stored shape for
+  connected and unconnected repositories. Existing Git-authored content must be
+  preserved through an explicit ingestion/cutover; connected mode must not keep
+  another file-backed read path. No intermediate schema or second draft.
+- One repository connection selects optional Linear synchronization. Use the
+  existing repository configuration boundary; a new per-Project selector is
+  forbidden. A configured connection implies all plan objects participate;
+  an absent mapping means pending export, not an unsynchronized personal object.
+- A local mutation and its pending provider effect commit together. Reuse existing
+  writeback concepts where their meaning fits; completion-only `PmWritebackState`
+  must not become a second contradictory sync status. Sync records contain the
+  stable operation/object identity, captured local revision and required payload,
+  provider mapping, acknowledged revision and unresolved error/conflict. They
+  record delivery, not a second copy of the authoritative editable plan.
+- `create_task(NewTask) -> Task`, `edit_task(id, expected_revision, patch) -> Task`,
+  append-comment and Project/rotation mutations use one transaction path.
+  The exact final Rust signatures can follow surviving APIs. Reads return these
+  owned records and derived pending/conflict state, without a provider round trip.
+- Active CLI/Desktop connections drive bounded synchronization independently of
+  agent turns and unrelated outbound work. Local comments and completion commit
+  immediately and propagate on that active path; inbound state, membership and
+  comments enter the same writer and visible plan. Explicit repository sync is a
+  recovery entry, not a prerequisite. Disconnection preserves pending/uncertain
+  mutations; reconnect resumes by stable mutation identity, without echoes or
+  duplicate Tasks/comments. No resident service, hidden turn/Flow replay or
+  indefinite retry.
 
-`ops/pm/task_planning_tests.rs::task_deletion_planning_recovers_lost_response_without_ordinary_ownership`
-covers that sequence and a new-process retry. Its shared fixture explicitly
-asserts zero durable Tasks. `task_issue_identities` has no Project ID; neither a
-Task nor a complete cached issue is required for this evidence to exist.
+## Synchronization and preservation counterexamples
 
-An in-memory SQLite experiment applied the canonical catalog through
-`0.13.9.002_release`, inserted one Wave and retained issue identity, and passed
-`foreign_key_check` with zero Tasks, Projects, cached issues, cached Projects and
-deletion confirmations. A Task-keyed alias cannot represent that valid input:
-dropping it loses recovery, inventing a Project fabricates ownership, and creating
-a confirmation fabricates success. This disproves the unconditional table
-replacement in the earlier draft; it does not establish the new lifecycle.
+1. **Commit succeeds; reply is lost.** Retry the same creation identity, not a new
+   Task. Pending effects remain attached to the existing row across restart.
+2. **Linear accepts; acknowledgement is lost.** Retain uncertain publication and
+   the operation identity. Confirm by exact readback before another create.
+   A description marker and two empty lookups alone do not prove duplicate safety.
+   Verify whether the Linear API supports caller-supplied IDs; otherwise retain
+   uncertainty instead of claiming success or blindly issuing another create.
+3. **A later local edit arrives while an earlier push is in flight.** Acknowledge
+   only its captured revision. Do not clear newer pending fields or overwrite them
+   with the first response. Preserve comment identity and ordering separately.
+4. **Linear changes the same field while a local edit is pending.** Preserve both
+   values in history and adopt Linear as the current value. Supersede the losing
+   pending intention rather than retrying it. Unrelated inbound fields advance.
+   Keep observation age; an offline read is not a fresh remote fact.
+5. **Linear completes or abandons work.** Reconcile the planning observation while
+   preserving the established distinction between external state and local
+   Workflow/Process authority. External state never grants process control or
+   checkout deletion. Local done/abandoned edits also persist during outage and
+   synchronize later; provider failure cannot roll back the local decision.
+   For observed competing planning changes, Linear wins. Retain mutation identity
+   and provider revision evidence; missing ordering is not proof of successful
+   delivery. Preserve the unseen-write race as a documented limit. Remote completion
+   updates planning/presentation, never advances a captured local Workflow.
+6. **A repository connects with existing work.** Existing mappings and IDs survive;
+   unexported records become pending, not a second plan. Disconnect retains records,
+   mappings and pending/uncertain history. No live connection change is authorized
+   as a fixture or migration shortcut.
+7. **An old Project is absent.** Retained Task identity and checkout files remain
+   readable. All current/history IDs, Session/native identities, comments, PRs,
+   deletion receipts and selection evidence survive the released-frontier cutover.
 
-This correction preserves the existing recovery evidence and operation.
-Only issues with established Project/Wave ownership become durable Tasks during
-import; unresolved provider facts and recovery identities remain evidence until
-ownership is established. The `local_planning` draft retains orphan evidence.
-The populated migration proof reads retained Task/Project rows through Rust and
-compares PR/Session/workflow/recovery rows byte-for-byte. The existing lost-response
-operation test passes against the new schema. These are disposable-store proofs,
-not installed acceptance. Keep extending this same draft as the lifecycle changes.
+## Semi-live synchronization — Jack Heart, 2026-10-08
 
-## Internal slices and acceptance
+Jack's comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires preserving
+responsiveness to Linear completion, newly added Project Tasks and comments.
+Inbound observation runs independently of local mutations, manual sync and outbound
+effect delivery. Pending local edits cannot stall unrelated inbound fields,
+membership, state or comments. Same-field conflict retains both values; external
+state grants no Workflow/Process or checkout authority.
 
-**This slice: the local lifecycle keystone, one coherent PR.** Internal cuts:
+Jack's follow-up `93690dc2-5526-4ecf-a203-5e248339b0c9` requires local comments
+and completion to save immediately and propagate while a CLI/Desktop connection
+is active, without the next agent turn, manual refresh or outbound queue drain.
+Incoming comments/completion share the active acquisition path with Project
+membership and reach both the common store and visible planning. The independent acquisition loops below cover only part of the required contract. Prove both directions during pending
+unrelated writes and after reconnect, including duplicate delivery, lost replies,
+and delayed completion after explicit reopening. Preserve stable mutation IDs and
+avoid echoes through the common writer; callbacks around individual commands are
+not the synchronization architecture.
 
-1. Replace provider-first identity/resolution and mandatory placement; one migration
-   draft against the released frontier, edited in place. Preserve all existing IDs,
-   aliases, planning-only issues, histories, links and deletion-recovery evidence.
-   Retain the recovery-only table above. No intermediate schemas. Include persisted
-   Task/Project JSON shapes in the migration audit: typed columns can pass FK checks
-   while historical serialized records fail current readers.
-2. Preserve Linear-shaped operations and field semantics while adding personal
-   Wave/Project provisioning and store-owned definitions; transactional
-   create/edit/comment/rotation with optional workflows and no network dependency.
-3. Cut CLI, prompts, delivery and Desktop over to the shared reader; prove complete
-   local work and retained Linear behavior. Update architecture, DTO fixtures and
-   user docs together.
+Jack Heart selected one custom Git planning ref for LOO-412’s two-way planning
+prototype in comment `8b45e82d-6765-490a-a3d6-44b44611cedd`, then accepted the
+cross-Task plan in `b5402659-b825-4c12-b278-5d56ae1aa518` on October 8.
+LOO-406 owns common local planning storage/mutation APIs and Linear sync;
+LOO-412 owns Git-ref transport between machines, excluding execution state.
+LOO-412 can build isolated transport/protocol fixtures now. Full integration
+consumes a coherent committed common-writer boundary from LOO-406, without
+copying dirty code or implementing a second planning owner. The ongoing LOO-412
+conversation owns that prototype. No machine replication here, real plan publication
+to the public code repository, or competing pursue Flow is authorized.
+Semi-live comments/completion, visible pending changes, stable mutation identities
+and the accepted conflict policy remain required. Inbound planning never moves
+Workflow, signals Processes or cleans checkouts; transport provides no Linear
+echo or duplicate-export guarantee. Publication here remains for review only.
 
-The first storage cut now represents unplaced local Tasks in the existing model.
-`Store::{create_local_task,edit_local_task}` commit authored fields and optimistic
-revisions transactionally. The caller supplies one `TaskId` across retries; a
-`task_creation_intents` receipt preserves the original input even after later edits.
-Conflicting reuse fails; separate same-title creation has a distinct ID. Creation
-allocates no PR, Session, Process, workflow or checkout. SQLite row readers accept
-optional provider mapping/observation and placement; Task status and Wave projections
-now expose those absences without requiring a provider.
-The store resolver accepts
-full IDs and `lf-` UUID prefixes and rejects ambiguity. Stored local labels retain the full UUID; the shared reader displays the
-shortest unique prefix of at least twelve digits, extending it on collision.
+Current source boundaries (reconciled 2026-10-08):
 
-The draft rebuilds Task/Project tables without changing existing IDs or child rows.
-It depends on the integrated `process_names` draft so retained Started triggers use
-current table/column names. No second draft was added. Review found that original
-creation input must survive edits for retry comparison, and that an absent provider
-observation must remain NULL rather than epoch zero; both are fixed.
+- `lf/commands/run.rs::prepare_task_input` refreshes comments before launch.
+  `ops/task_input.rs::TaskInput::refresh` now starts `PlanningSync` from the common
+  runner. Its inbound loop waits 15 seconds after each bounded attempt; batch
+  `poll` consumes live steers and interrupts every 5 seconds. Acquisition and
+  delivery run independently of that consumption.
+- `ISSUE_OBSERVATION_QUERY` reads title, description and paginated comments.
+  A separate bounded acquisition loop refreshes repository Waves through the
+  existing snapshot ingestion path, including state and Project membership;
+  one failing Wave does not prevent requests for the others.
+- `ops/pm.rs::load_show_snapshot` refreshes on Auto reads after one hour, with a
+  five-second deadline; Force refreshes immediately, Never reads retained facts.
+  Existing explicit refresh and exact-issue acquisition paths remain relevant.
+- `lf/commands/work_watch.rs` projects through a read-only store, with a separate
+  writable connection for the selected Task's `PlanningSync`. Its five-minute
+  planning clock covers Git/filesystem facts; `PlanningSync` separately acquires
+  Linear inventory every 15 seconds.
+  The source has comment-ingestion APIs and historical webhook schemas, but no
+  current Linear webhook receiver/registration call. The CLI parser explicitly
+  rejects `repo webhook serve`. This establishes no configured webhook delivery.
 
-Implemented local boundaries (2026-10-08):
+At `73059ecd1`, periodic refresh ran only in batch Codex/OpenCode. Current source
+starts `PlanningSync` at `run_agent`, covering native Codex, native Claude, Claude's
+batch subprocess and the existing batch harness without changing stdin or mode.
+Desktop's work watcher starts the same lifetime for its selected Task and stops it
+on scope change/connection exit. Inbound comment attempts remain independent of
+outbound delivery, every 15 seconds with a five-second request bound; pending
+comments and state decisions have separate one-second delivery loops. Repository
+configuration enables these effects; retained mappings alone do not reconnect it.
+These are foreground-owned lifetimes, not a resident service or a turn/Flow retry.
+Comment acquisition follows the selected Task; repository-wide delivery currently
+selects mapped Tasks only. Unmapped records still need export and pending-state
+projection through the common writer. The existing mapped receipt projection must
+not become the definition of whether a connected repository has unsynced work.
 
-- A personal plan binds one canonical repository. Wave membership selects Local
-  authority explicitly; adding a provider alias does not transfer it. `personal:`
-  qualifies stored Waves, including `personal:inbox`; a shared same-name Wave stays
-  separate. Reserved-prefix shared names receive a `shared:` address. Root personal
-  provisioning is transactional and leaves tracked definitions unchanged.
-- Public create/edit/comment/status use the existing Task rows. `--creation-id`
-  retains one UUID, emitted before creation; separate creates remain distinct.
-  The content-hash provider marker is replaced too. Local retry reads its original
-  Project receipt across later edits and rotation. Comments retain UUID, named or
-  unresolved author, progress provenance and directional steering.
-- First checkout records placement and PR atomically before creating files. New
-  local branches include the full UUID. Unplaced status and completion work; local
-  workflow admission and completion bypass Linear. Wave and checkout locks protect
-  placement; queued creation retains the Wave guard through commit.
-- `wave ensure`, `wave edit`, Project workflow selection and plan editing operate
-  on personal definitions. Goals/memory feed prompt assembly from SQLite; generated
-  curation instructions write back there. Project content reuses Linear's Markdown
-  encoding with workflow updated in the same transaction. Local rank is allocated
-  within its Project; completed time comes from the retained completion event.
-- Local rotation commits destination, selection, started Task membership and its
-  receipt together, preserving backlog. Original input survives for retry checking.
-  Public fixtures exercise rotation twice, retained workflow/checkout and creation
-  retry across that switch. Multi-Wave rollback, concurrent creation/rotation and
-  conflicting retry input are covered. Mixed-authority recovery passes ten interrupted provider mutations; a local
-  transaction does not make provider effects atomic.
-- The same migration also retains `pm_items.body` and `pm_projects.body` byte-for-byte
-  and parses their historical fixture shapes through current observation readers.
-  PR, Session, workflow, move and orphan deletion-recovery preservation still pass.
-  No historical Task/Project JSON payload owner was found beyond those provider
-  observation records; paired field coverage is described below.
+The common comment transaction records the thread, its delivery UUID and local
+Steer. Provider acquisition enters that same thread and the existing Steer ledger.
+The comment UUID is also the Linear mutation ID: [Linear's published schema](https://studio.apollographql.com/public/Linear-API/variant/current/schema/reference/inputs/CommentCreateInput)
+accepts caller-supplied UUIDs. Lost replies use exact ID/issue/body readback;
+concurrent delivery attempts cannot allocate another comment. Corrections retain
+provider revisions; echoes do not repeat local direction. A conflicting remote body
+becomes current automatically; the original local comment and first conflicting
+provider observation remain in the receipt. That intention leaves pending delivery.
+Later provider corrections advance normally; delayed acknowledgements cannot erase
+the retained values, republish the local body or manufacture another Steer.
+Task/Project creation accepts caller-supplied UUIDs in the inspected schema;
+their delivery and exact-readback contract remains unimplemented.
 
-Implementation and focused acceptance now cover the remaining boundaries:
+CLI and Desktop show pending comment IDs and retained losing local bodies. Partial/failed
+reads retain the saved thread and expose a refresh error. Desktop Task frames now
+carry comments; receiving a frame invalidates an older in-flight thread read.
 
-- Native launch and same-Session resume, a managed skill Flow, terminal launch
-  refusal and connected deletion refusal run through public CLI with contained
-  Codex providers. A retained alias cannot select authority. Personal deletion
-  hides the plan, preserves its row/history and refuses later mutation/resume.
-- Owned Linear issue import and connected placement reuse identity and provider
-  branches. Released-frontier fixtures preserve serialized observations, Task/PR/
-  Session/workflow links and orphan deletion evidence. Repeat import and alias
-  changes allocate no second Task.
-- The shared `PmItemUpdate` replaces the local patch type and redundant text
-  adapter. Paired local/Linear fixtures cover title, empty description, ordering,
-  assignment/clearing and Project name/summary. Existing lifecycle fixtures cover
-  state, completion, relationship ownership, branch/URL and comments. Native
-  provider revisions remain distinct from local concurrency revisions.
-- Nested personal definitions, renaming/refiling, stable Wave selectors and private
-  workflow import/catalog/source operate through SQLite. Desktop edits personal
-  workflows in its sheet using that writer. `local_task.json` is compared with
-  public CLI output, decoded by Rust/Swift and rendered in headless production views.
-  Local selectors extend on collisions without changing identity or stored spelling.
-- The strict GitHub fixture reaches `pr publish`, `land -c` and `pr reconcile`;
-  pending merge does not complete the Task, and confirmed merge does. The no-remote
-  fixture proves refusal with Task/PR state retained. These prove public dispatch
-  and readback, not live GitHub permissions or installed continuity.
-- Concurrent same-ID creation retains one Task; failed filesystem placement retries
-  the same PR/allocation. Multi-Wave rotation rolls back together on conflict.
-  New creation and rotation serialize, started work moves and backlog remains.
-  A failing race test found Project selection before the Wave lock; selection now
-  occurs under that lock while retries keep their original Project receipt.
+Focused evidence: the comment operation fixture saves mapped Tasks' comments during
+outage, reconciles a lost reply and concurrent delivery, rejects echoes, and retains
+both collision values through a late acknowledgement. The real `run_agent` entry
+with isolated provider stubs covers incoming and outgoing comments for native Codex,
+native Claude and batch Claude while unrelated completion writeback stays pending.
+The public CLI/work-watch fixture proves an offline save reaches the open Desktop
+stream and survives closing/reopening that watcher without another refresh command.
+It does not restore Linear or prove pending effects drain after provider recovery.
+Headless app tests prove pending display, streamed thread updates and rejection
+of a late older read.
+One initial native fixture launched the real Codex executable because vendor setup
+rebuilds PATH; its disposable provider Home and external-network denial contained
+it, and it exited for non-terminal stdin. Corrected fixtures isolate parent PATH
+and LF_BIN, as TESTING.md requires. The corrected entry checks pass.
 
-Review corrections: deletion checks select actual authority; import retains orphan
-recovery evidence; creation and rotation receipts retain original input; optional
-checkout is resolved before Git operations. Refiles lock source/destination Waves
-in stable order before choosing the current destination. Public fixtures scrub
-inherited Loopflow/Linear authority, and unknown provider/GitHub stub calls fail.
-Personal deletion uses a timestamp on its Task, never Linear's recovery table.
+Completion fixtures cover atomic rollback, immediate local completion, lost
+replies, later local reopening and automatic adoption of observed Linear conflicts.
+Inventory acquisition imports membership/completion independently; incoming planning
+never advances Workflow. Comment fixtures cover adoption, authorship, rollback,
+reopen, subsequent corrections and delayed acknowledgements without new comments
+or repeated direction. Public CLI fixtures cover Task/Project fields, status,
+Workflow selection, KRs and cross-Wave membership, preserving pending baselines
+and retaining losing receipts. These source checks do not prove configured or
+installed acceptance or composed native/Flow/Desktop reconnect. Release's
+operation-entry lesson remains applicable; its complete child goal/memory were read.
 
-Publication preparation: the affected gate passes, including connected
-planning/rotation recovery and the full headless app/model matrix. The mixed rotation
-operation fixture now interrupts each of ten provider mutations after personal
-settlement. Retry retains the personal receipt, original started membership and
-backlog even when that backlog starts afterward; connected PR/Flow history survives.
-A second retry creates no Project and performs no provider mutation. This is
-composed operation evidence, not a public CLI crash or live-provider proof.
-Gate found five missing architecture-map owners and nineteen Rust failures.
-Corrections retain imported unplaced identities in fixtures, exercise populated
-migration through its transaction, add planning revisions for private definitions,
-workflows and comments, and permit duplicate ticket aliases across repositories
-while keeping full identities unique and ambiguous lookup explicit. Delivery still
-validates the Task commit range before checking remote availability. The 66-test repair selection and final six-suite matrix pass. The disposable Linux
-migration/adoption proof also passes after its fixture retains the imported Task ID
-and checks absent placement, PRs and Started before checkout. No installation,
-provider or GitHub effects escaped the fixtures. Public CLI proofs use contained
-providers; no live-provider continuity or installed upgrade is established.
+## Prefix contract
 
-Desktop evidence has two boundaries: public CLI output is compared with the
-shared Task/comment fixture and decoded/rendered in Swift; workflow controls use
-a contained command transport, paired with separate public CLI storage fixtures.
-These establish source behavior, not a composed installed app/provider session.
-No product decision blocks gate or publication, and no installation, live-provider
-continuity, callback, synchronization or export is claimed.
+Accept unique prefixes of at least four case-insensitive UUID hex digits, bare or
+following `lf-`/`task_`. Display at least seven digits and lengthen when needed.
+Ambiguity returns matching full IDs; it never chooses a Task. Full IDs and exact
+Linear aliases keep working. Creation idempotency still requires a full identity;
+a selector is not an identity allocator. New branches retain the full UUID.
+All CLI consumers share resolution, including file access, Session filtering and
+process inspection. No fixed-length per-command alternatives.
 
-Select concrete authority at the planning operation boundary. Local lookups must
-not enter `resolve_owned_issue` or acquire a provider token. Linear ingestion keeps
-revision/removal evidence before projecting the shared reader. Update Rust/Swift
-DTOs and fixtures together. The callback, Git and Linear follow-ups above require
-separate designs; no follow-up Tasks are filed and machine delivery does not wait.
+## Remaining implementation and delivery
 
-Completed keystone gate: `uv run python scripts/test.py --rust --swift --loopflow --e2e`
-with new public-CLI `local_planning` fixtures and populated released-frontier
-migration cases. Tests use disposable stores with inherited LF authority cleared,
-stub providers/GitHub and no installation promotion. Unknown CLI calls must fail
-in stubs. Release's child memory records how permissive stubs and tests beneath
-the public entry point missed failures: each lifecycle proof must reach the CLI
-operation and verify durable readback after a lost reply or restart. The current
-`--swift` suite builds the app and runs headless model/view tests; `--loopflow`
-compiles the app and UI runners. Display-hosted interaction remains optional and
-neither compile-only results nor skipped checks count as Desktop behavior proof.
-Expected outcomes:
+1. Implement Task/Project export and field, cancellation and deletion delivery
+   with stable mutation identities, exact lost-reply readback and pending/uncertain
+   outcomes. Include unmapped connected records. Retain the independent foreground
+   acquisition and delivery lifetimes; no resident or turn/Flow retry.
+2. Finish common CLI/Desktop pending/conflict presentation and composed active
+   native/Flow/Desktop reconnect checks. Prove incoming state, membership and
+   comments during unrelated pending delivery, and immediate local saves followed
+   by propagation without another turn or refresh. Execution stays local.
+3. Gate the complete content, identify honest independently shippable seams and
+   update PR #1503 through the authored publication boundary. The current ownership
+   source cut is available for review; missing connected delivery is not waived.
 
-- Zero Linear/auth calls from create through edit/comment, placement, workflow,
-  delivery and terminal readback. Planning-only creation allocates no execution.
-- Same IDs/comments appear in CLI and headless Desktop views; private planning
-  leaves tracked repository files unchanged, including when a shared Wave has
-  the same name. Prefix ambiguity cannot select another person's Task.
-- Crash/retry preserves a committed Task when checkout creation fails; rotation
-  remains atomic, with started identities preserved and backlog retained.
-- Existing connected Tasks retain aliases, PR chains, provider-age/removal facts,
-  Session history and workflow position across migration. No old binary opens the
-  installed store. Linear failures cannot affect unrelated personal scopes.
-- Paired local/Linear fixtures retain supported planning fields and nulls. Creation
-  crash/retry reuses identity, same-title independent creates remain distinct, and
-  importing twice or changing a Linear ticket alias never allocates another Task.
-  Two isolated creators need no shared counter; forced short-prefix ambiguity is
-  explicit. Connection with a different provider UUID preserves the local ID.
+## Done when
 
-Git follow-up acceptance uses two independent stores and a disposable bare remote,
-then an explicitly authorized real host: delayed push, divergent edits, concurrent
-rotation/rank, lost push response, unsupported namespace, separate code/plan
-remotes and fresh-machine recovery. Record requests/bytes and prove excluded
-execution/credential fields are absent. Local Git fixtures do not prove host policy.
+Focused implement checks build the changed code and test the touched operation.
+Gate runs `uv run python scripts/test.py --rust --swift --loopflow --e2e` once on
+final content, plus the existing disposable Linux migration/adoption proof from
+TESTING.md. Headless Desktop checks cover the same views and saved data in both
+connection modes. Public subprocess fixtures prove no-Linear lifecycle and
+connected offline-save/restart/sync, inbound edits, comments, conflicts, failed
+publication readback, rotation and retained execution history. Include Linear
+completion, membership and comments during pending outbound delivery and after
+reconnect, driven by actual active CLI/Desktop operation entry points. Local
+comments/completion propagate without a subsequent turn or manual refresh; delayed
+observed conflicts adopt Linear while preserving local execution and losing edits. Provider and GitHub
+side effects stay contained; no source binary writes the installed store.
 
-Design review found four consequential near-misses and incorporated their fixes:
-nullable Linear IDs without planning-only Tasks; namespace separation mistaken for
-privacy; a write-once mapping mistaken for duplicate-safe export; remote completion
-mistaken for local workflow arrival. Remaining choices are in `questions.md`.
+The earlier gate at `dfe18ab60` covers the superseded split. General synchronization remains substantial implementation work. Delivery must retain the implemented observed-conflict policy and uncertain effects. No atomic cross-system guarantee is claimed. Decomposed shipping now
+owns the delivery plan; installation remains outside this work.
 
-Earlier focused storage/migration, DTO and headless Desktop evidence remains at
-`2d4115339:scratch/explore-loopflow-s-own-store.md`; compression changed no schema
-or Swift code. Publication preparation adds the composed recovery regression and repairs the
-architecture map; production behavior is unchanged.
+Check (2026-10-08 conflict adoption): network-isolated Rust test binaries (completion/comments, abandonment, released-frontier pending decisions, five public local-planning cases) 25 PASS; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS; separately rerun unseen-write regression FAIL as recorded; gate owns full/materialized Rust, headless Desktop and Linux adoption.
 
-Check (2026-10-08): `uv run python scripts/test.py --rust --swift --loopflow --e2e` — PASS, six suites (2,293 Rust tests, 402 headless Swift tests, 76 website tests, CLI smoke, app/UI-runner build; 17 ignored Rust tests); `uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history` — PASS, disposable Linux migration and adoption; mixed rotation's ten failure points passed in the matrix; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` — PASS. Optional display diagnostics and live/installed acceptance are not claimed.
+Review repaired Project ID precedence over duplicate slugs and retained delivery
+observations in the existing provider snapshot so later saves use the adopted
+baseline. State reconciliation parses provider revisions through the existing
+ordering function. The comment operation fixture now selects a disposable Home
+and one database throughout; its earlier production-store guard rejection wrote
+no production data. All source checks run with inherited LF/Linear authority
+cleared and external network denied. The full connected product remains unfinished.
 
-Sync check (2026-10-08): merged main at `f72bc3ab9`; retained resident machine credentials and concrete Linear APIs, restoring `viewer_id` for the new machine-login caller. `cargo test -p loopflow --lib -- ops::pm::oauth_tests lf::commands::ssh::tests linear_retains_an_independent_encrypted_refresh_grant` — PASS (21 passed, one intentionally ignored tracing entry point); `cargo fmt` — PASS.
+Preservation: the pre-realignment code, docs, scratch, separate GOAL edit and
+review artifacts, with SHA-256 manifest, are retained at
+`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-realign-ck_545tb/`.
+That snapshot retains the earlier ownership/compression preservation references.
+The GOAL edit and historical review artifacts remain unchanged.
+
+Before conflict reconciliation, exact scratch and Wave memory bytes were preserved
+with a SHA-256 manifest at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-conflicts-w_8arsgw`.

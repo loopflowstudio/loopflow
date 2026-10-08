@@ -1519,21 +1519,15 @@ impl CodexHarness {
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
-        thread_params.insert(
-            "config".into(),
-            json!({
-                "shell_environment_policy.set": tool_environment,
-                "allow_login_shell": false,
-                "features.shell_snapshot": false,
-            }),
-        );
-        let context_file = super::write_system_prompt_file(launch)?;
-        if let Some(path) = &context_file {
-            thread_params
-                .get_mut("config")
-                .expect("thread config was just inserted")["model_instructions_file"] =
-                json!(path.to_string_lossy());
+        let mut config = json!({
+            "shell_environment_policy.set": tool_environment,
+            "allow_login_shell": false,
+            "features.shell_snapshot": false,
+        });
+        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+            config["model_instructions_file"] = json!(path.to_string_lossy());
         }
+        thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.

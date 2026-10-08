@@ -298,6 +298,28 @@ fn resolve_account_route_blocking(
     Ok(route)
 }
 
+/// Retain provider instructions on disk so native resume can read the same context.
+pub(crate) fn write_system_prompt_file(
+    config: &AgentConfig,
+    name: &str,
+) -> Result<Option<PathBuf>, CoreError> {
+    let prompt = system_prompt_with_structured_replies(config);
+    if prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let cwd = config
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    Ok(Some(crate::engine::prompt::write_prompt_log(
+        &cwd,
+        &prompt,
+        &format!("{name}.context"),
+        None,
+    )?))
+}
+
 /// Build the effective system prompt including structured reply guidance.
 pub fn system_prompt_with_structured_replies(config: &AgentConfig) -> String {
     let guidance = render_structured_reply_guidance(&config.structured_replies);
@@ -613,9 +635,8 @@ fn claude_skip_permissions(cwd: Option<&Path>, auto: bool, skip_permissions: boo
 
 /// Common Claude CLI arguments shared across engine and session paths.
 ///
-/// Both `build_claude_command` (engine one-shot) and the session harness
-/// `build_args` construct a `ClaudeArgs` and call `to_args()`, then add
-/// their mode-specific flags on top (`--print` for engine, `-p` for harness).
+/// The one-shot command and persistent stream driver add their mode-specific
+/// flags around these shared arguments.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ClaudeArgs {
     /// Model variant (already resolved, no "claude:" prefix).
@@ -727,50 +748,7 @@ impl ClaudeArgs {
     }
 }
 
-/// Build CLI args for a Claude session turn (`claude -p ...`).
-///
-/// This is shared by session harnesses so session turn invocation stays aligned
-/// with engine-owned Claude argument conventions.
-fn claude_args_for(config: &AgentConfig, resume_id: Option<&str>) -> ClaudeArgs {
-    ClaudeArgs {
-        model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
-        system_prompt: Some(system_prompt_with_structured_replies(config)),
-        system_prompt_file: None,
-        add_dirs: provider_writable_roots(config),
-        skip_permissions: config.execution_boundary.is_some()
-            || (config.write_scope == AgentWriteScope::Configured
-                && claude_skip_permissions(config.cwd.as_deref(), true, config.skip_permissions)),
-        worktree_isolation: config.write_scope == AgentWriteScope::Worktree
-            && config.execution_boundary.is_none(),
-        max_turns: config.max_turns,
-        stream: true,
-        chrome: false,
-        resume_id: resume_id.map(str::to_string),
-    }
-}
-
-pub fn build_claude_session_turn_args(
-    content: &str,
-    config: &AgentConfig,
-    resume_id: Option<&str>,
-) -> Vec<String> {
-    let mut args = vec!["-p".to_string(), content.to_string()];
-    args.extend(claude_args_for(config, resume_id).to_args());
-    args.push(
-        if config.chrome {
-            "--chrome"
-        } else {
-            "--no-chrome"
-        }
-        .to_string(),
-    );
-    args
-}
-
-/// Args for the persistent stream-json driver: `-p --input-format stream-json`
-/// plus the shared session flags (`--output-format stream-json --verbose`, model,
-/// system prompt, writable roots, permissions, `--resume`). Turn content is fed
-/// on stdin as stream-json user messages, not as a positional argument.
+/// Args for the persistent stream-json driver; turn content arrives on stdin.
 pub fn build_claude_stream_session_args(
     config: &AgentConfig,
     resume_id: Option<&str>,
@@ -782,9 +760,28 @@ pub fn build_claude_stream_session_args(
         "--input-format".to_string(),
         "stream-json".to_string(),
     ];
-    let mut claude_args = claude_args_for(config, resume_id);
-    claude_args.system_prompt_file = context_file.map(Path::to_path_buf);
-    args.extend(claude_args.to_args());
+    args.extend(
+        ClaudeArgs {
+            model: config.agent.as_deref().and_then(ClaudeArgs::resolve_model),
+            system_prompt: None,
+            system_prompt_file: context_file.map(Path::to_path_buf),
+            add_dirs: provider_writable_roots(config),
+            skip_permissions: config.execution_boundary.is_some()
+                || (config.write_scope == AgentWriteScope::Configured
+                    && claude_skip_permissions(
+                        config.cwd.as_deref(),
+                        true,
+                        config.skip_permissions,
+                    )),
+            worktree_isolation: config.write_scope == AgentWriteScope::Worktree
+                && config.execution_boundary.is_none(),
+            max_turns: config.max_turns,
+            stream: true,
+            chrome: false,
+            resume_id: resume_id.map(str::to_string),
+        }
+        .to_args(),
+    );
     args
 }
 
@@ -3034,105 +3031,40 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn build_claude_session_turn_args_minimal() {
+    fn claude_stream_context_keeps_large_instructions_and_reply_guidance_off_argv() {
+        let home = tempfile::tempdir().unwrap();
         let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: String::new(),
-            task_prompt: "task".to_string(),
-            agent: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: BTreeMap::new(),
-        };
-        let args = build_claude_session_turn_args("hello", &config, None);
-        assert_eq!(args[0], "-p");
-        assert_eq!(args[1], "hello");
-        assert!(args.contains(&"--output-format".to_string()));
-        assert!(args.contains(&"stream-json".to_string()));
-        assert!(args.contains(&"--verbose".to_string()));
-        assert_eq!(
-            args.contains(&"--dangerously-skip-permissions".to_string()),
-            claude_skip_permissions(Some(Path::new("/tmp")), true, false)
-        );
-    }
-
-    #[test]
-    fn build_claude_session_turn_args_full() {
-        let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: "Be concise".to_string(),
-            task_prompt: "task".to_string(),
-            agent: Some("claude-sonnet-4-5-20250514".to_string()),
-            cwd: Some("/tmp".into()),
-            max_turns: Some(5),
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
+            system_prompt: "Keep the complete context.\n".repeat(6_000),
+            cwd: Some(home.path().to_path_buf()),
+            agent: Some("claude:sonnet".into()),
             skip_permissions: true,
-            structured_replies: Vec::new(),
-            directive_relay: None,
-            env: BTreeMap::new(),
-        };
-        let args = build_claude_session_turn_args("fix tests", &config, Some("sess_abc"));
-        assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"sess_abc".to_string()));
-        assert!(args.contains(&"--model".to_string()));
-        assert!(args.contains(&"claude-sonnet-4-5-20250514".to_string()));
-        assert!(args.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(args.contains(&"--max-turns".to_string()));
-        assert!(args.contains(&"5".to_string()));
-        assert!(args.contains(&"--append-system-prompt".to_string()));
-        assert!(args.contains(&"Be concise".to_string()));
-    }
-
-    #[test]
-    fn build_claude_session_turn_args_appends_loopflow_guidance() {
-        let config = AgentConfig {
-            chrome: false,
-            session_driver: None,
-            system_prompt: "Base prompt".to_string(),
-            task_prompt: "task".to_string(),
-            agent: None,
-            cwd: Some("/tmp".into()),
-            max_turns: None,
-            resume_token: None,
-            provider_account_id: None,
-            provider_account_authority_home: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
-            skip_permissions: false,
+            max_turns: Some(5),
             structured_replies: vec![StructuredReply {
-                name: "suggest_actions".to_string(),
-                description: "Suggest actions".to_string(),
-                guidance: "Emit <lf:suggest_actions> JSON.".to_string(),
+                name: "suggest_actions".into(),
+                description: "Suggest actions".into(),
+                guidance: "Emit <lf:suggest_actions> JSON.".into(),
             }],
-            directive_relay: None,
-            env: BTreeMap::new(),
+            ..default_launch()
         };
-
-        let args = build_claude_session_turn_args("hello", &config, None);
-        let prompt_idx = args
-            .iter()
-            .position(|arg| arg == "--append-system-prompt")
-            .expect("expected --append-system-prompt");
-        let prompt = args
-            .get(prompt_idx + 1)
-            .expect("system prompt text should follow flag");
-        assert!(prompt.contains("Base prompt"));
-        assert!(prompt.contains("<lf:structured_replies>"));
-        assert!(prompt.contains("<lf:suggest_actions>"));
+        let path = write_system_prompt_file(&config, "session")
+            .unwrap()
+            .unwrap();
+        let args = build_claude_stream_session_args(&config, Some("sess_abc"), Some(&path));
+        assert!(args.iter().all(|arg| arg.len() < 122_880));
+        for (flag, value) in [
+            ("--append-system-prompt-file", path.to_str().unwrap()),
+            ("--input-format", "stream-json"),
+            ("--output-format", "stream-json"),
+            ("--model", "sonnet"),
+            ("--max-turns", "5"),
+            ("--resume", "sess_abc"),
+        ] {
+            assert!(args.windows(2).any(|pair| pair == [flag, value]));
+        }
+        let context = std::fs::read_to_string(path).unwrap();
+        assert!(context.contains(&config.system_prompt));
+        assert!(context.contains("<lf:structured_replies>"));
+        assert!(context.contains("<lf:suggest_actions>"));
     }
 
     #[test]

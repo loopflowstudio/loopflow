@@ -134,11 +134,10 @@ pub(crate) fn preview_process_prompt(
     }
 
     let original_system = format_prompt(PromptFormatMode::Full, &components);
-    let original_task = INITIAL_TURN_PROMPT.to_string();
     let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
     budget_report.measure_input(
         &original_system,
-        &original_task,
+        INITIAL_TURN_PROMPT,
         &format_prompt(PromptFormatMode::Full, &components),
         INITIAL_TURN_PROMPT,
     );
@@ -148,8 +147,6 @@ pub(crate) fn preview_process_prompt(
     let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
     validate_agent_policy(&agent)?;
 
-    let system_prompt = prompt.clone();
-    let task_prompt = INITIAL_TURN_PROMPT.to_string();
     let action_style = components
         .skill
         .as_ref()
@@ -157,8 +154,8 @@ pub(crate) fn preview_process_prompt(
     let launch = AgentConfig {
         chrome: false,
         session_driver: None,
-        system_prompt,
-        task_prompt,
+        system_prompt: prompt.clone(),
+        task_prompt: INITIAL_TURN_PROMPT.to_string(),
         agent: Some(agent),
         max_turns,
         resume_token: None,
@@ -179,7 +176,7 @@ pub(crate) fn preview_process_prompt(
     let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
     budget_report.measure_input(
         &original_system,
-        &original_task,
+        INITIAL_TURN_PROMPT,
         &effective_system,
         &launch.task_prompt,
     );

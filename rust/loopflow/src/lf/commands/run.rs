@@ -1,8 +1,7 @@
 use crate::engine::{
     check_cli_available, missing_agent_message, parse_agent, prepare_process_prompt, run_agent,
-    write_prompt_log, AgentCapabilities, AgentConfig, Config, ContextSourceOverrides,
-    ProcessConfig, ProcessPromptInput, ProcessTarget, PromptComponents, SkillSyncOptions,
-    StreamFormat, Surface,
+    AgentCapabilities, AgentConfig, Config, ContextSourceOverrides, ProcessConfig,
+    ProcessPromptInput, ProcessTarget, PromptComponents, SkillSyncOptions, StreamFormat, Surface,
 };
 use crate::lf::commands::util::launch_session_with_env;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -517,7 +516,7 @@ fn should_run_via_skill(skill_name: &str) -> bool {
 }
 
 /// Build the launch seed for a vendor skill handoff: the skill invocation,
-/// system-safe instruction sections, Wave memory (when non-empty), and an
+/// operating and surface instructions, Wave memory (when non-empty), and an
 /// optional user message. Orientation now
 /// lives in the skill bodies themselves, and the skill body loads from the
 /// synced skill on invoke, so this stays small enough for the GUI deep-link
@@ -634,12 +633,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         let context_file = if target == ProcessTarget::Tui
             && matches!(built.harness.as_str(), "claude" | "codex")
         {
-            Some(write_prompt_log(
-                &built.repo_root,
-                &crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config),
-                &format!("{}.context", built.log_name),
-                None,
-            )?)
+            crate::engine::agent::write_system_prompt_file(&built.agent_config, &built.log_name)?
         } else {
             None
         };
@@ -689,11 +683,9 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     );
 
     let agent_config = built.agent_config.clone();
-    let effective_system =
-        crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
-    let result = run_headless_prompt(built, &capture, &effective_system, &agent_config);
+    let result = run_headless_prompt(built, &capture, &agent_config);
     let outcome = if result.is_ok() {
         "completed"
     } else {
@@ -713,23 +705,11 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
 fn run_headless_prompt(
     built: &PromptBuild,
     capture: &CaptureHandle,
-    effective_system: &str,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
-    // Skill-launched skills clear the system prompt (the seed carries everything
-    // in the task prompt). Don't write or pass a context file in that case: codex
-    // treats an empty `model_instructions_file` as an error.
     let context_file_start = Instant::now();
-    let context_file = if effective_system.trim().is_empty() {
-        None
-    } else {
-        Some(write_prompt_log(
-            &built.repo_root,
-            effective_system,
-            &format!("{}.context", built.log_name),
-            None,
-        )?)
-    };
+    let context_file =
+        crate::engine::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"
@@ -1459,9 +1439,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let manifest = std::fs::read_to_string(run_dir.join("manifest.json")).unwrap();
         assert!(manifest.contains("task:LOO-265"));
         assert!(!run_dir.join("terminal.json").exists());
-        let effective_system =
-            crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-        let result = run_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
+        let result = run_headless_prompt(&built, &capture, &built.agent_config);
         capture
             .finish(if result.is_ok() {
                 "completed"

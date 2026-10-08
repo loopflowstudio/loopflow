@@ -7,7 +7,7 @@ from playwright.sync_api import Page, expect
 
 
 def test_approved_homepage_sections(homepage: Page) -> None:
-    expect(homepage.locator("h1")).to_have_text("A command line for great software engineering.")
+    expect(homepage.locator("h1")).to_have_text("A software engineering CLI for your agents.")
     assert homepage.locator("main > section").evaluate_all(
         "sections => sections.map(section => section.id)"
     ) == ["", "", "flows", "tasks", "mac", "why", "start"]

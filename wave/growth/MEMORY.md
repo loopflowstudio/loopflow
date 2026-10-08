@@ -221,6 +221,19 @@ Linux despite passing on macOS. An explicit 44px minimum and fallback-font
 coverage preserve the touch target across platforms; run the website suite
 after the final layout edit.
 
+## Studio pages and hero (2026-10-08, LOO-438)
+
+Jack Heart replaced the homepage headline with "A software engineering CLI for
+your agents", superseding "A command line for great software engineering." The
+label and subline above and below it are unchanged. He kept the product page
+at the root ("loopflow.studio should basically implicitly mean /loopflow") and
+added a studio bar, a company page and short pages for Etude and Fantasia, in
+the order Loopflow, Etude, Fantasia. The company page says Etude is what is
+sold, Loopflow is the tool for building it, and Fantasia is the research that
+drives both; this supersedes "The site does not state this plan" below.
+Loopflow stays free. Etude's page says only that it is being built. Copy on
+those pages beyond Jack's quoted lines is draft until he approves it.
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

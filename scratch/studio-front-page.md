@@ -108,3 +108,5 @@ together." No line in that repository is quoted as Jack's; the lever wording on
 the page is a draft.
 
 Jack Heart set the order everywhere: Loopflow, Etude, Fantasia.
+
+Jack Heart replaced the homepage headline "A command line for great software engineering." with "A software engineering CLI for your agents" (plural). The /studio Loopflow row was aligned to the plural.

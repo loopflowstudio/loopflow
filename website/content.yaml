@@ -20,7 +20,7 @@ studio:
     efforts:
     - name: Loopflow
       label: The tool we build with
-      text: Loopflow is a software engineering CLI for your agent. Free and open source.
+      text: Loopflow is a software engineering CLI for your agents. Free and open source.
       status: Available today
       link:
         label: Loopflow ↗
@@ -80,7 +80,7 @@ homepage:
     href: /docs
   hero:
     label: Loopflow is a software instrument
-    tagline: A command line for great software engineering.
+    tagline: A software engineering CLI for your agents.
     subline: A free, open-source podium for conducting your software orchestra, with native
       macOS and terminal interfaces.
     actions:

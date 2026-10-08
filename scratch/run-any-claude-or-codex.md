@@ -412,3 +412,5 @@ read selectively. The local `origin/main` reference remains at the PR base
 `812d8cc55`; no upstream fetch or provider refresh was performed.
 
 Check (2026-10-08): restored-source build, isolated codex_connect `--public-connect` and `--shared-provider-home`, Ruff and diff checks pass; `--queued-exit` fails because driver exit clears the live endpoint with native work pending; removed retention/unsubscribe candidates fail plain resume. Gate/review and LF admission remain.
+
+Sync check (2026-10-08): `cargo test -p loopflow --test flow_tests interactive_flow_keeps_input_and_advances_only_after_each_provider_exits -- --exact` passed after merging main; captured skill input and inherited terminal mode both retained.

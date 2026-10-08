@@ -61,16 +61,19 @@ struct CommandArgTables {
     subcommands: HashMap<String, CommandArgTables>,
 }
 
-fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
+fn command_arg_tables(command: &clap::Command, root: bool) -> CommandArgTables {
     let mut direct = FlagTables::default();
-    for arg in command.get_arguments() {
+    for arg in command
+        .get_arguments()
+        .filter(|arg| root || !arg.is_global_set())
+    {
         direct.insert(arg);
     }
 
     let mut recursive = direct.clone();
     let mut subcommands = HashMap::new();
     for subcommand in command.get_subcommands() {
-        let child = command_arg_tables(subcommand);
+        let child = command_arg_tables(subcommand, false);
         recursive.extend(&child.recursive);
         subcommands.insert(subcommand.get_name().to_string(), child);
     }
@@ -85,7 +88,7 @@ fn command_arg_tables(command: &clap::Command) -> CommandArgTables {
 /// Derive flag ownership from the same command tree used for navigation.
 fn arg_tables() -> &'static CommandArgTables {
     static TABLES: OnceLock<CommandArgTables> = OnceLock::new();
-    TABLES.get_or_init(|| command_arg_tables(&loopflow::lf::navigation::command_tree()))
+    TABLES.get_or_init(|| command_arg_tables(&loopflow::lf::navigation::command_tree(), true))
 }
 
 fn flag_name(arg: &str) -> &str {
@@ -1338,7 +1341,7 @@ fn run() -> anyhow::Result<()> {
     })?;
     let args = reorder_args(normalized);
 
-    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
+    let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1346,6 +1349,16 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    if cli.agent.is_some() && !cli.may_launch_agent() {
+        eprintln!("This command does not start an agent; --agent has no effect.");
+    }
+    // Only an explicit selection becomes an inherited override. Task and
+    // repository defaults are filled later and never acquire this precedence.
+    let selected_agent = loopflow::engine::config::agent_override().or(cli.agent.clone());
+    let _agent_override = selected_agent
+        .as_ref()
+        .map(|agent| EnvGuard::set(loopflow::engine::config::AGENT_OVERRIDE_ENV, agent));
+    cli.agent = selected_agent;
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
@@ -2042,6 +2055,75 @@ mod tests {
     }
 
     #[test]
+    fn global_agent_combines_with_selectors_without_consuming_literal_arguments() {
+        for invocation in [
+            vec!["--task", "LOO-438", "skill", "task/session"],
+            vec!["--wt", "feature", "skill", "debug"],
+            vec!["-b", "-c", "--account", "fixture", "run", "ship-api"],
+            vec!["task", "run", "LOO-438", "pursue"],
+            vec!["pr", "publish"],
+            vec!["pr", "open"],
+            vec!["audit"],
+        ] {
+            for flag in ["-a", "--agent"] {
+                for position in 0..=invocation.len() {
+                    // Do not split another option from its value.
+                    if position > 0
+                        && matches!(invocation[position - 1], "--task" | "--wt" | "--account")
+                    {
+                        continue;
+                    }
+                    let mut args = invocation.clone();
+                    args.splice(position..position, [flag, "claude"]);
+                    args.insert(0, "lf");
+                    let args = loopflow::lf::navigation::normalize_args(
+                        args.into_iter().map(String::from).collect(),
+                    )
+                    .unwrap();
+                    let cli = Cli::try_parse_from(reorder_args(args)).unwrap();
+                    assert_eq!(
+                        cli.agent.as_deref(),
+                        Some("claude"),
+                        "{invocation:?} at {position}"
+                    );
+                }
+            }
+        }
+        for invocation in [
+            vec!["lf", "skill", "debug", "--", "-a", "literal"],
+            vec!["lf", "run", "debug", "--", "-a", "literal"],
+            vec!["lf", "debug", "--", "-a", "literal"],
+        ] {
+            let args = invocation.into_iter().map(String::from).collect();
+            let args = reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap());
+            assert!(args.ends_with(&["--".into(), "-a".into(), "literal".into()]));
+            assert!(Cli::try_parse_from(args).unwrap().agent.is_none());
+        }
+        let args = [
+            "lf",
+            "skill",
+            "debug",
+            "-a",
+            "claude",
+            "--machine",
+            "fixture",
+        ]
+        .map(String::from);
+        let (transport, remote) = loopflow::lf::navigation::machine_invocation(&args)
+            .unwrap()
+            .unwrap();
+        assert_eq!(transport.machine.as_deref(), Some("fixture"));
+        let args = std::iter::once("lf".into()).chain(remote).collect();
+        assert_eq!(
+            Cli::try_parse_from(reorder_args(args))
+                .unwrap()
+                .agent
+                .as_deref(),
+            Some("claude")
+        );
+    }
+
+    #[test]
     fn bound_cwd_is_entered_for_the_invocation_and_restored_afterward() {
         let _lock = PROCESS_STATE_LOCK.lock().unwrap();
         let previous = std::env::current_dir().unwrap();
@@ -2248,7 +2330,7 @@ mod tests {
             .map(String::from)
             .to_vec();
         let reordered = reorder_args(args);
-        assert_eq!(reordered, vec!["lf", "pr", "open", "-a", "codex"]);
+        assert_eq!(reordered, vec!["lf", "-a", "codex", "pr", "open"]);
         assert!(matches!(
             Cli::try_parse_from(reordered).unwrap().command,
             Some(Commands::Pr {

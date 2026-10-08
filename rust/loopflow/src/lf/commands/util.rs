@@ -184,10 +184,11 @@ pub(crate) fn resume_session_with_env(
     launch_lock: Option<File>,
     remote: Option<&Path>,
 ) -> Result<()> {
+    let selected_model = crate::engine::config::resume_model(harness, model)?;
     let user_name = crate::engine::config::participant_name()?;
     let mut command = build_resume_session_command(
         harness,
-        model,
+        selected_model.as_deref(),
         worktree,
         &provider_session.provider_session_id,
     )?;

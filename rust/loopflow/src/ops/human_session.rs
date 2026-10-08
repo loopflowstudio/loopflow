@@ -662,6 +662,15 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
+    if store
+        .sqlite
+        .input_provider_session(&session.artifact_key)?
+        .is_some()
+    {
+        if let Some(provider) = session.provider.as_deref() {
+            crate::engine::config::resume_model(provider, session.model.as_deref())?;
+        }
+    }
     let admitted;
     let session = if resume {
         let id = session.id.clone();

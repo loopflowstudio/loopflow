@@ -192,7 +192,7 @@ pub(crate) fn preview_process_prompt(
         .skill
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
-    let launch = AgentConfig {
+    let mut launch = AgentConfig {
         chrome: false,
         session_driver: None,
         system_prompt,
@@ -215,6 +215,7 @@ pub(crate) fn preview_process_prompt(
         )]
         .into(),
     };
+    launch.apply_agent_override();
     let effective_system = crate::engine::agent::system_prompt_with_structured_replies(&launch);
     budget_report.measure_input(
         &original_system,
@@ -281,8 +282,8 @@ pub(crate) fn resolve_agent(
     skill: Option<&Skill>,
     config: &Config,
 ) -> String {
-    override_agent
-        .map(str::to_owned)
+    crate::engine::config::agent_override()
+        .or_else(|| override_agent.map(str::to_owned))
         .or_else(|| skill.and_then(|skill| skill.agent.clone()))
         .or_else(|| config.agent.clone())
         .or_else(|| skill.and_then(|skill| skill.default_agent.clone()))

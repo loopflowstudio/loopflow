@@ -263,6 +263,7 @@ fn session_environment(
     context: &crate::child::ChildExecutionContext,
 ) -> Vec<(String, String)> {
     let inherited_context = [
+        crate::engine::config::AGENT_OVERRIDE_ENV,
         "LF_TRACE_ID",
         "LF_PROCESS_LFID",
         crate::lf::WORK_DECLARATION_ENV,
@@ -374,6 +375,7 @@ pub(crate) async fn start_tmux_session(
 /// What one lf process is: its Machine, binary, Process, Flow step and claims. A new
 /// session starts without any of it and receives only what its launch names.
 const PROCESS_CONTEXT_ENV: &[&str] = &[
+    crate::engine::config::AGENT_OVERRIDE_ENV,
     crate::lf::WORK_DECLARATION_ENV,
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
@@ -609,12 +611,13 @@ mod tests {
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}${LF_ACCOUNT_ISOLATION-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}${LF_ACCOUNT_ISOLATION-}\"".into(),
             ],
             &[],
         );
         let output = std::process::Command::new("/bin/sh")
             .args(["-c", &command])
+            .env("LF_AGENT_OVERRIDE", "claude")
             .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
             .env("LF_ACCOUNT_SELECTION", "parent-selection")

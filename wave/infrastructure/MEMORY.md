@@ -1,5 +1,19 @@
 # infrastructure wave memory
 
+## Global agent override (LOO-440, 2026-10-08)
+
+Jack Heart selected one global `-a` / `--agent`, overriding Task, nested Flow,
+step, skill and child-command agents; omission preserves defaults. Work stops at
+demo, without landing, logins or real provider accounts. Main already parsed the
+reported forms; installed 0.13.9's failure is historical.
+
+Explicit selection travels as invocation context; saved defaults never become
+inherited overrides. Replay preserves its source. Native history keeps its provider;
+a conflicting resume explains how to start anew. Six fixture Sessions record Claude
+across Task/Flow/provider children; no-flag launches retain declared models. Fixtures
+require isolated synthetic accounts: shared macOS activation attempted a Keychain
+write and failed. Installed/live-provider acceptance remains unproved.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
@@ -896,37 +910,24 @@ Historical identity, execution eligibility and consumed launch evidence remain
 separate. LOO-287's architecture pass and weekly observations remain unproved;
 local deletion and checks establish no KR. Intelligence owns prompt assembly.
 
-## Installation and command scope (curated 2026-10-02)
+## Installation and command scope (curated 2026-10-08)
 
-LOO-292's installation acceptance closed below; LOO-287 retains command-scope
-reduction. [Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#installation-and-command-scope-branch-evidence-2026-09-24)
-retains September 24 fixtures, failed public v0.12.20 clean-home promotion and
-exact branch evidence.
+LOO-292 closed below; LOO-287 retains command reduction. Historical fixtures and
+failed v0.12.20 promotion: `86d0e5e6a:wave/infrastructure/MEMORY.md`, this heading.
+Mechanics/proofs: docs/lf.md and TESTING.md.
 
-Installation verifies a pinned published installer; the promotion transaction
-alone activates artifacts/store. Checkout integration is separate. No Git,
-Homebrew, uv, Python or source maintenance belongs in installation. First install
-has no previous selection: preflight must precede ordinary startup authorization,
-and the pinned candidate owns recovery after handoff. Matching version strings
-are insufficient without exact-store preflight and a complete matching macOS app.
-Bound inspection of broken binaries. Do not restore the old Python refresh alias:
-delegation through PATH recursed into the old source updater.
+Pinned published promotion alone activates artifacts/store; source and checkout
+maintenance stay separate. First-install preflight precedes startup; the pinned
+candidate owns recovery. Verify exact store, matching app and complete copies/hashes;
+bound broken-binary reads. Preserve launchd labels/logs and custom destinations
+without source WorkingDirectory. OS-account promotion requires disposable accounts
+or containers; HOME/LF_HOME/PATH mocks do not isolate it. Simulated launchctl proves
+no timing. Keep the recursive Python/PATH refresh alias deleted.
 
-Preserve launchd label/logs and custom install directory, without source
-WorkingDirectory. Simulated launchctl proves no real timing. Promotion resolves the OS
-account home: HOME/LF_HOME and PATH mocks cannot isolate it. Use disposable OS
-accounts/containers without the real installation; verify failed first activation
-and retained-candidate recovery. Artifact-copy completion and member hashes matter;
-one asynchronous fixture copy produced mismatched bytes and a segfault. Ubuntu
-24.04 reached promotion where Debian bookworm lacked the release's GLIBC versions.
-
-Ordinary-folder absence differs from a genuine Git error; never invent an empty
-repository or silently mutate a default route. Machine commands need no repo
-capture. LOO-287's ordinary-folder/provider-completion and target-first resolution
-remain unproved across every consumer. New-repository creation/configuration/PM
-setup remains unselected. No receipt redesign was selected: switch phase alone
-cannot substitute for durable advancement evidence. Current mechanics and proof
-commands belong in docs/lf.md and TESTING.md.
+Ordinary folders differ from Git failures; never invent a repo or mutate a route.
+Machine commands need no repo capture. LOO-287's ordinary-folder/provider-completion
+and target-first proofs remain open. New-repo/configuration/PM setup and receipt
+redesign remain unselected; switch phase is not durable advancement evidence.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 

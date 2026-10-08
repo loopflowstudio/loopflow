@@ -11,7 +11,8 @@ use std::process::{Command, Stdio};
 pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 
 pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Result<()> {
-    let cli = parse_remote_command(lf_args)?;
+    let mut cli = parse_remote_command(lf_args)?;
+    cli.agent = crate::engine::config::agent_override().or(cli.agent);
     let inherited_selection = AccountSelection::from_env()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
@@ -31,6 +32,10 @@ pub fn run(target: &str, forward_agent: bool, lf_args: &[String]) -> anyhow::Res
         ),
         crate::provider_account::activation::isolation_env(true),
     ];
+    let agent = crate::engine::config::agent_override();
+    if let Some(agent) = agent.as_deref() {
+        extra_env.push((crate::engine::config::AGENT_OVERRIDE_ENV, agent));
+    }
     let declaration = std::env::var(crate::lf::WORK_DECLARATION_ENV).ok();
     if let Some(value) = declaration.as_deref() {
         extra_env.push((crate::lf::WORK_DECLARATION_ENV, value));

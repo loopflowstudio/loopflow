@@ -51,7 +51,8 @@ Open Loopflow or run its CLI
 |---|---|
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--agent / -a` | Agent to use (harness or harness:model) |
+| `--agent / -a` | Override agents named in Tasks, Flows and skills, including child commands (harness[:model]) Applies everywhere. |
+| `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -117,7 +118,6 @@ Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens
 
 | Argument | What it does |
 |---|---|
-| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--help / -h` | Print help |
@@ -128,7 +128,6 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 | Argument | What it does |
 |---|---|
-| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--help / -h` | Print help |

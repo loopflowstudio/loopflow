@@ -2,6 +2,7 @@ use std::ffi::OsString;
 
 /// Execution authority and capture context inherited by tests launched inside lf.
 pub const AMBIENT_TASK_ENV: &[&str] = &[
+    "LF_AGENT_OVERRIDE",
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
     "LF_AS",

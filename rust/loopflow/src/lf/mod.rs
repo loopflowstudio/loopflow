@@ -41,8 +41,8 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Agent to use (harness or harness:model)
-    #[arg(short = 'a', long = "agent")]
+    /// Override agents named in Tasks, Flows and skills, including child commands (harness[:model])
+    #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
     /// Captured skill and arguments supplied by the invoking Flow process.
@@ -155,6 +155,54 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub fn may_launch_agent(&self) -> bool {
+        match &self.command {
+            None
+            | Some(Commands::External(_) | Commands::Run { .. } | Commands::Inline { .. })
+            | Some(Commands::Skill { .. } | Commands::Replay { .. } | Commands::Discord { .. }) => {
+                true
+            }
+            Some(Commands::Flow { cmd }) => matches!(cmd, FlowCommand::External(_)),
+            Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
+            Some(Commands::Session { cmd }) => matches!(
+                cmd,
+                SessionCommand::Resume { .. }
+                    | SessionCommand::Open { json: false, .. }
+                    | SessionCommand::Ensure { .. }
+                    | SessionCommand::Replace { .. }
+                    | SessionCommand::ServeConversation { .. }
+            ),
+            Some(Commands::Commit { message, .. }) => message.is_none(),
+            Some(Commands::Sync(args)) => !args.plan && !args.abort && !args.manual,
+            Some(Commands::Pr { cmd }) => matches!(
+                cmd,
+                Some(
+                    PrCommand::Open { .. }
+                        | PrCommand::Publish { .. }
+                        | PrCommand::Submit { .. }
+                        | PrCommand::Arm { .. }
+                        | PrCommand::Land { .. }
+                )
+            ),
+            Some(Commands::Repo { cmd }) => matches!(
+                cmd,
+                RepoCommand::Release {
+                    cmd: ReleaseCommand::Run { .. }
+                        | ReleaseCommand::Bump { .. }
+                        | ReleaseCommand::Notes { .. }
+                } | RepoCommand::Ci {
+                    cmd: Some(CiCommand::Watch {
+                        status: false,
+                        uninstall: false,
+                        ..
+                    }),
+                    ..
+                }
+            ),
+            Some(_) => false,
+        }
+    }
+
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(self) -> Result<Self, clap::Error> {
@@ -219,9 +267,6 @@ impl Cli {
             if let Some(value) = value {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
-        }
-        if let Some(agent) = &self.agent {
-            args.extend(["--agent".to_string(), agent.clone()]);
         }
         if let Some(input) = &self.skill_input {
             args.extend([
@@ -1156,9 +1201,6 @@ pub enum PrCommand {
     /// Publish a ready PR headlessly: push, create or refresh, print state + URL.
     /// Opens no review surface.
     Publish {
-        /// Agent to use (harness or harness:model)
-        #[arg(short = 'a', long = "agent")]
-        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -1167,9 +1209,6 @@ pub enum PrCommand {
     /// Push and create or update a draft PR, then open its GitHub page.
     /// Existing ready PRs stay ready; opening a draft does not publish it.
     Open {
-        /// Agent to use (harness or harness:model)
-        #[arg(short = 'a', long = "agent")]
-        agent: Option<String>,
         #[arg(long = "title")]
         title: Option<String>,
         #[arg(long = "body")]
@@ -2652,48 +2691,22 @@ mod tests {
     }
 
     #[test]
-    fn pr_open_accepts_agent_override() {
-        for flag in ["--agent", "-a"] {
-            let cli = Cli::try_parse_from(["lf", "pr", "open", flag, "codex"]).expect("parse");
-            let Some(Commands::Pr {
-                cmd: Some(PrCommand::Open { agent, title, body }),
-            }) = cli.command
-            else {
-                panic!("expected pr command");
-            };
-
-            assert_eq!(agent.as_deref(), Some("codex"));
-            assert_eq!(title, None);
-            assert_eq!(body, None);
-        }
-    }
-
-    #[test]
-    fn top_level_agent_reaches_pr_open() {
-        let cli = Cli::try_parse_from(["lf", "-a", "codex", "pr", "open"]).expect("parse");
-        let Some(Commands::Pr {
-            cmd: Some(PrCommand::Open { agent, title, body }),
-        }) = cli.command
-        else {
-            panic!("expected pr command");
-        };
-
-        assert_eq!(cli.agent.as_deref(), Some("codex"));
-        assert_eq!(agent, None);
-        assert_eq!(title, None);
-        assert_eq!(body, None);
-    }
-
-    #[test]
-    fn flow_children_keep_the_selected_agent() {
-        for flag in ["--agent", "-a"] {
-            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "run", "code"])
-                .expect("parse agent selection");
-            let args = std::iter::once("lf".to_owned())
-                .chain(cli.process_options().step_args())
-                .chain(["skill".to_owned(), "debug".to_owned()]);
-            let child = Cli::try_parse_from(args).expect("parse child invocation");
-            assert_eq!(child.agent.as_deref(), Some("claude:opus"));
+    fn agent_is_global_across_command_owners() {
+        for command in [
+            vec!["pr", "open"],
+            vec!["pr", "publish"],
+            vec!["task", "run", "LOO-438", "pursue"],
+            vec!["run", "ship-api"],
+        ] {
+            for flag in ["--agent", "-a"] {
+                for position in 0..=command.len() {
+                    let mut args = command.clone();
+                    args.splice(position..position, [flag, "claude:opus"]);
+                    args.insert(0, "lf");
+                    let cli = Cli::try_parse_from(&args).unwrap();
+                    assert_eq!(cli.agent.as_deref(), Some("claude:opus"), "{args:?}");
+                }
+            }
         }
     }
 }

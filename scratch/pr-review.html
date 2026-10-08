@@ -10,7 +10,7 @@
 <h1>One Task, up to one PR</h1>
 <p class="scope">PR merges → file follow-ups or record “none needed” → Task completes.</p>
 <p>All four slices are implemented: truthful Flow launch, optional PRs, post-merge follow-through, and selected design handoff to stacked Tasks. Research can finish without a PR. This replaces the earlier milestone-only walkthrough.</p>
-<div class="meta">Local review comparison: <a href="https://github.com/loopflowstudio/loopflow/compare/812d8cc55cf62f913219bb06de2d90e77addc925...0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad">812d8cc55 → 0bbaaaa23</a> · actual base / merge base to reviewed head.<br>The landing corrections at this local checkpoint are not yet published. They make waited landing repair its own CI, preserve held exits, and make repeated landing harmless for a merged Task PR. Full gate, the wider lifecycle proof and configured demo remain pending.</div>
+<div class="meta">Local review comparison: <a href="https://github.com/loopflowstudio/loopflow/compare/812d8cc55cf62f913219bb06de2d90e77addc925...62b76f13a2b8dcba484bbaa1b5533609288bab00">812d8cc55 → 62b76f13a</a> · actual base / merge base to reviewed head.<br>The landing corrections at this local checkpoint are not yet published. They make waited landing repair its own CI, preserve held exits, and make repeated landing harmless for a merged Task PR. Full gate, the wider lifecycle proof and configured demo remain pending.</div>
 <nav aria-label="Reading route"><a href="#complete">1. End means done</a><a href="#finish">2. Who finishes the merge</a><a href="#filing">3. Filing and retries</a><a href="#stack">4. Dependent Tasks</a><a href="#proof">Evidence</a></nav>
 <table aria-label="From user action to implementation"><thead><tr><th>When someone…</th><th>What happens</th><th>Where the code controls this</th></tr></thead><tbody>
 <tr><td data-label="When someone…"><a href="#complete">Completes research or delivered code</a></td><td data-label="What happens">Research keeps its files and reaches done. A Task with a PR needs merge evidence and recorded follow-through before it can reach end.</td><td data-label="Where the code controls this"><code>TaskSnapshot</code> exposes one optional PR. <code>complete_task</code> checks delivery and writes the Workflow end in one transaction.</td></tr>
@@ -40,7 +40,7 @@ $ lf task complete FIX-2
 # Checkout cleanup output omitted.
 Task FIX-2 is at end: done</code></pre></figure>
 <p>Placement now belongs to the Task, so checkout creation no longer invents a PR. The shared read replaces the old PR array and active selection with <code>pr: Option&lt;TaskPr&gt;</code>; publication creates its one current PR.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task.rs#L101-L134">rust/loopflow/src/ops/task.rs · TaskSnapshot — the shared Task read</a><span>Local checkpoint · Changed optional PR, placement and follow-through fields; surrounding read contract retained · 0bbaaaa23 · L101–134</span></figcaption><pre tabindex="0"><code>pub struct TaskSnapshot {
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task.rs#L101-L134">rust/loopflow/src/ops/task.rs · TaskSnapshot — the shared Task read</a><span>Local checkpoint · Changed optional PR, placement and follow-through fields; surrounding read contract retained · 62b76f13a · L101–134</span></figcaption><pre tabindex="0"><code>pub struct TaskSnapshot {
     pub machine_id: Option&lt;crate::durable::MachineId&gt;,
     pub issue_id: String,
     pub issue_identifier: String,
@@ -74,8 +74,9 @@ Task FIX-2 is at end: done</code></pre></figure>
     pub observation: Observation,
     pub actions: TaskActionModel,
 }</code></pre></figure>
+<p><strong>LOO-406 integration remains:</strong> TaskSnapshot is the existing assembled read, not a second stored Task. Reuse LOO-406's local identity and optional placement with this PR's optional PR and follow-through. Filing here still calls Linear directly; it must use the shared planning API when the branches integrate, with local filing and completion tested without provider calls. Do not retain separate local, Linear or delivery Task models.</p>
 <p><code>task complete</code> and <code>task move … end</code> share the dispatcher and <code>workflow_set → task_end → reach_end</code>. The operation explains refusals and handles planning writeback; this store transaction rechecks delivery before moving to end.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/store/sqlite/children.rs#L107-L161">rust/loopflow/src/store/sqlite/children.rs · SqliteStore::complete_task</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L107–161</span></figcaption><pre tabindex="0"><code>    /// Put the Task at `end` of its Workflow by `how`, with what completion
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/store/sqlite/children.rs#L107-L161">rust/loopflow/src/store/sqlite/children.rs · SqliteStore::complete_task</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L107–161</span></figcaption><pre tabindex="0"><code>    /// Put the Task at `end` of its Workflow by `how`, with what completion
     /// settles beside it. Returns false, writing nothing, when the move no
     /// longer applies to where the Task stands.
     pub(crate) fn complete_task(
@@ -131,7 +132,7 @@ Task FIX-2 is at end: done</code></pre></figure>
         Ok(true)
     }</code></pre></figure>
 <div class="note"><p>There is no separate “at end but incomplete” state. An open PR, unconfirmed filing or unresolved legacy obligation leaves the Task before end. A no-PR Task needs no disposition unless it already has filing or conversion obligations. Retained files and Sessions do not block completion.</p></div>
-<details><summary>The shared CLI entry and the visible Desktop result</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/bin/lf.rs#L975-L1001">rust/loopflow/src/bin/lf.rs · run_task_command — Move / Complete</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L975–1001</span></figcaption><pre tabindex="0"><code>        TaskCommand::Move {
+<details><summary>The shared CLI entry and the visible Desktop result</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/bin/lf.rs#L975-L1001">rust/loopflow/src/bin/lf.rs · run_task_command — Move / Complete</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L975–1001</span></figcaption><pre tabindex="0"><code>        TaskCommand::Move {
             issue,
             reason,
             force,
@@ -157,7 +158,7 @@ Task FIX-2 is at end: done</code></pre></figure>
                 )?
             );
             Ok(())
-        }</code></pre></figure><p>The page consumes the shared optional PR and follow-through facts. It shows pending, ready to complete, or done with links; a recorded “none” reason remains readable. These are delivery labels alongside Workflow state.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/swift/LoopflowMac/Views/TaskWorkView.swift#L101-L147">swift/LoopflowMac/Views/TaskWorkView.swift · TaskDeliveryView</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L101–147</span></figcaption><pre tabindex="0"><code>/// Delivery evidence stays beside the conversation and in Task details.
+        }</code></pre></figure><p>The page consumes the shared optional PR and follow-through facts. It shows pending, ready to complete, or done with links; a recorded “none” reason remains readable. These are delivery labels alongside Workflow state.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/swift/LoopflowMac/Views/TaskWorkView.swift#L101-L147">swift/LoopflowMac/Views/TaskWorkView.swift · TaskDeliveryView</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L101–147</span></figcaption><pre tabindex="0"><code>/// Delivery evidence stays beside the conversation and in Task details.
 struct TaskDeliveryView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
@@ -204,7 +205,7 @@ struct TaskDeliveryView: View {
         }
     }
 }</code></pre></figure><p>Completion is local Workflow truth. Linear writeback and checkout cleanup retain their own retry paths; a failure there does not create a second completion flag. The alias and checkout-aware Flow launch are the earlier slice in this same PR.</p></details>
-<details><summary>Migration removes serial authority while retaining historical PRs</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/store/migrations/drafts/optional_task_pr.sql#L95-L118">rust/loopflow/src/store/migrations/drafts/optional_task_pr.sql · placement, current-PR uniqueness and historical rows</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L95–118</span></figcaption><pre tabindex="0"><code>-- Checkout placement exists independently of publication. Retain every old PR id
+<details><summary>Migration removes serial authority while retaining historical PRs</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/store/migrations/drafts/optional_task_pr.sql#L95-L118">rust/loopflow/src/store/migrations/drafts/optional_task_pr.sql · placement, current-PR uniqueness and historical rows</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L95–118</span></figcaption><pre tabindex="0"><code>-- Checkout placement exists independently of publication. Retain every old PR id
 -- because landing, stack and event history may still reference it.
 ALTER TABLE tasks ADD COLUMN branch TEXT NOT NULL DEFAULT &#x27;&#x27;;
 ALTER TABLE tasks ADD COLUMN base_commit TEXT NOT NULL DEFAULT &#x27;&#x27;;
@@ -247,11 +248,11 @@ $ lf --task FIX-2 run finish-delivery
 # If the disposition is already durable, only completion remains:
 $ lf task complete FIX-2
 Task FIX-2 is at end: done</code></pre></figure>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/engine/builtins/task/flow/ship.yaml#L1-L3">rust/loopflow/src/engine/builtins/task/flow/ship.yaml · ship Flow</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L1–3</span></figcaption><pre tabindex="0"><code>- gate
-- cmd: land --wait
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/engine/builtins/task/flow/ship.yaml#L1-L3">rust/loopflow/src/engine/builtins/task/flow/ship.yaml · ship Flow</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L1–3</span></figcaption><pre tabindex="0"><code>- gate
+- cmd: land --wait-and-fix
 - follow-through</code></pre></figure>
 <p>The command waits for merge evidence. The skill decides which accepted obligations need another Task, records that decision through the API, and completes the source. Reconciliation can settle an already-recorded disposition; it never invents that judgment or launches the skill.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/engine/builtins/task/skill/follow-through.md#L5-L65">rust/loopflow/src/engine/builtins/task/skill/follow-through.md · follow-through skill</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L5–65</span></figcaption><pre tabindex="0"><code>Finish delivered work by giving each accepted remaining obligation its own Task.
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/engine/builtins/task/skill/follow-through.md#L5-L65">rust/loopflow/src/engine/builtins/task/skill/follow-through.md · follow-through skill</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L5–65</span></figcaption><pre tabindex="0"><code>Finish delivered work by giving each accepted remaining obligation its own Task.
 
 1. **Read the delivery.** Resolve the Task with `lf task status &lt;issue&gt; --json`.
    Read its accepted brief, merged PR copy and head, delivery evidence, acceptance
@@ -313,7 +314,7 @@ scheduled.” Unknown schedule evidence stays unknown. Time passing never proves
 the follow-up succeeded. The source completes after filing, without waiting for
 that later evidence.</code></pre></figure>
 <div class="note"><p><strong>The operational limit:</strong> this adds no permanent completion watcher. If a driver dies or a PR merges manually, finishing waits for the next Task/Wave operation. A due date also creates no wakeup: without installed schedule coverage or an ongoing operation, “check tomorrow” is recorded work awaiting a pass.</p></div>
-<details><summary>CI repair and repeated landing</summary><p>Waited landing and the optional repository watcher share one CI incident reservation. The repair skill repairs, publishes and re-arms. Admission recognizes the calling command’s recorded waiting Flow drivers and Task carrier; it still refuses unrelated live work and unresolved provider turns.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task_automation.rs#L42-L124">rust/loopflow/src/ops/task_automation.rs · admission_blocker</a><span>Local checkpoint · Updated admission: waiting controllers may delegate repair; unrelated work still blocks · 0bbaaaa23 · L42–124</span></figcaption><pre tabindex="0"><code>pub(crate) fn admission_blocker(
+<details><summary>CI repair and repeated landing</summary><p>Waited landing and the optional repository watcher share one CI incident reservation. The repair skill repairs, publishes and re-arms. Admission recognizes the calling command’s recorded waiting Flow drivers and Task carrier; it still refuses unrelated live work and unresolved provider turns.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task_automation.rs#L42-L124">rust/loopflow/src/ops/task_automation.rs · admission_blocker</a><span>Local checkpoint · Updated admission: waiting controllers may delegate repair; unrelated work still blocks · 62b76f13a · L42–124</span></figcaption><pre tabindex="0"><code>pub(crate) fn admission_blocker(
     store: &amp;crate::store::sqlite::SqliteStore,
     task: &amp;crate::durable::TaskId,
     repair_session: Option&lt;&amp;str&gt;,
@@ -395,7 +396,7 @@ pub(crate) fn waiting_controllers(
         }
     }
     Ok(waiting)
-}</code></pre></figure><p>Jack also requested harmless retries after merge. Bare land and waited land now share this verified-merge success path. They report whether the Task is complete, preserve finishing notes and edits, and skip sync, cleanup, publication and re-arming. Failed or ambiguous observations remain failures.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/lf/commands/ops/mod.rs#L596-L646">rust/loopflow/src/lf/commands/ops/mod.rs · land_repo</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L596–646</span></figcaption><pre tabindex="0"><code>pub(crate) fn land_repo(
+}</code></pre></figure><p>Jack also requested harmless retries after merge. Bare land and waited land now share this verified-merge success path. They report whether the Task is complete, preserve finishing notes and edits, and skip sync, cleanup, publication and re-arming. Failed or ambiguous observations remain failures.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/lf/commands/ops/mod.rs#L602-L652">rust/loopflow/src/lf/commands/ops/mod.rs · land_repo</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L602–652</span></figcaption><pre tabindex="0"><code>pub(crate) fn land_repo(
     repo_root: &amp;Path,
     options: &amp;LandOptions,
     progress: &amp;impl Progress,
@@ -430,7 +431,7 @@ pub(crate) fn waiting_controllers(
         }
     })?;
     if let Some(pr) = pr {
-        if options.wait {
+        if options.wait_and_fix {
             crate::engine::agent::register_interrupt_cleanup(|| {
                 eprintln!(&quot;Landing wait interrupted; merge intent retained.&quot;);
             });
@@ -446,7 +447,7 @@ pub(crate) fn waiting_controllers(
     }
     Ok(())
 }</code></pre></figure><p>The CI-repair skill ends after <code>lf arm</code>; it does not file follow-ups or complete the Task. If repair outlives the finishing driver, the next Task/Wave operation still owns follow-through.</p></details>
-<details><summary>The wait loop and stopped-delivery recovery instructions</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/pr_landing.rs#L1491-L1519">rust/loopflow/src/ops/pr_landing.rs · wait_for_merge</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L1491–1519</span></figcaption><pre tabindex="0"><code>/// Observe and repair this PR until it merges; each check releases its claim.
+<details><summary>The wait loop and stopped-delivery recovery instructions</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/pr_landing.rs#L1491-L1519">rust/loopflow/src/ops/pr_landing.rs · wait_for_merge</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L1491–1519</span></figcaption><pre tabindex="0"><code>/// Observe and repair this PR until it merges; each check releases its claim.
 pub fn wait_for_merge(repo: &amp;Path, options: &amp;LandOptions, pr: &amp;PrInfo) -&gt; OpsResult&lt;()&gt; {
     let initial = record_armed_pr(repo, options, pr)?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -474,7 +475,7 @@ pub fn wait_for_merge(repo: &amp;Path, options: &amp;LandOptions, pr: &amp;PrInf
     });
     runtime.shutdown_background();
     result
-}</code></pre></figure><p>Implementation defaults are 15-second observations for at most 30 minutes. The ordinary process handler owns interruption; timeout returns held and retains the request. Waited landing admits its own CI repair. A held command keeps exit 3 through the Flow and stops automatic retries. Ordinary failure still retries the whole Flow, up to three attempts while its Task runner survives; <a href="https://linear.app/loopflow/issue/LOO-435">LOO-435</a> owns retry from the failed step. After merge, the operator follows this instruction:</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/engine/builtins/task/skill/task_operate.md#L94-L105">rust/loopflow/src/engine/builtins/task/skill/task_operate.md · Finish merged delivery</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L94–105</span></figcaption><pre tabindex="0"><code>5. **Finish merged delivery.** A verified merge, including a manual GitHub merge,
+}</code></pre></figure><p>Implementation defaults are 15-second observations for at most 30 minutes. The ordinary process handler owns interruption; timeout returns held and retains the request. Waited landing admits its own CI repair. A held command keeps exit 3 through the Flow and stops automatic retries. Ordinary failure still retries the whole Flow, up to three attempts while its Task runner survives; <a href="https://linear.app/loopflow/issue/LOO-435">LOO-435</a> owns retry from the failed step. After merge, the operator follows this instruction:</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/engine/builtins/task/skill/task_operate.md#L94-L105">rust/loopflow/src/engine/builtins/task/skill/task_operate.md · Finish merged delivery</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L94–105</span></figcaption><pre tabindex="0"><code>5. **Finish merged delivery.** A verified merge, including a manual GitHub merge,
    leaves the Task pending until follow-ups are filed or none needed is recorded.
    First inspect every associated live Flow and unfinished Process; a live ship
    Flow owns its finish. With no live driver, if the disposition is already durable,
@@ -508,7 +509,7 @@ $ lf task complete FIX-2
 # Checkout cleanup output omitted.
 Task FIX-2 is at end: done</code></pre></figure>
 <p>The receipt separates the immutable filing request from the confirmed link. The saved key names an obligation, the UUID identifies its issue, and the saved Project survives chapter rotation. The confirmed due date follows Linear's current value.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/work/task/follow_through.rs#L5-L37">rust/loopflow/src/work/task/follow_through.rs · FollowThroughIntent / Link / FollowThrough</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L5–37</span></figcaption><pre tabindex="0"><code>/// Exact filing input, persisted before contacting Linear.
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/work/task/follow_through.rs#L5-L37">rust/loopflow/src/work/task/follow_through.rs · FollowThroughIntent / Link / FollowThrough</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L5–37</span></figcaption><pre tabindex="0"><code>/// Exact filing input, persisted before contacting Linear.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FollowThroughIntent {
     pub key: String,
@@ -542,7 +543,7 @@ pub struct FollowThrough {
     pub scope_notes: Vec&lt;String&gt;,
 }</code></pre></figure>
 <p>This public operation owns the sequence: check merge, reuse or reserve the intent, confirm the issue and relation, then record the link. <code>--finish</code> reconfirms every intent before recording a reason; <code>--none</code> is the zero-filing path.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task/follow_through.rs#L19-L154">rust/loopflow/src/ops/task/follow_through.rs · task_follow_up</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L19–154</span></figcaption><pre tabindex="0"><code>pub fn task_follow_up(repo: &amp;Path, issue: &amp;str, options: &amp;FollowUpOptions) -&gt; OpsResult&lt;String&gt; {
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task/follow_through.rs#L19-L154">rust/loopflow/src/ops/task/follow_through.rs · task_follow_up</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L19–154</span></figcaption><pre tabindex="0"><code>pub fn task_follow_up(repo: &amp;Path, issue: &amp;str, options: &amp;FollowUpOptions) -&gt; OpsResult&lt;String&gt; {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -679,7 +680,7 @@ pub struct FollowThrough {
     })
 }</code></pre></figure>
 <div class="note"><p><strong>A caller-visible choice:</strong> <code>--key</code> defaults to <code>follow-up</code>. A second obligation needs a different stable key. Reusing a key with a new title, date or destination deliberately returns to the original request; it does not edit that child or create another one.</p></div>
-<details><summary>The transaction boundary and failed confirmation</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/store/sqlite/task_follow_through.rs#L22-L117">rust/loopflow/src/store/sqlite/task_follow_through.rs · reserve_follow_through / link_follow_through / finish_follow_through</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L22–117</span></figcaption><pre tabindex="0"><code>    pub fn reserve_follow_through(
+<details><summary>The transaction boundary and failed confirmation</summary><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/store/sqlite/task_follow_through.rs#L22-L117">rust/loopflow/src/store/sqlite/task_follow_through.rs · reserve_follow_through / link_follow_through / finish_follow_through</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L22–117</span></figcaption><pre tabindex="0"><code>    pub fn reserve_follow_through(
         &amp;self,
         task: &amp;TaskId,
         intent: &amp;FollowThroughIntent,
@@ -774,7 +775,7 @@ pub struct FollowThrough {
         )?;
         tx.commit()?;
         Ok(())
-    }</code></pre></figure><p>Reservation serializes competing writers and returns the original request for an existing key. Once an intent exists, <code>--none</code> cannot discard it; every saved intent must have a confirmed matching link before finish. Completion rechecks the resulting facts in the transaction shown in stop 1.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task/follow_through.rs#L156-L183">rust/loopflow/src/ops/task/follow_through.rs · confirm_intent</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L156–183</span></figcaption><pre tabindex="0"><code>async fn confirm_intent(
+    }</code></pre></figure><p>Reservation serializes competing writers and returns the original request for an existing key. Once an intent exists, <code>--none</code> cannot discard it; every saved intent must have a confirmed matching link before finish. Completion rechecks the resulting facts in the transaction shown in stop 1.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task/follow_through.rs#L156-L183">rust/loopflow/src/ops/task/follow_through.rs · confirm_intent</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L156–183</span></figcaption><pre tabindex="0"><code>async fn confirm_intent(
     repo: &amp;Path,
     task: &amp;Task,
     intent: &amp;FollowThroughIntent,
@@ -823,7 +824,7 @@ $ lf sync
 design handoff conflict: &lt;destination&gt; already contains child work; selected content retained in &lt;receipt&gt;
 # Reconcile the retained source with the child&#x27;s document; no force overwrite.</code></pre></figure>
 <p>Existing stack sync already carries parent changes through squash merge. This PR adds an explicit <code>--design</code> handoff while keeping scratch isolation. The caller selects a child-specific file; the command transfers its bytes without interpreting a multi-step plan.</p>
-<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task/handoff.rs#L14-L117">rust/loopflow/src/ops/task/handoff.rs · DesignHandoff / read_design / write_design</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L14–117</span></figcaption><pre tabindex="0"><code>#[derive(Debug, Serialize, Deserialize)]
+<figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task/handoff.rs#L14-L117">rust/loopflow/src/ops/task/handoff.rs · DesignHandoff / read_design / write_design</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L14–117</span></figcaption><pre tabindex="0"><code>#[derive(Debug, Serialize, Deserialize)]
 pub(super) struct DesignHandoff {
     source_task: Option&lt;TaskId&gt;,
     source_issue: Option&lt;String&gt;,
@@ -929,7 +930,7 @@ fn write_new(path: &amp;Path, content: &amp;[u8]) -&gt; std::io::Result&lt;()&gt
 }</code></pre></figure>
 <div class="note"><p>The applied receipt makes the handoff one-time: even deletion of the child's note is preserved on retry. A different input at an occupied destination fails with both contents retained. Parent code can keep syncing; later design decisions need a deliberate child update.</p></div>
 <p class="proof">Inspected handoff fixtures cover two distinct child designs, exact content and provenance, repeated handoff after a parent commit, edited/deleted child notes, and occupied-path conflicts. Existing stack tests supply parent-update and squash behavior. A single complete stacked-task demo remains unshown.</p>
-<details><summary>The earlier launch/status repair remains in this PR</summary><p>Placement resolves before Process admission, and <code>task run</code> starts its Flow child in the target checkout. The caller retains its own history. Task status and Flow inventory share association rules; registration now records Started and the Flow together before any step runs.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/store/sqlite/flow_inventory.rs#L206-L227">rust/loopflow/src/store/sqlite/flow_inventory.rs · record_flow_process</a><span>Local checkpoint · Changed in this PR · 0bbaaaa23 · L206–227</span></figcaption><pre tabindex="0"><code>    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
+<details><summary>The earlier launch/status repair remains in this PR</summary><p>Placement resolves before Process admission, and <code>task run</code> starts its Flow child in the target checkout. The caller retains its own history. Task status and Flow inventory share association rules; registration now records Started and the Flow together before any step runs.</p><figure class="source"><figcaption><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/store/sqlite/flow_inventory.rs#L206-L227">rust/loopflow/src/store/sqlite/flow_inventory.rs · record_flow_process</a><span>Local checkpoint · Changed in this PR · 62b76f13a · L206–227</span></figcaption><pre tabindex="0"><code>    /// A driver&#x27;s one write about its Flow: the name and graph it launched with.
     pub(crate) fn record_flow_process(
         &amp;self,
         driver: &amp;ProcessLfid,
@@ -961,8 +962,8 @@ fn write_new(path: &amp;Path, content: &amp;[u8]) -&gt; std::io::Result&lt;()&gt
 <li><code>cargo test -p loopflow --lib</code>, filtered to <code>ops::task::tests::watched_landing_completes_task_only_from_merged_pr_evidence</code>, <code>ops::task::follow_through::tests</code>, and <code>store::sqlite::pr_landings::tests</code> — five passed.</li>
 <li><code>swift test --package-path swift --filter 'MockWaveFixtureTests|DTOFixtureTests|TaskFlowTests/deliveryEvidence'</code> — 31 passed.</li>
 <li><code>cargo fmt --all</code>, <code>cargo clippy --all-targets -- -D warnings</code> and <code>git diff --check</code> — recorded passes, with inherited <code>LF_*</code>/<code>LOOPFLOW_*</code> cleared for product tests.</li>
-</ul><p><a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/scratch/make-a-task-up-to.md#L490-L563">Design, acceptance rows and dated evidence</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/src/ops/task/follow_through/tests.rs">Operation-level filing regression</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/tests/task_flow_launch_tests.rs">Public CLI lifecycle cases</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/rust/loopflow/tests/task_handoff_tests.rs">Design handoff cases</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/0bbaaaa235a6bf74a4ade9e1952d7dbdfd4d11ad/swift/LoopflowTests/TaskFlowProofTests.swift">Swift delivery-label assertions</a>.</p><p>These fixtures do not establish sustained Desktop use or the chapter's duration KRs. No live Home migration or landing was performed. Jack requested the separately filed Infrastructure follow-up LOO-435 during this review.</p></details>
+</ul><p><a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/scratch/make-a-task-up-to.md#L490-L563">Design, acceptance rows and dated evidence</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/src/ops/task/follow_through/tests.rs">Operation-level filing regression</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/tests/task_flow_launch_tests.rs">Public CLI lifecycle cases</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/rust/loopflow/tests/task_handoff_tests.rs">Design handoff cases</a> · <a href="https://github.com/loopflowstudio/loopflow/blob/62b76f13a2b8dcba484bbaa1b5533609288bab00/swift/LoopflowTests/TaskFlowProofTests.swift">Swift delivery-label assertions</a>.</p><p>These fixtures do not establish sustained Desktop use or the chapter's duration KRs. No live Home migration or landing was performed. Jack requested the separately filed Infrastructure follow-up LOO-435 during this review.</p></details>
 <p>Jack Heart's accepted contract is zero-or-one PR, follow-through before source completion, and <code>task complete</code> as the end alias. Polling limits, the filing-key interface, explicit design handoff and return on the next Wave pass are implementation choices for the complete review. This artifact makes no merge decision.</p>
 </section>
-<footer>Local walkthrough for Jack Heart · PR #1499 · source fixed at 0bbaaaa23. Source excerpts are embedded for offline reading with revision-pinned links. <span id="render-note">Inspected with headless Chromium at 1440 px and 390 px, including code and disclosures. Anchor targets, keyboard toggles, document overflow and print expansion pass; all 17 excerpts match Git. Focused landing, CI watcher and held-exit tests accompany the corrections; broader acceptance remains with gate and demo.</span></footer>
+<footer>Local walkthrough for Jack Heart · PR #1499 · source fixed at 62b76f13a. Source excerpts are embedded for offline reading with revision-pinned links. <span id="render-note">Inspected with headless Chromium at 1440 px and 390 px, including code and disclosures. Anchor targets, keyboard toggles, document overflow and print expansion pass; all 17 excerpts match Git. Focused landing, CI watcher and held-exit tests accompany the corrections; broader acceptance remains with gate and demo.</span></footer>
 </main><script>window.addEventListener('beforeprint',()=>document.querySelectorAll('details').forEach(d=>d.open=true));</script></body></html>

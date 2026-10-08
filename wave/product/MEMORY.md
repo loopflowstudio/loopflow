@@ -60,12 +60,13 @@ per request. Current placements copy inheritance once; delegation is unimplement
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
-October 7: `task_checkouts` takes its Machine from `work_placements`; inheritance
-changes would falsely move existing execution. Separate delegation from observed
-location. WorkRef lacks a repository root. LOO-412 (`0cd8e7f14`) retains independent
-Workflows/legacy IDs; LOO-406 excludes synchronization. Jack's Git leaning and
-Linear-owned plans (`f929c7f5`, `25b3eede`) leave the shared-source contract open.
-LOO-427 remains unimplemented pending reconciliation.
+October 7: `task_checkouts` reads `work_placements`; separate delegation from
+checkout location before changing inheritance. WorkRef lacks a repository root.
+LOO-412 (`0cd8e7f14`) keeps independent
+IDs; LOO-406 excludes sync. Jack's Git leaning and Linear plans (`f929c7f5`,
+`25b3eede`) leave shared authority unresolved. LOO-427 remains unimplemented.
+Cold opens overwrite one pending URL; cover reversed registration and repeat opens.
+No native proof.
 
 ## Live Home reconciliation (2026-10-05)
 

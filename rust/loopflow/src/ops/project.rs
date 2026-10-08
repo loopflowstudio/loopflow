@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::ops::{OpsError, OpsResult};
 use crate::pm::{PmProject, ProjectContent, ProjectStatus};
@@ -93,41 +92,6 @@ pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
         .ensure_project(wave.id(), wave.slug())
         .map_err(project_error)?;
     store.sqlite.planning_project(&id).map_err(project_error)
-}
-
-// Validate both the response and the accepted body: a delayed response may lose
-// to newer stored facts, and only those accepted facts may authorize activation.
-pub(crate) async fn accept_project(
-    store: &Store,
-    wave: &Wave,
-    ctx: &super::pm::PmContext,
-    project: PmProject,
-    observed_at: i64,
-    acquisition: &Arc<PlanningLocks>,
-) -> OpsResult<PmProject> {
-    let validate = |project: &PmProject| {
-        crate::pm::validate_project_ownership(
-            wave.slug(),
-            &ctx.initiative,
-            Some(&ctx.team_id),
-            project,
-        )
-        .map_err(project_error)
-    };
-    validate(&project)?;
-    let project = store
-        .put_pm_project(
-            wave.id(),
-            "linear",
-            &ctx.initiative,
-            project,
-            observed_at,
-            Some(acquisition.clone()),
-        )
-        .await
-        .map_err(project_error)?;
-    validate(&project)?;
-    Ok(project)
 }
 
 pub async fn update_plan(

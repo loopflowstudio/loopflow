@@ -29,8 +29,8 @@ lf checkout <id>
 LOO-406 is replacing split planning ownership with one local plan and optional
 repository-wide Linear synchronization. The remaining Wave path still provisions
 `personal:inbox` for creation without a Wave. Personal Wave definitions live in
-SQLite; other Wave definitions remain repository-owned. Membership, rotation,
-deletion and refiling still branch on stored Wave ownership. These are unfinished
+SQLite; other Wave definitions remain repository-owned. Deletion and refiling
+still branch on stored Wave ownership. Rotation now saves through one local transaction. These are unfinished
 cutover paths; Task and Project creation/editing already share local writers.
 Reads provision nothing, and personal definitions do not write the code checkout.
 
@@ -72,14 +72,16 @@ even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
 provider deletion evidence apply regardless of planning mode. Local completion
 records its decision and workflow arrival together.
-GitHub delivery still requires confirmed merge evidence. Local chapter rotation commits
-all selected personal Waves together, carrying started Tasks and preserving backlog.
-A mixed Local/Linear rotation retains each authority's recovery records; a SQLite
-transaction cannot make the external provider effects atomic.
+GitHub delivery still requires confirmed merge evidence. Chapter rotation commits
+all selected Waves together, carrying started Tasks and preserving backlog. Stable
+local IDs select the rows and retry receipts; provider aliases select existing
+Projects through their stored mapping. Membership, Project fields, selection and
+pending effects commit together. Connected commands report pending Linear sync.
+Inbound observations preserve pending membership while accepting unrelated fields.
+Provider delivery is unfinished; local settlement does not acknowledge an external effect.
 
 LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished. Wave definitions/provisioning, membership,
-rotation and deletion/refiling retain separate planning authorities;
+optional Linear synchronization. That cutover remains unfinished. Wave definitions/provisioning and deletion/refiling retain separate planning authorities;
 the common offline checkout and launch paths do not establish common planning ownership.
 Task creation and edits use one SQLite writer, regardless of provider mapping.
 Creation receipts retain the original Project and input; field receipts retain
@@ -304,10 +306,12 @@ clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under acquisition ownership; it cannot reconcile a changed Initiative.
 
 Chapter rollover transfers started work and retains unreviewed backlog in its
-predecessor Project before completing that Project in Linear. It confirms provider
-completion before recording the Project. Closing it neither completes transferred
-Tasks nor changes historical KR results. Current Project readers follow the shared
-binding, which rotation switches before confirming predecessor completion.
+predecessor Project. The same local transaction marks the predecessor completed,
+selects the successor and retains each pending provider field change. It changes
+neither Task execution nor historical KR results. Retry consumes the original plan
+and selected membership, preserving later edits. Pre-cutover unfinished provider
+transitions remain unresolved with their original receipts; local rotation does not
+claim to recover their uncertain external effects.
 
 The planning store can retain explicit archival acknowledgements. Integrating
 archival into the provider-backed chapter operation and preserving old acknowledgements
@@ -388,7 +392,7 @@ effect, so it cannot settle a newer decision. Explicit state resolution supersed
 the delivery identity without changing the Workflow. No local/provider clock
 comparison orders edits. The provider read and mutation remain separate requests;
 they do not prevent a concurrent Linear edit between them. The complete unified
-planning-owner cutover remains in progress; Wave provisioning and rotation still use
+planning-owner cutover remains in progress; Wave provisioning and deletion/refiling still use
 split paths. Abandonment of an existing Task saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation

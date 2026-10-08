@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
 use super::{classify_task, TaskDisposition, TaskStartEvidence};
-use crate::ops::pm::{pm_sync, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
+use crate::ops::pm::{pm_sync, resolve_context, PmSyncOptions, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::NullProgress;
 use crate::planning::{LinearIssueId, TaskPlan};
 use crate::pm::{PmItem, PmProject, ProjectStatus};
@@ -506,17 +506,6 @@ async fn local_started_task(
     (task, pr, flows)
 }
 
-fn task_started_at(path: &std::path::Path, task: &TaskId) -> i64 {
-    rusqlite::Connection::open(path)
-        .unwrap()
-        .query_row(
-            "SELECT started_at FROM tasks WHERE id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )
-        .expect("reserved Task work has a non-null Started timestamp")
-}
-
 fn clean_checkout(checkout: &std::path::Path) -> String {
     std::fs::create_dir_all(checkout).unwrap();
     for args in [
@@ -693,7 +682,7 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
     let (task, pr, flow) = local_started_task(&home, &repo).await;
     PM_TEST_CONTEXT
         .scope(home, async {
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let snapshot = crate::ops::pm::refresh_pm_snapshot(&repo, "a", &ctx)
                 .await
                 .unwrap();
@@ -815,7 +804,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                             graphql_url: first.graphql_url.clone(),
                         },
                         async {
-                            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                            let ctx = resolve_context(&repo, "a").await.unwrap();
                             let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
                                 .await
                                 .unwrap();
@@ -869,7 +858,7 @@ async fn legacy_project_adoption_preserves_plans_across_lost_responses() {
                         let task = store.get_task_by_issue("a-started").await.unwrap().unwrap();
                         let prs = store.task_prs(&task.id).await.unwrap();
                         let flow = store.sqlite.task_flows(&task.id).unwrap();
-                        let ctx = super::resolve_context(&repo, "a").await.unwrap();
+                        let ctx = resolve_context(&repo, "a").await.unwrap();
                         super::adopt_legacy_projects(&repo, &store, "a", &ctx, true)
                             .await
                             .unwrap();
@@ -946,7 +935,7 @@ async fn legacy_adoption_leaves_foreign_team_projects_and_receipts_untouched() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let store = super::pm_store().await.unwrap();
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let plans = crate::ops::pm::checked_projects(&repo, &ctx, "a")
                 .await
                 .unwrap();
@@ -1017,7 +1006,7 @@ async fn legacy_adoption_without_a_receipt_never_guesses_between_plans() {
     PM_TEST_CONTEXT
         .scope(home, async {
             let store = super::pm_store().await.unwrap();
-            let ctx = super::resolve_context(&repo, "a").await.unwrap();
+            let ctx = resolve_context(&repo, "a").await.unwrap();
             let projects = super::adopt_legacy_projects(&repo, &store, "a", &ctx, false)
                 .await
                 .unwrap();
@@ -1060,6 +1049,3 @@ fn old_id(wave: &str) -> &'static str {
         _ => panic!("fixture Wave"),
     }
 }
-
-#[path = "chapter_rotation_tests.rs"]
-mod rotation;

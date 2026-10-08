@@ -134,8 +134,15 @@ pub(super) fn task_in(conn: &Connection, id: &TaskId) -> StoreResult<PmTaskObser
         ) {
             state = observation.state;
         }
+        let pending_membership = super::planning_changes::PlanningChanges::Task(id)
+            .pending(conn)?
+            .into_iter()
+            .find(|change| change.field == "project_id");
         if observation.record.as_ref().is_some_and(|record| {
-            record.item.project_id != item.project_id
+            (record.item.project_id != item.project_id && pending_membership.is_none())
+                || pending_membership
+                    .as_ref()
+                    .is_some_and(|change| change.conflict.is_some())
                 || record
                     .item
                     .team_id

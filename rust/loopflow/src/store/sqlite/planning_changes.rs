@@ -29,6 +29,8 @@ impl<'a> PlanningChanges<'a> {
         previous: Value,
         value: Value,
     ) -> StoreResult<bool> {
+        let previous = self.normalize(conn, field, previous)?;
+        let value = self.normalize(conn, field, value)?;
         if previous == value {
             return Ok(false);
         }
@@ -48,7 +50,7 @@ impl<'a> PlanningChanges<'a> {
         let base = body
             .map(|body| -> StoreResult<Value> {
                 let body: Value = serde_json::from_str(&body)?;
-                Ok(serde_json::json!({"revision": body["revision"], "value": body[field]}))
+                Ok(serde_json::json!({"revision": body["revision"], "value": self.normalize(conn, field, body[field].clone())?}))
             })
             .transpose()?;
         conn.execute(
@@ -65,6 +67,25 @@ impl<'a> PlanningChanges<'a> {
             ],
         )?;
         Ok(true)
+    }
+
+    // Membership receipts retain durable identity even when a provider mapping arrives later.
+    fn normalize(self, conn: &Connection, field: &str, value: Value) -> StoreResult<Value> {
+        if matches!(self, Self::Task(_)) && field == "project_id" {
+            if let Some(selector) = value.as_str() {
+                let id: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                        [selector],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if let Some(id) = id {
+                    return Ok(Value::String(id));
+                }
+            }
+        }
+        Ok(value)
     }
 
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
@@ -105,7 +126,7 @@ impl<'a> PlanningChanges<'a> {
         let (owner, _) = self.owner();
         let mut saved = serde_json::to_value(observed)?;
         for change in self.pending(conn)? {
-            let remote = saved[&change.field].clone();
+            let remote = self.normalize(conn, &change.field, saved[&change.field].clone())?;
             if remote != change.value
                 && change
                     .base

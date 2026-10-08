@@ -34,6 +34,7 @@ mod pr_landings;
 mod processes;
 mod program_status;
 mod project_content;
+mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;

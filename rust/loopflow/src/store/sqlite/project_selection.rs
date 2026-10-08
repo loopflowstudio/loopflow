@@ -79,6 +79,7 @@ fn write_in(
 }
 
 /// Callers hold the Wave guard through reconciliation; compare and replace in one transaction.
+#[cfg(test)]
 pub(crate) fn write_project_binding(
     store: &SqliteStore,
     wave: &WaveId,

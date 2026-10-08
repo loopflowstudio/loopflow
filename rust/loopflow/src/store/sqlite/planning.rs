@@ -582,6 +582,14 @@ fn project_accepted_planning(
         let item =
             super::planning_changes::PlanningChanges::Task(&crate::durable::TaskId::from_raw(&id))
                 .retain(tx, &item)?;
+        let project: String = match item.project_id.as_deref() {
+            Some(selected) => tx.query_row(
+                "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                [selected],
+                |row| row.get(0),
+            )?,
+            None => project,
+        };
         tx.execute(
             "WITH pending AS (SELECT task_id FROM task_state_deliveries d WHERE d.settled=0
                  AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id))

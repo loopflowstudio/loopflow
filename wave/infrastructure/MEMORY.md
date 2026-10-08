@@ -39,8 +39,7 @@ fails: between ownership read and unconditional mutation, Linear reopening is
 overwritten; matching readback falsely settles delivery. The published Linear schema
 at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
 Extra reads and matching readback cannot prove preserved concurrent changes.
-October 8's iteration direction authorizes the ownership cut and provider-guarantee
-investigation. Weakening preservation or automatic propagation remains unselected.
+Preservation and automatic propagation remain required.
 
 `b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
 local creates one retry-stable UUID without overwriting the provider comment or
@@ -57,19 +56,21 @@ and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project sele
 `22477da8e` owns Project edits/Workflow selection and per-field receipts.
 `921fc68ba` moves complete-plan edits onto that writer and removes inspection locking.
 
-`b6e291dd4` shares Task creation/edit; `71c8e445c` shares receipt/creation reads.
-Original input/Project, foreign-key owners, pending values, first conflicts and
-retry identity survive; provider-first creation/edit is deleted.
+Common Task creation/edit and Project creation/selection preserve original input,
+foreign-key owners, later edits, pending fields, first conflicts and stable UUIDs.
+Unchanged saves preserve revisions/receipts; exact IDs own selection and import.
+Active Workflow proves started work without inventing Started. Shared identity reads
+retain one row per Task and matching abbreviations. Detailed cuts and proof limits:
+`1815198f5:wave/infrastructure/MEMORY.md`, this heading.
 
-`764e90ae3` shares Project creation/binding/activation: atomic name/selection,
-retained UUIDs/mappings and status conflicts/later edits. `6570ee0f7` centralizes
-exact-ID binding/import. Workflow selection owns definitions; unchanged saves retain
-receipts/revisions. Terminal/invalid facts retain selection. Active Workflow proves
-started work without inventing Started. Reusing resolved Task identity fixes duplicate
-unmapped rows; Work and plan share abbreviation SQL. Offline proofs establish no delivery.
+Common rotation replaces both writers with one local Project/membership transaction.
+Wave/checkout locks retain started work and backlog; input and mutation IDs survive
+retry. Membership receipts use durable IDs across later provider mapping. Inbound
+observations retain pending membership, unrelated edits and both conflict values.
+Uncertain pre-cutover transitions remain unresolved with receipts intact. Paired
+CLI proofs establish no provider delivery, installation or composed sync acceptance.
 
-Wave schema/provisioning/definitions, membership, rotation and deletion/refiling
-still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
+Wave schema/provisioning/definitions and deletion/refiling still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
 pending presentation and composed reconnect remain unfinished. Project updates
 also lack a revision precondition. The one draft starts at v0.13.10 (`fc0bb97f7`);
 installation remains unproved.

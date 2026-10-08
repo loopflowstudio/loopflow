@@ -401,7 +401,7 @@ CREATE TABLE task_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','rank')),
+    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','rank','project_id')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),

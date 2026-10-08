@@ -1761,3 +1761,289 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         assert!(!repo.path().join("wave").exists());
     }
 }
+
+#[test]
+fn rotation_saves_membership_and_pending_effects_offline() {
+    use loopflow::durable::TaskId;
+    use loopflow::planning::NewTask;
+    use loopflow::store::PmSnapshotRow;
+
+    for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            repo.create_file(".lf/config.yaml", "pm:\n  linear_team: fixture-team\n");
+        }
+        let path = home.path().join("loopflow.db");
+        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let wave = loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "product".into(),
+            canonical.to_string(),
+        );
+        store.create_wave(&wave).unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "ensure", "product", "--json"],
+        );
+        let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
+        let db = rusqlite::Connection::open(&path).unwrap();
+        if mapped {
+            db.execute("UPDATE projects SET external_project_id='provider-project',planning_teams='[\"fixture-team\"]',planning_initiatives='[\"initiative\"]' WHERE id=?1", [project.id.as_str()]).unwrap();
+        }
+        let active = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                project_id: project.id.clone(),
+                title: "Started work".into(),
+                description: "Retain description".into(),
+            })
+            .unwrap();
+        let backlog = store
+            .create_task(&NewTask {
+                id: TaskId::new(),
+                project_id: project.id.clone(),
+                title: "Unreviewed backlog".into(),
+                description: "".into(),
+            })
+            .unwrap();
+        db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [active.id.as_str()]).unwrap();
+        db.execute(
+            "UPDATE tasks SET started_at=17 WHERE id=?1",
+            [active.id.as_str()],
+        )
+        .unwrap();
+        if mapped {
+            db.execute("UPDATE tasks SET external_issue_id='provider-issue',issue_identifier='FIX-1',planning_team_id='fixture-team' WHERE id=?1", [active.id.as_str()]).unwrap();
+        }
+        let saved = store.planning_task(&active.id).unwrap().record.unwrap();
+        let mut snapshot = loopflow::pm::PmSnapshot {
+            projects: vec![saved.project.unwrap()],
+            items: vec![saved.item],
+        };
+        if mapped {
+            store
+                .put_pm_snapshot(&PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 20,
+                    snapshot: snapshot.clone(),
+                })
+                .unwrap();
+        }
+        let successor = loopflow::durable::ProjectId::new();
+        let file = home.path().join("rotation.json");
+        let plan = serde_json::json!({"name":"Next", "waves":[{"wave_id":wave.id(),"successor_id":successor,"create":true,"project_name":"Next", "content":{"workflow":"","metric_targets":[],"krs":[{"text":"Preserve work","holds":false}]}}]});
+        std::fs::write(&file, serde_json::to_vec(&plan).unwrap()).unwrap();
+        let args = [
+            "wave",
+            "new-chapter",
+            "product",
+            "Next",
+            "--plan",
+            file.to_str().unwrap(),
+            "--json",
+        ];
+        let preview = lf(
+            repo.path(),
+            home.path(),
+            &[
+                "wave",
+                "new-chapter",
+                "product",
+                "Next",
+                "--plan",
+                file.to_str().unwrap(),
+                "--dry-run",
+                "--json",
+            ],
+        );
+        assert_eq!(preview["waves"][0]["tasks"][0]["disposition"], "move");
+        assert_eq!(
+            store.task(&active.id).unwrap().unwrap().project_id,
+            project.id
+        );
+        let revision = || {
+            db.query_row(
+                "SELECT revision FROM store_revisions WHERE domain='planning'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        let before = revision();
+        db.execute_batch("CREATE TRIGGER fail_rotation BEFORE UPDATE OF current_project_id ON waves BEGIN SELECT RAISE(ABORT,'injected rotation failure'); END;").unwrap();
+        assert!(!command(repo.path(), home.path(), &args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        db.execute_batch("DROP TRIGGER fail_rotation").unwrap();
+        assert!(store.project(&successor).unwrap().is_none());
+        assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
+        assert!(store
+            .pending_project_changes(&project.id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(revision(), before);
+        lf(repo.path(), home.path(), &args);
+        let moved = store.task(&active.id).unwrap().unwrap();
+        assert_eq!(moved.project_id, successor);
+        assert_eq!(
+            db.query_row(
+                "SELECT started_at FROM tasks WHERE id=?1",
+                [active.id.as_str()],
+                |r| r.get::<_, Option<i64>>(0)
+            )
+            .unwrap(),
+            Some(17)
+        );
+        assert_eq!(
+            store.task(&backlog.id).unwrap().unwrap().project_id,
+            project.id
+        );
+        let changes = store.pending_task_changes(&active.id).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "project_id");
+        assert_eq!(changes[0].value, successor.as_str());
+        let status = store.pending_project_changes(&project.id).unwrap();
+        assert_eq!(status[0].value, "completed");
+        let settled_revision = revision();
+        lf(repo.path(), home.path(), &args);
+        assert_eq!(revision(), settled_revision);
+        assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
+        assert_eq!(store.pending_project_changes(&project.id).unwrap(), status);
+        if mapped {
+            snapshot.items[0].description = "Incoming unrelated edit".into();
+            snapshot.items[0].revision = Some("2026-10-08T12:00:00Z".into());
+            store
+                .put_pm_snapshot(&PmSnapshotRow {
+                    wave_id: wave.id().clone(),
+                    provider: "linear".into(),
+                    initiative: "initiative".into(),
+                    synced_at: 21,
+                    snapshot,
+                })
+                .unwrap();
+            let retained = store.task(&active.id).unwrap().unwrap();
+            assert_eq!(retained.project_id, successor);
+            assert_eq!(retained.plan.description, "Incoming unrelated edit");
+            assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
+            assert_eq!(
+                store.project(&project.id).unwrap().unwrap().plan.status,
+                loopflow::pm::ProjectStatus::Completed
+            );
+        }
+        let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        assert_eq!(
+            reopened.task(&active.id).unwrap().unwrap().project_id,
+            successor
+        );
+        assert_eq!(reopened.pending_task_changes(&active.id).unwrap(), changes);
+        if mapped {
+            db.execute(
+                "UPDATE projects SET external_project_id='exported-successor' WHERE id=?1",
+                [successor.as_str()],
+            )
+            .unwrap();
+            let mut echo = store.planning_task(&active.id).unwrap().record.unwrap();
+            echo.item.revision = Some("2026-10-08T12:30:00Z".into());
+            echo.observed_at = 22;
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &echo,
+                    Some((wave.id(), "initiative")),
+                )
+                .unwrap();
+            assert_eq!(store.pending_task_changes(&active.id).unwrap(), changes);
+            assert_eq!(
+                store.task(&active.id).unwrap().unwrap().project_id,
+                successor
+            );
+        }
+        // Select an already stored destination using its provider alias when present.
+        let mut existing = project.clone();
+        existing.id = loopflow::durable::ProjectId::new();
+        existing.plan.name = "Future".into();
+        existing.plan.slug = "future".into();
+        existing.plan.status = loopflow::pm::ProjectStatus::Planned;
+        existing.plan.linear_id =
+            mapped.then(|| loopflow::planning::LinearProjectId::new("future-provider").unwrap());
+        store.insert_project(&existing).unwrap();
+        let mut next = plan.clone();
+        next["waves"][0]["successor_id"] = serde_json::json!(existing
+            .plan
+            .linear_id
+            .as_ref()
+            .map(|id| id.as_str())
+            .unwrap_or(existing.id.as_str()));
+        next["waves"][0]["create"] = serde_json::json!(false);
+        std::fs::write(&file, serde_json::to_vec(&next).unwrap()).unwrap();
+        lf(repo.path(), home.path(), &args);
+        assert_eq!(
+            store.task(&active.id).unwrap().unwrap().project_id,
+            existing.id
+        );
+        assert_eq!(
+            store.project(&existing.id).unwrap().unwrap().plan.name,
+            "Next"
+        );
+        let pending = store.pending_project_changes(&existing.id).unwrap();
+        assert!(pending
+            .iter()
+            .any(|c| c.field == "status" && c.value == "started"));
+        assert!(pending.iter().any(|c| c.field == "krs"));
+        lf(repo.path(), home.path(), &args);
+        assert_eq!(
+            store.pending_project_changes(&existing.id).unwrap(),
+            pending
+        );
+        if mapped {
+            let before = store.pending_task_changes(&active.id).unwrap();
+            let mut remote = store.planning_task(&active.id).unwrap().record.unwrap();
+            let project = remote.project.as_mut().unwrap();
+            project.id = "third-provider-project".into();
+            project.name = "Another plan".into();
+            project.slug = "another-plan".into();
+            project.initiative_ids = vec!["initiative".into()];
+            project.team_ids = vec!["fixture-team".into()];
+            remote.item.project_id = Some(project.id.clone());
+            remote.item.revision = Some("2026-10-08T13:00:00Z".into());
+            remote.observed_at = 22;
+            store
+                .put_pm_task(
+                    &canonical.to_string(),
+                    "linear",
+                    &remote,
+                    Some((wave.id(), "initiative")),
+                )
+                .unwrap();
+            assert_eq!(
+                store.task(&active.id).unwrap().unwrap().project_id,
+                existing.id
+            );
+            let conflict = store.pending_task_changes(&active.id).unwrap();
+            assert_eq!(conflict[0].id, before[0].id);
+            assert_eq!(conflict[0].value, existing.id.as_str());
+            assert_eq!(
+                conflict[0].conflict.as_ref().unwrap()["value"],
+                store
+                    .project_by_project("third-provider-project")
+                    .unwrap()
+                    .unwrap()
+                    .id
+                    .as_str()
+            );
+            assert_eq!(
+                store.planning_task(&active.id).unwrap().state,
+                loopflow::store::PlanningState::Invalid
+            );
+        }
+        assert!(!repo.path().join("wave").exists());
+    }
+}

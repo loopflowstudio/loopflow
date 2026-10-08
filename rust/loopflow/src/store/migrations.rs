@@ -4389,6 +4389,16 @@ mod tests {
         assert_eq!(content.krs, project.krs);
         assert_eq!(content.workflow, project.workflow);
         assert_eq!(content.metric_targets, project.metric_targets);
+        conn.execute("INSERT INTO task_changes(id,task_id,field,value_json) VALUES('membership','task_fields','project_id','\"project_fields\"')", []).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT task_id FROM task_changes WHERE id='membership'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "task_fields"
+        );
     }
 
     #[test]

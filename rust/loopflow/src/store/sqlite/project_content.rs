@@ -142,7 +142,7 @@ impl SqliteStore {
     }
 }
 
-fn write_content(
+pub(super) fn write_content(
     conn: &Connection,
     project: &ProjectId,
     current: &PmProject,

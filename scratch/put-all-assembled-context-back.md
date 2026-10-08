@@ -17,8 +17,9 @@ Terminal, batch and persistent launches share `write_system_prompt_file` in
 `engine/agent.rs`, including structured reply guidance and empty-context handling.
 Files stay in the prompt-log directory for native resume. Capture attribution,
 reference escaping, source order and native permission settings remain intact.
-IDE deep links retain their existing full-prompt/vendor-seed transport; they have
-no system-file option. LOO-428's flags and Flow output are untouched.
+Main's LOO-420 integration removes IDE deep links and keeps terminal/headless
+execution. The launch fixtures use its renamed `-a` agent selector. LOO-428's
+flags and Flow output are untouched.
 
 ## Delete — do not maintain
 
@@ -142,6 +143,8 @@ publication/acceptance, scheduled-failure and pending-version sections were read
 the retained landing incident was not reread.
 
 Checks: `cargo test -p loopflow --test context_tests --test golden_prompt` PASS (17 + 1); compiled lib test `reference_rendering_preserves_live_requests_and_original_components` PASS (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` PASS. Gate owns affected suites; earlier transport/attribution results remain at `7611c2866:scratch/put-all-assembled-context-back.md`.
+
+Sync check (main `873f40e30`): `cargo test -p loopflow --test context_launch_tests terminal_context_uses_files_and_preserves_failed_sessions` PASS (1, Claude + Codex fixtures); broader checks remain with gate.
 
 `lf context --skill compress` reports all sources within budget; memory is
 15,998/16,000 tokens. No limit was raised.

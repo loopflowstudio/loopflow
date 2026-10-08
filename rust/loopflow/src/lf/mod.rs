@@ -93,6 +93,10 @@ pub struct Cli {
     #[arg(short = 'b', long = "batch")]
     pub batch: bool,
 
+    /// Show context accounting and diagnostic logs
+    #[arg(short = 'v', long, global = true)]
+    pub verbose: bool,
+
     /// Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch)
     #[arg(long, conflicts_with_all = ["ide", "batch"])]
     pub tui: bool,
@@ -184,6 +188,7 @@ impl Cli {
             ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
+            ("--verbose", self.verbose),
         ] {
             if enabled {
                 args.push(flag.to_string());
@@ -240,6 +245,7 @@ impl Cli {
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
+            verbose: self.verbose,
             tui: self.tui,
             ide: self.ide,
             chrome: self.chrome,

@@ -490,7 +490,6 @@ async fn local_started_task(
         &[("commit -m work", Some("succeeded"))],
         None,
     );
-    context.store.sqlite.mark_task_started(&task.id).unwrap();
     assert!(context.store.task_started(&task.id).await.unwrap());
     let flows = context.store.sqlite.task_flows(&task.id).unwrap();
     assert_eq!(flows.len(), 1);

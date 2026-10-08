@@ -865,6 +865,57 @@ fn authored_flow_records_each_skill_as_one_session() {
 }
 
 #[test]
+fn flow_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
+    let repo = loopflow_test_support::TestRepo::new();
+    write_skill(repo.path(), "work", "private-instructions-marker");
+    write_flow(repo.path(), "readable", "- work\n- work\n");
+    let bin = TempDir::new().unwrap();
+    write_executable(
+        &bin.path().join("codex"),
+        &codex_app_server_script("agent-readable-text", ""),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    for (verbose, log_filter) in [
+        (false, None),
+        (true, None),
+        (true, Some("loopflow=trace,lf=trace")),
+    ] {
+        let home = TempDir::new().unwrap();
+        let mut args = vec![
+            "--batch",
+            "--no-loopflow",
+            "-m",
+            "codex",
+            "run",
+            "readable",
+            "private-message-marker",
+        ];
+        if verbose {
+            args.insert(0, "--verbose");
+        }
+        let mut command = lf_command(repo.path(), home.path(), &args, Some(&path));
+        command.env_remove("RUST_LOG");
+        if let Some(filter) = log_filter {
+            command.env("RUST_LOG", filter);
+        }
+        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stderr}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("agent-readable-text"));
+        assert!(stderr.contains("[1/2]"), "{stderr}");
+        assert!(stderr.contains("[2/2]"), "{stderr}");
+        assert_eq!(stderr.contains("INFO"), verbose, "{stderr}");
+        assert_eq!(stderr.contains("total"), verbose, "{stderr}");
+        assert!(!stderr.contains("private-message-marker"), "{stderr}");
+        assert!(!stderr.contains("private-instructions-marker"), "{stderr}");
+    }
+}
+
+#[test]
 fn operational_flow_rejects_review_before_launch_or_capture() {
     for source in [
         "- step:

@@ -214,11 +214,13 @@ requires membership in the loaded catalog; the
 [versioned root tests](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/app-server/tests/suite/v2/skills_list.rs)
 cover replacement. A successful turn alone proves no skill expansion.
 
-The LF prototype reproduced exit zero without expansion and was removed.
-`--lf target/debug/lf` retains the outstanding LF acceptance check; it is expected
-to fail until native dispatch is implemented. Registering one Session's snapshot
-must not overwrite roots used by other conversations in the same engine.
-No global-root replacement or shared-engine rejection was added to production.
+The LF prototype reproduced exit zero without expansion and was removed, together
+with the `--lf` probe tied to its private snapshot layout (retained at
+`c91648d63:scripts/benchmarks/skill-invocation/codex_request_mapping.py`). Native LF
+dispatch still needs an entry-point proof once its placement is implemented.
+Registering one Session's snapshot must not overwrite roots used by other
+conversations in the same engine. No global-root replacement or shared-engine
+rejection was added to production.
 
 ### Additive Codex catalog selection
 

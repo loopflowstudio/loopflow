@@ -2,12 +2,12 @@ use std::env;
 use std::fs;
 use std::sync::{Mutex, OnceLock};
 
-use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
+use loopflow::engine::builtins::{
+    builtin_flow_names, builtin_skill_description, builtin_skill_names, BUILTIN_FLOW_CATEGORIES,
+    BUILTIN_SKILL_CATEGORIES,
+};
 use loopflow::engine::target::{resolve_definition, Target};
 use loopflow::engine::{load_flow, load_skill, skill_catalog::SkillCatalog};
-use loopflow::lf::discovery::{
-    builtin_skill_description, BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
-};
 use tempfile::TempDir;
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

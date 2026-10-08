@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub mod commands;
-pub mod discovery;
 pub mod navigation;
 pub mod output;
 

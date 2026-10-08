@@ -7,8 +7,9 @@ use clap::Command;
 use serde::Serialize;
 
 use crate::engine::target::{resolve_definition, DefinitionKind};
-use crate::lf::discovery::definition_source;
-use crate::lf::navigation::{command_tree, definition_invocation, resolve_path};
+use crate::lf::navigation::{
+    command_tree, definition_invocation, definition_source, format_target, resolve_path,
+};
 
 #[derive(Debug, Serialize)]
 pub struct Entry {
@@ -22,7 +23,7 @@ pub struct Entry {
 fn flow_entry(tree: &Command, repo: &Path, name: String) -> Entry {
     let kind = DefinitionKind::Flow;
     let description = match resolve_definition(repo, &name, Some(kind)) {
-        Ok(target) => crate::lf::discovery::format_target(&target),
+        Ok(target) => format_target(&target),
         Err(error) => format!("unavailable: {error}"),
     };
     Entry {

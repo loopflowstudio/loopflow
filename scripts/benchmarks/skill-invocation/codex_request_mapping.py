@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from continuity import _request, _send, _until
-from request_mapping import _run, _Terminal
+from request_mapping import _Terminal
 from websockets.asyncio.client import unix_connect
 from websockets.asyncio.server import unix_serve
 
@@ -606,14 +606,8 @@ def _last_user_texts(request: dict) -> list[str]:
     return [block.get("text", "") for block in user.get("content", [])]
 
 
-def _probe(
-    lf: Path | None,
-    codex: str,
-    additive: str | None = None,
-    redelivery: bool = False,
-    boundary: bool = False,
-    boundary_race: bool = False,
-) -> bool:
+def _probe(codex: str, mode: str) -> bool:
+    additive = mode if mode in ("original", "alias") else None
     requests = []
     received, release = threading.Event(), threading.Event()
 
@@ -625,7 +619,7 @@ def _probe(
             try:
                 super().handle()
             except (BrokenPipeError, ConnectionResetError):
-                if not boundary:
+                if mode != "boundary":
                     raise
                 # The interruption case deliberately closes its model stream.
 
@@ -635,9 +629,9 @@ def _probe(
                 text.startswith("<skill>\n") for text in _last_user_texts(requests[-1])
             )
             if (
-                (redelivery and len(requests) in (1, 3))
-                or (boundary and native_turn)
-                or (boundary_race and len(requests) == 2)
+                (mode == "redelivery" and len(requests) in (1, 3))
+                or (mode == "boundary" and native_turn)
+                or (mode == "boundary-race" and len(requests) == 2)
             ):
                 received.set()
                 if not release.wait(20):
@@ -704,223 +698,166 @@ def _probe(
             )
             skill.write_text(source)
             (skill.parent / "reference.txt").write_text("bundled reference")
-            context_file = workspace / "context.md"
-            context_file.write_text(context)
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(home), CODEX_HOME=str(codex_home), LF_HOME=str(root / "lf"))
-            if lf is None:
-                snapshot = root / "captured/skills/audit/SKILL.md"
-                snapshot.parent.mkdir(parents=True)
-                snapshot.write_text(source)
+            snapshot = root / "captured/skills/audit/SKILL.md"
+            snapshot.parent.mkdir(parents=True)
+            snapshot.write_text(source)
 
-                async def _native() -> dict:
-                    if boundary_race:
-                        return await _boundary_race(
-                            codex, workspace, env, skill, context, (received, release)
+            async def _native() -> dict:
+                if mode == "boundary-race":
+                    return await _boundary_race(
+                        codex, workspace, env, skill, context, (received, release)
+                    )
+                if mode == "boundary":
+                    return await _boundary_recovery(
+                        codex, workspace, env, skill, context, (received, release)
+                    )
+                async with _app_server(codex, workspace, env) as process:
+                    if mode == "redelivery":
+                        return await _steer_redelivery(
+                            process, workspace, skill, context, (received, release)
                         )
-                    if boundary:
-                        return await _boundary_recovery(
-                            codex, workspace, env, skill, context, (received, release)
-                        )
-                    async with _app_server(codex, workspace, env) as process:
-                        if redelivery:
-                            return await _steer_redelivery(
-                                process, workspace, skill, context, (received, release)
-                            )
-                        return await _catalog_probe(
-                            process, workspace, snapshot, context, additive, skill
-                        )
+                    return await _catalog_probe(
+                        process, workspace, snapshot, context, additive, skill
+                    )
 
-                checks = asyncio.run(_native())
-                if boundary_race:
-                    checks.update(
-                        expected_requests=len(requests) == 4,
-                        raced_start_not_expanded=len(requests) >= 3
-                        and not _skill_paths(requests[2]),
-                        fresh_start_expanded=len(requests) == 4
-                        and str(skill) in _skill_paths(requests[3]),
-                    )
-                    print(
-                        json.dumps(
-                            {"mode": "boundary-race", "requests": len(requests), "checks": checks}
-                        ),
-                        flush=True,
-                    )
-                    return all(checks.values())
-                if boundary:
-                    native_requests = [
-                        request
-                        for request in requests
-                        if any(text.startswith("<skill>\n") for text in _last_user_texts(request))
-                    ]
-                    title_requests = [
-                        request
-                        for request in requests
-                        if any(
-                            text.startswith("Generate a concise, single-line task title")
-                            for text in _last_user_texts(request)
-                        )
-                    ]
-                    checks.update(
-                        expected_conversation_requests=len(requests) - len(title_requests) == 5,
-                        native_expansion=len(native_requests) == 2
-                        and all(
-                            _skill_paths(request) == [str(skill)]
-                            and any(marker in text for text in _last_user_texts(request))
-                            for request in native_requests
-                        ),
-                        draft_not_submitted_with_skill=len(native_requests) == 2
-                        and all(
-                            "UNSUBMITTED_DRAFT_" not in json.dumps(request)
-                            for request in native_requests
-                        ),
-                    )
-                    print(
-                        json.dumps(
-                            {
-                                "mode": "boundary",
-                                "requests": len(requests),
-                                "title_requests": len(title_requests),
-                                "checks": checks,
-                            }
-                        ),
-                        flush=True,
-                    )
-                    return all(checks.values())
-                if redelivery:
-                    texts = (
-                        [
-                            block.get("text", "")
-                            for item in requests[1].get("input", [])
-                            if item.get("role") == "user"
-                            for block in item.get("content", [])
-                        ]
-                        if len(requests) >= 2
-                        else []
-                    )
-                    checks.update(
-                        expected_requests=len(requests) == 5,
-                        duplicate_model_input=sum(text.count(f"$audit {context}") for text in texts)
-                        == 2,
-                        steer_skill_not_expanded=len(requests) >= 2
-                        and not _skill_paths(requests[1]),
-                        single_steer_not_expanded=len(requests) >= 4
-                        and not _skill_paths(requests[3])
-                        and sum(
-                            block.get("text", "").count(f"$audit {context}")
-                            for item in requests[3].get("input", [])
-                            if item.get("role") == "user"
-                            for block in item.get("content", [])
-                        )
-                        == 1,
-                        start_skill_expanded=len(requests) == 5
-                        and str(skill) in _skill_paths(requests[4]),
-                    )
-                    print(
-                        json.dumps(
-                            {
-                                "mode": "steer-redelivery",
-                                "requests": len(requests),
-                                "checks": checks,
-                            }
-                        ),
-                        flush=True,
-                    )
-                    return all(checks.values())
+            checks = asyncio.run(_native())
+            if mode == "boundary-race":
                 checks.update(
-                    expected_requests=len(requests) == (5 if additive else 2),
-                    unregistered_path_ignored=len(requests) >= 2
-                    and marker not in json.dumps(requests[0].get("input", [])),
-                    registered_path_expanded=len(requests) >= 2
-                    and any(
-                        f"<path>{snapshot}</path>" in json.dumps(item)
-                        and marker in json.dumps(item)
-                        for item in requests[1].get("input", [])
-                        if item.get("role") == "user"
+                    expected_requests=len(requests) == 4,
+                    raced_start_not_expanded=len(requests) >= 3 and not _skill_paths(requests[2]),
+                    fresh_start_expanded=len(requests) == 4
+                    and str(skill) in _skill_paths(requests[3]),
+                )
+                print(
+                    json.dumps(
+                        {"mode": "boundary-race", "requests": len(requests), "checks": checks}
+                    ),
+                    flush=True,
+                )
+                return all(checks.values())
+            if mode == "boundary":
+                native_requests = [
+                    request
+                    for request in requests
+                    if any(text.startswith("<skill>\n") for text in _last_user_texts(request))
+                ]
+                title_requests = [
+                    request
+                    for request in requests
+                    if any(
+                        text.startswith("Generate a concise, single-line task title")
+                        for text in _last_user_texts(request)
+                    )
+                ]
+                checks.update(
+                    expected_conversation_requests=len(requests) - len(title_requests) == 5,
+                    native_expansion=len(native_requests) == 2
+                    and all(
+                        _skill_paths(request) == [str(skill)]
+                        and any(marker in text for text in _last_user_texts(request))
+                        for request in native_requests
+                    ),
+                    draft_not_submitted_with_skill=len(native_requests) == 2
+                    and all(
+                        "UNSUBMITTED_DRAFT_" not in json.dumps(request)
+                        for request in native_requests
                     ),
                 )
-                if additive:
-                    checks["additive_native_expansion"] = len(requests) == 5 and any(
-                        marker in json.dumps(item)
-                        and "<skill>" in json.dumps(item)
-                        and f"<path>{skill}</path>" not in json.dumps(item)
-                        for item in requests[3].get("input", [])
-                        if item.get("role") == "user"
-                    )
-                    before, after = _skill_paths(requests[2]), _skill_paths(requests[-1])
-                    checks["implicit_selection_unchanged"] = before == after == [str(skill)]
-                    print(
-                        json.dumps(
-                            {
-                                "before_mount": before,
-                                "explicit_mount": _skill_paths(requests[3])
-                                if len(requests) == 5
-                                else [],
-                                "after_mount": after,
-                            }
-                        ),
-                        flush=True,
-                    )
                 print(
                     json.dumps(
                         {
-                            "mode": "additive-catalog" if additive else "provider-counterexample",
+                            "mode": "boundary",
+                            "requests": len(requests),
+                            "title_requests": len(title_requests),
                             "checks": checks,
                         }
                     ),
                     flush=True,
                 )
                 return all(checks.values())
-            env["LF_BIN"] = str(lf)
-            result = _run(
-                [
-                    str(lf),
-                    "-b",
-                    "--no-loopflow",
-                    "--agent",
-                    "codex:gpt-5.4",
-                    "--docs",
-                    str(context_file),
-                    "audit",
-                    "alpha",
-                ],
-                workspace,
-                env,
-                [],
-            )
-            snapshots = list((root / "lf/runs").glob("*/*/skill-*/skills/invoke/SKILL.md"))
-            messages = [item for request in requests for item in request.get("input", [])]
-            users = [json.dumps(item) for item in messages if item.get("role") == "user"]
-            checks = {
-                "exit_zero": result.returncode == 0,
-                "single_request": len(requests) == 1,
-                "native_expansion": len(snapshots) == 1
+            if mode == "redelivery":
+                texts = (
+                    [
+                        block.get("text", "")
+                        for item in requests[1].get("input", [])
+                        if item.get("role") == "user"
+                        for block in item.get("content", [])
+                    ]
+                    if len(requests) >= 2
+                    else []
+                )
+                checks.update(
+                    expected_requests=len(requests) == 5,
+                    duplicate_model_input=sum(text.count(f"$audit {context}") for text in texts)
+                    == 2,
+                    steer_skill_not_expanded=len(requests) >= 2 and not _skill_paths(requests[1]),
+                    single_steer_not_expanded=len(requests) >= 4
+                    and not _skill_paths(requests[3])
+                    and sum(
+                        block.get("text", "").count(f"$audit {context}")
+                        for item in requests[3].get("input", [])
+                        if item.get("role") == "user"
+                        for block in item.get("content", [])
+                    )
+                    == 1,
+                    start_skill_expanded=len(requests) == 5
+                    and str(skill) in _skill_paths(requests[4]),
+                )
+                print(
+                    json.dumps(
+                        {
+                            "mode": "steer-redelivery",
+                            "requests": len(requests),
+                            "checks": checks,
+                        }
+                    ),
+                    flush=True,
+                )
+                return all(checks.values())
+            checks.update(
+                expected_requests=len(requests) == (5 if additive else 2),
+                unregistered_path_ignored=len(requests) >= 2
+                and marker not in json.dumps(requests[0].get("input", [])),
+                registered_path_expanded=len(requests) >= 2
                 and any(
-                    f"<path>{snapshots[0]}</path>" in text and marker in text for text in users
+                    f"<path>{snapshot}</path>" in json.dumps(item) and marker in json.dumps(item)
+                    for item in requests[1].get("input", [])
+                    if item.get("role") == "user"
                 ),
-                "native_arguments": any("$audit alpha" in text for text in users),
-                "context_user_only": any(context in text for text in users)
-                and not any(
-                    context in json.dumps(item) for item in messages if item.get("role") != "user"
+            )
+            if additive:
+                checks["additive_native_expansion"] = len(requests) == 5 and any(
+                    marker in json.dumps(item)
+                    and "<skill>" in json.dumps(item)
+                    and f"<path>{skill}</path>" not in json.dumps(item)
+                    for item in requests[3].get("input", [])
+                    if item.get("role") == "user"
+                )
+                before, after = _skill_paths(requests[2]), _skill_paths(requests[-1])
+                checks["implicit_selection_unchanged"] = before == after == [str(skill)]
+                print(
+                    json.dumps(
+                        {
+                            "before_mount": before,
+                            "explicit_mount": _skill_paths(requests[3])
+                            if len(requests) == 5
+                            else [],
+                            "after_mount": after,
+                        }
+                    ),
+                    flush=True,
+                )
+            print(
+                json.dumps(
+                    {
+                        "mode": "additive-catalog" if additive else "provider-counterexample",
+                        "checks": checks,
+                    }
                 ),
-                "retained_source": len(snapshots) == 1 and snapshots[0].read_text() == source,
-                "bundled_reference": len(snapshots) == 1
-                and (snapshots[0].parent / "reference.txt").read_text() == "bundled reference",
-            }
-            rpc = [
-                json.loads(line)
-                for path in (root / "lf/runs").glob("*/*/events.jsonl")
-                for line in path.read_text().splitlines()
-            ]
-            registration = [
-                event.get("line")
-                for event in rpc
-                if event.get("type") == "provider_output" and '"skills"' in event.get("line", "")
-            ]
-            print(json.dumps({"checks": checks}), flush=True)
-            if not all(checks.values()):
-                print(result.stderr)
-                print(json.dumps({"registration": registration}))
+                flush=True,
+            )
             return all(checks.values())
     finally:
         release.set()
@@ -931,48 +868,40 @@ def _probe(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.set_defaults(mode="catalog")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--lf",
-        type=Path,
-        help="Check the pending native LF implementation instead of the provider counterexample",
-    )
     parser.add_argument("--codex", default=shutil.which("codex"))
     mode.add_argument(
         "--additive",
+        dest="mode",
         choices=["original", "alias"],
         help="Probe a skill link while preserving sibling roots and plain invocation",
     )
     mode.add_argument(
         "--redelivery",
-        action="store_true",
+        dest="mode",
+        action="store_const",
+        const="redelivery",
         help="Check duplicate structured steering with an identical RPC id",
     )
     mode.add_argument(
         "--boundary-race",
-        action="store_true",
+        dest="mode",
+        action="store_const",
+        const="boundary-race",
         help="Start another client's turn between idle observation and native skill delivery",
     )
     mode.add_argument(
         "--boundary",
-        action="store_true",
+        dest="mode",
+        action="store_const",
+        const="boundary",
         help="Lose a native turn reply, cancel its waiter and recover on a new connection",
     )
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")
-    return (
-        0
-        if _probe(
-            args.lf.resolve() if args.lf else None,
-            args.codex,
-            args.additive,
-            args.redelivery,
-            args.boundary,
-            args.boundary_race,
-        )
-        else 1
-    )
+    return 0 if _probe(args.codex, args.mode) else 1
 
 
 if __name__ == "__main__":

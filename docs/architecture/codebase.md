@@ -42,7 +42,7 @@ subprocess edge to one concept.
 | Behavior | Begin at | Main object passed onward |
 | --- | --- | --- |
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
-| Skill/Flow discovery | [`lf/discovery.rs`](../../rust/loopflow/src/lf/discovery.rs) | selected Skill or Flow |
+| Skill/Flow discovery | [`engine/target.rs`](../../rust/loopflow/src/engine/target.rs) | selected Skill or Flow |
 | prompt assembly | [`engine/prompt.rs`](../../rust/loopflow/src/engine/prompt.rs) | system/task prompt pair |
 | provider routing | [`provider_account.rs`](../../rust/loopflow/src/provider_account.rs) | selected account route and lease |
 | provider streams | [`harness/`](../../rust/loopflow/src/harness/) | normalized conversation and usage |

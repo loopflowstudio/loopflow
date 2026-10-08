@@ -14,44 +14,44 @@ Task/repository/Flow diagnostics are expected in that empty fixture and prove
 parsing only. Root help silently ignores selection. Source shows saved Task
 agent precedence and no inherited override for agent-issued child commands.
 
-## Implementation
+## Reconciled implementation (2026-10-08)
 
-Use Clap's global declaration and the existing generic handling of external
-skill arguments. Carry explicit selection through one invocation environment
-value; defaults must never create it. Resolve it before preparing a provider
-prompt/capture, and preserve it through provider children and remote transport.
-Fresh independent Session shells clear it with other invocation context.
-Keep `--` opaque. Explain no-agent commands without changing their result.
+One Clap global replaces PR-local declarations and precedence. Generic argument
+partitioning still serves external skills and preserves literal `--` arguments;
+duplicate parser tests and the separate before/after lists are removed.
+Help and the generated reference describe the global override once.
 
-## Delete — do not maintain
+`LF_AGENT_OVERRIDE` carries explicit selection before prompt preparation and
+capture. Both prepared and direct provider launches apply it; Task/Flow defaults
+never become inherited overrides. Independent Session shells clear it. Remote
+transport forwards inherited selection; a top-level remote flag stays in argv.
+Replay changes only its new capture. Native resume retains its provider and
+permits a model override, rejecting a provider change before launch.
 
-- `PrCommand::Publish.agent` and `PrCommand::Open.agent`, their precedence
-  branches and duplicate parser tests.
-- PR-specific expectation that reordering moves `-a` to a leaf. Clap owns
-  global argument placement; generic external-skill handling remains necessary.
+Compression keeps one partition of global flags and skill arguments. The public
+CLI fixture asserts the exact six Claude Sessions across Task, nested Flow and
+provider-child launches, including a child that explicitly requests Codex.
+Separate no-flag launches retain skill/step models. Native-history refusal keeps
+all six Sessions. Synthetic accounts use `--isolate`; an earlier shared activation
+failed at a macOS Keychain write without using real providers or logins.
 
-## Review and remaining work
+Main's startup changes from `497885050` are integrated. They remove provider
+probes and reuse resolved directories; the override does not restore those
+probes or require another resolver. Release's child memory was read in full:
+its operation-entry lesson supports checking recorded Sessions through the
+public CLI, rather than treating successful parsing as launch acceptance.
 
-One global declaration replaces the PR copies. Existing generic rewriting still
-handles opaque external-skill arguments; inherited Clap globals are not local
-argument owners. Explicit selection travels as `LF_AGENT_OVERRIDE`, while Flow
-children stop turning saved defaults into `--agent` flags.
+## Remaining work
 
-Review found two additional consumers: replay now records the selected agent on
-its new capture without changing the source; native resume rejects a different
-provider before launching and allows a model override within the same provider.
-No schema change or compatibility path is needed. The generated command reference
-lists inherited globals once.
+Publication checks covered Task launches, replay, native resume, shell isolation,
+command discovery and startup after the integrated main changes. Review found
+root help exceeded its existing 25-line limit; removing two blank lines restored
+the limit without dropping the global override explanation. Discovery then passed.
+Demo/review owns judgment using synthetic providers under Jack Heart's constraint.
+Remote execution, installed/live-provider acceptance, hosted CI and delivery
+remain unproved; real-provider use and landing remain outside authorization.
+No product decision is needed for this reconciliation.
+Prior evidence: `69bdad343:scratch/choose-the-agent-with-a.md`; compression:
+`5df2ba251`. The publication repair changes only root-help spacing.
 
-The CLI fixture demonstrates the requested behavior using disposable Task/Workflow
-records, nested Flows and stand-in providers. All six step/child Sessions record
-Claude; separate no-flag runs record skill/step model choices. Native-history refusal
-preserves all six Sessions. Real provider use, installation, hosted CI and delivery
-were not exercised. Gate owns affected suites; demo/review owns judgment. No landing.
-
-Realign inspected Release's headings and relevant publication/recovery sections;
-its operation-entry lesson supports the public CLI fixture. Other child historical
-incident detail was not reread. Infrastructure memory retains source versus installed
-acceptance and archives older installation detail at the supplied base commit.
-
-Checks: build, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, Ruff and 32 focused network-isolated parser/launch/replay/history tests passed; affected suites deferred to gate.
+Checks: network-isolated `cargo nextest run -p loopflow` across Task launch, Session CLI, startup, discovery, parser, replay, resume, shell and Flow-graph cases: 77/78 passed; after the help-spacing repair, `--test cli_discovery`: 23/23 passed; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed. Full gate and hosted CI remain unproved.

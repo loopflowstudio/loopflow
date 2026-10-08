@@ -7,7 +7,9 @@
   within that provider is allowed. No history is converted or discarded.
 - The fixture uses synthetic account records and `--isolate`. Its earlier shared
   activation failed at a macOS Keychain write; no real provider or login was run.
-- `lf context --skill realign` reports the generated local Work seed at 17,255
-  tokens, 1,255 above its goal limit. It includes the active implementation diff;
-  authored memory and scratch are curated separately. The Task directive and
-  required regression coverage remain intact; no budget was raised.
+- The generated Task input embeds the complete branch diff, including deletions.
+  Reconciliation's `lf context --skill realign --json` reports about 17,900
+  tokens against the 16,000-token goal limit (about 1,900 over). Memory and
+  scratch fit. Required implementation and regression evidence account for the
+  remaining conflict; shrinking authored notes cannot remove it. The full
+  excerpt source was read, evidence retained and limits left unchanged.

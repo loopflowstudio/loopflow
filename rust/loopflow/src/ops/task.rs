@@ -1315,9 +1315,7 @@ fn create_prepared_task(
             .map_err(task_error)?
             .ok_or_else(|| task_error("owning Wave is not initialized"))?;
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
-        let project =
-            super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
-        let project_workflow = project.plan.workflow.clone();
+        super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
         // Re-resolve after worktree planning: a concurrent run may have created
         // the Task in the gap. Non-terminal Work wins. Terminal Work remains
         // authoritative and requires an explicit recovery transition.
@@ -1429,24 +1427,6 @@ fn create_prepared_task(
         }
 
         finish_task_checkout(&store, &task, &pr).await?;
-        // A new Task stands at `start` of its Project's workflow. A Project
-        // that names none leaves the Task without one until a run names it.
-        if let (Some(process), Some(definition)) = (
-            crate::journal::current_process_lfid(),
-            super::project::load_workflow(
-                &store,
-                &task.wave_id,
-                &project_workflow,
-                task.worktree()?,
-            )
-            .ok()
-            .flatten(),
-        ) {
-            store
-                .sqlite
-                .take_up_workflow(&task.id, &definition, &process, None)
-                .map_err(task_error)?;
-        }
         Ok(task)
     })
 }
@@ -2202,37 +2182,20 @@ pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
 
 async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
     let wave = owning_wave(store, task).await?;
-    let url = if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        None
-    } else {
-        let snapshot = store
-            .pm_snapshot(&task.wave_id)
+    let url = if let Some(issue) = &task.plan.linear_id {
+        let observation = store
+            .pm_task_observation(wave.repo(), "linear", issue.as_str())
             .await
-            .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-            .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
-        let snapshot = snapshot.snapshot;
-        let item = snapshot
-            .items
-            .iter()
-            .find(|item| {
-                task.plan
-                    .linear_id
-                    .as_ref()
-                    .is_some_and(|id| item.id == id.as_str())
-            })
-            .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
+            .map_err(task_error)?;
         Some(
-            item.url
-                .as_deref()
+            observation
+                .record
+                .and_then(|record| record.item.url)
                 .filter(|url| _valid_task_url(url))
-                .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?
-                .to_string(),
+                .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?,
         )
+    } else {
+        None
     };
     let prs = store
         .task_prs(&task.id)

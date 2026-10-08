@@ -20,6 +20,19 @@ Desktop watches committed local state. Historical ingress APIs prove no live
 webhook delivery. Keep existing triggers/cadence; operation-entry proofs for all
 three examples remain required.
 
+Jack's comment `93690dc2-5526-4ecf-a203-5e248339b0c9` extends this to semi-live
+comments and completion: active CLI/Desktop connections save locally immediately
+and propagate without awaiting another agent turn, manual refresh or unrelated
+outbound drain. Incoming state, membership and comments enter the common store
+and visible planning on that active observation path. Disconnect retains pending
+changes; reconnect catches up without duplicate Tasks/comments. Stable mutation
+identities prevent echoes through the common writer, not per-operation callbacks.
+Remote completion cannot advance a captured local Workflow, signal Processes or
+clean checkouts. Delayed completion cannot overwrite newer explicit reopening;
+machine clocks alone prove no order. Preserve conflicts and prove these boundaries
+at operation entry. LOO-412 retains its under-review machine transport, sync scope
+and active-owner choices; this authorizes neither its restart nor replication here.
+
 Jack also selected Git-like Task prefixes: accept four or more hex digits, bare or
 prefixed, reject ambiguity, and retain full IDs. Display abbreviations can lengthen.
 Stable identity, creation receipts, provider mapping and placement stay distinct.
@@ -196,16 +209,6 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-## Retained capture storage and autonomous cleanup (2026-10-05)
-
-Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
-one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
-comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
-(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
-select history. Preservation constraints and contrary evidence remain under
-Capture cutover below. This decision authorizes neither installed conversion nor
-live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
-
 ## Project configuration and review direction (2026-10-05)
 
 Jack Heart resolved LOO-366's shared local Project binding and one-time cached-name
@@ -248,26 +251,20 @@ release evidence belongs in [Release memory](release/MEMORY.md).
 
 ## Capture cutover (LOO-370, reconciled 2026-10-05)
 
-Jack Heart authorized autonomous source delivery, not installed conversion or
-interruption. Infrastructure selected one opaque `runs/` physical capture root
-under that delegation; the updated brief and delivered steers explicitly accept
-it. This changes the prior layout-replacement requirement. No relocation,
-parallel layout, compatibility alias or privileged offline migration is required.
+Infrastructure selected one opaque `~/.lf/runs` root under Jack Heart's source-only
+delegation (comment `3829b49e-2ade-4bee-8850-2ae2297399a8`); PR #1450 (`1af81fe03`)
+is integrated. This supersedes relocation, parallel layouts and offline migration.
+Capture keys select history; Session IDs select mutations, and Session/Exec
+provenance supplies authority.
+Preserve paths, payloads, feedback, native identity and usage; missing payload
+cannot erase resumable identity. Checksum-pinned v0.13.3 stub-provider proofs and
+#1450's merge establish no installed conversion or interruption authority.
 
-Capture keys select history; Session IDs select mutations; Session/Exec provenance
-supplies authority. Missing payload cannot erase resumable SQLite identity.
-Keep historical paths, payloads, feedback, native identity and usage unchanged.
-Checksum-pinned v0.13.3 capture preservation passed with stub providers, including
-native resume, independent replay, review feedback and nested Exec ancestry.
-Those fixtures prove neither installation nor conversion; #1450's source merge
-does not establish either installed outcome.
-
-The abandoned permission probes demonstrated writable hard-link aliases and a
-recovery check/write race that altered unrelated replacement metadata. Those
-counterexamples and the unresolved Mac boot-custody investigation remain at
-`6fcdbe9da0b47ef95f1f92ebdb259401a327cd46:scratch/finish-removing-the-retired-run.md`.
-Deleting the probes does not establish exclusion or migration. Installed acceptance
-remains separate from source fixtures and delivery.
+Writable hard-link aliases, a recovery check/write race altering replacement
+metadata and unresolved Mac boot custody remain counterevidence, not repaired by
+deleting probes. Exact proofs and references:
+`5948e490eb7414a059f27ba39f838423a4730465:wave/infrastructure/MEMORY.md`
+under this heading.
 
 ## Review replacement (2026-10-04)
 

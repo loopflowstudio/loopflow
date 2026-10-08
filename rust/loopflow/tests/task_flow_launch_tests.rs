@@ -228,7 +228,6 @@ impl WorkflowTask {
     fn new() -> Self {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
-        repo.create_branch("launch-proof");
         let home = tempfile::tempdir().unwrap();
         let env = support::EnvGuard::new(&[
             ("open", "#!/bin/sh\nexit 0\n"),
@@ -268,6 +267,8 @@ impl WorkflowTask {
         // The Task's branch starts from these definitions and holds nothing.
         repo.stage_all();
         repo.commit("Define the fixture Flows and workflows");
+        repo.push();
+        repo.create_branch("launch-proof");
         let registered = support::register_task(
             home.path(),
             &repo.path().canonicalize().unwrap(),
@@ -364,6 +365,60 @@ fn moves(workflow: &serde_json::Value) -> Vec<(String, Option<u64>)> {
 fn refusal(output: std::process::Output) -> String {
     assert!(!output.status.success());
     String::from_utf8_lossy(&output.stderr).to_string()
+}
+
+#[test]
+fn checkout_leaves_workflow_selection_to_the_first_run() {
+    let fixture = WorkflowTask::new();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = &fixture.registered.store;
+    let sqlite =
+        loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+            .unwrap();
+    let mut snapshot = runtime
+        .block_on(store.pm_snapshot(&fixture.registered.task.wave_id))
+        .unwrap()
+        .unwrap();
+    let mut item = snapshot.snapshot.items[0].clone();
+    item.id = "unplaced-issue".into();
+    item.identifier = "INF-124".into();
+    item.name = "Workflow chosen at first run".into();
+    item.branch_name = None;
+    snapshot.snapshot.items.push(item);
+    runtime
+        .block_on(store.put_pm_snapshot(snapshot, None))
+        .unwrap();
+    let task = runtime
+        .block_on(store.get_task_by_issue("INF-124"))
+        .unwrap()
+        .unwrap();
+    let select = |name: &str| {
+        sqlite.update_project_content(
+            &task.project_id,
+            &loopflow::pm::ProjectContent {
+                workflow: name.into(),
+                krs: Vec::new(),
+                metric_targets: Vec::new(),
+            },
+            Some("nodes: {review: demo}\nedges: [{from: start, to: review, flow: proof}, {from: review, to: end}]\n"),
+        ).unwrap();
+    };
+    select("before-checkout");
+    fixture.ok(&["task", "checkout", "INF-124"]);
+    assert!(sqlite.task_work(&task.id).unwrap().workflow.is_none());
+    select("at-first-run");
+    fixture.ok(&["-b", "task", "run", "INF-124"]);
+    let captured = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
+    assert_eq!(captured.definition.name, "at-first-run");
+    assert_eq!(
+        serde_json::to_value(&captured.position).unwrap(),
+        at("review")
+    );
+    select("after-first-run");
+    fixture.ok(&["-b", "task", "run", "INF-124"]);
+    let retained = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
+    assert_eq!(retained.definition, captured.definition);
+    assert_eq!(serde_json::to_value(&retained.position).unwrap(), at("end"));
 }
 
 #[test]

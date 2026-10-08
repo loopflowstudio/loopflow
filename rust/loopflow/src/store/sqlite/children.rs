@@ -29,6 +29,11 @@ use super::durable::{inherit_project_placement, inherit_task_placement};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub(crate) fn task_deleted(&self, task: &Task) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_deleted_on(&conn, task)
+    }
+
     pub fn place_task(
         &self,
         task_id: &TaskId,
@@ -1153,19 +1158,14 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
     Ok(())
 }
 
-pub(super) fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
-    if super::local_planning::project_authority_on(conn, &task.project_id)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        return Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND planning_deleted_at IS NOT NULL)",
-            [task.id.as_str()],
-            |row| row.get(0),
-        )?);
-    }
+fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
+    // Either receipt applies regardless of planning ownership.
+    // Registration also checks provider evidence before a Task row exists.
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?1 AND issue_id=?2)",
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND planning_deleted_at IS NOT NULL)
+         OR EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?2 AND issue_id=?3)",
         params![
+            task.id.as_str(),
             task.wave_id.as_str(),
             task.plan.linear_id.as_ref().map(|id| id.as_str())
         ],
@@ -1356,10 +1356,8 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
 ) VALUES (
     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
 )";
-const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL AND (
-    EXISTS(SELECT 1 FROM waves w WHERE w.id=p.wave_id AND w.personal_plan_id IS NOT NULL)
-    OR NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)
-)";
+const TASK_VISIBLE: &str = "t.planning_deleted_at IS NULL
+    AND NOT EXISTS(SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id)";
 const TASK_COLUMNS: &str = "WITH RECURSIVE selector_lengths(n) AS (
     SELECT 7 UNION ALL SELECT n+1 FROM selector_lengths WHERE n<32
 ) SELECT
@@ -2218,6 +2216,14 @@ mod local_planning_tests {
             )
             .unwrap();
         assert_eq!(edited.plan.title, "A mapping does not transfer authority");
+        store
+            .confirm_task_deletion(&mapped.wave_id, "different-provider-uuid", "TEAM-9")
+            .unwrap();
+        assert!(store.task_deleted(&mapped).unwrap());
+        assert!(store.list_tasks(None).unwrap().is_empty());
+        let retained = store.task(&mapped.id).unwrap().unwrap();
+        assert_eq!(retained.plan, edited.plan);
+        assert_eq!(store.create_local_task(&input).unwrap(), retained);
     }
 
     #[test]

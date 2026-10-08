@@ -29,11 +29,6 @@ pub(super) fn project_authority_on(
 }
 
 impl SqliteStore {
-    pub(crate) fn task_deleted(&self, task: &crate::work::task::Task) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        super::children::task_deleted_on(&conn, task)
-    }
-
     pub(crate) fn delete_local_task(&self, id: &crate::durable::TaskId) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

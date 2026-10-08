@@ -2746,6 +2746,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_deletion_receipt_hides_mapped_tasks_without_erasing_history() {
+        let (directory, store, wave) = planning_store().await;
+        let project = make_project(&wave);
+        store.create_project(&project).await.unwrap();
+        select_project(&store, &project);
+        let task = make_task(&wave, &project);
+        let pr = make_task_pr(&task);
+        store.create_task(&task, &pr, None).await.unwrap();
+        assert!(!store.sqlite.task_deleted(&task).unwrap());
+        rusqlite::Connection::open(directory.path().join("registry.db"))
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_deleted_at=42 WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+        assert!(store.sqlite.task_deleted(&task).unwrap());
+        assert!(store.list_tasks(None).await.unwrap().is_empty());
+        assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
+        assert_eq!(store.active_task_pr(&pr.task_id).await.unwrap(), Some(pr));
+    }
+
+    #[tokio::test]
     async fn task_deletion_confirmation_serializes_with_registration() {
         for registration_first in [false, true] {
             let directory = tempfile::tempdir().unwrap();

@@ -289,12 +289,9 @@ fn resolve_account_route_blocking(
         launch.provider_account_id.clone(),
         launch.provider_account_authority_home.clone(),
     ) {
-        (Some(account_id), Some(home)) => resolve_recorded_provider_account_blocking(
-            provider,
-            launch.resume_token.clone(),
-            account_id,
-            home,
-        ),
+        (Some(account_id), Some(home)) => {
+            resolve_recorded_provider_account_blocking(provider, account_id, home)
+        }
         (account_id, None) => resolve_provider_account_exact_blocking(
             provider,
             launch.resume_token.clone(),

@@ -490,7 +490,7 @@ lf --account primary@ implement
 
 See [Subscription Management](/docs/subscriptions) for identity storage,
 access profiles, routing, health, selectors, and remote development. See
-[Security](/docs/security) for credential forwarding and trust boundaries.
+[Security](/docs/security) for machine logins and trust boundaries.
 
 ### Skill sources
 

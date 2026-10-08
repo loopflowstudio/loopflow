@@ -1,11 +1,9 @@
-//! Host-local provider accounts, selection, and process-lifetime credential
-//! leases for Claude and Codex.
+//! Machine-local provider accounts, selection, and launch homes for Claude and Codex.
 
 pub mod activation;
 pub(crate) mod identity;
-pub mod lease;
+pub mod selection;
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -117,10 +115,10 @@ pub enum ProviderAccountError {
     Store(#[from] StoreError),
     #[error("provider account filesystem failed: {0}")]
     Filesystem(String),
-    #[error("invalid forwarded account lease: {0}")]
-    AccountLease(String),
-    #[error("cannot forward {provider} account '{account_id}': {reason}")]
-    ForwardingCredential {
+    #[error("invalid account selection: {0}")]
+    AccountSelection(String),
+    #[error("cannot authenticate {provider} account '{account_id}': {reason}")]
+    CredentialUnavailable {
         provider: Provider,
         account_id: ProviderAccountId,
         reason: String,
@@ -162,8 +160,7 @@ enum RouteHome {
     },
 }
 
-/// Who holds the account's login. Independent of [`RouteHome`]: a lent
-/// account runs shared or isolated like a stored one.
+/// The catalog holding an account's login, independent of its launch home.
 #[derive(Clone)]
 enum AccountLogin {
     /// A profile in this Machine's catalog. A shared launch signs the native
@@ -178,43 +175,14 @@ enum AccountLogin {
         catalog: SharedStore,
         profile: PathBuf,
     },
-    /// The origin of an `lf --machine` session owns the login and lends one access
-    /// token, which is never written here. Claude takes it from its
-    /// environment; a Codex engine is handed it over its protocol.
-    Lent {
-        client: lease::AccountLeaseClient,
-        access_token: String,
-    },
-}
-
-#[derive(Clone)]
-enum AccountCandidateAuthority {
-    Local { store: SharedStore, home: PathBuf },
-    Forwarded { client: lease::AccountLeaseClient },
 }
 
 #[derive(Clone)]
 struct AccountCandidate {
     account: ProviderAccount,
-    limits: Vec<AccountLimitRow>,
     credential_available: bool,
-    authority: AccountCandidateAuthority,
-}
-
-impl AccountCandidate {
-    fn is_forwarded(&self) -> bool {
-        matches!(self.authority, AccountCandidateAuthority::Forwarded { .. })
-    }
-
-    fn is_strained(&self, now: i64) -> bool {
-        active_account_strain(
-            &self.account.provider,
-            &self.account.account_id,
-            &self.limits,
-            now,
-        )
-        .is_some()
-    }
+    strained: bool,
+    home: PathBuf,
 }
 
 #[derive(Clone)]
@@ -232,15 +200,10 @@ impl std::fmt::Debug for ProviderAccountRoute {
             RouteHome::Isolated => "account_home",
             RouteHome::Shared { .. } => "native_home",
         };
-        let login = match self.login {
-            AccountLogin::Stored { .. } | AccountLogin::Replayed { .. } => "profile",
-            AccountLogin::Lent { .. } => "access_token",
-        };
         f.debug_struct("ProviderAccountRoute")
             .field("provider", &self.provider)
             .field("account_id", &self.account_id)
             .field("home", &home)
-            .field("login", &login)
             .field("resume_requested_session", &self.resume_requested_session)
             .finish()
     }
@@ -277,40 +240,12 @@ impl ProviderAccountRoute {
         }
     }
 
-    /// A route on an account its `lf --machine` origin lent.
-    fn lent(
-        client: lease::AccountLeaseClient,
-        provider: Provider,
-        resolution: &lease::LeaseResolution,
-        isolated: bool,
-        named: bool,
-    ) -> Self {
-        Self {
-            provider,
-            account_id: resolution.account_id.clone(),
-            resume_requested_session: resolution.resume_requested_session,
-            home: if isolated {
-                RouteHome::Isolated
-            } else {
-                Self::shared_home(named)
-            },
-            login: AccountLogin::Lent {
-                client,
-                access_token: resolution.access_token().to_string(),
-            },
-        }
-    }
-
     /// The home an isolated conversation on this account runs in.
-    fn account_home(&self) -> PathBuf {
+    fn account_home(&self) -> &Path {
         match &self.login {
             AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
-                profile.clone()
+                profile
             }
-            AccountLogin::Lent { .. } => crate::store::lf_home_dir()
-                .join("accounts")
-                .join(self.provider.as_str())
-                .join(format!("forwarded-{}", self.account_id)),
         }
     }
 
@@ -339,11 +274,6 @@ impl ProviderAccountRoute {
 
     pub(crate) fn resume_requested_session(&self) -> bool {
         self.resume_requested_session
-    }
-
-    #[cfg(test)]
-    pub(crate) fn is_forwarded(&self) -> bool {
-        matches!(self.login, AccountLogin::Lent { .. })
     }
 
     #[cfg(test)]
@@ -379,33 +309,21 @@ impl ProviderAccountRoute {
     /// secret-bearing representation to persist or log.
     pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
         self.check_identity().await?;
-        match &self.login {
-            AccountLogin::Lent { access_token, .. } => {
-                if access_token.trim().is_empty() {
-                    return Err(ProviderAccountError::NoAuthenticatedAccount {
-                        provider: self.provider,
-                        accounts: format!("{} (forwarded credential is empty)", self.account_id),
-                    });
-                }
-            }
-            AccountLogin::Stored { profile, .. } | AccountLogin::Replayed { profile, .. } => {
-                let home = self.credential_home(profile);
-                crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
-                    .await
-                    .map_err(|error| ProviderAccountError::ForwardingCredential {
-                        provider: self.provider,
-                        account_id: self.account_id.clone(),
-                        reason: error.to_string(),
-                    })?
-                    .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
-                        provider: self.provider,
-                        accounts: format!(
-                            "{} (provider CLI reports no active OAuth login)",
-                            self.account_id
-                        ),
-                    })?;
-            }
-        }
+        let home = self.credential_home(self.account_home());
+        crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
+            .await
+            .map_err(|error| ProviderAccountError::CredentialUnavailable {
+                provider: self.provider,
+                account_id: self.account_id.clone(),
+                reason: error.to_string(),
+            })?
+            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                provider: self.provider,
+                accounts: format!(
+                    "{} (provider CLI reports no active OAuth login)",
+                    self.account_id
+                ),
+            })?;
         self.check_identity().await?;
         Ok(())
     }
@@ -416,9 +334,7 @@ impl ProviderAccountRoute {
             | AccountLogin::Replayed {
                 catalog: store,
                 profile,
-            } => (Arc::clone(store), profile),
-            // The origin checked the login it lent.
-            AccountLogin::Lent { .. } => return Ok(()),
+            } => (store, profile),
         };
         let accounts = store
             .list_provider_accounts(Some(self.provider.as_str()))
@@ -451,54 +367,6 @@ impl ProviderAccountRoute {
         {
             command.env(name, self.account_home());
         }
-        // Codex has no variable for a ChatGPT login; see `engine_login`.
-        if let (Provider::Claude, AccountLogin::Lent { access_token, .. }) =
-            (self.provider, &self.login)
-        {
-            command.env("CLAUDE_CODE_OAUTH_TOKEN", access_token);
-        }
-    }
-
-    /// The `account/login/start` request that signs a Codex engine in with a
-    /// lent token, held in the engine's memory. `None` for every other route,
-    /// whose login the engine reads from its home.
-    pub(crate) fn engine_login(&self) -> Result<Option<serde_json::Value>, ProviderAccountError> {
-        match (self.provider, &self.login) {
-            (Provider::Codex, AccountLogin::Lent { access_token, .. }) => {
-                let mut login = self.engine_tokens(access_token)?;
-                login["type"] = "chatgptAuthTokens".into();
-                Ok(Some(login))
-            }
-            _ => Ok(None),
-        }
-    }
-
-    /// A fresh lent token for an engine whose own was refused. Only the
-    /// origin can renew it.
-    pub(crate) fn renew_engine_login(&self) -> Result<serde_json::Value, ProviderAccountError> {
-        let AccountLogin::Lent { client, .. } = &self.login else {
-            return Err(ProviderAccountError::Runtime(
-                "this account's login is renewed in its own home".into(),
-            ));
-        };
-        self.engine_tokens(&client.renew(self.provider, &self.account_id)?)
-    }
-
-    fn engine_tokens(&self, access_token: &str) -> Result<serde_json::Value, ProviderAccountError> {
-        let workspace = crate::provider_auth::jwt_claims(access_token)
-            .and_then(|claims| {
-                claims
-                    .get("https://api.openai.com/auth")?
-                    .get("chatgpt_account_id")?
-                    .as_str()
-                    .map(str::to_owned)
-            })
-            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                provider: self.provider,
-                account_id: self.account_id.clone(),
-                reason: "the lent token names no ChatGPT workspace".into(),
-            })?;
-        Ok(serde_json::json!({"accessToken": access_token, "chatgptAccountId": workspace}))
     }
 
     /// The one place a launch takes on an account. Every route configures
@@ -509,32 +377,7 @@ impl ProviderAccountRoute {
         &self,
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
-        if matches!(
-            (self.provider, &self.login),
-            (Provider::Codex, AccountLogin::Lent { .. })
-        ) {
-            return Err(ProviderAccountError::ForwardingCredential {
-                provider: self.provider,
-                account_id: self.account_id.clone(),
-                reason: "a lent Codex account signs in through Loopflow's Codex engine, \
-                         and this launch starts Codex directly"
-                    .into(),
-            });
-        }
-        self.launch_engine_as(command).await
-    }
-
-    /// [`Self::launch_as`] for a Codex engine, which the caller then signs in
-    /// with [`Self::engine_login`].
-    pub(crate) async fn launch_engine_as(
-        &self,
-        command: &mut Command,
-    ) -> Result<Option<fs::File>, ProviderAccountError> {
         self.apply(command);
-        if let (RouteHome::Isolated, AccountLogin::Lent { .. }) = (&self.home, &self.login) {
-            let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            ensure_account_home_at(&operator_home, &self.account_home(), self.provider)?;
-        }
         let (RouteHome::Shared { cause, .. }, AccountLogin::Stored { store, .. }) =
             (&self.home, &self.login)
         else {
@@ -570,14 +413,6 @@ impl ProviderAccountRoute {
                     )
                     .await?;
             }
-            AccountLogin::Lent { client, .. } => {
-                client.pin_session(
-                    self.provider,
-                    provider_session_id,
-                    &self.account_id,
-                    matches!(self.home, RouteHome::Isolated),
-                )?;
-            }
             AccountLogin::Replayed { .. } => {}
         }
         Ok(())
@@ -590,11 +425,7 @@ impl ProviderAccountRoute {
         match &self.login {
             AccountLogin::Stored { store, .. } => {
                 let account_id = self.used_account().await?;
-                record_rate_limit_signal(store, self.provider, &account_id, signal, "stream")
-                    .await?;
-            }
-            AccountLogin::Lent { client, .. } => {
-                client.record_health(self.provider, &self.account_id, signal)?;
+                record_rate_limit_signal(store, self.provider, &account_id, signal).await?;
             }
             AccountLogin::Replayed { .. } => {}
         }
@@ -640,11 +471,6 @@ impl ProviderAccountRoute {
                             )
                             .await?
                     }
-                    AccountLogin::Lent { client, .. } => client.record_credential_invalidated(
-                        self.provider,
-                        &self.account_id,
-                        reason,
-                    )?,
                     AccountLogin::Replayed { .. } => {}
                 }
                 Ok(())
@@ -665,14 +491,12 @@ fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsString> {
 }
 
 /// Record a provider rate-limit signal against a store: health row plus any
-/// observed limit windows. Shared by the local route and the lease broker so
-/// cooldown policy stays in one place.
-pub(crate) async fn record_rate_limit_signal(
+/// observed limit windows.
+async fn record_rate_limit_signal(
     store: &SharedStore,
     provider: Provider,
     account_id: &ProviderAccountId,
     signal: &RateLimitSignal,
-    source: &str,
 ) -> Result<(), ProviderAccountError> {
     let cooldown_until = signal.limited.then(|| {
         let now = now_unix();
@@ -693,7 +517,12 @@ pub(crate) async fn record_rate_limit_signal(
         .await?;
     if !signal.windows.is_empty() {
         store
-            .upsert_provider_account_limits(provider.as_str(), account_id, &signal.windows, source)
+            .upsert_provider_account_limits(
+                provider.as_str(),
+                account_id,
+                &signal.windows,
+                "stream",
+            )
             .await?;
     }
     Ok(())
@@ -872,42 +701,6 @@ fn link_shared_path(_source: &Path, _target: &Path) -> Result<(), ProviderAccoun
     Ok(())
 }
 
-pub(crate) async fn prepare_account_access_token(
-    provider: Provider,
-    account: &ProviderAccount,
-    accounts: &[ProviderAccount],
-) -> Result<String, ProviderAccountError> {
-    let home =
-        account
-            .home
-            .as_deref()
-            .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-                provider,
-                account_id: account.account_id.clone(),
-                reason: "managed account has no native credential home".to_string(),
-            })?;
-    identity::check_current_identity(account, accounts)
-        .await
-        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    let home = activation::credential_home(provider, home);
-    let access_token = crate::provider_auth::prepare_provider_account_access_token(provider, &home)
-        .await
-        .map_err(|error| ProviderAccountError::ForwardingCredential {
-            provider,
-            account_id: account.account_id.clone(),
-            reason: error.to_string(),
-        })?
-        .ok_or_else(|| ProviderAccountError::ForwardingCredential {
-            provider,
-            account_id: account.account_id.clone(),
-            reason: "provider CLI reports no active OAuth login".to_string(),
-        })?;
-    identity::check_current_identity(account, accounts)
-        .await
-        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
-    Ok(access_token)
-}
-
 #[cfg(test)]
 pub(crate) async fn resolve_provider_account(
     provider: Provider,
@@ -933,21 +726,15 @@ pub(crate) async fn resolve_provider_account_exact(
         }
         _ => None,
     };
-    let client = lease::AccountLeaseClient::from_env()?;
-    let recorded = match (recorded, &client, provider_session_id) {
-        (None, Some(client), Some(id)) => client.session_isolated(provider, id)?,
-        (recorded, _, _) => recorded,
-    };
     let isolated = recorded.unwrap_or_else(activation::launch_isolated);
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
     let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
-    if client.is_some() || !lease::AccountSelection::from_env()?.is_default() {
-        return resolve_merged_provider_account(
+    if !selection::AccountSelection::from_env()?.is_default() {
+        return resolve_selected_provider_account(
             provider,
             provider_session_id,
             exact_account_id,
-            client,
             store,
             isolated,
         )
@@ -1108,110 +895,84 @@ async fn select_shared_account(
         .await?)
 }
 
-async fn resolve_merged_provider_account(
+async fn resolve_selected_provider_account(
     provider: Provider,
     provider_session_id: Option<&str>,
     exact_account_id: Option<&ProviderAccountId>,
-    client: Option<lease::AccountLeaseClient>,
     local_store: Option<SharedStore>,
     isolated: bool,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     let repo_id = current_repo_id()?;
-    let Some(mut candidates) = ordered_merged_candidates(
+    let Some(mut candidates) = ordered_selected_candidates(
         provider,
         provider_session_id,
         exact_account_id,
-        client,
         repo_id.as_ref(),
-        local_store.clone(),
+        local_store.as_ref(),
         true,
     )
     .await?
     else {
         return Ok(None);
     };
+    let store = local_store
+        .as_ref()
+        .expect("candidates belong to the machine store");
     if !isolated {
         let native = activation::native_home(provider, None);
-        let active = match &local_store {
-            Some(store) => activation::observe_active_account(store, provider, &native).await?,
-            None => None,
-        };
+        let active = activation::observe_active_account(store, provider, &native).await?;
         if let Some(index) = active.and_then(|active| active_candidate(&active, &candidates)) {
             let active = candidates.remove(index);
             candidates.insert(0, active);
         }
     }
-    let mut last_forwarded_error = None;
     for (candidate, explicit) in candidates {
-        match &candidate.authority {
-            AccountCandidateAuthority::Local { store, home } => {
-                if !explicit
-                    && store
-                        .select_provider_account(
-                            provider,
-                            std::slice::from_ref(&candidate.account.account_id),
-                            provider_session_id,
-                        )
-                        .await?
-                        .is_none()
-                {
-                    continue;
-                }
-                let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                ensure_account_home_at(&operator_home, home, provider)?;
-                let resumed = match provider_session_id {
-                    Some(session_id) => store
-                        .provider_session_account(provider, session_id)
-                        .await?
-                        .is_some_and(|account_id| account_id == candidate.account.account_id),
-                    None => false,
-                };
-                if !isolated {
-                    return Ok(Some(ProviderAccountRoute::shared(
-                        provider,
-                        candidate.account.account_id.clone(),
-                        Arc::clone(store),
-                        home.clone(),
-                        explicit,
-                    )));
-                }
-                return Ok(Some(ProviderAccountRoute {
+        let home = &candidate.home;
+        if !explicit
+            && store
+                .select_provider_account(
                     provider,
-                    account_id: candidate.account.account_id.clone(),
-                    resume_requested_session: resumed,
-                    home: RouteHome::Isolated,
-                    login: AccountLogin::Stored {
-                        store: Arc::clone(store),
-                        profile: home.clone(),
-                    },
-                }));
-            }
-            AccountCandidateAuthority::Forwarded { client } => {
-                match client.resolve_exact(
-                    provider,
-                    &candidate.account.account_id,
-                    provider_session_id.map(str::to_string),
-                ) {
-                    Ok(resolution) => {
-                        return Ok(Some(ProviderAccountRoute::lent(
-                            client.clone(),
-                            provider,
-                            &resolution,
-                            isolated,
-                            explicit,
-                        )));
-                    }
-                    Err(error) => last_forwarded_error = Some(error),
-                }
-            }
+                    std::slice::from_ref(&candidate.account.account_id),
+                    provider_session_id,
+                )
+                .await?
+                .is_none()
+        {
+            continue;
         }
+        let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        ensure_account_home_at(&operator_home, home, provider)?;
+        let resumed = match provider_session_id {
+            Some(session_id) => store
+                .provider_session_account(provider, session_id)
+                .await?
+                .is_some_and(|account_id| account_id == candidate.account.account_id),
+            None => false,
+        };
+        if !isolated {
+            return Ok(Some(ProviderAccountRoute::shared(
+                provider,
+                candidate.account.account_id.clone(),
+                Arc::clone(store),
+                home.clone(),
+                explicit,
+            )));
+        }
+        return Ok(Some(ProviderAccountRoute {
+            provider,
+            account_id: candidate.account.account_id.clone(),
+            resume_requested_session: resumed,
+            home: RouteHome::Isolated,
+            login: AccountLogin::Stored {
+                store: Arc::clone(store),
+                profile: home.clone(),
+            },
+        }));
     }
-    if let Some(error) = last_forwarded_error {
-        return Err(error);
-    }
+
     Err(ProviderAccountError::NoEligibleAccount {
         provider,
-        accounts: "no healthy local or forwarded account remains".to_string(),
+        accounts: "no healthy selected account remains".to_string(),
     })
 }
 
@@ -1223,121 +984,79 @@ fn active_candidate(
 ) -> Option<usize> {
     let named = candidates.iter().any(|(_, explicit)| *explicit);
     candidates.iter().position(|(candidate, explicit)| {
-        matches!(candidate.authority, AccountCandidateAuthority::Local { .. })
-            && *explicit == named
+        *explicit == named
             && candidate.credential_available
-            && !candidate.is_strained(now_unix())
+            && !candidate.strained
             && candidate.account.account_id == *active
     })
 }
 
-async fn ordered_merged_candidates(
+async fn ordered_selected_candidates(
     provider: Provider,
     provider_session_id: Option<&str>,
     exact_account_id: Option<&ProviderAccountId>,
-    client: Option<lease::AccountLeaseClient>,
     repo_id: Option<&RepoId>,
-    local_store: Option<SharedStore>,
+    local_store: Option<&SharedStore>,
     verify_identity: bool,
 ) -> Result<Option<Vec<(AccountCandidate, bool)>>, ProviderAccountError> {
-    let forwarded = match &client {
-        Some(client) => client.describe()?,
-        None => lease::AccountLease {
-            grants: Vec::new(),
-            restricted: false,
-        },
-    };
-    let grant = forwarded.grant(provider);
     let mut catalog = match &local_store {
-        Some(store) if !forwarded.restricted => store.list_provider_accounts(None).await?,
-        _ => Vec::new(),
+        Some(store) => store.list_provider_accounts(None).await?,
+        None => Vec::new(),
     };
     let mut candidates = Vec::new();
     let mut local_route = Vec::new();
-    if !forwarded.restricted {
-        if let Some(store) = &local_store {
-            local_route = provider_route_account_ids(store, repo_id, provider)
-                .await?
-                .unwrap_or_default();
-            let limits = store
-                .provider_account_limits(Some(provider.as_str()))
-                .await?;
-            for account in catalog
-                .iter()
-                .filter(|account| account.provider == provider.as_str())
-            {
-                let identity = if verify_identity {
-                    identity::check_current_identity(account, &catalog)
-                        .await
-                        .map_err(|error| error.to_string())
-                } else {
-                    identity::check_account_identity(account, &catalog)
-                };
-                let identity_matches = match identity {
-                    Ok(()) => true,
-                    Err(reason) => {
-                        tracing::warn!("skipping managed account: {reason}");
-                        false
-                    }
-                };
-                let Some(home) = account.home.clone() else {
-                    continue;
-                };
-                candidates.push(AccountCandidate {
-                    credential_available: account.credential_state == CredentialState::Connected
-                        && identity_matches,
-                    account: account.clone(),
-                    limits: limits.clone(),
-                    authority: AccountCandidateAuthority::Local {
-                        store: Arc::clone(store),
-                        home,
-                    },
-                });
-            }
+    if let Some(store) = &local_store {
+        local_route = provider_route_account_ids(store, repo_id, provider)
+            .await?
+            .unwrap_or_default();
+        let limits = store
+            .provider_account_limits(Some(provider.as_str()))
+            .await?;
+        let now = now_unix();
+        for account in catalog
+            .iter()
+            .filter(|account| account.provider == provider.as_str())
+        {
+            let identity = if verify_identity {
+                identity::check_current_identity(account, &catalog)
+                    .await
+                    .map_err(|error| error.to_string())
+            } else {
+                identity::check_account_identity(account, &catalog)
+            };
+            let identity_matches = match identity {
+                Ok(()) => true,
+                Err(reason) => {
+                    tracing::warn!("skipping managed account: {reason}");
+                    false
+                }
+            };
+            let Some(home) = account.home.clone() else {
+                continue;
+            };
+            candidates.push(AccountCandidate {
+                credential_available: account.credential_state == CredentialState::Connected
+                    && identity_matches,
+                account: account.clone(),
+                strained: active_account_strain(
+                    provider.as_str(),
+                    &account.account_id,
+                    &limits,
+                    now,
+                )
+                .is_some(),
+                home,
+            });
         }
     }
-    let local_count = candidates.len();
-    // Resolve target-side selectors across both providers. A selector qualified
-    // for Codex must not fail a Claude launch, and vice versa. Equivalent
-    // identities are one selection entry, with the target's local copy first;
-    // origin preferences retain forwarded provenance through `grant.preferred`.
     catalog.retain(|account| account.home.is_some());
-    let mut seen_accounts: HashSet<_> = catalog
-        .iter()
-        .map(|account| (account.provider.clone(), account.account_id.clone()))
-        .collect();
-    if let Some(client) = &client {
-        for forwarded_grant in &forwarded.grants {
-            for account_id in &forwarded_grant.accounts {
-                let facts = client.account_facts(forwarded_grant.provider, account_id)?;
-                let Some(account) = facts.account else {
-                    continue;
-                };
-                if forwarded_grant.provider == provider {
-                    candidates.push(AccountCandidate {
-                        account: account.clone(),
-                        limits: facts.limits,
-                        credential_available: facts.credential_available,
-                        authority: AccountCandidateAuthority::Forwarded {
-                            client: client.clone(),
-                        },
-                    });
-                }
-                let key = (account.provider.clone(), account.account_id.clone());
-                if seen_accounts.insert(key) {
-                    catalog.push(account);
-                }
-            }
-        }
-    }
-    let selection = lease::AccountSelection::from_env()?;
+    let selection = selection::AccountSelection::from_env()?;
     let selected = selection.resolved_accounts(&catalog)?;
     if candidates.is_empty() {
-        if forwarded.restricted || selection.is_restricted() || exact_account_id.is_some() {
+        if selection.is_restricted() || exact_account_id.is_some() {
             return Err(ProviderAccountError::NoEligibleAccount {
                 provider,
-                accounts: "the restricted merged account selection excludes this provider"
-                    .to_string(),
+                accounts: "the restricted account selection excludes this provider".to_string(),
             });
         }
         return Ok(None);
@@ -1357,40 +1076,16 @@ async fn ordered_merged_candidates(
 
     let mut order = explicitly_preferred.clone();
     if !selection.is_restricted() {
-        if let Some(grant) = &grant {
-            for account_id in grant.accounts.iter().take(grant.preferred) {
-                if let Some(index) = candidates.iter().position(|candidate| {
-                    candidate.is_forwarded() && candidate.account.account_id == *account_id
-                }) {
-                    push_candidate(&mut order, index);
-                    push_candidate(&mut explicitly_preferred, index);
-                }
-            }
-        }
         for account_id in &local_route {
-            if let Some(index) = candidates[..local_count]
+            if let Some(index) = candidates
                 .iter()
                 .position(|candidate| candidate.account.account_id == *account_id)
             {
                 push_candidate(&mut order, index);
             }
         }
-        if let Some(grant) = &grant {
-            for account_id in &grant.accounts {
-                if let Some(index) = candidates[..local_count]
-                    .iter()
-                    .position(|candidate| candidate.account.account_id == *account_id)
-                {
-                    push_candidate(&mut order, index);
-                }
-                if let Some(index) = candidates.iter().position(|candidate| {
-                    candidate.is_forwarded() && candidate.account.account_id == *account_id
-                }) {
-                    push_candidate(&mut order, index);
-                }
-            }
-        }
-        for index in 0..local_count {
+
+        for index in 0..candidates.len() {
             push_candidate(&mut order, index);
         }
     }
@@ -1401,7 +1096,7 @@ async fn ordered_merged_candidates(
     if order.is_empty() {
         return Err(ProviderAccountError::NoEligibleAccount {
             provider,
-            accounts: "the merged local and forwarded account selection is empty".to_string(),
+            accounts: "the account selection is empty".to_string(),
         });
     }
 
@@ -1410,21 +1105,11 @@ async fn ordered_merged_candidates(
             Some(store) => store.provider_session_account(provider, session_id).await?,
             None => None,
         };
-        let forwarded_pin = client
-            .as_ref()
-            .map(|client| client.pinned_account(provider, session_id))
-            .transpose()?
-            .flatten();
         if let Some(index) = order.iter().position(|index| {
             let candidate = &candidates[*index];
-            match &candidate.authority {
-                AccountCandidateAuthority::Local { .. } => local_pin
-                    .as_ref()
-                    .is_some_and(|account_id| *account_id == candidate.account.account_id),
-                AccountCandidateAuthority::Forwarded { .. } => forwarded_pin
-                    .as_ref()
-                    .is_some_and(|account_id| *account_id == candidate.account.account_id),
-            }
+            local_pin
+                .as_ref()
+                .is_some_and(|account_id| *account_id == candidate.account.account_id)
         }) {
             let pinned = order.remove(index);
             push_candidate(&mut explicitly_preferred, pinned);
@@ -1439,7 +1124,7 @@ async fn ordered_merged_candidates(
         .count();
     order[preferred_count..].sort_by_key(|index| {
         (
-            candidates[*index].is_strained(now),
+            candidates[*index].strained,
             plan_preference(&candidates[*index].account),
         )
     });
@@ -1542,28 +1227,18 @@ pub(crate) async fn inspect_provider_route(
     store: Option<&SharedStore>,
     repo_id: Option<&RepoId>,
     provider: Provider,
-) -> Result<Option<Vec<(ProviderAccount, bool)>>, ProviderAccountError> {
-    let client = lease::AccountLeaseClient::from_env()?;
-    if client.is_some() || !lease::AccountSelection::from_env()?.is_default() {
-        return Ok(ordered_merged_candidates(
-            provider,
-            None,
-            None,
-            client,
-            repo_id,
-            store.cloned(),
-            false,
-        )
-        .await?
-        .map(|candidates| {
-            candidates
-                .into_iter()
-                .map(|(candidate, _)| {
-                    let forwarded = candidate.is_forwarded();
-                    (candidate.account, forwarded)
-                })
-                .collect()
-        }));
+) -> Result<Option<Vec<ProviderAccount>>, ProviderAccountError> {
+    if !selection::AccountSelection::from_env()?.is_default() {
+        return Ok(
+            ordered_selected_candidates(provider, None, None, repo_id, store, false)
+                .await?
+                .map(|candidates| {
+                    candidates
+                        .into_iter()
+                        .map(|(candidate, _)| candidate.account)
+                        .collect()
+                }),
+        );
     }
     let Some(store) = store else {
         return Ok(None);
@@ -1597,12 +1272,7 @@ pub(crate) async fn inspect_provider_route(
             .await?,
         now,
     );
-    Ok(Some(
-        available
-            .into_iter()
-            .map(|account| (account, false))
-            .collect(),
-    ))
+    Ok(Some(available))
 }
 
 pub(crate) async fn provider_route_account_ids(
@@ -1652,47 +1322,17 @@ pub(crate) fn resolve_provider_account_exact_blocking(
 
 /// Resolve one recorded account without consulting current planning routes.
 ///
-/// A forwarded credential grant wins when it contains the exact account.
-/// Otherwise the account's deterministic credential Machine on the Session's Machine is
-/// the authority. This path deliberately does not apply current repository
+/// The account catalog on the recorded Machine is the authority. This path deliberately does not apply current repository
 /// routing or account-health policy: replay names the account it requires.
 /// Both providers read the owning account catalog to check credential identity.
 pub(crate) fn resolve_recorded_provider_account_blocking(
     provider: Provider,
-    provider_session_id: Option<String>,
     account_id: ProviderAccountId,
     lf_home: PathBuf,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "recorded-route", move |runtime| {
         runtime.block_on(async move {
             ensure_supported(provider)?;
-            if let Some(client) = lease::AccountLeaseClient::from_env()? {
-                let forwarded = client.describe()?;
-                if forwarded
-                    .grant(provider)
-                    .is_some_and(|grant| grant.accounts.contains(&account_id))
-                {
-                    let resolution =
-                        client.resolve_exact(provider, &account_id, provider_session_id.clone())?;
-                    let route = ProviderAccountRoute::lent(
-                        client,
-                        provider,
-                        &resolution,
-                        activation::launch_isolated(),
-                        true,
-                    );
-                    route.verify_ready().await?;
-                    return Ok(Some(route));
-                }
-                if forwarded.restricted {
-                    return Err(ProviderAccountError::NoEligibleAccount {
-                        provider,
-                        accounts: format!(
-                            "'{account_id}' is not included in the forwarded credential grant"
-                        ),
-                    });
-                }
-            }
 
             let home = lf_home
                 .join("accounts")
@@ -2042,14 +1682,6 @@ mod tests {
                 .and_then(|value| value.as_deref()),
             Some(temp.path().join("codex-reserve").to_str().unwrap())
         );
-        // Provider launch carries no account-selection env; descendants inherit
-        // the lease handle, not a re-derivable selection.
-        assert_eq!(
-            environment
-                .get(lease::ACCOUNT_LEASE_ENV)
-                .map(Option::is_some),
-            None
-        );
         assert_eq!(environment.get("CLAUDE_CODE_OAUTH_TOKEN"), Some(&None));
 
         let mut async_command = tokio::process::Command::new("codex");
@@ -2239,9 +1871,8 @@ mod account_first_tests {
     async fn codex_routing_skips_mismatched_identity_and_readiness_rechecks_it() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             temp.path().join("loopflow.db"),
         ))
@@ -2298,7 +1929,6 @@ mod account_first_tests {
         assert!(error.contains("replacement@example.com") && error.contains("second@example.com"));
         let error = resolve_recorded_provider_account_blocking(
             Provider::Codex,
-            None,
             second.account_id.clone(),
             temp.path().to_path_buf(),
         )
@@ -2321,9 +1951,8 @@ mod account_first_tests {
     async fn claude_routing_refreshes_changed_identity_and_rechecks_readiness() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
             temp.path().join("loopflow.db"),
         ))
@@ -2445,14 +2074,13 @@ mod account_first_tests {
             permissions.set_mode(0o755);
             fs::set_permissions(&claude, permissions).unwrap();
         }
-        let _restore = EnvRestore::capture(&["LF_HOME", "PATH", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME", "PATH"]);
         std::env::set_var("LF_HOME", temp.path());
         let path = std::env::var_os("PATH").unwrap_or_default();
         std::env::set_var(
             "PATH",
             std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path))).unwrap(),
         );
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2493,9 +2121,8 @@ mod account_first_tests {
     async fn blocking_pin_honors_exact_account_without_changing_dynamic_selection() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2538,9 +2165,8 @@ mod account_first_tests {
     fn recorded_account_requires_its_owning_identity_catalog() {
         let _lock = crate::journal::test_env_lock();
         let home = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", home.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let registry = home.path().join("loopflow.db");
         fs::create_dir(&registry).unwrap();
 
@@ -2555,7 +2181,6 @@ mod account_first_tests {
 
         let route = resolve_recorded_provider_account_blocking(
             Provider::Claude,
-            None,
             account_id.clone(),
             home.path().to_path_buf(),
         )
@@ -2580,14 +2205,12 @@ mod account_first_tests {
         });
         let route = resolve_recorded_provider_account_blocking(
             Provider::Claude,
-            None,
             account_id.clone(),
             home.path().to_path_buf(),
         )
         .unwrap()
         .unwrap();
         assert_eq!(route.account_id(), &account_id);
-        assert!(!route.is_forwarded());
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -2595,9 +2218,8 @@ mod account_first_tests {
     async fn hard_limit_moves_the_route_to_the_next_account() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2775,9 +2397,8 @@ mod account_first_tests {
     async fn missing_routes_are_unmanaged_and_unusable_routes_fail() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
 
         assert!(resolve_provider_account(Provider::Claude, None)
             .await
@@ -2824,9 +2445,8 @@ mod account_first_tests {
     async fn accounts_form_an_implicit_route_when_no_route_is_configured() {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
-        let _restore = EnvRestore::capture(&["LF_HOME", lease::ACCOUNT_LEASE_ENV]);
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
         std::env::set_var("LF_HOME", temp.path());
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
                 temp.path().join("loopflow.db"),
@@ -2857,12 +2477,11 @@ mod account_first_tests {
         assert_eq!(route.account_id(), &healthy.account_id);
     }
 
-    const SHARED_ENV: [&str; 6] = [
+    const SHARED_ENV: [&str; 5] = [
         "LF_HOME",
         "CODEX_HOME",
         "CLAUDE_CONFIG_DIR",
         "LF_TEST_CLAUDE_PROFILE_URL",
-        lease::ACCOUNT_LEASE_ENV,
         activation::ACCOUNT_ISOLATION_ENV,
     ];
 
@@ -2876,7 +2495,6 @@ mod account_first_tests {
     /// stored account holds.
     async fn shared_home(provider: Provider, temp: &Path, active: &str) -> (SharedStore, PathBuf) {
         std::env::set_var("LF_HOME", temp);
-        std::env::remove_var(lease::ACCOUNT_LEASE_ENV);
         std::env::remove_var(activation::ACCOUNT_ISOLATION_ENV);
         let native = temp.join("native");
         fs::create_dir_all(&native).unwrap();
@@ -3279,12 +2897,15 @@ mod account_first_tests {
         let _lock = crate::journal::test_env_lock();
         let temp = tempdir().unwrap();
         let _restore = EnvRestore::capture(&SHARED_ENV);
-        let _selection = EnvRestore::capture(&[lease::ACCOUNT_SELECTION_ENV]);
-        let (_store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Codex, temp.path(), "second").await;
         let listed = |accounts: &[&str]| {
             let accounts: Vec<String> = accounts.iter().map(|id| format!("codex={id}")).collect();
-            let selection = lease::AccountSelection::from_flags(&accounts, &[]).unwrap();
-            std::env::set_var(lease::ACCOUNT_SELECTION_ENV, selection.env_value().unwrap());
+            let selection = selection::AccountSelection::from_flags(&accounts, &[]).unwrap();
+            std::env::set_var(
+                selection::ACCOUNT_SELECTION_ENV,
+                selection.env_value().unwrap(),
+            );
         };
 
         listed(&["first", "second"]);
@@ -3294,6 +2915,27 @@ mod account_first_tests {
             .unwrap();
         assert!(route.is_shared());
         assert_eq!(route.account_id().as_str(), "second");
+
+        // A strained active account does not displace a healthy named choice.
+        store
+            .upsert_provider_account_limits(
+                "codex",
+                &parse_account_id("second").unwrap(),
+                &[crate::store::AccountLimitWindow {
+                    window: "weekly".into(),
+                    used_percent: 95,
+                    resets_at: Some(now_unix() + 3600),
+                    plan: None,
+                }],
+                "stream",
+            )
+            .await
+            .unwrap();
+        let route = resolve_provider_account(Provider::Codex, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "first");
 
         // Naming only another account is a request to move to it.
         listed(&["first"]);
@@ -3459,7 +3101,7 @@ mod inspection_tests {
             assert_eq!(
                 inspected
                     .iter()
-                    .map(|(a, _)| a.account_id.as_str())
+                    .map(|a| a.account_id.as_str())
                     .collect::<Vec<_>>(),
                 ["healthy", "strained"]
             );
@@ -3476,7 +3118,7 @@ mod inspection_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(selected.account.account_id, inspected[0].0.account_id);
+            assert_eq!(selected.account.account_id, inspected[0].account_id);
         }
     }
 }

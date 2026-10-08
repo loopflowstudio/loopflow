@@ -135,7 +135,7 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         if value.starts_with('-') {
             let name = value.split('=').next().expect("split has a first item");
-            let is_transport = matches!(name, "--machine" | "--secret" | "--forward-agent");
+            let is_transport = matches!(name, "--machine" | "--forward-agent");
             let start = index;
             if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
@@ -358,7 +358,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
                     .trim_end()
             ));
         }
-        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --secret <name>, --forward-agent\n");
+        output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --forward-agent\n");
         output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
         return Ok(output);
     }

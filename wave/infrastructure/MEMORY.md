@@ -1016,8 +1016,7 @@ all assembled context in one system/instructions file, short user trigger, no
 split, fallback or lf-side refusal wording. PR #1498 owns transport/oversized
 acceptance. Claude readback proves neither plan mode, cmux nor the combined
 candidate; shared transport proves no native resume. Jack authorized 429 landing
-despite gaps, then 428 queue/landing October 8. Earlier screenshot/Codex failure:
-`4e6770cbf5:wave/infrastructure/MEMORY.md`.
+despite gaps, then 428 queue/landing October 8.
 
 Jack approved setup-free Codex coexistence: temporary native capture profile,
 bounded wrapper-trust parser probe, unchanged saved config/trust. Normal exit
@@ -1035,8 +1034,8 @@ October 8: terminal defaults interactive, `-i` forces it, `-b` stays headless;
 website and static proofs: `9ab5b6a52:wave/infrastructure/MEMORY.md`, this heading;
 CI owns the full materialized matrix. LOO-422 owns OSC 7501 simplification after
 adoption. Preserve caller checkpoints/common invocation loading. Codex rejected-turn
-recovery remains unresolved; homepage capture follows installation. Earlier limits:
-`64ea39be9:wave/infrastructure/MEMORY.md`, `44fe36620`.
+recovery remains unresolved; homepage capture follows installation. Earlier evidence
+and limits remain in that archived heading.
 
 LOO-420: Jack Heart's October 8 comments `5f149330-5f5d-4a71-bb05-289b13fe2d94`
 and `76407cd0-b271-45e7-8953-62abe7f9df2b` correct the overexpanded scope:

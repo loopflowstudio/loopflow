@@ -1843,24 +1843,22 @@ fn _run_agent_once(
             cmd.args(["--input-format", "stream-json", "--replay-user-messages"]);
             cmd.arg("--plugin-dir").arg(plugin);
             if !launch.task_prompt.is_empty() {
-                input.write_all(
+                writeln!(
+                    input,
+                    "{}",
                     serde_json::json!({
                         "type": "user", "shouldQuery": false,
                         "message": {"role": "user", "content": launch.task_prompt}
                     })
-                    .to_string()
-                    .as_bytes(),
                 )?;
-                input.write_all(b"\n")?;
             }
-            input.write_all(
+            writeln!(
+                input,
+                "{}",
                 serde_json::json!({
                     "type": "user", "message": {"role": "user", "content": command}
                 })
-                .to_string()
-                .as_bytes(),
             )?;
-            input.write_all(b"\n")?;
         } else {
             input.write_all(launch.task_prompt.as_bytes())?;
         }

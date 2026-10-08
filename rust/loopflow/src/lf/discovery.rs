@@ -21,14 +21,10 @@ pub fn builtin_skills() -> HashSet<String> {
         .collect()
 }
 
-pub(crate) fn definition_source(repo: &Path, name: &str, kind: DefinitionKind) -> String {
-    let path = match kind {
-        DefinitionKind::Flow => crate::engine::flow::find_flow_source_path(name, repo),
-        DefinitionKind::Skill => crate::engine::find_skill_source_path(name, repo),
-    };
+pub(crate) fn definition_source(repo: &Path, path: Option<&Path>) -> String {
     path.map(|path| {
         path.strip_prefix(repo)
-            .unwrap_or(&path)
+            .unwrap_or(path)
             .display()
             .to_string()
     })

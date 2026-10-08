@@ -1061,13 +1061,16 @@ own selection and attribution. Export preserves third-party files; Claude's
 0.13.9 launches lacked native identity and both reconnects failed. Preserve history;
 launcher success proves no engine exit.
 
-Local Claude headless LF/Flow fake-API receipts now prove native expansion, exact
-arguments and user-only context after source removal with a same-name collision.
-Capture-local plugins retain original provenance and link sibling assets. Native
-snapshot paths differ; parent-relative resources, deleted bundles and full controls
-remain unproved. Context-only messages acknowledge separately from the skill result;
-that acknowledgement must not settle execution. Builtins stay inline; ports report
-unenforced declarations. This establishes no live-model fidelity or cost improvement.
+Local Claude headless LF/Flow fake-API receipts prove native expansion, exact
+arguments and user-only context after SKILL.md removal with a same-name collision.
+Capture-local plugins retain provenance but link current siblings at launch, not
+captured assets. Removing the bundle removes resource availability; changed base
+paths leave parent-relative resources and plugin variables unresolved. Full controls
+remain unproved. Context acknowledgement must not settle the skill. Builtins stay
+inline; ports report unenforced declarations. These are not accepted fidelity losses.
+Intelligence's October 1 ablation shows omitted context returning through disk reads;
+cost comparisons need repeated baselines and resumed history, absent from its pilot.
+No live-model fidelity or cost improvement is established.
 
 Codex 0.160.1 ignores unregistered explicit skill paths while returning success.
 Its documented per-cwd extra roots are ignored; `skills/extraRoots/set` works but

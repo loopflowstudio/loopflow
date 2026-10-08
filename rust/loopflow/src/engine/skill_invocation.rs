@@ -18,33 +18,23 @@ impl SkillInvocation {
         Ok(serde_json::from_slice(&std::fs::read(path)?)?)
     }
 
-    pub(crate) fn prepare_native(
+    pub(crate) fn claude_plugin(
         &self,
         config: &crate::engine::agent::AgentConfig,
-    ) -> anyhow::Result<(PathBuf, PathBuf)> {
+    ) -> anyhow::Result<(PathBuf, String)> {
         let capture = config
             .env
             .get(crate::session_record::CAPTURE_KEY_ENV)
             .ok_or_else(|| anyhow::anyhow!("native skill input requires its Session capture"))?;
         let directory = crate::session_record::capture_dir(capture)?;
-        let materialized = tempfile::Builder::new()
+        let root = tempfile::Builder::new()
             .prefix("skill-")
             .tempdir_in(directory)?
             .keep();
-        let path = self.materialize(&materialized.join("skills/invoke"))?;
-        let (harness, _) = crate::engine::parse_agent(config.agent());
-        if !self.native_for(&harness) {
-            eprintln!("warning: porting {} to {harness}; native model, tool permissions, subagents and shell preprocessing remain instructions, not enforced controls", self.skill.name);
-            std::fs::write(&path, self.instruction_text(&harness))?;
+        if !self.native_for("claude") {
+            eprintln!("warning: porting {} to claude; native model, tool permissions, subagents and shell preprocessing remain instructions, not enforced controls", self.skill.name);
         }
-        Ok((materialized, path))
-    }
-
-    pub(crate) fn claude_plugin(
-        &self,
-        config: &crate::engine::agent::AgentConfig,
-    ) -> anyhow::Result<(PathBuf, String)> {
-        let (root, _) = self.prepare_native(config)?;
+        self.materialize(&root.join("skills/invoke"), "claude")?;
         let namespace = format!("lf-{}", uuid::Uuid::new_v4().simple());
         std::fs::create_dir(root.join(".claude-plugin"))?;
         std::fs::write(
@@ -56,7 +46,7 @@ impl SkillInvocation {
         Ok((root, self.command(&format!("/{namespace}:invoke"))))
     }
 
-    pub fn native_for(&self, harness: &str) -> bool {
+    fn native_for(&self, harness: &str) -> bool {
         matches!(
             (
                 self.skill.source.as_ref().map(|source| source.dialect),
@@ -175,7 +165,7 @@ impl SkillInvocation {
         }
     }
 
-    pub fn command(&self, name: &str) -> String {
+    fn command(&self, name: &str) -> String {
         if self.arguments.is_empty() {
             name.to_string()
         } else {
@@ -185,10 +175,10 @@ impl SkillInvocation {
 
     /// Materialize the captured definition without modifying a third-party file.
     /// Sibling resources continue to resolve against the original bundle.
-    pub(crate) fn materialize(&self, directory: &Path) -> std::io::Result<PathBuf> {
+    fn materialize(&self, directory: &Path, harness: &str) -> std::io::Result<PathBuf> {
         std::fs::create_dir_all(directory)?;
         let target = directory.join("SKILL.md");
-        std::fs::write(&target, self.source_text())?;
+        std::fs::write(&target, self.instruction_text(harness))?;
         if let Some(parent) = self
             .skill
             .source
@@ -270,6 +260,9 @@ mod tests {
         assert!(text.contains("allowed-tools: Read\nmodel: sonnet"));
         assert!(text.contains("no automatic cross-harness enforcement"));
         assert!(text.contains("exec_command"));
+        let snapshot = tempfile::tempdir().unwrap();
+        let file = invocation.materialize(snapshot.path(), "codex").unwrap();
+        assert_eq!(std::fs::read_to_string(file).unwrap(), text);
     }
 
     #[test]
@@ -296,7 +289,7 @@ mod tests {
             invocation.source_text()
         );
         let snapshot = repo.path().join("snapshot");
-        let file = invocation.materialize(&snapshot).unwrap();
+        let file = invocation.materialize(&snapshot, "claude").unwrap();
         assert_eq!(std::fs::read_to_string(file).unwrap(), original);
         assert_eq!(
             std::fs::read_to_string(snapshot.join("reference.txt")).unwrap(),

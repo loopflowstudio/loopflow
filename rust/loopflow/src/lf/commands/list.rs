@@ -25,7 +25,10 @@ fn flow_entry(tree: &Command, repo: &Path, name: String) -> Entry {
         Err(error) => format!("unavailable: {error}"),
     };
     Entry {
-        source: definition_source(repo, &name, kind),
+        source: definition_source(
+            repo,
+            crate::engine::flow::find_flow_source_path(&name, repo).as_deref(),
+        ),
         invocation: definition_invocation(tree, &name, kind),
         name,
         kind: kind.as_str().to_string(),

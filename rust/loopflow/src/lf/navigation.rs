@@ -427,12 +427,13 @@ fn definition_help(
     kind: Option<DefinitionKind>,
 ) -> Result<String> {
     let target = resolve_definition(repo, name, kind)?;
-    let (name, kind, description) = match &target {
+    let (name, kind, description, source) = match &target {
         Target::Command(_) | Target::Xor(_) => anyhow::bail!("{name} is not a named skill or flow"),
         Target::Skill(skill) => (
             skill.name.as_str(),
             DefinitionKind::Skill,
             skill.content.clone().unwrap_or_default(),
+            skill.source.as_ref().map(|source| source.path.clone()),
         ),
         Target::Flow(flow) => {
             let mut reviews = crate::engine::human_occurrence_ids(flow, repo)?;
@@ -441,11 +442,16 @@ fn definition_help(
             if !reviews.is_empty() {
                 description.push_str(&format!("\nReview steps: {}", reviews.join(", ")));
             }
-            (flow.name.as_str(), DefinitionKind::Flow, description)
+            (
+                flow.name.as_str(),
+                DefinitionKind::Flow,
+                description,
+                crate::engine::flow::find_flow_source_path(&flow.name, repo),
+            )
         }
     };
     let label = kind.as_str();
-    let source = definition_source(repo, name, kind);
+    let source = definition_source(repo, source.as_deref());
     let invocation = definition_invocation(tree, name, kind);
     let mut output =
         format!("{name} — {label} ({source})\n{description}\n\n  {invocation} [message]\n");

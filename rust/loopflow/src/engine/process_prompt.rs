@@ -155,18 +155,20 @@ pub(crate) fn preview_process_prompt(
     // the system prompt. Repo content (docs, diffs, wave, clipboard) goes in the
     // task prompt to avoid triggering third-party app classifiers.
     let system_prompt = format_claude_system_prompt(&components);
-    let skill_invocation = components.skill.as_ref().and_then(|skill| {
-        let invocation = crate::engine::skill_invocation::SkillInvocation {
+    let skill_invocation = components
+        .skill
+        .as_ref()
+        .filter(|skill| {
+            surface == Surface::Headless
+                && parse_agent(&agent).0 == "claude"
+                && skill.source.as_ref().is_some_and(|source| {
+                    source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
+                })
+        })
+        .map(|skill| crate::engine::skill_invocation::SkillInvocation {
             skill: skill.clone(),
             arguments: skill_arguments.clone(),
-        };
-        (surface == Surface::Headless
-            && skill.source.as_ref().is_some_and(|source| {
-                source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
-            })
-            && parse_agent(&agent).0 == "claude")
-            .then_some(invocation)
-    });
+        });
     let task_prompt = if skill_invocation.is_some() {
         let mut context = components.clone();
         context.skill = None;

@@ -621,17 +621,6 @@ fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
     }
 }
 
-fn first_existing_path(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
-    paths.into_iter().find(|path| path.exists())
-}
-
-fn paths_with_extensions(dir: &Path, name: &str, extensions: &[&str]) -> Vec<PathBuf> {
-    extensions
-        .iter()
-        .map(|extension| dir.join(format!("{name}.{extension}")))
-        .collect()
-}
-
 fn collect_flow_names(
     dir: &Path,
     prefix: Option<&str>,
@@ -675,36 +664,11 @@ pub fn find_flow_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
 }
 
 fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    // 1. Repo-local flows
-    if let Some(path) = first_existing_path(paths_with_extensions(
-        &repo.join(".lf/flows"),
-        name,
-        &["yaml", "yml", "json"],
-    )) {
-        return Ok(path);
-    }
-
-    // 2. Namespaced flows in subdirectories (.lf/flows/gstack/sprint.yaml)
-    if let Some((prefix, flow_name)) = name.split_once('/') {
-        if let Some(path) = first_existing_path(paths_with_extensions(
-            &repo.join(".lf/flows").join(prefix),
-            flow_name,
-            &["yaml", "yml"],
-        )) {
-            return Ok(path);
-        }
-    }
-
-    Err(LoadError::FlowNotFound(name.to_string()))
-}
-
-/// The catalog's selected editable source; embedded skills have no disk path.
-pub fn find_skill_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
-    crate::engine::skill_catalog::SkillCatalog::discover(Some(repo))
-        .ok()?
-        .resolve(name)?
-        .path
-        .clone()
+    ["yaml", "yml", "json"]
+        .map(|extension| repo.join(".lf/flows").join(format!("{name}.{extension}")))
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))
 }
 
 // -----------------------------------------------------------------------------
@@ -1122,9 +1086,8 @@ mod tests {
     use serde_yaml_ng::Value;
 
     use super::{
-        build_xor_routing_suffix, compile_branch, compile_flow, find_skill_source_path,
-        human_occurrence_ids, load_flow, load_skill, ConcreteStep, DefinitionLoader,
-        FlowDefinition, Skill, Step, XorDef, XorPath,
+        build_xor_routing_suffix, compile_branch, compile_flow, human_occurrence_ids, load_flow,
+        load_skill, ConcreteStep, DefinitionLoader, FlowDefinition, Skill, Step, XorDef, XorPath,
     };
     use crate::engine::error::LoadError;
     use crate::engine::target::Target;
@@ -1482,19 +1445,6 @@ Design the feature.
         let skill = load_skill("my-tool", tmp.path()).unwrap();
         assert_eq!(skill.name, "my-tool");
         assert!(skill.content.unwrap().contains("Do the thing."));
-    }
-
-    #[test]
-    fn find_skill_source_path_finds_agent_skills() {
-        let tmp = TempDir::new().unwrap();
-        let skill_path = tmp.path().join(".agents/skills/my-tool/SKILL.md");
-        fs::create_dir_all(skill_path.parent().unwrap()).unwrap();
-        fs::write(&skill_path, "Do the thing.").unwrap();
-
-        assert_eq!(
-            find_skill_source_path("my-tool", tmp.path()),
-            Some(skill_path)
-        );
     }
 
     #[test]

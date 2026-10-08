@@ -800,10 +800,8 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let retry = open(&["session", "resume"]);
     assert!(retry.status.success(), "{retry:?}");
 
-    // --version succeeds, then the executable disappears before the actual spawn.
-    write_provider(
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then /bin/rm -- \"$0\"; exit 0; fi\nexit 93\n",
-    );
+    // A missing executable is positive evidence that the provider never started.
+    std::fs::remove_file(&provider).unwrap();
     let failed = open(&["session", "connect", &id, "--replace"]);
     assert!(!failed.status.success());
     assert!(!String::from_utf8_lossy(&failed.stderr).contains("no confirmed engine exit"));

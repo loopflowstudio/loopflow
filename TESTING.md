@@ -65,6 +65,13 @@ The introductions in `README.md` and `docs/index.md` share the same text. When
 editing either introduction, update both and run
 `uv run --project website --extra test pytest website/tests/test_readme_index_sync.py`.
 
+`cargo test -p loopflow --test agent_startup_tests` exercises bare `lf` and
+Session reconnect to a stand-in provider with an empty environment and no
+credentials. CI's ordinary Rust network isolation covers it. It bounds provider
+and Git launches, SQLite statement/returned-row counts, and time to provider
+handoff; [native readiness measurements](scripts/benchmarks/agent-startup/README.md)
+remain a separate opt-in benchmark.
+
 Changes to builtin Flows affect the parser, graph, Task controller and CLI fixtures.
 Run the affected controller progression and CLI behavior tests as well as graph
 checks; use authored fixture Flows when a test needs a fixed sequence independent

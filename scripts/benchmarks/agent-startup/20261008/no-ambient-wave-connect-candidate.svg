@@ -1,0 +1,491 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1600" height="958" onload="init(evt)" viewBox="0 0 1600 958" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:fg="http://github.com/jonhoo/inferno"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: Aggregated diagnostic samples, including waits. Not elapsed-time accounting. Attach misses initial startup; excludes provider and Git child CPU. Hover or click to inspect.--><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:monospace; font-size:12px }
+#title { text-anchor:middle; font-size:17px; }
+#matched { text-anchor:end; }
+#search { text-anchor:end; opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[
+        var nametype = 'Function:';
+        var fontsize = 12;
+        var fontwidth = 0.59;
+        var xpad = 10;
+        var inverted = false;
+        var searchcolor = 'rgb(230,0,230)';
+        var fluiddrawing = false;
+        var truncate_text_right = false;
+    ]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames, known_font_width;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    known_font_width = get_monospace_width(frames);
+    total_samples = parseInt(frames.attributes.total_samples.value);
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[*|x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+            svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            update_text_for_elements(frames.children);
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad;
+            matchedtxt.attributes.x.value = svgWidth - xpad;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes["fg:x"]) {
+            var params = get_params()
+            params.x = el.attributes["fg:x"].value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["fg:orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("fg:orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["fg:orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["fg:orig_" + attr].value;
+    e.removeAttribute("fg:orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function get_monospace_width(frames) {
+    // Given the id="frames" element, return the width of text characters if
+    // this is a monospace font, otherwise return 0.
+    text = find_child(frames.children[0], "text");
+    originalContent = text.textContent;
+    text.textContent = "!";
+    bangWidth = text.getComputedTextLength();
+    text.textContent = "W";
+    wWidth = text.getComputedTextLength();
+    text.textContent = originalContent;
+    if (bangWidth === wWidth) {
+        return bangWidth;
+    } else {
+        return 0;
+    }
+}
+function update_text_for_elements(elements) {
+    // In order to render quickly in the browser, you want to do one pass of
+    // reading attributes, and one pass of mutating attributes. See
+    // https://web.dev/avoid-large-complex-layouts-and-layout-thrashing/ for details.
+
+    // Fall back to inefficient calculation, if we're variable-width font.
+    // TODO This should be optimized somehow too.
+    if (known_font_width === 0) {
+        for (var i = 0; i < elements.length; i++) {
+            update_text(elements[i]);
+        }
+        return;
+    }
+
+    var textElemNewAttributes = [];
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var r = find_child(e, "rect");
+        var t = find_child(e, "text");
+        var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+        var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+        var newX = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+        // Smaller than this size won't fit anything
+        if (w < 2 * known_font_width) {
+            textElemNewAttributes.push([newX, ""]);
+            continue;
+        }
+
+        // Fit in full text width
+        if (txt.length * known_font_width < w) {
+            textElemNewAttributes.push([newX, txt]);
+            continue;
+        }
+
+        var substringLength = Math.floor(w / known_font_width) - 2;
+        if (truncate_text_right) {
+            // Truncate the right side of the text.
+            textElemNewAttributes.push([newX, txt.substring(0, substringLength) + ".."]);
+            continue;
+        } else {
+            // Truncate the left side of the text.
+            textElemNewAttributes.push([newX, ".." + txt.substring(txt.length - substringLength, txt.length)]);
+            continue;
+        }
+    }
+
+    console.assert(textElemNewAttributes.length === elements.length, "Resize failed, please file a bug at https://github.com/jonhoo/inferno/");
+
+    // Now that we know new textContent, set it all in one go so we don't refresh a bazillion times.
+    for (var i = 0; i < elements.length; i++) {
+        var e = elements[i];
+        var values = textElemNewAttributes[i];
+        var t = find_child(e, "text");
+        t.attributes.x.value = values[0];
+        t.textContent = values[1];
+    }
+}
+
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * parseInt(e.attributes["fg:x"].value) / total_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / total_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, zoomed_width_samples) {
+    if (e.tagName == "text") {
+        var parent_x = parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value);
+        e.attributes.x.value = format_percent(parent_x + (100 * 3 / frames.attributes.width.value));
+    } else if (e.tagName == "rect") {
+        e.attributes.x.value = format_percent(100 * (parseInt(e.attributes["fg:x"].value) - x) / zoomed_width_samples);
+        e.attributes.width.value = format_percent(100 * parseInt(e.attributes["fg:w"].value) / zoomed_width_samples);
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, zoomed_width_samples);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseInt(attr["fg:w"].value);
+    var xmin = parseInt(attr["fg:x"].value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    var to_update_text = [];
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseInt(a["fg:x"].value);
+        var ew = parseInt(a["fg:w"].value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                to_update_text.push(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, width);
+                to_update_text.push(e);
+            }
+        }
+    }
+    update_text_for_elements(to_update_text);
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+    }
+    update_text_for_elements(el);
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        // Skip over frames which are either not visible, or below the zoomed-to frame
+        if (e.classList.contains("hide") || e.classList.contains("parent")) {
+            continue;
+        }
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseInt(rect.attributes["fg:w"].value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseInt(rect.attributes["fg:x"].value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    for (var k in keys) {
+        var x = parseInt(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="958" fill="url(#background)"/><text id="title" fill="rgb(0,0,0)" x="50.0000%" y="24.00">lf connect: no-ambient-wave — candidate</text><text id="subtitle" x="50.0000%" y="48.00">Release + debuginfo; macOS sample, 1 ms; main thread only; startup + shutdown</text><text id="details" fill="rgb(0,0,0)" x="10" y="941.00"> </text><text id="unzoom" class="hide" fill="rgb(0,0,0)" x="10" y="24.00">Reset Zoom</text><text id="search" fill="rgb(0,0,0)" x="1590" y="24.00">Search</text><text id="matched" fill="rgb(0,0,0)" x="1590" y="941.00"> </text><svg id="frames" x="10" width="1580" total_samples="70"><g><title>loopflow::store::migrations::_validate_development_schema (1 samples, 1.43%)</title><rect x="0.0000%" y="461" width="1.4286%" height="15" fill="rgb(220,185,34)" fg:x="0" fg:w="1"/><text x="0.1875%" y="471.50">l..</text></g><g><title>loopflow::store::migration_schema::product_schema (1 samples, 1.43%)</title><rect x="0.0000%" y="445" width="1.4286%" height="15" fill="rgb(206,204,28)" fg:x="0" fg:w="1"/><text x="0.1875%" y="455.50">l..</text></g><g><title>alloc::fmt::format::format_inner (1 samples, 1.43%)</title><rect x="0.0000%" y="429" width="1.4286%" height="15" fill="rgb(225,219,39)" fg:x="0" fg:w="1"/><text x="0.1875%" y="439.50">a..</text></g><g><title>__rustc::__rdl_alloc (1 samples, 1.43%)</title><rect x="0.0000%" y="413" width="1.4286%" height="15" fill="rgb(254,82,43)" fg:x="0" fg:w="1"/><text x="0.1875%" y="423.50">_..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite (2 samples, 2.86%)</title><rect x="0.0000%" y="493" width="2.8571%" height="15" fill="rgb(220,198,36)" fg:x="0" fg:w="2"/><text x="0.1875%" y="503.50">loop..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite::{closure#0} (2 samples, 2.86%)</title><rect x="0.0000%" y="477" width="2.8571%" height="15" fill="rgb(231,80,6)" fg:x="0" fg:w="2"/><text x="0.1875%" y="487.50">loop..</text></g><g><title>loopflow::store::migrations::validate_experimental_schema::{closure#0} (1 samples, 1.43%)</title><rect x="1.4286%" y="461" width="1.4286%" height="15" fill="rgb(210,17,5)" fg:x="1" fg:w="1"/><text x="1.6161%" y="471.50">l..</text></g><g><title>loopflow::store::migrations::validate_applied_checksums (1 samples, 1.43%)</title><rect x="1.4286%" y="445" width="1.4286%" height="15" fill="rgb(242,97,54)" fg:x="1" fg:w="1"/><text x="1.6161%" y="455.50">l..</text></g><g><title>alloc::fmt::format::format_inner (1 samples, 1.43%)</title><rect x="1.4286%" y="429" width="1.4286%" height="15" fill="rgb(225,219,39)" fg:x="1" fg:w="1"/><text x="1.6161%" y="439.50">a..</text></g><g><title>core::fmt::write (1 samples, 1.43%)</title><rect x="1.4286%" y="413" width="1.4286%" height="15" fill="rgb(248,210,20)" fg:x="1" fg:w="1"/><text x="1.6161%" y="423.50">c..</text></g><g><title>&lt;alloc::string::String as core::fmt::Write&gt;::write_str (1 samples, 1.43%)</title><rect x="1.4286%" y="397" width="1.4286%" height="15" fill="rgb(237,176,18)" fg:x="1" fg:w="1"/><text x="1.6161%" y="407.50">&lt;..</text></g><g><title>&lt;alloc::raw_vec::RawVecInner&lt;_&gt;&gt;::reserve::do_reserve_and_handle::&lt;alloc::alloc::Global&gt; (1 samples, 1.43%)</title><rect x="1.4286%" y="381" width="1.4286%" height="15" fill="rgb(226,85,12)" fg:x="1" fg:w="1"/><text x="1.6161%" y="391.50">&lt;..</text></g><g><title>&lt;alloc::raw_vec::RawVecInner&gt;::finish_grow (1 samples, 1.43%)</title><rect x="1.4286%" y="365" width="1.4286%" height="15" fill="rgb(245,212,45)" fg:x="1" fg:w="1"/><text x="1.6161%" y="375.50">&lt;..</text></g><g><title>_realloc (1 samples, 1.43%)</title><rect x="1.4286%" y="349" width="1.4286%" height="15" fill="rgb(248,188,4)" fg:x="1" fg:w="1"/><text x="1.6161%" y="359.50">_..</text></g><g><title>_malloc_zone_realloc (1 samples, 1.43%)</title><rect x="1.4286%" y="333" width="1.4286%" height="15" fill="rgb(206,76,7)" fg:x="1" fg:w="1"/><text x="1.6161%" y="343.50">_..</text></g><g><title>xzm_realloc (1 samples, 1.43%)</title><rect x="1.4286%" y="317" width="1.4286%" height="15" fill="rgb(240,178,36)" fg:x="1" fg:w="1"/><text x="1.6161%" y="327.50">x..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::open (3 samples, 4.29%)</title><rect x="0.0000%" y="509" width="4.2857%" height="15" fill="rgb(208,216,5)" fg:x="0" fg:w="3"/><text x="0.1875%" y="519.50">&lt;loopfl..</text></g><g><title>loopflow::store::sqlite::configure_write_connection (1 samples, 1.43%)</title><rect x="2.8571%" y="493" width="1.4286%" height="15" fill="rgb(242,40,52)" fg:x="2" fg:w="1"/><text x="3.0446%" y="503.50">l..</text></g><g><title>&lt;rusqlite::Connection&gt;::pragma_query_value::&lt;alloc::string::String, loopflow::store::sqlite::configure_write_connection::{closure#0}&gt; (1 samples, 1.43%)</title><rect x="2.8571%" y="477" width="1.4286%" height="15" fill="rgb(244,213,35)" fg:x="2" fg:w="1"/><text x="3.0446%" y="487.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="2.8571%" y="461" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="2" fg:w="1"/><text x="3.0446%" y="471.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="2.8571%" y="445" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="2" fg:w="1"/><text x="3.0446%" y="455.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="2.8571%" y="429" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="2" fg:w="1"/><text x="3.0446%" y="439.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="2.8571%" y="413" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="2" fg:w="1"/><text x="3.0446%" y="423.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="2.8571%" y="397" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="2" fg:w="1"/><text x="3.0446%" y="407.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="2.8571%" y="381" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="2" fg:w="1"/><text x="3.0446%" y="391.50">y..</text></g><g><title>sqlite3Pragma (1 samples, 1.43%)</title><rect x="2.8571%" y="365" width="1.4286%" height="15" fill="rgb(209,185,45)" fg:x="2" fg:w="1"/><text x="3.0446%" y="375.50">s..</text></g><g><title>sqlite3ReadSchema (1 samples, 1.43%)</title><rect x="2.8571%" y="349" width="1.4286%" height="15" fill="rgb(233,180,14)" fg:x="2" fg:w="1"/><text x="3.0446%" y="359.50">s..</text></g><g><title>sqlite3InitOne (1 samples, 1.43%)</title><rect x="2.8571%" y="333" width="1.4286%" height="15" fill="rgb(218,4,10)" fg:x="2" fg:w="1"/><text x="3.0446%" y="343.50">s..</text></g><g><title>sqlite3_exec (1 samples, 1.43%)</title><rect x="2.8571%" y="317" width="1.4286%" height="15" fill="rgb(252,100,1)" fg:x="2" fg:w="1"/><text x="3.0446%" y="327.50">s..</text></g><g><title>sqlite3InitCallback (1 samples, 1.43%)</title><rect x="2.8571%" y="301" width="1.4286%" height="15" fill="rgb(208,171,3)" fg:x="2" fg:w="1"/><text x="3.0446%" y="311.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="2.8571%" y="285" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="2" fg:w="1"/><text x="3.0446%" y="295.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="2.8571%" y="269" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="2" fg:w="1"/><text x="3.0446%" y="279.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="2.8571%" y="253" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="2" fg:w="1"/><text x="3.0446%" y="263.50">y..</text></g><g><title>sqlite3AddColumn (1 samples, 1.43%)</title><rect x="2.8571%" y="237" width="1.4286%" height="15" fill="rgb(247,143,53)" fg:x="2" fg:w="1"/><text x="3.0446%" y="247.50">s..</text></g><g><title>dbReallocFinish (1 samples, 1.43%)</title><rect x="2.8571%" y="221" width="1.4286%" height="15" fill="rgb(219,164,6)" fg:x="2" fg:w="1"/><text x="3.0446%" y="231.50">d..</text></g><g><title>sqlite3Realloc (1 samples, 1.43%)</title><rect x="2.8571%" y="205" width="1.4286%" height="15" fill="rgb(234,8,39)" fg:x="2" fg:w="1"/><text x="3.0446%" y="215.50">s..</text></g><g><title>loopflow::session_record::sync_dir (12 samples, 17.14%)</title><rect x="4.2857%" y="509" width="17.1429%" height="15" fill="rgb(213,178,20)" fg:x="3" fg:w="12"/><text x="4.4732%" y="519.50">loopflow::session_record::sync_dir</text></g><g><title>&lt;std::fs::File&gt;::sync_all (12 samples, 17.14%)</title><rect x="4.2857%" y="493" width="17.1429%" height="15" fill="rgb(216,175,45)" fg:x="3" fg:w="12"/><text x="4.4732%" y="503.50">&lt;std::fs::File&gt;::sync_all</text></g><g><title>fcntl (12 samples, 17.14%)</title><rect x="4.2857%" y="477" width="17.1429%" height="15" fill="rgb(210,180,8)" fg:x="3" fg:w="12"/><text x="4.4732%" y="487.50">fcntl</text></g><g><title>__fcntl (12 samples, 17.14%)</title><rect x="4.2857%" y="461" width="17.1429%" height="15" fill="rgb(210,80,5)" fg:x="3" fg:w="12"/><text x="4.4732%" y="471.50">__fcntl</text></g><g><title>&lt;loopflow::lf::commands::util::ProviderClientGuard&gt;::publish (31 samples, 44.29%)</title><rect x="0.0000%" y="541" width="44.2857%" height="15" fill="rgb(245,183,31)" fg:x="0" fg:w="31"/><text x="0.1875%" y="551.50">&lt;loopflow::lf::commands::util::ProviderClientGuard&gt;::publish</text></g><g><title>loopflow::session_record::write_provider_client (31 samples, 44.29%)</title><rect x="0.0000%" y="525" width="44.2857%" height="15" fill="rgb(254,147,10)" fg:x="0" fg:w="31"/><text x="0.1875%" y="535.50">loopflow::session_record::write_provider_client</text></g><g><title>loopflow::session_record::write_private_exclusive (16 samples, 22.86%)</title><rect x="21.4286%" y="509" width="22.8571%" height="15" fill="rgb(249,142,4)" fg:x="15" fg:w="16"/><text x="21.6161%" y="519.50">loopflow::session_record::write_private_exclusive</text></g><g><title>&lt;std::fs::File&gt;::sync_all (16 samples, 22.86%)</title><rect x="21.4286%" y="493" width="22.8571%" height="15" fill="rgb(216,175,45)" fg:x="15" fg:w="16"/><text x="21.6161%" y="503.50">&lt;std::fs::File&gt;::sync_all</text></g><g><title>fcntl (16 samples, 22.86%)</title><rect x="21.4286%" y="477" width="22.8571%" height="15" fill="rgb(210,180,8)" fg:x="15" fg:w="16"/><text x="21.6161%" y="487.50">fcntl</text></g><g><title>__fcntl (16 samples, 22.86%)</title><rect x="21.4286%" y="461" width="22.8571%" height="15" fill="rgb(210,80,5)" fg:x="15" fg:w="16"/><text x="21.6161%" y="471.50">__fcntl</text></g><g><title>&lt;rusqlite::Connection&gt;::open_with_flags::&lt;&amp;std::path::Path&gt; (1 samples, 1.43%)</title><rect x="44.2857%" y="525" width="1.4286%" height="15" fill="rgb(246,62,27)" fg:x="31" fg:w="1"/><text x="44.4732%" y="535.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::open_with_flags (1 samples, 1.43%)</title><rect x="44.2857%" y="509" width="1.4286%" height="15" fill="rgb(237,154,51)" fg:x="31" fg:w="1"/><text x="44.4732%" y="519.50">&lt;..</text></g><g><title>openDatabase (1 samples, 1.43%)</title><rect x="44.2857%" y="493" width="1.4286%" height="15" fill="rgb(215,70,19)" fg:x="31" fg:w="1"/><text x="44.4732%" y="503.50">o..</text></g><g><title>sqlite3BtreeOpen (1 samples, 1.43%)</title><rect x="44.2857%" y="477" width="1.4286%" height="15" fill="rgb(211,33,21)" fg:x="31" fg:w="1"/><text x="44.4732%" y="487.50">s..</text></g><g><title>unixFullPathname (1 samples, 1.43%)</title><rect x="44.2857%" y="461" width="1.4286%" height="15" fill="rgb(241,120,19)" fg:x="31" fg:w="1"/><text x="44.4732%" y="471.50">u..</text></g><g><title>appendAllPathElements (1 samples, 1.43%)</title><rect x="44.2857%" y="445" width="1.4286%" height="15" fill="rgb(236,14,14)" fg:x="31" fg:w="1"/><text x="44.4732%" y="455.50">a..</text></g><g><title>lstat (1 samples, 1.43%)</title><rect x="44.2857%" y="429" width="1.4286%" height="15" fill="rgb(220,52,2)" fg:x="31" fg:w="1"/><text x="44.4732%" y="439.50">l..</text></g><g><title>loopflow::store::migrations::_validate_development_schema (1 samples, 1.43%)</title><rect x="45.7143%" y="493" width="1.4286%" height="15" fill="rgb(220,185,34)" fg:x="32" fg:w="1"/><text x="45.9018%" y="503.50">l..</text></g><g><title>&lt;std::hash::random::RandomState as core::hash::BuildHasher&gt;::hash_one::&lt;&amp;alloc::vec::Vec&lt;&amp;str&gt;&gt; (1 samples, 1.43%)</title><rect x="45.7143%" y="477" width="1.4286%" height="15" fill="rgb(216,123,19)" fg:x="32" fg:w="1"/><text x="45.9018%" y="487.50">&lt;..</text></g><g><title>&lt;core::hash::sip::Hasher&lt;core::hash::sip::Sip13Rounds&gt; as core::hash::Hasher&gt;::write (1 samples, 1.43%)</title><rect x="45.7143%" y="461" width="1.4286%" height="15" fill="rgb(215,18,37)" fg:x="32" fg:w="1"/><text x="45.9018%" y="471.50">&lt;..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite (2 samples, 2.86%)</title><rect x="45.7143%" y="525" width="2.8571%" height="15" fill="rgb(220,198,36)" fg:x="32" fg:w="2"/><text x="45.9018%" y="535.50">loop..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite::{closure#0} (2 samples, 2.86%)</title><rect x="45.7143%" y="509" width="2.8571%" height="15" fill="rgb(231,80,6)" fg:x="32" fg:w="2"/><text x="45.9018%" y="519.50">loop..</text></g><g><title>loopflow::store::migrations::validate_experimental_schema::{closure#0} (1 samples, 1.43%)</title><rect x="47.1429%" y="493" width="1.4286%" height="15" fill="rgb(210,17,5)" fg:x="33" fg:w="1"/><text x="47.3304%" y="503.50">l..</text></g><g><title>loopflow::store::migrations::validate_applied_checksums (1 samples, 1.43%)</title><rect x="47.1429%" y="477" width="1.4286%" height="15" fill="rgb(242,97,54)" fg:x="33" fg:w="1"/><text x="47.3304%" y="487.50">l..</text></g><g><title>&lt;digest::core_api::wrapper::CoreWrapper&lt;digest::core_api::ct_variable::CtVariableCoreWrapper&lt;sha2::core_api::Sha256VarCore, typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UTerm, typenum::bit::B1&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, sha2::OidSha256&gt;&gt; as digest::digest::Digest&gt;::digest::&lt;&amp;[u8]&gt; (1 samples, 1.43%)</title><rect x="47.1429%" y="461" width="1.4286%" height="15" fill="rgb(230,197,47)" fg:x="33" fg:w="1"/><text x="47.3304%" y="471.50">&lt;..</text></g><g><title>sha2::sha256::compress256 (1 samples, 1.43%)</title><rect x="47.1429%" y="445" width="1.4286%" height="15" fill="rgb(208,95,51)" fg:x="33" fg:w="1"/><text x="47.3304%" y="455.50">s..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::open (4 samples, 5.71%)</title><rect x="44.2857%" y="541" width="5.7143%" height="15" fill="rgb(208,216,5)" fg:x="31" fg:w="4"/><text x="44.4732%" y="551.50">&lt;loopflow:..</text></g><g><title>loopflow::store::sqlite::configure_write_connection (1 samples, 1.43%)</title><rect x="48.5714%" y="525" width="1.4286%" height="15" fill="rgb(242,40,52)" fg:x="34" fg:w="1"/><text x="48.7589%" y="535.50">l..</text></g><g><title>&lt;rusqlite::Connection&gt;::pragma_query_value::&lt;alloc::string::String, loopflow::store::sqlite::configure_write_connection::{closure#0}&gt; (1 samples, 1.43%)</title><rect x="48.5714%" y="509" width="1.4286%" height="15" fill="rgb(244,213,35)" fg:x="34" fg:w="1"/><text x="48.7589%" y="519.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="48.5714%" y="493" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="34" fg:w="1"/><text x="48.7589%" y="503.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="48.5714%" y="477" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="34" fg:w="1"/><text x="48.7589%" y="487.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="48.5714%" y="461" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="34" fg:w="1"/><text x="48.7589%" y="471.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="48.5714%" y="445" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="34" fg:w="1"/><text x="48.7589%" y="455.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="48.5714%" y="429" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="34" fg:w="1"/><text x="48.7589%" y="439.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="48.5714%" y="413" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="34" fg:w="1"/><text x="48.7589%" y="423.50">y..</text></g><g><title>sqlite3Pragma (1 samples, 1.43%)</title><rect x="48.5714%" y="397" width="1.4286%" height="15" fill="rgb(209,185,45)" fg:x="34" fg:w="1"/><text x="48.7589%" y="407.50">s..</text></g><g><title>sqlite3ReadSchema (1 samples, 1.43%)</title><rect x="48.5714%" y="381" width="1.4286%" height="15" fill="rgb(233,180,14)" fg:x="34" fg:w="1"/><text x="48.7589%" y="391.50">s..</text></g><g><title>sqlite3InitOne (1 samples, 1.43%)</title><rect x="48.5714%" y="365" width="1.4286%" height="15" fill="rgb(218,4,10)" fg:x="34" fg:w="1"/><text x="48.7589%" y="375.50">s..</text></g><g><title>sqlite3_exec (1 samples, 1.43%)</title><rect x="48.5714%" y="349" width="1.4286%" height="15" fill="rgb(252,100,1)" fg:x="34" fg:w="1"/><text x="48.7589%" y="359.50">s..</text></g><g><title>sqlite3InitCallback (1 samples, 1.43%)</title><rect x="48.5714%" y="333" width="1.4286%" height="15" fill="rgb(208,171,3)" fg:x="34" fg:w="1"/><text x="48.7589%" y="343.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="48.5714%" y="317" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="34" fg:w="1"/><text x="48.7589%" y="327.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="48.5714%" y="301" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="34" fg:w="1"/><text x="48.7589%" y="311.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="48.5714%" y="285" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="34" fg:w="1"/><text x="48.7589%" y="295.50">y..</text></g><g><title>sqlite3AddColumn (1 samples, 1.43%)</title><rect x="48.5714%" y="269" width="1.4286%" height="15" fill="rgb(247,143,53)" fg:x="34" fg:w="1"/><text x="48.7589%" y="279.50">s..</text></g><g><title>core::ptr::drop_glue::&lt;core::option::Option&lt;loopflow::lf::commands::util::ProviderClientGuard&gt;&gt; (10 samples, 14.29%)</title><rect x="50.0000%" y="541" width="14.2857%" height="15" fill="rgb(230,227,53)" fg:x="35" fg:w="10"/><text x="50.1875%" y="551.50">core::ptr::drop_glue::&lt;core::o..</text></g><g><title>&lt;loopflow::lf::commands::util::ProviderClientGuard as core::ops::drop::Drop&gt;::drop (10 samples, 14.29%)</title><rect x="50.0000%" y="525" width="14.2857%" height="15" fill="rgb(252,73,19)" fg:x="35" fg:w="10"/><text x="50.1875%" y="535.50">&lt;loopflow::lf::commands::util:..</text></g><g><title>loopflow::session_record::remove_provider_client (10 samples, 14.29%)</title><rect x="50.0000%" y="509" width="14.2857%" height="15" fill="rgb(223,153,40)" fg:x="35" fg:w="10"/><text x="50.1875%" y="519.50">loopflow::session_record::remo..</text></g><g><title>&lt;std::fs::File&gt;::sync_all (10 samples, 14.29%)</title><rect x="50.0000%" y="493" width="14.2857%" height="15" fill="rgb(216,175,45)" fg:x="35" fg:w="10"/><text x="50.1875%" y="503.50">&lt;std::fs::File&gt;::sync_all</text></g><g><title>fcntl (10 samples, 14.29%)</title><rect x="50.0000%" y="477" width="14.2857%" height="15" fill="rgb(210,180,8)" fg:x="35" fg:w="10"/><text x="50.1875%" y="487.50">fcntl</text></g><g><title>__fcntl (10 samples, 14.29%)</title><rect x="50.0000%" y="461" width="14.2857%" height="15" fill="rgb(210,80,5)" fg:x="35" fg:w="10"/><text x="50.1875%" y="471.50">__fcntl</text></g><g><title>&lt;alloc::sync::Arc&lt;std::sync::poison::mutex::Mutex&lt;rusqlite::Connection&gt;&gt;&gt;::drop_slow (1 samples, 1.43%)</title><rect x="64.2857%" y="525" width="1.4286%" height="15" fill="rgb(227,32,20)" fg:x="45" fg:w="1"/><text x="64.4732%" y="535.50">&lt;..</text></g><g><title>core::ptr::drop_glue::&lt;rusqlite::Connection&gt; (1 samples, 1.43%)</title><rect x="64.2857%" y="509" width="1.4286%" height="15" fill="rgb(215,6,50)" fg:x="45" fg:w="1"/><text x="64.4732%" y="519.50">c..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::close (1 samples, 1.43%)</title><rect x="64.2857%" y="493" width="1.4286%" height="15" fill="rgb(229,197,40)" fg:x="45" fg:w="1"/><text x="64.4732%" y="503.50">&lt;..</text></g><g><title>sqlite3Close (1 samples, 1.43%)</title><rect x="64.2857%" y="477" width="1.4286%" height="15" fill="rgb(212,72,12)" fg:x="45" fg:w="1"/><text x="64.4732%" y="487.50">s..</text></g><g><title>sqlite3LeaveMutexAndCloseZombie (1 samples, 1.43%)</title><rect x="64.2857%" y="461" width="1.4286%" height="15" fill="rgb(231,24,34)" fg:x="45" fg:w="1"/><text x="64.4732%" y="471.50">s..</text></g><g><title>sqlite3BtreeClose (1 samples, 1.43%)</title><rect x="64.2857%" y="445" width="1.4286%" height="15" fill="rgb(245,104,27)" fg:x="45" fg:w="1"/><text x="64.4732%" y="455.50">s..</text></g><g><title>sqlite3SchemaClear (1 samples, 1.43%)</title><rect x="64.2857%" y="429" width="1.4286%" height="15" fill="rgb(237,199,35)" fg:x="45" fg:w="1"/><text x="64.4732%" y="439.50">s..</text></g><g><title>deleteTable (1 samples, 1.43%)</title><rect x="64.2857%" y="413" width="1.4286%" height="15" fill="rgb(219,122,30)" fg:x="45" fg:w="1"/><text x="64.4732%" y="423.50">d..</text></g><g><title>sqlite3DbFree (1 samples, 1.43%)</title><rect x="64.2857%" y="397" width="1.4286%" height="15" fill="rgb(250,136,12)" fg:x="45" fg:w="1"/><text x="64.4732%" y="407.50">s..</text></g><g><title>_xzm_free (1 samples, 1.43%)</title><rect x="64.2857%" y="381" width="1.4286%" height="15" fill="rgb(211,172,22)" fg:x="45" fg:w="1"/><text x="64.4732%" y="391.50">_..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite (1 samples, 1.43%)</title><rect x="65.7143%" y="509" width="1.4286%" height="15" fill="rgb(220,198,36)" fg:x="46" fg:w="1"/><text x="65.9018%" y="519.50">l..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite::{closure#0} (1 samples, 1.43%)</title><rect x="65.7143%" y="493" width="1.4286%" height="15" fill="rgb(231,80,6)" fg:x="46" fg:w="1"/><text x="65.9018%" y="503.50">l..</text></g><g><title>loopflow::store::migrations::validate_experimental_schema::{closure#0} (1 samples, 1.43%)</title><rect x="65.7143%" y="477" width="1.4286%" height="15" fill="rgb(210,17,5)" fg:x="46" fg:w="1"/><text x="65.9018%" y="487.50">l..</text></g><g><title>loopflow::store::migrations::validate_applied_checksums (1 samples, 1.43%)</title><rect x="65.7143%" y="461" width="1.4286%" height="15" fill="rgb(242,97,54)" fg:x="46" fg:w="1"/><text x="65.9018%" y="471.50">l..</text></g><g><title>alloc::fmt::format::format_inner (1 samples, 1.43%)</title><rect x="65.7143%" y="445" width="1.4286%" height="15" fill="rgb(225,219,39)" fg:x="46" fg:w="1"/><text x="65.9018%" y="455.50">a..</text></g><g><title>core::fmt::write (1 samples, 1.43%)</title><rect x="65.7143%" y="429" width="1.4286%" height="15" fill="rgb(248,210,20)" fg:x="46" fg:w="1"/><text x="65.9018%" y="439.50">c..</text></g><g><title>&lt;loopflow::store::migration_catalog::MigrationId as core::fmt::Display&gt;::fmt (1 samples, 1.43%)</title><rect x="65.7143%" y="413" width="1.4286%" height="15" fill="rgb(221,122,31)" fg:x="46" fg:w="1"/><text x="65.9018%" y="423.50">&lt;..</text></g><g><title>core::fmt::write (1 samples, 1.43%)</title><rect x="65.7143%" y="397" width="1.4286%" height="15" fill="rgb(248,210,20)" fg:x="46" fg:w="1"/><text x="65.9018%" y="407.50">c..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::open (2 samples, 2.86%)</title><rect x="65.7143%" y="525" width="2.8571%" height="15" fill="rgb(208,216,5)" fg:x="46" fg:w="2"/><text x="65.9018%" y="535.50">&lt;loo..</text></g><g><title>loopflow::store::sqlite::configure_write_connection (1 samples, 1.43%)</title><rect x="67.1429%" y="509" width="1.4286%" height="15" fill="rgb(242,40,52)" fg:x="47" fg:w="1"/><text x="67.3304%" y="519.50">l..</text></g><g><title>&lt;rusqlite::Connection&gt;::pragma_query_value::&lt;alloc::string::String, loopflow::store::sqlite::configure_write_connection::{closure#0}&gt; (1 samples, 1.43%)</title><rect x="67.1429%" y="493" width="1.4286%" height="15" fill="rgb(244,213,35)" fg:x="47" fg:w="1"/><text x="67.3304%" y="503.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="67.1429%" y="477" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="47" fg:w="1"/><text x="67.3304%" y="487.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="67.1429%" y="461" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="47" fg:w="1"/><text x="67.3304%" y="471.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="67.1429%" y="445" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="47" fg:w="1"/><text x="67.3304%" y="455.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="67.1429%" y="429" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="47" fg:w="1"/><text x="67.3304%" y="439.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="67.1429%" y="413" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="47" fg:w="1"/><text x="67.3304%" y="423.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="67.1429%" y="397" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="47" fg:w="1"/><text x="67.3304%" y="407.50">y..</text></g><g><title>sqlite3Pragma (1 samples, 1.43%)</title><rect x="67.1429%" y="381" width="1.4286%" height="15" fill="rgb(209,185,45)" fg:x="47" fg:w="1"/><text x="67.3304%" y="391.50">s..</text></g><g><title>sqlite3ReadSchema (1 samples, 1.43%)</title><rect x="67.1429%" y="365" width="1.4286%" height="15" fill="rgb(233,180,14)" fg:x="47" fg:w="1"/><text x="67.3304%" y="375.50">s..</text></g><g><title>sqlite3InitOne (1 samples, 1.43%)</title><rect x="67.1429%" y="349" width="1.4286%" height="15" fill="rgb(218,4,10)" fg:x="47" fg:w="1"/><text x="67.3304%" y="359.50">s..</text></g><g><title>sqlite3_exec (1 samples, 1.43%)</title><rect x="67.1429%" y="333" width="1.4286%" height="15" fill="rgb(252,100,1)" fg:x="47" fg:w="1"/><text x="67.3304%" y="343.50">s..</text></g><g><title>sqlite3InitCallback (1 samples, 1.43%)</title><rect x="67.1429%" y="317" width="1.4286%" height="15" fill="rgb(208,171,3)" fg:x="47" fg:w="1"/><text x="67.3304%" y="327.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="67.1429%" y="301" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="47" fg:w="1"/><text x="67.3304%" y="311.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="67.1429%" y="285" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="47" fg:w="1"/><text x="67.3304%" y="295.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="67.1429%" y="269" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="47" fg:w="1"/><text x="67.3304%" y="279.50">y..</text></g><g><title>sqlite3TriggerUpdateStep (1 samples, 1.43%)</title><rect x="67.1429%" y="253" width="1.4286%" height="15" fill="rgb(249,140,34)" fg:x="47" fg:w="1"/><text x="67.3304%" y="263.50">s..</text></g><g><title>triggerStepAllocate (1 samples, 1.43%)</title><rect x="67.1429%" y="237" width="1.4286%" height="15" fill="rgb(221,192,39)" fg:x="47" fg:w="1"/><text x="67.3304%" y="247.50">t..</text></g><g><title>dbMallocRawFinish (1 samples, 1.43%)</title><rect x="67.1429%" y="221" width="1.4286%" height="15" fill="rgb(208,98,9)" fg:x="47" fg:w="1"/><text x="67.3304%" y="231.50">d..</text></g><g><title>sqlite3Malloc (1 samples, 1.43%)</title><rect x="67.1429%" y="205" width="1.4286%" height="15" fill="rgb(229,2,28)" fg:x="47" fg:w="1"/><text x="67.3304%" y="215.50">s..</text></g><g><title>sqlite3MemMalloc (1 samples, 1.43%)</title><rect x="67.1429%" y="189" width="1.4286%" height="15" fill="rgb(218,226,43)" fg:x="47" fg:w="1"/><text x="67.3304%" y="199.50">s..</text></g><g><title>_xzm_xzone_malloc (1 samples, 1.43%)</title><rect x="67.1429%" y="173" width="1.4286%" height="15" fill="rgb(214,103,16)" fg:x="47" fg:w="1"/><text x="67.3304%" y="183.50">_..</text></g><g><title>loopflow::lf::commands::util::record_interactive_opened (4 samples, 5.71%)</title><rect x="64.2857%" y="541" width="5.7143%" height="15" fill="rgb(218,61,52)" fg:x="45" fg:w="4"/><text x="64.4732%" y="551.50">loopflow::..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::retain_session_observation (1 samples, 1.43%)</title><rect x="68.5714%" y="525" width="1.4286%" height="15" fill="rgb(209,28,37)" fg:x="48" fg:w="1"/><text x="68.7589%" y="535.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::execute::&lt;&amp;[&amp;dyn rusqlite::types::to_sql::ToSql]&gt; (1 samples, 1.43%)</title><rect x="68.5714%" y="509" width="1.4286%" height="15" fill="rgb(238,32,31)" fg:x="48" fg:w="1"/><text x="68.7589%" y="519.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="68.5714%" y="493" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="48" fg:w="1"/><text x="68.7589%" y="503.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="68.5714%" y="477" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="48" fg:w="1"/><text x="68.7589%" y="487.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="68.5714%" y="461" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="48" fg:w="1"/><text x="68.7589%" y="471.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="68.5714%" y="445" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="48" fg:w="1"/><text x="68.7589%" y="455.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="68.5714%" y="429" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="48" fg:w="1"/><text x="68.7589%" y="439.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="68.5714%" y="413" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="48" fg:w="1"/><text x="68.7589%" y="423.50">y..</text></g><g><title>sqlite3Insert (1 samples, 1.43%)</title><rect x="68.5714%" y="397" width="1.4286%" height="15" fill="rgb(238,22,26)" fg:x="48" fg:w="1"/><text x="68.7589%" y="407.50">s..</text></g><g><title>sqlite3CodeRowTrigger (1 samples, 1.43%)</title><rect x="68.5714%" y="381" width="1.4286%" height="15" fill="rgb(247,208,34)" fg:x="48" fg:w="1"/><text x="68.7589%" y="391.50">s..</text></g><g><title>codeRowTrigger (1 samples, 1.43%)</title><rect x="68.5714%" y="365" width="1.4286%" height="15" fill="rgb(229,162,34)" fg:x="48" fg:w="1"/><text x="68.7589%" y="375.50">c..</text></g><g><title>sqlite3Update (1 samples, 1.43%)</title><rect x="68.5714%" y="349" width="1.4286%" height="15" fill="rgb(253,64,44)" fg:x="48" fg:w="1"/><text x="68.7589%" y="359.50">s..</text></g><g><title>sqlite3TriggerColmask (1 samples, 1.43%)</title><rect x="68.5714%" y="333" width="1.4286%" height="15" fill="rgb(232,97,23)" fg:x="48" fg:w="1"/><text x="68.7589%" y="343.50">s..</text></g><g><title>codeRowTrigger (1 samples, 1.43%)</title><rect x="68.5714%" y="317" width="1.4286%" height="15" fill="rgb(229,162,34)" fg:x="48" fg:w="1"/><text x="68.7589%" y="327.50">c..</text></g><g><title>sqlite3Select (1 samples, 1.43%)</title><rect x="68.5714%" y="301" width="1.4286%" height="15" fill="rgb(225,131,28)" fg:x="48" fg:w="1"/><text x="68.7589%" y="311.50">s..</text></g><g><title>selectInnerLoop (1 samples, 1.43%)</title><rect x="68.5714%" y="285" width="1.4286%" height="15" fill="rgb(208,220,8)" fg:x="48" fg:w="1"/><text x="68.7589%" y="295.50">s..</text></g><g><title>sqlite3ExprCodeExprList (1 samples, 1.43%)</title><rect x="68.5714%" y="269" width="1.4286%" height="15" fill="rgb(252,62,42)" fg:x="48" fg:w="1"/><text x="68.7589%" y="279.50">s..</text></g><g><title>sqlite3ExprCodeTarget (1 samples, 1.43%)</title><rect x="68.5714%" y="253" width="1.4286%" height="15" fill="rgb(211,22,53)" fg:x="48" fg:w="1"/><text x="68.7589%" y="263.50">s..</text></g><g><title>sqlite3ExprIfFalse (1 samples, 1.43%)</title><rect x="68.5714%" y="237" width="1.4286%" height="15" fill="rgb(229,52,47)" fg:x="48" fg:w="1"/><text x="68.7589%" y="247.50">s..</text></g><g><title>sqlite3ExprIfFalse (1 samples, 1.43%)</title><rect x="68.5714%" y="221" width="1.4286%" height="15" fill="rgb(229,52,47)" fg:x="48" fg:w="1"/><text x="68.7589%" y="231.50">s..</text></g><g><title>sqlite3ExprIfTrue (1 samples, 1.43%)</title><rect x="68.5714%" y="205" width="1.4286%" height="15" fill="rgb(209,224,5)" fg:x="48" fg:w="1"/><text x="68.7589%" y="215.50">s..</text></g><g><title>sqlite3ExprIfTrue (1 samples, 1.43%)</title><rect x="68.5714%" y="189" width="1.4286%" height="15" fill="rgb(209,224,5)" fg:x="48" fg:w="1"/><text x="68.7589%" y="199.50">s..</text></g><g><title>sqlite3ExprIfTrue (1 samples, 1.43%)</title><rect x="68.5714%" y="173" width="1.4286%" height="15" fill="rgb(209,224,5)" fg:x="48" fg:w="1"/><text x="68.7589%" y="183.50">s..</text></g><g><title>sqlite3ExprCodeTemp (1 samples, 1.43%)</title><rect x="68.5714%" y="157" width="1.4286%" height="15" fill="rgb(238,113,32)" fg:x="48" fg:w="1"/><text x="68.7589%" y="167.50">s..</text></g><g><title>sqlite3CodeSubselect (1 samples, 1.43%)</title><rect x="68.5714%" y="141" width="1.4286%" height="15" fill="rgb(211,203,9)" fg:x="48" fg:w="1"/><text x="68.7589%" y="151.50">s..</text></g><g><title>sqlite3Select (1 samples, 1.43%)</title><rect x="68.5714%" y="125" width="1.4286%" height="15" fill="rgb(225,131,28)" fg:x="48" fg:w="1"/><text x="68.7589%" y="135.50">s..</text></g><g><title>sqlite3WhereBegin (1 samples, 1.43%)</title><rect x="68.5714%" y="109" width="1.4286%" height="15" fill="rgb(225,2,52)" fg:x="48" fg:w="1"/><text x="68.7589%" y="119.50">s..</text></g><g><title>exprAnalyze (1 samples, 1.43%)</title><rect x="68.5714%" y="93" width="1.4286%" height="15" fill="rgb(247,122,39)" fg:x="48" fg:w="1"/><text x="68.7589%" y="103.50">e..</text></g><g><title>exprAnalyzeOrTerm (1 samples, 1.43%)</title><rect x="68.5714%" y="77" width="1.4286%" height="15" fill="rgb(217,0,27)" fg:x="48" fg:w="1"/><text x="68.7589%" y="87.50">e..</text></g><g><title>dbMallocRawFinish (1 samples, 1.43%)</title><rect x="68.5714%" y="61" width="1.4286%" height="15" fill="rgb(208,98,9)" fg:x="48" fg:w="1"/><text x="68.7589%" y="71.50">d..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::record_session_provider_process (1 samples, 1.43%)</title><rect x="70.0000%" y="525" width="1.4286%" height="15" fill="rgb(213,145,30)" fg:x="49" fg:w="1"/><text x="70.1875%" y="535.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::execute::&lt;&amp;[&amp;dyn rusqlite::types::to_sql::ToSql]&gt; (1 samples, 1.43%)</title><rect x="70.0000%" y="509" width="1.4286%" height="15" fill="rgb(238,32,31)" fg:x="49" fg:w="1"/><text x="70.1875%" y="519.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="70.0000%" y="493" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="49" fg:w="1"/><text x="70.1875%" y="503.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="70.0000%" y="477" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="49" fg:w="1"/><text x="70.1875%" y="487.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="70.0000%" y="461" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="49" fg:w="1"/><text x="70.1875%" y="471.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="70.0000%" y="445" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="49" fg:w="1"/><text x="70.1875%" y="455.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="70.0000%" y="429" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="49" fg:w="1"/><text x="70.1875%" y="439.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="70.0000%" y="413" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="49" fg:w="1"/><text x="70.1875%" y="423.50">y..</text></g><g><title>sqlite3Update (1 samples, 1.43%)</title><rect x="70.0000%" y="397" width="1.4286%" height="15" fill="rgb(253,64,44)" fg:x="49" fg:w="1"/><text x="70.1875%" y="407.50">s..</text></g><g><title>sqlite3TriggerColmask (1 samples, 1.43%)</title><rect x="70.0000%" y="381" width="1.4286%" height="15" fill="rgb(232,97,23)" fg:x="49" fg:w="1"/><text x="70.1875%" y="391.50">s..</text></g><g><title>codeRowTrigger (1 samples, 1.43%)</title><rect x="70.0000%" y="365" width="1.4286%" height="15" fill="rgb(229,162,34)" fg:x="49" fg:w="1"/><text x="70.1875%" y="375.50">c..</text></g><g><title>sqlite3Update (1 samples, 1.43%)</title><rect x="70.0000%" y="349" width="1.4286%" height="15" fill="rgb(253,64,44)" fg:x="49" fg:w="1"/><text x="70.1875%" y="359.50">s..</text></g><g><title>&lt;std::sys::process::unix::common::Command&gt;::spawn (3 samples, 4.29%)</title><rect x="71.4286%" y="493" width="4.2857%" height="15" fill="rgb(227,203,23)" fg:x="50" fg:w="3"/><text x="71.6161%" y="503.50">&lt;std::s..</text></g><g><title>posix_spawnp (3 samples, 4.29%)</title><rect x="71.4286%" y="477" width="4.2857%" height="15" fill="rgb(224,193,3)" fg:x="50" fg:w="3"/><text x="71.6161%" y="487.50">posix_s..</text></g><g><title>posix_spawn (3 samples, 4.29%)</title><rect x="71.4286%" y="461" width="4.2857%" height="15" fill="rgb(207,147,46)" fg:x="50" fg:w="3"/><text x="71.6161%" y="471.50">posix_s..</text></g><g><title>__posix_spawn (3 samples, 4.29%)</title><rect x="71.4286%" y="445" width="4.2857%" height="15" fill="rgb(229,221,18)" fg:x="50" fg:w="3"/><text x="71.6161%" y="455.50">__posix..</text></g><g><title>loopflow::lf::commands::util::session_command_status_with_env::{closure#7} (7 samples, 10.00%)</title><rect x="70.0000%" y="541" width="10.0000%" height="15" fill="rgb(251,114,23)" fg:x="49" fg:w="7"/><text x="70.1875%" y="551.50">loopflow::lf::comman..</text></g><g><title>loopflow::journal::process_started_at (6 samples, 8.57%)</title><rect x="71.4286%" y="525" width="8.5714%" height="15" fill="rgb(236,69,14)" fg:x="50" fg:w="6"/><text x="71.6161%" y="535.50">loopflow::journal..</text></g><g><title>&lt;std::process::Command&gt;::output (6 samples, 8.57%)</title><rect x="71.4286%" y="509" width="8.5714%" height="15" fill="rgb(243,90,8)" fg:x="50" fg:w="6"/><text x="71.6161%" y="519.50">&lt;std::process::Co..</text></g><g><title>std::sys::process::unix::common::read_output (3 samples, 4.29%)</title><rect x="75.7143%" y="493" width="4.2857%" height="15" fill="rgb(209,86,15)" fg:x="53" fg:w="3"/><text x="75.9018%" y="503.50">std::sy..</text></g><g><title>poll (3 samples, 4.29%)</title><rect x="75.7143%" y="477" width="4.2857%" height="15" fill="rgb(233,125,31)" fg:x="53" fg:w="3"/><text x="75.9018%" y="487.50">poll</text></g><g><title>&lt;alloc::sync::Arc&lt;std::sync::poison::mutex::Mutex&lt;rusqlite::Connection&gt;&gt;&gt;::drop_slow (1 samples, 1.43%)</title><rect x="80.0000%" y="525" width="1.4286%" height="15" fill="rgb(227,32,20)" fg:x="56" fg:w="1"/><text x="80.1875%" y="535.50">&lt;..</text></g><g><title>core::ptr::drop_glue::&lt;rusqlite::Connection&gt; (1 samples, 1.43%)</title><rect x="80.0000%" y="509" width="1.4286%" height="15" fill="rgb(215,6,50)" fg:x="56" fg:w="1"/><text x="80.1875%" y="519.50">c..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::close (1 samples, 1.43%)</title><rect x="80.0000%" y="493" width="1.4286%" height="15" fill="rgb(229,197,40)" fg:x="56" fg:w="1"/><text x="80.1875%" y="503.50">&lt;..</text></g><g><title>sqlite3Close (1 samples, 1.43%)</title><rect x="80.0000%" y="477" width="1.4286%" height="15" fill="rgb(212,72,12)" fg:x="56" fg:w="1"/><text x="80.1875%" y="487.50">s..</text></g><g><title>sqlite3LeaveMutexAndCloseZombie (1 samples, 1.43%)</title><rect x="80.0000%" y="461" width="1.4286%" height="15" fill="rgb(231,24,34)" fg:x="56" fg:w="1"/><text x="80.1875%" y="471.50">s..</text></g><g><title>sqlite3BtreeClose (1 samples, 1.43%)</title><rect x="80.0000%" y="445" width="1.4286%" height="15" fill="rgb(245,104,27)" fg:x="56" fg:w="1"/><text x="80.1875%" y="455.50">s..</text></g><g><title>sqlite3SchemaClear (1 samples, 1.43%)</title><rect x="80.0000%" y="429" width="1.4286%" height="15" fill="rgb(237,199,35)" fg:x="56" fg:w="1"/><text x="80.1875%" y="439.50">s..</text></g><g><title>deleteTable (1 samples, 1.43%)</title><rect x="80.0000%" y="413" width="1.4286%" height="15" fill="rgb(219,122,30)" fg:x="56" fg:w="1"/><text x="80.1875%" y="423.50">d..</text></g><g><title>exprListDeleteNN (1 samples, 1.43%)</title><rect x="80.0000%" y="397" width="1.4286%" height="15" fill="rgb(246,196,50)" fg:x="56" fg:w="1"/><text x="80.1875%" y="407.50">e..</text></g><g><title>sqlite3ExprDeleteNN (1 samples, 1.43%)</title><rect x="80.0000%" y="381" width="1.4286%" height="15" fill="rgb(237,73,27)" fg:x="56" fg:w="1"/><text x="80.1875%" y="391.50">s..</text></g><g><title>_xzm_free (1 samples, 1.43%)</title><rect x="80.0000%" y="365" width="1.4286%" height="15" fill="rgb(211,172,22)" fg:x="56" fg:w="1"/><text x="80.1875%" y="375.50">_..</text></g><g><title>&lt;alloc::string::String as core::iter::traits::collect::FromIterator&lt;char&gt;&gt;::from_iter::&lt;hex::BytesToHexChars&gt; (1 samples, 1.43%)</title><rect x="81.4286%" y="445" width="1.4286%" height="15" fill="rgb(219,224,47)" fg:x="57" fg:w="1"/><text x="81.6161%" y="455.50">&lt;..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite (2 samples, 2.86%)</title><rect x="81.4286%" y="509" width="2.8571%" height="15" fill="rgb(220,198,36)" fg:x="57" fg:w="2"/><text x="81.6161%" y="519.50">loop..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite::{closure#0} (2 samples, 2.86%)</title><rect x="81.4286%" y="493" width="2.8571%" height="15" fill="rgb(231,80,6)" fg:x="57" fg:w="2"/><text x="81.6161%" y="503.50">loop..</text></g><g><title>loopflow::store::migrations::validate_experimental_schema::{closure#0} (2 samples, 2.86%)</title><rect x="81.4286%" y="477" width="2.8571%" height="15" fill="rgb(210,17,5)" fg:x="57" fg:w="2"/><text x="81.6161%" y="487.50">loop..</text></g><g><title>loopflow::store::migrations::validate_applied_checksums (2 samples, 2.86%)</title><rect x="81.4286%" y="461" width="2.8571%" height="15" fill="rgb(242,97,54)" fg:x="57" fg:w="2"/><text x="81.6161%" y="471.50">loop..</text></g><g><title>alloc::fmt::format::format_inner (1 samples, 1.43%)</title><rect x="82.8571%" y="445" width="1.4286%" height="15" fill="rgb(225,219,39)" fg:x="58" fg:w="1"/><text x="83.0446%" y="455.50">a..</text></g><g><title>core::fmt::write (1 samples, 1.43%)</title><rect x="82.8571%" y="429" width="1.4286%" height="15" fill="rgb(248,210,20)" fg:x="58" fg:w="1"/><text x="83.0446%" y="439.50">c..</text></g><g><title>&lt;loopflow::store::migration_catalog::MigrationId as core::fmt::Display&gt;::fmt (1 samples, 1.43%)</title><rect x="82.8571%" y="413" width="1.4286%" height="15" fill="rgb(221,122,31)" fg:x="58" fg:w="1"/><text x="83.0446%" y="423.50">&lt;..</text></g><g><title>core::fmt::write (1 samples, 1.43%)</title><rect x="82.8571%" y="397" width="1.4286%" height="15" fill="rgb(248,210,20)" fg:x="58" fg:w="1"/><text x="83.0446%" y="407.50">c..</text></g><g><title>&lt;alloc::string::String as core::fmt::Write&gt;::write_str (1 samples, 1.43%)</title><rect x="82.8571%" y="381" width="1.4286%" height="15" fill="rgb(237,176,18)" fg:x="58" fg:w="1"/><text x="83.0446%" y="391.50">&lt;..</text></g><g><title>loopflow::lf::commands::util::spawn_session_command_with_env (60 samples, 85.71%)</title><rect x="0.0000%" y="557" width="85.7143%" height="15" fill="rgb(229,87,17)" fg:x="0" fg:w="60"/><text x="0.1875%" y="567.50">loopflow::lf::commands::util::spawn_session_command_with_env</text></g><g><title>loopflow::session_record::write_provider_session (4 samples, 5.71%)</title><rect x="80.0000%" y="541" width="5.7143%" height="15" fill="rgb(228,85,18)" fg:x="56" fg:w="4"/><text x="80.1875%" y="551.50">loopflow::..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::open (3 samples, 4.29%)</title><rect x="81.4286%" y="525" width="4.2857%" height="15" fill="rgb(208,216,5)" fg:x="57" fg:w="3"/><text x="81.6161%" y="535.50">&lt;loopfl..</text></g><g><title>loopflow::store::sqlite::configure_write_connection (1 samples, 1.43%)</title><rect x="84.2857%" y="509" width="1.4286%" height="15" fill="rgb(242,40,52)" fg:x="59" fg:w="1"/><text x="84.4732%" y="519.50">l..</text></g><g><title>&lt;rusqlite::Connection&gt;::pragma_query_value::&lt;alloc::string::String, loopflow::store::sqlite::configure_write_connection::{closure#0}&gt; (1 samples, 1.43%)</title><rect x="84.2857%" y="493" width="1.4286%" height="15" fill="rgb(244,213,35)" fg:x="59" fg:w="1"/><text x="84.4732%" y="503.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (1 samples, 1.43%)</title><rect x="84.2857%" y="477" width="1.4286%" height="15" fill="rgb(206,188,49)" fg:x="59" fg:w="1"/><text x="84.4732%" y="487.50">&lt;..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (1 samples, 1.43%)</title><rect x="84.2857%" y="461" width="1.4286%" height="15" fill="rgb(221,88,16)" fg:x="59" fg:w="1"/><text x="84.4732%" y="471.50">&lt;..</text></g><g><title>sqlite3LockAndPrepare (1 samples, 1.43%)</title><rect x="84.2857%" y="445" width="1.4286%" height="15" fill="rgb(229,28,36)" fg:x="59" fg:w="1"/><text x="84.4732%" y="455.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="84.2857%" y="429" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="59" fg:w="1"/><text x="84.4732%" y="439.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="84.2857%" y="413" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="59" fg:w="1"/><text x="84.4732%" y="423.50">s..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="84.2857%" y="397" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="59" fg:w="1"/><text x="84.4732%" y="407.50">y..</text></g><g><title>sqlite3Pragma (1 samples, 1.43%)</title><rect x="84.2857%" y="381" width="1.4286%" height="15" fill="rgb(209,185,45)" fg:x="59" fg:w="1"/><text x="84.4732%" y="391.50">s..</text></g><g><title>sqlite3ReadSchema (1 samples, 1.43%)</title><rect x="84.2857%" y="365" width="1.4286%" height="15" fill="rgb(233,180,14)" fg:x="59" fg:w="1"/><text x="84.4732%" y="375.50">s..</text></g><g><title>sqlite3InitOne (1 samples, 1.43%)</title><rect x="84.2857%" y="349" width="1.4286%" height="15" fill="rgb(218,4,10)" fg:x="59" fg:w="1"/><text x="84.4732%" y="359.50">s..</text></g><g><title>sqlite3_exec (1 samples, 1.43%)</title><rect x="84.2857%" y="333" width="1.4286%" height="15" fill="rgb(252,100,1)" fg:x="59" fg:w="1"/><text x="84.4732%" y="343.50">s..</text></g><g><title>sqlite3InitCallback (1 samples, 1.43%)</title><rect x="84.2857%" y="317" width="1.4286%" height="15" fill="rgb(208,171,3)" fg:x="59" fg:w="1"/><text x="84.4732%" y="327.50">s..</text></g><g><title>sqlite3Prepare (1 samples, 1.43%)</title><rect x="84.2857%" y="301" width="1.4286%" height="15" fill="rgb(211,121,0)" fg:x="59" fg:w="1"/><text x="84.4732%" y="311.50">s..</text></g><g><title>sqlite3RunParser (1 samples, 1.43%)</title><rect x="84.2857%" y="285" width="1.4286%" height="15" fill="rgb(215,73,20)" fg:x="59" fg:w="1"/><text x="84.4732%" y="295.50">s..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (2 samples, 2.86%)</title><rect x="85.7143%" y="509" width="2.8571%" height="15" fill="rgb(206,188,49)" fg:x="60" fg:w="2"/><text x="85.9018%" y="519.50">&lt;rus..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (2 samples, 2.86%)</title><rect x="85.7143%" y="493" width="2.8571%" height="15" fill="rgb(221,88,16)" fg:x="60" fg:w="2"/><text x="85.9018%" y="503.50">&lt;rus..</text></g><g><title>sqlite3LockAndPrepare (2 samples, 2.86%)</title><rect x="85.7143%" y="477" width="2.8571%" height="15" fill="rgb(229,28,36)" fg:x="60" fg:w="2"/><text x="85.9018%" y="487.50">sqli..</text></g><g><title>sqlite3Prepare (2 samples, 2.86%)</title><rect x="85.7143%" y="461" width="2.8571%" height="15" fill="rgb(211,121,0)" fg:x="60" fg:w="2"/><text x="85.9018%" y="471.50">sqli..</text></g><g><title>sqlite3RunParser (2 samples, 2.86%)</title><rect x="85.7143%" y="445" width="2.8571%" height="15" fill="rgb(215,73,20)" fg:x="60" fg:w="2"/><text x="85.9018%" y="455.50">sqli..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="87.1429%" y="429" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="61" fg:w="1"/><text x="87.3304%" y="439.50">y..</text></g><g><title>sqlite3Insert (1 samples, 1.43%)</title><rect x="87.1429%" y="413" width="1.4286%" height="15" fill="rgb(238,22,26)" fg:x="61" fg:w="1"/><text x="87.3304%" y="423.50">s..</text></g><g><title>sqlite3CodeRowTrigger (1 samples, 1.43%)</title><rect x="87.1429%" y="397" width="1.4286%" height="15" fill="rgb(247,208,34)" fg:x="61" fg:w="1"/><text x="87.3304%" y="407.50">s..</text></g><g><title>codeRowTrigger (1 samples, 1.43%)</title><rect x="87.1429%" y="381" width="1.4286%" height="15" fill="rgb(229,162,34)" fg:x="61" fg:w="1"/><text x="87.3304%" y="391.50">c..</text></g><g><title>exprDup (1 samples, 1.43%)</title><rect x="87.1429%" y="365" width="1.4286%" height="15" fill="rgb(205,160,21)" fg:x="61" fg:w="1"/><text x="87.3304%" y="375.50">e..</text></g><g><title>exprDup (1 samples, 1.43%)</title><rect x="87.1429%" y="349" width="1.4286%" height="15" fill="rgb(205,160,21)" fg:x="61" fg:w="1"/><text x="87.3304%" y="359.50">e..</text></g><g><title>exprDup (1 samples, 1.43%)</title><rect x="87.1429%" y="333" width="1.4286%" height="15" fill="rgb(205,160,21)" fg:x="61" fg:w="1"/><text x="87.3304%" y="343.50">e..</text></g><g><title>sqlite3ExprListDup (1 samples, 1.43%)</title><rect x="87.1429%" y="317" width="1.4286%" height="15" fill="rgb(210,81,36)" fg:x="61" fg:w="1"/><text x="87.3304%" y="327.50">s..</text></g><g><title>&lt;rusqlite::Connection&gt;::execute::&lt;&amp;[&amp;dyn rusqlite::types::to_sql::ToSql]&gt; (3 samples, 4.29%)</title><rect x="85.7143%" y="525" width="4.2857%" height="15" fill="rgb(238,32,31)" fg:x="60" fg:w="3"/><text x="85.9018%" y="535.50">&lt;rusqli..</text></g><g><title>&lt;rusqlite::statement::Statement&gt;::execute_with_bound_parameters (1 samples, 1.43%)</title><rect x="88.5714%" y="509" width="1.4286%" height="15" fill="rgb(210,40,43)" fg:x="62" fg:w="1"/><text x="88.7589%" y="519.50">&lt;..</text></g><g><title>sqlite3_step (1 samples, 1.43%)</title><rect x="88.5714%" y="493" width="1.4286%" height="15" fill="rgb(228,44,14)" fg:x="62" fg:w="1"/><text x="88.7589%" y="503.50">s..</text></g><g><title>sqlite3VdbeExec (1 samples, 1.43%)</title><rect x="88.5714%" y="477" width="1.4286%" height="15" fill="rgb(208,202,31)" fg:x="62" fg:w="1"/><text x="88.7589%" y="487.50">s..</text></g><g><title>sqlite3BtreeInsert (1 samples, 1.43%)</title><rect x="88.5714%" y="461" width="1.4286%" height="15" fill="rgb(241,183,0)" fg:x="62" fg:w="1"/><text x="88.7589%" y="471.50">s..</text></g><g><title>pager_write (1 samples, 1.43%)</title><rect x="88.5714%" y="445" width="1.4286%" height="15" fill="rgb(224,165,54)" fg:x="62" fg:w="1"/><text x="88.7589%" y="455.50">p..</text></g><g><title>subjournalPageIfRequired (1 samples, 1.43%)</title><rect x="88.5714%" y="429" width="1.4286%" height="15" fill="rgb(205,1,32)" fg:x="62" fg:w="1"/><text x="88.7589%" y="439.50">s..</text></g><g><title>memjrnlWrite (1 samples, 1.43%)</title><rect x="88.5714%" y="413" width="1.4286%" height="15" fill="rgb(249,222,26)" fg:x="62" fg:w="1"/><text x="88.7589%" y="423.50">m..</text></g><g><title>unixOpen (1 samples, 1.43%)</title><rect x="88.5714%" y="397" width="1.4286%" height="15" fill="rgb(239,145,32)" fg:x="62" fg:w="1"/><text x="88.7589%" y="407.50">u..</text></g><g><title>robust_open (1 samples, 1.43%)</title><rect x="88.5714%" y="381" width="1.4286%" height="15" fill="rgb(242,72,24)" fg:x="62" fg:w="1"/><text x="88.7589%" y="391.50">r..</text></g><g><title>posixOpen (1 samples, 1.43%)</title><rect x="88.5714%" y="365" width="1.4286%" height="15" fill="rgb(209,13,20)" fg:x="62" fg:w="1"/><text x="88.7589%" y="375.50">p..</text></g><g><title>open (1 samples, 1.43%)</title><rect x="88.5714%" y="349" width="1.4286%" height="15" fill="rgb(232,223,8)" fg:x="62" fg:w="1"/><text x="88.7589%" y="359.50">o..</text></g><g><title>__open (1 samples, 1.43%)</title><rect x="88.5714%" y="333" width="1.4286%" height="15" fill="rgb(239,226,41)" fg:x="62" fg:w="1"/><text x="88.7589%" y="343.50">_..</text></g><g><title>lf::run (64 samples, 91.43%)</title><rect x="0.0000%" y="765" width="91.4286%" height="15" fill="rgb(234,106,13)" fg:x="0" fg:w="64"/><text x="0.1875%" y="775.50">lf::run</text></g><g><title>lf::dispatch (64 samples, 91.43%)</title><rect x="0.0000%" y="749" width="91.4286%" height="15" fill="rgb(216,64,43)" fg:x="0" fg:w="64"/><text x="0.1875%" y="759.50">lf::dispatch</text></g><g><title>lf::dispatch::{closure#1} (64 samples, 91.43%)</title><rect x="0.0000%" y="733" width="91.4286%" height="15" fill="rgb(240,200,37)" fg:x="0" fg:w="64"/><text x="0.1875%" y="743.50">lf::dispatch::{closure#1}</text></g><g><title>loopflow::lf::commands::session::run (64 samples, 91.43%)</title><rect x="0.0000%" y="717" width="91.4286%" height="15" fill="rgb(249,135,24)" fg:x="0" fg:w="64"/><text x="0.1875%" y="727.50">loopflow::lf::commands::session::run</text></g><g><title>loopflow::journal::with_runtime::&lt;(), loopflow::lf::commands::session::run::{closure#0}&gt; (64 samples, 91.43%)</title><rect x="0.0000%" y="701" width="91.4286%" height="15" fill="rgb(231,118,10)" fg:x="0" fg:w="64"/><text x="0.1875%" y="711.50">loopflow::journal::with_runtime::&lt;(), loopflow::lf::commands::session::run::{closure#0}&gt;</text></g><g><title>&lt;tokio::runtime::runtime::Runtime&gt;::block_on::&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt; (64 samples, 91.43%)</title><rect x="0.0000%" y="685" width="91.4286%" height="15" fill="rgb(236,66,5)" fg:x="0" fg:w="64"/><text x="0.1875%" y="695.50">&lt;tokio::runtime::runtime::Runtime&gt;::block_on::&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt;</text></g><g><title>tokio::runtime::context::runtime::enter_runtime::&lt;&lt;tokio::runtime::scheduler::multi_thread::MultiThread&gt;::block_on&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt;::{closure#0}, core::result::Result&lt;(), anyhow::Error&gt;&gt; (64 samples, 91.43%)</title><rect x="0.0000%" y="669" width="91.4286%" height="15" fill="rgb(224,179,20)" fg:x="0" fg:w="64"/><text x="0.1875%" y="679.50">tokio::runtime::context::runtime::enter_runtime::&lt;&lt;tokio::runtime::scheduler::multi_thread::MultiThread&gt;::block_on&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt;::{closure#0}, core::result::Resu..</text></g><g><title>&lt;tokio::runtime::park::CachedParkThread&gt;::block_on::&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt; (64 samples, 91.43%)</title><rect x="0.0000%" y="653" width="91.4286%" height="15" fill="rgb(245,208,13)" fg:x="0" fg:w="64"/><text x="0.1875%" y="663.50">&lt;tokio::runtime::park::CachedParkThread&gt;::block_on::&lt;loopflow::lf::commands::session::run_async::{closure#0}&gt;</text></g><g><title>loopflow::lf::commands::session::run_async::{closure#0} (64 samples, 91.43%)</title><rect x="0.0000%" y="637" width="91.4286%" height="15" fill="rgb(205,40,17)" fg:x="0" fg:w="64"/><text x="0.1875%" y="647.50">loopflow::lf::commands::session::run_async::{closure#0}</text></g><g><title>loopflow::lf::commands::session::open::{closure#0} (64 samples, 91.43%)</title><rect x="0.0000%" y="621" width="91.4286%" height="15" fill="rgb(220,137,18)" fg:x="0" fg:w="64"/><text x="0.1875%" y="631.50">loopflow::lf::commands::session::open::{closure#0}</text></g><g><title>loopflow::ops::human_session::open::{closure#0} (64 samples, 91.43%)</title><rect x="0.0000%" y="605" width="91.4286%" height="15" fill="rgb(230,44,4)" fg:x="0" fg:w="64"/><text x="0.1875%" y="615.50">loopflow::ops::human_session::open::{closure#0}</text></g><g><title>loopflow::lf::commands::util::resume_session (64 samples, 91.43%)</title><rect x="0.0000%" y="589" width="91.4286%" height="15" fill="rgb(227,170,9)" fg:x="0" fg:w="64"/><text x="0.1875%" y="599.50">loopflow::lf::commands::util::resume_session</text></g><g><title>loopflow::lf::commands::util::resume_session_with_env (64 samples, 91.43%)</title><rect x="0.0000%" y="573" width="91.4286%" height="15" fill="rgb(205,213,0)" fg:x="0" fg:w="64"/><text x="0.1875%" y="583.50">loopflow::lf::commands::util::resume_session_with_env</text></g><g><title>loopflow::session_record::runtime::finish_session_driver (4 samples, 5.71%)</title><rect x="85.7143%" y="557" width="5.7143%" height="15" fill="rgb(206,202,28)" fg:x="60" fg:w="4"/><text x="85.9018%" y="567.50">loopflow::..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::finish_session_driver::&lt;loopflow::session_record::runtime::finish_session_driver::{closure#1}&gt; (4 samples, 5.71%)</title><rect x="85.7143%" y="541" width="5.7143%" height="15" fill="rgb(224,32,31)" fg:x="60" fg:w="4"/><text x="85.9018%" y="551.50">&lt;loopflow:..</text></g><g><title>&lt;rusqlite::transaction::Transaction&gt;::commit (1 samples, 1.43%)</title><rect x="90.0000%" y="525" width="1.4286%" height="15" fill="rgb(229,212,3)" fg:x="63" fg:w="1"/><text x="90.1875%" y="535.50">&lt;..</text></g><g><title>&lt;rusqlite::Connection&gt;::execute_batch (1 samples, 1.43%)</title><rect x="90.0000%" y="509" width="1.4286%" height="15" fill="rgb(227,83,49)" fg:x="63" fg:w="1"/><text x="90.1875%" y="519.50">&lt;..</text></g><g><title>sqlite3_step (1 samples, 1.43%)</title><rect x="90.0000%" y="493" width="1.4286%" height="15" fill="rgb(228,44,14)" fg:x="63" fg:w="1"/><text x="90.1875%" y="503.50">s..</text></g><g><title>sqlite3VdbeExec (1 samples, 1.43%)</title><rect x="90.0000%" y="477" width="1.4286%" height="15" fill="rgb(208,202,31)" fg:x="63" fg:w="1"/><text x="90.1875%" y="487.50">s..</text></g><g><title>sqlite3VdbeHalt (1 samples, 1.43%)</title><rect x="90.0000%" y="461" width="1.4286%" height="15" fill="rgb(233,161,48)" fg:x="63" fg:w="1"/><text x="90.1875%" y="471.50">s..</text></g><g><title>vdbeCommit (1 samples, 1.43%)</title><rect x="90.0000%" y="445" width="1.4286%" height="15" fill="rgb(248,178,13)" fg:x="63" fg:w="1"/><text x="90.1875%" y="455.50">v..</text></g><g><title>sqlite3BtreeCommitPhaseOne (1 samples, 1.43%)</title><rect x="90.0000%" y="429" width="1.4286%" height="15" fill="rgb(245,34,32)" fg:x="63" fg:w="1"/><text x="90.1875%" y="439.50">s..</text></g><g><title>sqlite3PagerCommitPhaseOne (1 samples, 1.43%)</title><rect x="90.0000%" y="413" width="1.4286%" height="15" fill="rgb(250,124,12)" fg:x="63" fg:w="1"/><text x="90.1875%" y="423.50">s..</text></g><g><title>pagerWalFrames (1 samples, 1.43%)</title><rect x="90.0000%" y="397" width="1.4286%" height="15" fill="rgb(222,202,45)" fg:x="63" fg:w="1"/><text x="90.1875%" y="407.50">p..</text></g><g><title>unixSync (1 samples, 1.43%)</title><rect x="90.0000%" y="381" width="1.4286%" height="15" fill="rgb(207,160,44)" fg:x="63" fg:w="1"/><text x="90.1875%" y="391.50">u..</text></g><g><title>fsync (1 samples, 1.43%)</title><rect x="90.0000%" y="365" width="1.4286%" height="15" fill="rgb(225,33,6)" fg:x="63" fg:w="1"/><text x="90.1875%" y="375.50">f..</text></g><g><title>&lt;std::fs::File as std::io::Write&gt;::write_all (2 samples, 2.86%)</title><rect x="91.4286%" y="717" width="2.8571%" height="15" fill="rgb(210,24,20)" fg:x="64" fg:w="2"/><text x="91.6161%" y="727.50">&lt;std..</text></g><g><title>&lt;std::fs::File as std::io::Write&gt;::write (2 samples, 2.86%)</title><rect x="91.4286%" y="701" width="2.8571%" height="15" fill="rgb(242,167,51)" fg:x="64" fg:w="2"/><text x="91.6161%" y="711.50">&lt;std..</text></g><g><title>write (2 samples, 2.86%)</title><rect x="91.4286%" y="685" width="2.8571%" height="15" fill="rgb(237,166,9)" fg:x="64" fg:w="2"/><text x="91.6161%" y="695.50">write</text></g><g><title>loopflow::store::migrations::_validate_development_schema (1 samples, 1.43%)</title><rect x="94.2857%" y="653" width="1.4286%" height="15" fill="rgb(220,185,34)" fg:x="66" fg:w="1"/><text x="94.4732%" y="663.50">l..</text></g><g><title>loopflow::store::migration_schema::product_schema (1 samples, 1.43%)</title><rect x="94.2857%" y="637" width="1.4286%" height="15" fill="rgb(206,204,28)" fg:x="66" fg:w="1"/><text x="94.4732%" y="647.50">l..</text></g><g><title>_xzm_free (1 samples, 1.43%)</title><rect x="94.2857%" y="621" width="1.4286%" height="15" fill="rgb(211,172,22)" fg:x="66" fg:w="1"/><text x="94.4732%" y="631.50">_..</text></g><g><title>_platform_memset (1 samples, 1.43%)</title><rect x="94.2857%" y="605" width="1.4286%" height="15" fill="rgb(217,168,42)" fg:x="66" fg:w="1"/><text x="94.4732%" y="615.50">_..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite (2 samples, 2.86%)</title><rect x="94.2857%" y="685" width="2.8571%" height="15" fill="rgb(220,198,36)" fg:x="66" fg:w="2"/><text x="94.4732%" y="695.50">loop..</text></g><g><title>loopflow::store::migrations::initialize_experimental_sqlite::{closure#0} (2 samples, 2.86%)</title><rect x="94.2857%" y="669" width="2.8571%" height="15" fill="rgb(231,80,6)" fg:x="66" fg:w="2"/><text x="94.4732%" y="679.50">loop..</text></g><g><title>loopflow::store::migrations::validate_experimental_schema::{closure#0} (1 samples, 1.43%)</title><rect x="95.7143%" y="653" width="1.4286%" height="15" fill="rgb(210,17,5)" fg:x="67" fg:w="1"/><text x="95.9018%" y="663.50">l..</text></g><g><title>loopflow::store::migrations::validate_applied_checksums (1 samples, 1.43%)</title><rect x="95.7143%" y="637" width="1.4286%" height="15" fill="rgb(242,97,54)" fg:x="67" fg:w="1"/><text x="95.9018%" y="647.50">l..</text></g><g><title>&lt;digest::core_api::wrapper::CoreWrapper&lt;digest::core_api::ct_variable::CtVariableCoreWrapper&lt;sha2::core_api::Sha256VarCore, typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UInt&lt;typenum::uint::UTerm, typenum::bit::B1&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, typenum::bit::B0&gt;, sha2::OidSha256&gt;&gt; as digest::digest::Digest&gt;::digest::&lt;&amp;[u8]&gt; (1 samples, 1.43%)</title><rect x="95.7143%" y="621" width="1.4286%" height="15" fill="rgb(230,197,47)" fg:x="67" fg:w="1"/><text x="95.9018%" y="631.50">&lt;..</text></g><g><title>sha2::sha256::compress256 (1 samples, 1.43%)</title><rect x="95.7143%" y="605" width="1.4286%" height="15" fill="rgb(208,95,51)" fg:x="67" fg:w="1"/><text x="95.9018%" y="615.50">s..</text></g><g><title>sqlite3GetToken (1 samples, 1.43%)</title><rect x="97.1429%" y="445" width="1.4286%" height="15" fill="rgb(254,24,49)" fg:x="68" fg:w="1"/><text x="97.3304%" y="455.50">s..</text></g><g><title>all (70 samples, 100%)</title><rect x="0.0000%" y="909" width="100.0000%" height="15" fill="rgb(206,183,37)" fg:x="0" fg:w="70"/><text x="0.1875%" y="919.50"></text></g><g><title>lf main (70 samples, 100.00%)</title><rect x="0.0000%" y="893" width="100.0000%" height="15" fill="rgb(244,166,7)" fg:x="0" fg:w="70"/><text x="0.1875%" y="903.50">lf main</text></g><g><title>start (70 samples, 100.00%)</title><rect x="0.0000%" y="877" width="100.0000%" height="15" fill="rgb(243,214,39)" fg:x="0" fg:w="70"/><text x="0.1875%" y="887.50">start</text></g><g><title>main (70 samples, 100.00%)</title><rect x="0.0000%" y="861" width="100.0000%" height="15" fill="rgb(238,28,47)" fg:x="0" fg:w="70"/><text x="0.1875%" y="871.50">main</text></g><g><title>std::rt::lang_start_internal (70 samples, 100.00%)</title><rect x="0.0000%" y="845" width="100.0000%" height="15" fill="rgb(240,177,54)" fg:x="0" fg:w="70"/><text x="0.1875%" y="855.50">std::rt::lang_start_internal</text></g><g><title>std::rt::lang_start::&lt;std::process::ExitCode&gt;::{closure#0} (70 samples, 100.00%)</title><rect x="0.0000%" y="829" width="100.0000%" height="15" fill="rgb(217,190,30)" fg:x="0" fg:w="70"/><text x="0.1875%" y="839.50">std::rt::lang_start::&lt;std::process::ExitCode&gt;::{closure#0}</text></g><g><title>std::sys::backtrace::__rust_begin_short_backtrace::&lt;fn() -&gt; std::process::ExitCode, std::process::ExitCode&gt; (70 samples, 100.00%)</title><rect x="0.0000%" y="813" width="100.0000%" height="15" fill="rgb(207,43,45)" fg:x="0" fg:w="70"/><text x="0.1875%" y="823.50">std::sys::backtrace::__rust_begin_short_backtrace::&lt;fn() -&gt; std::process::ExitCode, std::process::ExitCode&gt;</text></g><g><title>lf::main (70 samples, 100.00%)</title><rect x="0.0000%" y="797" width="100.0000%" height="15" fill="rgb(245,104,47)" fg:x="0" fg:w="70"/><text x="0.1875%" y="807.50">lf::main</text></g><g><title>loopflow::journal::with_process::&lt;lf::run&gt; (70 samples, 100.00%)</title><rect x="0.0000%" y="781" width="100.0000%" height="15" fill="rgb(253,219,6)" fg:x="0" fg:w="70"/><text x="0.1875%" y="791.50">loopflow::journal::with_process::&lt;lf::run&gt;</text></g><g><title>loopflow::journal::finish_runtime::&lt;()&gt; (6 samples, 8.57%)</title><rect x="91.4286%" y="765" width="8.5714%" height="15" fill="rgb(215,92,37)" fg:x="64" fg:w="6"/><text x="91.6161%" y="775.50">loopflow::journal..</text></g><g><title>loopflow::journal::emit (6 samples, 8.57%)</title><rect x="91.4286%" y="749" width="8.5714%" height="15" fill="rgb(230,16,49)" fg:x="64" fg:w="6"/><text x="91.6161%" y="759.50">loopflow::journal..</text></g><g><title>loopflow::journal::try_emit (6 samples, 8.57%)</title><rect x="91.4286%" y="733" width="8.5714%" height="15" fill="rgb(208,197,54)" fg:x="64" fg:w="6"/><text x="91.6161%" y="743.50">loopflow::journal..</text></g><g><title>loopflow::journal::ledger_insert (4 samples, 5.71%)</title><rect x="94.2857%" y="717" width="5.7143%" height="15" fill="rgb(234,119,8)" fg:x="66" fg:w="4"/><text x="94.4732%" y="727.50">loopflow::..</text></g><g><title>&lt;loopflow::store::sqlite::SqliteStore&gt;::open (4 samples, 5.71%)</title><rect x="94.2857%" y="701" width="5.7143%" height="15" fill="rgb(208,216,5)" fg:x="66" fg:w="4"/><text x="94.4732%" y="711.50">&lt;loopflow:..</text></g><g><title>loopflow::store::sqlite::configure_write_connection (2 samples, 2.86%)</title><rect x="97.1429%" y="685" width="2.8571%" height="15" fill="rgb(242,40,52)" fg:x="68" fg:w="2"/><text x="97.3304%" y="695.50">loop..</text></g><g><title>&lt;rusqlite::Connection&gt;::pragma_query_value::&lt;alloc::string::String, loopflow::store::sqlite::configure_write_connection::{closure#0}&gt; (2 samples, 2.86%)</title><rect x="97.1429%" y="669" width="2.8571%" height="15" fill="rgb(244,213,35)" fg:x="68" fg:w="2"/><text x="97.3304%" y="679.50">&lt;rus..</text></g><g><title>&lt;rusqlite::Connection&gt;::prepare_with_flags (2 samples, 2.86%)</title><rect x="97.1429%" y="653" width="2.8571%" height="15" fill="rgb(206,188,49)" fg:x="68" fg:w="2"/><text x="97.3304%" y="663.50">&lt;rus..</text></g><g><title>&lt;rusqlite::inner_connection::InnerConnection&gt;::prepare (2 samples, 2.86%)</title><rect x="97.1429%" y="637" width="2.8571%" height="15" fill="rgb(221,88,16)" fg:x="68" fg:w="2"/><text x="97.3304%" y="647.50">&lt;rus..</text></g><g><title>sqlite3LockAndPrepare (2 samples, 2.86%)</title><rect x="97.1429%" y="621" width="2.8571%" height="15" fill="rgb(229,28,36)" fg:x="68" fg:w="2"/><text x="97.3304%" y="631.50">sqli..</text></g><g><title>sqlite3Prepare (2 samples, 2.86%)</title><rect x="97.1429%" y="605" width="2.8571%" height="15" fill="rgb(211,121,0)" fg:x="68" fg:w="2"/><text x="97.3304%" y="615.50">sqli..</text></g><g><title>sqlite3RunParser (2 samples, 2.86%)</title><rect x="97.1429%" y="589" width="2.8571%" height="15" fill="rgb(215,73,20)" fg:x="68" fg:w="2"/><text x="97.3304%" y="599.50">sqli..</text></g><g><title>yy_reduce (2 samples, 2.86%)</title><rect x="97.1429%" y="573" width="2.8571%" height="15" fill="rgb(227,186,35)" fg:x="68" fg:w="2"/><text x="97.3304%" y="583.50">yy_r..</text></g><g><title>sqlite3Pragma (2 samples, 2.86%)</title><rect x="97.1429%" y="557" width="2.8571%" height="15" fill="rgb(209,185,45)" fg:x="68" fg:w="2"/><text x="97.3304%" y="567.50">sqli..</text></g><g><title>sqlite3ReadSchema (2 samples, 2.86%)</title><rect x="97.1429%" y="541" width="2.8571%" height="15" fill="rgb(233,180,14)" fg:x="68" fg:w="2"/><text x="97.3304%" y="551.50">sqli..</text></g><g><title>sqlite3InitOne (2 samples, 2.86%)</title><rect x="97.1429%" y="525" width="2.8571%" height="15" fill="rgb(218,4,10)" fg:x="68" fg:w="2"/><text x="97.3304%" y="535.50">sqli..</text></g><g><title>sqlite3_exec (2 samples, 2.86%)</title><rect x="97.1429%" y="509" width="2.8571%" height="15" fill="rgb(252,100,1)" fg:x="68" fg:w="2"/><text x="97.3304%" y="519.50">sqli..</text></g><g><title>sqlite3InitCallback (2 samples, 2.86%)</title><rect x="97.1429%" y="493" width="2.8571%" height="15" fill="rgb(208,171,3)" fg:x="68" fg:w="2"/><text x="97.3304%" y="503.50">sqli..</text></g><g><title>sqlite3Prepare (2 samples, 2.86%)</title><rect x="97.1429%" y="477" width="2.8571%" height="15" fill="rgb(211,121,0)" fg:x="68" fg:w="2"/><text x="97.3304%" y="487.50">sqli..</text></g><g><title>sqlite3RunParser (2 samples, 2.86%)</title><rect x="97.1429%" y="461" width="2.8571%" height="15" fill="rgb(215,73,20)" fg:x="68" fg:w="2"/><text x="97.3304%" y="471.50">sqli..</text></g><g><title>yy_reduce (1 samples, 1.43%)</title><rect x="98.5714%" y="445" width="1.4286%" height="15" fill="rgb(227,186,35)" fg:x="69" fg:w="1"/><text x="98.7589%" y="455.50">y..</text></g><g><title>sqlite3FinishTrigger (1 samples, 1.43%)</title><rect x="98.5714%" y="429" width="1.4286%" height="15" fill="rgb(254,202,51)" fg:x="69" fg:w="1"/><text x="98.7589%" y="439.50">s..</text></g><g><title>sqlite3WalkSelect (1 samples, 1.43%)</title><rect x="98.5714%" y="413" width="1.4286%" height="15" fill="rgb(245,14,32)" fg:x="69" fg:w="1"/><text x="98.7589%" y="423.50">s..</text></g><g><title>sqlite3WalkSelectExpr (1 samples, 1.43%)</title><rect x="98.5714%" y="397" width="1.4286%" height="15" fill="rgb(239,127,42)" fg:x="69" fg:w="1"/><text x="98.7589%" y="407.50">s..</text></g><g><title>sqlite3WalkExprNN (1 samples, 1.43%)</title><rect x="98.5714%" y="381" width="1.4286%" height="15" fill="rgb(222,140,3)" fg:x="69" fg:w="1"/><text x="98.7589%" y="391.50">s..</text></g><g><title>sqlite3WalkExprNN (1 samples, 1.43%)</title><rect x="98.5714%" y="365" width="1.4286%" height="15" fill="rgb(222,140,3)" fg:x="69" fg:w="1"/><text x="98.7589%" y="375.50">s..</text></g><g><title>sqlite3WalkExprNN (1 samples, 1.43%)</title><rect x="98.5714%" y="349" width="1.4286%" height="15" fill="rgb(222,140,3)" fg:x="69" fg:w="1"/><text x="98.7589%" y="359.50">s..</text></g><g><title>sqlite3WalkExprNN (1 samples, 1.43%)</title><rect x="98.5714%" y="333" width="1.4286%" height="15" fill="rgb(222,140,3)" fg:x="69" fg:w="1"/><text x="98.7589%" y="343.50">s..</text></g></svg></svg>

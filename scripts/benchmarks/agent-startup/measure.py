@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 import pty
-import re
 import select
 import signal
 import struct
@@ -14,6 +13,9 @@ import subprocess
 import termios
 import time
 from pathlib import Path
+
+import pyte
+from fixture import require_fixture
 
 
 def _environment(home: Path, lf: Path | None) -> dict[str, str]:
@@ -27,31 +29,51 @@ def _environment(home: Path, lf: Path | None) -> dict[str, str]:
     return env
 
 
-def _plain(data: bytes) -> str:
-    text = data.decode("utf-8", errors="replace")
-    text = re.sub(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)", "", text)
-    return re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+def _terminal() -> None:
+    os.setsid()
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
 
 
-def measure(command: list[str], cwd: Path, env: dict[str, str], output: Path,
-            provider: str, timeout: float = 45, profile: bool = False, trust_fixture: bool = False) -> dict:
-    output.mkdir(parents=True, exist_ok=True)
+def measure(
+    command: list[str],
+    cwd: Path,
+    env: dict[str, str],
+    output: Path,
+    provider: str,
+    timeout: float = 45,
+    profile: bool = False,
+    trust_fixture: bool = False,
+) -> dict:
+    output.mkdir(mode=0o700, parents=True, exist_ok=True)
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
     start = time.monotonic()
-    child = subprocess.Popen(command, cwd=cwd, env=env, stdin=slave, stdout=slave,
-                             stderr=slave, start_new_session=True)
+    child = subprocess.Popen(
+        command, cwd=cwd, env=env, stdin=slave, stdout=slave, stderr=slave, preexec_fn=_terminal
+    )
     os.close(slave)
     sampler = None
     if profile:
-        sampler = subprocess.Popen(["/usr/bin/sample", str(child.pid), "5", "1", "-mayDie",
-                                    "-file", str(output / "sample.txt")],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sampler = subprocess.Popen(
+            [
+                "/usr/bin/sample",
+                str(child.pid),
+                "5",
+                "1",
+                "-mayDie",
+                "-file",
+                str(output / "sample.txt"),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     transcript = bytearray()
+    screen = pyte.Screen(160, 40)
+    terminal = pyte.ByteStream(screen)
     ready = None
     marker_at = None
     trusted = False
-    marker = b"lf_startup_probe_unsubmitted"
+    marker = b"zzlfprobezz"
     status = "timeout"
     try:
         while time.monotonic() - start < timeout:
@@ -61,21 +83,32 @@ def measure(command: list[str], cwd: Path, env: dict[str, str], output: Path,
                 except OSError as exc:
                     if exc.errno != errno.EIO:
                         raise
+                    status = "exited"
                     break
                 if not data:
                     break
                 transcript.extend(data)
+                terminal.feed(data)
                 if b"\x1b[6n" in data:
                     os.write(master, b"\x1b[1;1R")
                 if b"\x1b[c" in data or b"\x1b[>c" in data:
                     os.write(master, b"\x1b[?1;2c")
-                plain = _plain(transcript)
+                plain = "\n".join(screen.display)
                 compact = "".join(plain.split())
                 if trust_fixture and not trusted and "Yes,Itrustthisfolder" in compact:
-                    os.write(master, b"\x1b[B\r")
+                    time.sleep(0.5)
+                    os.write(master, b"\x1b[B")
+                    time.sleep(0.2)
+                    os.write(master, b"\r")
                     trusted = True
-                prompt = ("❯" in plain and "mode" in plain if provider == "claude"
-                          else "contextleft" in compact or "?forshortcuts" in compact)
+                if trust_fixture and not trusted and "Continuewithouttrusting" in compact:
+                    os.write(master, b"\x1b")
+                    trusted = True
+                prompt = (
+                    "❯" in plain and "mode" in plain
+                    if provider == "claude"
+                    else "contextleft" in compact or "?forshortcuts" in compact
+                )
                 # A rendered footer alone can precede a usable editor. Require
                 # a marker echoed by the raw-mode application, without Enter.
                 if prompt and marker_at is None:
@@ -87,6 +120,25 @@ def measure(command: list[str], cwd: Path, env: dict[str, str], output: Path,
                     ready = time.monotonic() - start
                     status = "ready"
                     os.write(master, b"\x15")
+                    time.sleep(0.1)
+                    if provider == "codex":
+                        os.write(master, b"\x03")
+                        time.sleep(0.2)
+                        os.write(master, b"\x03")
+                    else:
+                        os.write(master, b"/exit\r")
+                    deadline = time.monotonic() + 5
+                    while child.poll() is None and time.monotonic() < deadline:
+                        if select.select([master], [], [], 0.05)[0]:
+                            try:
+                                drained = os.read(master, 65536)
+                                if not drained:
+                                    break
+                                transcript.extend(drained)
+                            except OSError as exc:
+                                if exc.errno != errno.EIO:
+                                    raise
+                                break
                     break
             if child.poll() is not None:
                 status = "exited"
@@ -95,6 +147,7 @@ def measure(command: list[str], cwd: Path, env: dict[str, str], output: Path,
         # Only the process group created above is ours. Copied Machine process
         # identities are never used for cleanup.
         (output / "terminal.private").write_bytes(transcript)
+        os.close(master)
         if child.poll() is None:
             try:
                 os.killpg(child.pid, signal.SIGTERM)
@@ -104,14 +157,18 @@ def measure(command: list[str], cwd: Path, env: dict[str, str], output: Path,
             child.wait(timeout=5)
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
-            child.wait()
-        os.close(master)
+            child.wait(timeout=5)
         if sampler:
             sampler.wait(timeout=15)
         (output / "terminal.private").write_bytes(transcript)
-    result = {"status": status, "ready_ms": None if ready is None else ready * 1000,
-              "editor_ms": None if marker_at is None else (marker_at - start) * 1000,
-              "returncode": child.returncode, "load1": os.getloadavg()[0]}
+    result = {
+        "status": status,
+        "ready_ms": None if ready is None else ready * 1000,
+        "editor_ms": None if marker_at is None else (marker_at - start) * 1000,
+        "returncode": child.returncode,
+        "load1": os.getloadavg()[0],
+        "dialog_handled": trusted,
+    }
     (output / "result.json").write_text(json.dumps(result) + "\n")
     return result
 
@@ -128,9 +185,22 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=45)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    require_fixture(args.home)
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    print(json.dumps(measure(command, args.cwd, _environment(args.home, args.lf),
-                             args.output, args.provider, args.timeout, args.profile, args.trust_fixture)))
+    print(
+        json.dumps(
+            measure(
+                command,
+                args.cwd,
+                _environment(args.home, args.lf),
+                args.output,
+                args.provider,
+                args.timeout,
+                args.profile,
+                args.trust_fixture,
+            )
+        )
+    )
 
 
 if __name__ == "__main__":

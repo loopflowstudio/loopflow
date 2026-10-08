@@ -248,61 +248,40 @@ so an interruption before replacement otherwise destroys retry evidence. The
 public restart fixture reproduces that boundary with no Session provider PID;
 retry uses saved identities. Unknown ownership and independent reviews still block.
 
-## Transient recovery (LOO-326, 2026-10-04)
+## Transient recovery (LOO-326, curated 2026-10-08)
 
 Jack Heart approved existing Tasks using valid cached planning regardless of age;
-known invalidation/removal/terminal state/ownership mismatch still blocks. Apply
-that policy at restart, continuation and each managed worker boundary. New advice
-still requires successful Linear publication before worker replacement. Preserve
-observation age; never rewrite a stale response as freshly acquired evidence.
+known invalidation, removal, terminal state or ownership mismatch still blocks.
+Apply this at restart, continuation and managed worker boundaries. New advice
+still needs successful Linear publication before worker replacement. Preserve
+observation age; a stale response is never fresh evidence.
 
-Read retries belong only around the failing provider read. Artifact attempts use
-separate temporary directories and keep candidate identity fixed. Bound pipe
-collection as well as process exit: a descendant can retain stdout after its
-parent exits. Never retry publisher writes or turn missing checks into success.
-The Swift cleanup finding stays in release memory (shipped in v0.12.24).
-PR #1413 merged these as acd6654f9 after hosted CI passed, including Swift under
-combined headless and external-network restrictions. Merge is not installation.
+Retry only the failed provider read. Artifact attempts use separate temporary
+directories and retain candidate identity. Bound pipe collection as well as exit:
+a descendant can retain stdout. Never retry publisher writes or invent checks.
 
-Jack Heart accepted the historical uncertainty of read-only Exec
-`5f239ead-89f9-49c4-92c4-4c2f8b97ca94` rather than blocking delivered work.
-PRs #1413/#1435/#1445/#1455 merged and shipped through v0.13.5. On October 6,
-`lf task complete LOO-326 --accept-unknown-exec` with that exact ID succeeded;
-fresh Task status confirmed `done` and current planning writeback. The command
-retained the unknown outcome and checkout. Acceptance grants neither process
-control nor cleanup authority. Missing receipts and unattributed terminal trace
-events still cannot establish exit; Session closure does not prove child exit.
+Jack accepted read-only Exec `5f239ead-89f9-49c4-92c4-4c2f8b97ca94`'s historical
+uncertainty. PRs #1413/#1435/#1445/#1455 shipped through v0.13.5. October 6's
+supported completion of LOO-326 retained its unknown outcome and checkout; fresh
+status confirmed done/current writeback. Acceptance grants no process control or
+cleanup authority. Session closure and missing receipts cannot prove child exit.
 
-Branch prevention now keys process receipts by Exec ID and removes them only
-after a successful terminal write. Interrupt cleanup follows the same rule;
-pruning requires exact death plus a matching persisted terminal record. Failed
-writes, PID reuse and pruning must preserve unfinished identity without inventing
-an outcome. These loss paths are not proved causes of the original incident.
-Release's October 4 retained-landing evidence remains the counterexample: its
-receipt proved death while separate leases established re-entry authority.
-The receipt-preservation repair cannot reconstruct the missing identity.
-Hosted CI passed before delivery; completion uses explicit accepted uncertainty,
-not a fabricated terminal receipt. Earlier interrupted local gate evidence remains
-in git history at `fc60c17c2a931f121d6672fea5c037352cc0e9b1`.
+Process receipts now use Exec identity and survive until a successful terminal
+write. Pruning requires exact death and matching persisted outcome; PID reuse,
+interruptions and failed writes retain unfinished identity. This prevention does
+not reconstruct the missing receipt or establish the original loss cause.
+Release's retained-landing incident still separates death evidence from re-entry
+leases. Checkout cleanup independently reacquires its lease; #1435's delayed
+child fixture proves a terminal receipt can precede descriptor closure.
 
-Release's October 5 recovery shows retries cannot fix a deadline that kills
-healthy transfers: 76 MB near 200 KiB/s exceeded five minutes but finished within
-fifteen. Jack Heart also selected preserving the pending release version during
-recovery, superseding automatic patch successors; published tags, artifacts and
-migration bytes stay immutable. Details and acceptance limits belong in Release memory.
-
-PR #1435 CI at `6c760f285` exposed a release cleanup race: a terminal repair
-Exec receipt can precede closure of inherited checkout descriptors. A delayed
-launcher reproduces the retained second checkout; cleanup and repair re-entry now
-wait up to five seconds for an independently acquired lease and preserve ownership
-if it stays held.
-The existing cleanup assertion stays intact; this repair shipped with #1435.
-
-Syncing a Task's own remote branch must not make its remote tip the PR's base.
-That mistake stranded PR #1456 despite passing CI. PR #1459, installed in
-v0.13.5, repaired the retained base using exact remote-tracking reflog evidence;
-PR #1456 merged October 6 at 13:53 UTC without rewriting feature history.
-Foreign sibling ancestry and missing evidence still refuse.
+#1459 repaired #1456's incorrect PR base using exact remote-tracking reflog
+evidence, preserving feature history; missing evidence and foreign ancestry
+still refuse. It shipped in v0.13.5, and #1456 merged October 6.
+Release owns the healthy-transfer deadline and pending-version lessons in
+[its memory](release/MEMORY.md). Detailed shipped proofs, acceptance command,
+exact commits and contrary evidence remain at
+`4e6770cbf550aa5f9d653650295481ced737a640:wave/infrastructure/MEMORY.md`
+under this heading.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 
@@ -1087,3 +1066,27 @@ both reconnects failed. Jack then directed removal of `--ide` and its app-launch
 path. Keep terminal/headless execution and historical records. Launcher success
 proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).
+
+## Agent startup profiling (LOO-436, 2026-10-08)
+
+Jack Heart authorized profiling and measured optimization through PR publication
+for review, without landing or Task completion, and requested a credential-free
+CI smoke. [The report](../../scripts/benchmarks/agent-startup/README.md) owns raw
+numbers, symbolized release wall-stack SVGs, comparisons and rejected attempts.
+Removing the interactive provider version probe and absent-Wave resolution has
+matched evidence; retaining a capture's SQLite handle did not and was removed.
+Claude reconnect has no demonstrated final gain and its median worsens.
+
+Prompt readiness requires unsubmitted text echoed by the raw-mode application,
+not a footer or terminal echo. Codex reconnect needs a seed turn outside timing.
+Fresh fixture state is not a cold OS cache; main-thread startup/shutdown samples
+are not CPU accounting.
+
+A copied database can retain absolute managed-provider home paths. Strip copied
+account routes before launching a benchmark; never connect copied real Sessions.
+Early excluded probes reached those paths without a filesystem-write audit, so
+complete isolation is unproved for them. Accepted runs use native accounts and
+benchmark-created Sessions; source proofs establish no installed gain or managed
+account continuity. The headless smoke preserves Session/native identity,
+context and retained history while bounding provider launches, Git and SQLite
+work. Hosted CI and publication remain separate evidence.

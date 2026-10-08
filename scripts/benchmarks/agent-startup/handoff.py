@@ -9,6 +9,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from fixture import require_fixture
 from measure import _environment
 
 STAND_IN = """#!/bin/sh
@@ -18,8 +19,9 @@ read -r finish
 """
 
 
-def measure(lf: Path, home: Path, repo: Path, output: Path, session: str | None,
-            profile: bool = False) -> dict:
+def measure(
+    lf: Path, home: Path, repo: Path, output: Path, session: str | None, profile: bool = False
+) -> dict:
     output.mkdir(parents=True, exist_ok=False)
     shim = output / "bin"
     shim.mkdir()
@@ -37,13 +39,24 @@ def measure(lf: Path, home: Path, repo: Path, output: Path, session: str | None,
         command.extend(["session", "connect", session])
     start = time.monotonic()
     with (output / "stderr.private").open("wb") as error:
-        child = subprocess.Popen(command, cwd=repo, env=env, stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=error)
+        child = subprocess.Popen(
+            command, cwd=repo, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=error
+        )
         sampler = None
         if profile:
-            sampler = subprocess.Popen(["/usr/bin/sample", str(child.pid), "5", "1", "-mayDie",
-                                        "-file", str(output / "sample.txt")],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            sampler = subprocess.Popen(
+                [
+                    "/usr/bin/sample",
+                    str(child.pid),
+                    "5",
+                    "1",
+                    "-mayDie",
+                    "-file",
+                    str(output / "sample.txt"),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         data = bytearray()
         handoff = None
         try:
@@ -65,14 +78,21 @@ def measure(lf: Path, home: Path, repo: Path, output: Path, session: str | None,
                 sampler.wait(timeout=15)
         if handoff is None or child.returncode:
             raise RuntimeError(f"handoff failed, status {child.returncode}; inspect {output}")
-    receipts = [json.loads(line) for path in output.glob("lf-*.jsonl")
-                for line in path.read_text().splitlines()]
+    receipts = [
+        json.loads(line)
+        for path in output.glob("lf-*.jsonl")
+        for line in path.read_text().splitlines()
+    ]
     end = [r for r in receipts if r["event"] == "end"]
     git = [json.loads(line) for line in (output / "git.private").read_text().splitlines()]
-    return {"handoff_ms": handoff, "git_processes": sum(r.get("event") == "start" for r in git),
-            "connections": sum(r["connections"] for r in end),
-            "statements": sum(r["statements"] for r in end), "rows": sum(r["rows"] for r in end),
-            "load1": os.getloadavg()[0]}
+    return {
+        "handoff_ms": handoff,
+        "git_processes": sum(r.get("event") == "start" for r in git),
+        "connections": sum(r["connections"] for r in end),
+        "statements": sum(r["statements"] for r in end),
+        "rows": sum(r["rows"] for r in end),
+        "load1": os.getloadavg()[0],
+    }
 
 
 def main() -> None:
@@ -85,22 +105,33 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=20)
     parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
+    require_fixture(args.home)
     args.output.mkdir(parents=True, exist_ok=False)
     variants = {"baseline": args.baseline.resolve()}
     if args.candidate:
         variants["candidate"] = args.candidate.resolve()
     (args.home / "config.yaml").write_text("agent: claude\n")
     # Only a Session just created by this fixture may be connected.
+    with sqlite3.connect(args.home / "loopflow.db") as db:
+        before = {row[0] for row in db.execute("SELECT id FROM agent_sessions")}
     measure(args.baseline.resolve(), args.home, args.repo, args.output / "prepare", None)
     with sqlite3.connect(args.home / "loopflow.db") as db:
-        session = db.execute("SELECT id FROM agent_sessions ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()[0]
+        created = {row[0] for row in db.execute("SELECT id FROM agent_sessions")} - before
+    if len(created) != 1:
+        raise RuntimeError("Preparation must create exactly one new benchmark Session")
+    session = created.pop()
     for i in range(args.samples):
         for path in ("bare", "connect"):
             order = list(variants) if i % 2 == 0 else list(reversed(variants))
             for variant in order:
-                result = measure(variants[variant], args.home, args.repo,
-                                 args.output / f"{path}-{i}-{variant}",
-                                 session if path == "connect" else None, args.profile)
+                result = measure(
+                    variants[variant],
+                    args.home,
+                    args.repo,
+                    args.output / f"{path}-{i}-{variant}",
+                    session if path == "connect" else None,
+                    args.profile,
+                )
                 row = {"path": path, "variant": variant, "sample": i, **result}
                 with (args.output / "numbers.jsonl").open("a") as numbers:
                     numbers.write(json.dumps(row) + "\n")

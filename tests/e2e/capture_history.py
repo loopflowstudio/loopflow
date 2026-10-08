@@ -237,7 +237,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
                     str(candidate),
                     "--mode",
                     "tui",
-                    "--model",
+                    "--agent",
                     "opencode",
                     ":",
                     "Nested work",
@@ -246,7 +246,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
             }
         )
     )
-    _command(candidate, env, repo, "--mode", "tui", "--model", "opencode", ":", "Parent work")
+    _command(candidate, env, repo, "--mode", "tui", "--agent", "opencode", ":", "Parent work")
     assert json.loads((home / "tool-result.json").read_text())["code"] == 0
     with sqlite3.connect(database) as db:
         parents = db.execute(

@@ -51,7 +51,7 @@ Open Loopflow or run its CLI
 |---|---|
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
-| `--model / -m` | Model to use (harness or harness:model) |
+| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -60,8 +60,7 @@ Open Loopflow or run its CLI
 | `--yolo` | Skip permission prompts Default: false. |
 | `--interactive / -i` | Run interactively Default: false. |
 | `--batch / -b` | Run headless: print the output and return when the work ends Default: false. |
-| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal (overrides session.launch) Default: false. |
-| `--ide` | Hand off Claude or Codex to the vendor app (overrides session.launch) Default: false. |
+| `--tui` | Hand off Claude, Codex, or OpenCode to the terminal Default: false. |
 | `--chrome` | Override Chrome integration; omission inherits configuration |
 | `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
 | `--__cron-lock-fd` | cron lock fd Internal. |
@@ -120,7 +119,7 @@ Publish a ready PR headlessly: push, create or refresh, print state + URL. Opens
 
 | Argument | What it does |
 |---|---|
-| `--model / -m` | model |
+| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--help / -h` | Print help |
@@ -131,7 +130,7 @@ Push and create or update a draft PR, then open its GitHub page. Existing ready 
 
 | Argument | What it does |
 |---|---|
-| `--model / -m` | model |
+| `--agent / -a` | Agent to use (harness or harness:model) |
 | `--title` | title |
 | `--body` | body |
 | `--help / -h` | Print help |

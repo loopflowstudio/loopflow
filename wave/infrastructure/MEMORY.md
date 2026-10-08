@@ -751,15 +751,19 @@ Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wa
 
 ## Task convergence (LOO-319, curated 2026-10-07)
 
-Jack Heart selected reconciliation before publication, human demo and authored
-delivery for LOO-319 / PR #1301. Captured invocations retain their definitions;
-feedback supplies no verdict. Task agent selection survives PM refresh and reloads
-at launch. PATH and provider Home must agree. Configured Claude continuation,
-real stall and Desktop agreement remain unproved; synthetic liveness grants no
-signal authority. Retain first PID/birth evidence across missing samples and
-recognize active tools. The historical synthetic Codex proof, remaining acceptance
-and original source references are preserved at
-`35e759aaf4e:wave/infrastructure/MEMORY.md` under this heading.
+LOO-319 / PR #1301 own this work. Exact slice/demo evidence and superseded
+Flow compositions remain at `cc18c992b:wave/infrastructure/MEMORY.md` under this
+heading and its linked prior memory.
+
+Jack Heart selected reconciliation before decision/publication, demo and authored
+delivery. Preserve captured definitions; locate policy rather than catalog indices.
+Feedback is not a verdict; failed decisions cannot regain authority. Reload Task
+agent choice at each launch, including review, despite PM refresh. Executable and
+Home must agree. The real Codex fixture used synthetic feedback and predates
+generic loop-decide; Claude launch/resume, real five-minute stall and rendered
+Desktop agreement remain unverified. Simulated liveness grants no signal authority;
+preserve first PID/birth across missing samples and account for active tools.
+TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
@@ -1009,9 +1013,6 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   time.
 - **Installation tests need OS-account isolation.** Jack Heart’s October 5 steer forbids the three LOO-370 host checks named in TESTING.md: getpwuid bypasses HOME/LF_HOME. PR #1444 supplies disposable-account proofs; until integrated, isolated CI owns them. Ordinary fixtures also scrub inherited LF_* authority.
 - **Concurrent editing corrupts a file; concurrent rebasing corrupts history.** Two drivers sharing one worktree shared its `rebase-merge` state dir: conflicts resolved themselves between commands and `done` advanced 6→22 with no `--continue` from the losing session. Check for a live agent before working — or rebasing — a wave worktree; the driver that owns the worktree owns its `.git` sequencer.
-- **A sync target is not always the PR's upstream** (2026-10-06). `lf sync
-  origin/<own branch>` made that tip #1456's base; land refused its own commits
-  as foreign. Fixed in source; #1456 lands after a release installs the fix.
 - **Linear Project UUIDs survive renames; derived slugs do not.** Project content
   lives in Linear and the local SQLite snapshot, with no `projects/*.md` cache.
   Use stable IDs when reconciling current names with captured historical plans.
@@ -1024,24 +1025,13 @@ failed scheduled targets do. Historical gap days do not keep later telemetry red
   Linear moves an issue, historical Task Runs retain their evidence but lose
   automated PR and completion authority; fail closed before side effects and
   preserve the full Work, Run, Steer, and PR history for remediation.
-- **Historical continuity currently short-circuits daily telemetry** (observed
-  2026-08-23). `telemetry-daily` stops in `doctor` on the same eight 2026-08-04
-  through 2026-08-11 gap days before its scorecard runs. LOO-241 owns making
-  continuity obligation-aware. Fresh receipts are new evidence for that Task,
-  not grounds for duplicate daily Tasks; retry its Work only from a Turn with
-  valid Run execution context.
-- **Release orchestration and product publication are separate evidence**
-  (observed 2026-08-23). A cron receipt proves only the scheduled target's
-  terminal state. `lf release status` remained at tag `v0.12.14` with a
-  successful hosted workflow and gate-safe notes but no GitHub Release after
-  both successful and failed `release-run` receipts. Judge the release KR by
-  the product state and keep same-tag recovery singular; LOO-261 owns the known
-  clean-host candidate-validation boundary.
-- **Incomplete release synchronization still consumes caller edits**
-  (reproduced 2026-08-23). The scheduled retry left `main` clean after removing
-  two pre-run Infrastructure memory edits. LOO-266 owns preserving the caller
-  branch, index, and working bytes across every release exit; do not file a
-  second repair Task for later instances of the same failure.
+- **August 23 incidents** remain at `b6bc42998:wave/infrastructure/MEMORY.md`
+  under Gotchas; archival establishes no repair. LOO-241 owns historical gaps
+  blocking telemetry; fresh receipts do not justify duplicate Tasks, and retries
+  require valid execution authority. LOO-261 owns clean-host candidate validation:
+  cron success proves no publication; judge product state and keep same-tag
+  recovery singular. LOO-266 owns release exits consuming caller edits: preserve
+  branch, index and working bytes; recurrence does not justify duplicate Tasks.
 
 ## Durable model lessons (curated 2026-10-02)
 
@@ -1084,3 +1074,13 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 `44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
 checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
+
+LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
+translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
+separate context and same-thread resume, not recall without resupply. Claude hook
+context survives deletion; rendering metadata cannot establish model authority.
+Exclude answer leakage. Installed 0.13.9 app launches recorded no native identity;
+both reconnects failed. Jack then directed removal of `--ide` and its app-launch
+path. Keep terminal/headless execution and historical records. Launcher success
+proves no engine exit. Native dispatch, ports and fidelity remain unproved.
+[Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -25,22 +25,52 @@ with PTY transport or deferring emission to LOO-394 remains an unresolved choice
 not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
 original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
 
-## Machine terminology (LOO-394, 2026-10-07)
+## Machines (LOO-394 / LOO-411, 2026-10-07)
 
-Jack Heart authorized the rename, then two changes to PR #1484 and republication
-only: discard old Desktop caches and name the installation scope `installation`.
-A machine is one OS user and data directory; `LF_HOME` retains its filesystem
-meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive.
-Cron reads released JSON keys. Desktop discards version-1 caches; this supersedes
-the earlier translation decision. Installation owns artifact updates and skill
-exports; short commands stay. Retain `~/.lf-machine/install` and the promotion
-lock path because released gates, receipts and jobs pin them; no relocation is
-proved. Retained binaries use the shared `install` shorthand. Exact-frontier
-fixtures seed released SQL without drafts. Local checks prove neither installed
-migration nor remote continuity. Schedule ownership and activation stay intact. Release's
-operation-entry lesson also applies to command removal: reject the retired
+Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
+publication and review, later superseded by the landing request below. A machine
+is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
+opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
+Jack chose to discard version-1 Desktop caches and name install scope `installation`
+(artifact updates and skill exports); short commands stay. Released gates,
+receipts and jobs pin `~/.lf-machine/install` and the promotion lock path; no
+relocation is proved. Recovery uses `install` for retained binaries. Cron reads
+released JSON keys; historical payloads survive.
+Rename evidence: `06e88761d:wave/infrastructure/MEMORY.md`.
+
+Jack rejected stable cross-version APIs, negotiation and old-peer support. Existing
+version/identity commands suffice: retain versions when identity fails; report
+differences and the update command without a version gate. Named connections live
+on Machine rows. Removal clears label/repo and releases destination uniqueness;
+identity, route and placements survive so a replacement can be added at that
+destination without deleting history or touching remote work. Only explicitly
+added machines may receive foreground credentials.
+OpenSSH owns destination syntax. Exact-frontier fixtures seed released
+SQL. Local source proofs establish no installed migration or configured remote
+continuity. Release schedules retain original ownership and activation.
+Release's operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
 Corrected installation fixtures still require disposable OS-account isolation.
+
+Jack Heart's PR #1489 review permits private OpenSSH sharing, an interactive
+first-install offer (default yes), and distinct failures with recovery commands,
+superseding installation exclusion. Existing lf is never replaced; status, batch
+and JSON never install. Personal masters stay separate; explicit agent forwarding
+gets its own socket scope. Cancel account routes on return: shared masters outlive
+commands. Fixtures and loopback SSH prove behavior and reuse, not real broker
+cleanup, installation, account continuity or migration. Passing focused tests
+retained open-output-handle warnings; success does not establish child cleanup.
+
+Jack Heart's LOO-411 decision (`c597174a-6330-4be3-9509-3e7667caf7d3`) replaces
+`lf ssh` with global `--machine <label-or-id>`, alongside Task, worktree and Wave.
+The target parses the whole command in its saved repository;
+`--machine Y machine add X` edits Y's registry. No command allowlist, SSH alias or
+per-call repository override. Secret and agent-forwarding options require a
+machine. Account flags resolve on the target, not against origin-only accounts;
+inherited origin restrictions still constrain its grant. Jack Heart later requested
+landing; this repair is limited to syncing main, focused verification and publication,
+then stopping. No later slice is authorized. Local fixtures prove dispatch and
+separate registries, not configured remote continuity or installation.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 
@@ -547,17 +577,10 @@ identity is unchanged. [Method and verification](https://github.com/loopflowstud
 
 ## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
-Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
-and shipped in v0.13.6 on October 6. Installed validation on 54 worktrees returned
-20/20 successful samples per surface: external text median/p95 1.465/1.511 s,
-JSON 1.387/1.443 s. Jack Heart has retired the one-second aim. Production timing is installed;
-local Git is the larger phase, with no measured hard lower bound. Numbers and method:
-[report](../../scripts/benchmarks/wt-list/README.md).
+PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
+[report](../../scripts/benchmarks/wt-list/README.md),
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading.
 
-- **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
-  Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
   doctor and install. Keep the Session fence outside runtime waits; OpenCode's
   fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
@@ -650,28 +673,21 @@ names and store-selection policies are historical evidence, not instructions.
 
 ## Managed account identity (LOO-339, branch evidence 2026-09-30)
 
-Jack Heart selected the identity core for [LOO-339](https://linear.app/loopflow/issue/LOO-339)
-delivery and authorized landing and a patch release without review. The earlier
-expanded scope is superseded: [LOO-340](https://linear.app/loopflow/issue/LOO-340)
-owns shared account state across Homes, current status by default, browser
-suppression, Claude cached identity/routing, Flow account bundles and reset credits.
-[LOO-338](https://linear.app/loopflow/issue/LOO-338) owns the command rename;
-this branch retains `lf auth`. Authorization is not evidence of shipment.
+Jack Heart selected LOO-339's identity core and authorized landing plus a patch
+release without review; shipment remains unproved. LOO-340 owns shared account
+state, default current status, browser suppression, Claude identity/routing, Flow
+account bundles and reset credits; LOO-338 owns renaming. Historical branch
+proofs and four findings: `32607f1d2:wave/infrastructure/MEMORY.md` under this
+heading, including its design and gate references. Current mechanics:
+[subscriptions](../../docs/subscriptions.md).
 
-Design, review and gate evidence remain at `8973f689a9e1:scratch/`; current
-behavior belongs in [subscriptions](../../docs/subscriptions.md).
-
-Usage acceptance cannot establish the intended login: validation compares
-expected email and per-user subject, never shared workspace identity. Reconnect
-stages and installs only after identity and duplicate checks, without proving
-native refresh coordination or sole browser ownership. An unavailable identity
-service is not credential rejection; a plan is separate from quota. Fixture
-isolation includes executable selection: clear inherited `LF_*` authority and pin
-the compiled source CLI. The four detailed findings remain at
-`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
-
-Synthetic passes prove no live OAuth or installed acceptance. State remains
-Home-local; LOO-340 owns shared authority. No installed repair is authorized.
+Usage does not establish the intended login: compare email and per-user subject,
+not workspace identity. Reconnect stages before identity/duplicate checks; native
+refresh coordination and sole browser ownership remain unproved. Unavailable
+identity service is not rejection; plan is not quota. Clear inherited LF_*
+authority and pin the compiled CLI in fixtures. Synthetic passes prove no live
+OAuth or installed outcome. State remains Home-local; no installed repair is
+authorized.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-04)
 
@@ -738,35 +754,25 @@ verification uses disposable stores; no old branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 
-Jack Heart selected public objects with one SQLite owner, direct skill/operation
-Execs and compiled Flow graphs. The four-store Session counterexample, LOO-298's
-autonomous single-PR landing authorization, rejected decomposition and merge-not-rebase
-decision remain at
-`08191d19269af96e15d79918689a04b4fa44dc30:wave/infrastructure/MEMORY.md`
-under this heading. Current contracts belong in the architecture and CLI references;
-source history does not establish installed conversion or configured acceptance.
+Jack Heart selected one SQLite owner per object, direct Processes and compiled
+Flows. September 30's counterexamples, delivery decisions and draft inventory
+remain at `72c58cac5d2f4f1700186379e0645446341b1373:wave/infrastructure/MEMORY.md`.
+Current contracts live in the architecture and CLI references.
 
-**One client, one main Home.** Jack reports only this machine is a client; the
-pinned dev Home is gone and its active Tasks were moved by hand to `~/.lf`.
-Do not recreate that Home or make fleet compatibility a cutover requirement.
-The reported transfer is not a verified conversion. Branch verification stays
-in disposable Homes with inherited authority removed; no branch binary writes
-the installed Home. Historical import, old-format compatibility and intermediate
-draft preservation are discarded. Keep current Work/links, account routes and
-resumable conversations. Exactly three direct drafts remain: `record_execs`,
-`project_status_chapters` and `session_ownership`; released SQL remains immutable.
+**One client, one main Home.** Jack reported manually moving active Tasks to
+`~/.lf` and retiring the pinned development Home; that proves no conversion.
+No fleet compatibility, historical import, old formats or intermediate drafts
+are required. Preserve current Work/links, account routes and resumable Sessions.
+Branch checks use disposable stores with inherited authority removed; no branch
+binary writes the installed store. Released SQL remains immutable.
 
-**Merge and conversion have different proof.** LOO-298 owns its merge checklist;
-this branch retains the earlier copy at `ab901f1f1:scratch/remaining-work.md`
-in Git history. Configured provider and
-Desktop continuity remain unproven; removing Jack's attendance requirement does
-not turn fixtures into acceptance. Before release conversion, quiesce old writers
-and new launches, preserve a consistent SQLite/filesystem backup and matching
-executable, rehearse current-state retention against the exact candidate, then
-verify the converted state before reopening writers. The private-copy converter
-currently reads live sidecars; its database backup plus those reads is not an
-atomic snapshot. Preserve native IDs, pending reviews, selected captures and
-the manually transferred Tasks, without importing old turns or driver authority.
+**Merge and conversion have different proof.** LOO-298's checklist remains at
+`ab901f1f1:scratch/remaining-work.md`. Fixtures prove no configured provider/Desktop
+continuity. Before conversion, quiesce writers and launches, preserve a consistent
+SQLite/filesystem backup and matching executable, rehearse the exact candidate,
+and verify before reopening. The private-copy converter's live sidecar reads
+plus SQLite backup are not atomic. Preserve native IDs, pending reviews, selected
+captures and manually transferred Tasks; import neither old turns nor driver authority.
 
 - **Three owners.** Exec is one actual lf process. AgentSession is one
   conversation, interactive or headless, surviving driver and engine
@@ -833,26 +839,12 @@ Provider stubs must contain conflict-agent launches: one bad fixture launched
 real credentials whose effects were not audited. Dense CLI timing and configured
 continuity remained unfinished in that dated evidence.
 
-Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
-intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
-Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
-`scripts/benchmarks/desktop-performance/record_live.py` records local usage
-without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
-measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
-was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
-zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
-installed build's six-second probe measured 51 ms/s hitches; these different
-windows/builds do not prove a causal improvement. Republishing identical readings
-was found in source and removed; remaining hang causes need profiling.
-
-LOO-300 owns Session streaming, projection caching and the density harness after
-the data-model work. The handoff records passes only for cold-start-to-outline
-and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
-that can skip when SwiftUI exposes no NSTextField; six other tests were removed
-after mounted paint hooks failed to fire. Missing results remain proof gaps.
-Key-to-next-draw and PTY echo are proxies, not glyph presentation. Jack Heart's
-October 7 direction retires the proposed numeric targets, soak requirements and
-deeper optimization; these historical gaps are not open acceptance requirements.
+Jack Heart retired numeric performance targets, soak and deeper optimization
+on October 7. LOO-291/300 evidence and instrumentation:
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading and in
+[scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
+Different recording windows prove no causal improvement; PTY echo and next draw
+are not glyph presentation. Those historical gaps are not open acceptance requirements.
 
 The earlier S5 active-PR resolver left landed branches unbound. That is historical
 failure evidence, not binding policy: current Session rows own attribution and
@@ -976,20 +968,14 @@ commands belong in docs/lf.md and TESTING.md.
 
 ## Installation and checkout closure (LOO-292, 2026-10-04)
 
-Jack Heart requested closing LOO-292 on actual machine evidence. Install updates
-published machine artifacts only; `lf task sync` (which replaced `lf rebase` in
-#1367) owns checkout updates. The schedule is opt-in login plus weekly, Monday
-09:00 local, with positional daily/hourly/5min. The separate daemon is retired.
-
-Published 0.13.0's October 4 installation and checkout acceptance, exact hashes,
-cadence receipts and retained limitations remain at
-`6448e3c9e:wave/infrastructure/MEMORY.md`
-under this heading. Installation preserved the Home, repaired a missing entry in
-an isolated Ubuntu container and preserved caller bytes during checkout sync.
-No Monday firing, sleep-coalesced wake or interactive app acceptance was proved.
-Unresolved: a currency probe triggered a redundant download under load; timeout
-is only a hypothesis. Reload killed that download without damaging installation.
-A hand-truncated entry gate is not healed by reinstall.
+Jack Heart closed LOO-292 on actual machine evidence: published 0.13.0 preserved
+its Home; isolated Ubuntu repaired a missing entry; checkout sync preserved caller
+bytes. Details: `32607f1d2:wave/infrastructure/MEMORY.md` under this heading and
+`6448e3c9e` there. Install owns artifacts, sync owns checkouts. Cadence is opt-in
+login plus Monday 09:00 local, with daily/hourly/5min options. No Monday firing,
+sleep-coalesced wake or interactive app acceptance was proved. Redundant download
+under load remains unexplained; reload stopped it without damaging installation.
+Reinstall does not heal a hand-truncated entry gate.
 
 ## Shipped history
 

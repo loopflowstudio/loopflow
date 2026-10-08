@@ -105,6 +105,8 @@ impl WorkRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Machine {
+    pub label: Option<String>,
+    pub repo: Option<String>,
     pub id: MachineId,
     pub route: String,
     #[serde(with = "time::serde::rfc3339")]

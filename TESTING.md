@@ -1007,6 +1007,12 @@ fixture setup. CLI fixtures must select their own disposable Machine. Upgrade pr
 must use published migration authority against a temporary shared store; opening
 an existing experiment intentionally validates its schema without upgrading it.
 
+Machine command changes also require `cargo test -p loopflow --test global_commands`
+to preserve repository-independent commands and explicit Machine isolation.
+When changing remote account-selection docs, run `cd website && uv run python
+dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
+guide must retain the current invocation, target catalog, and provenance contract.
+
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test
 runner. The materialization wrapper clears only its listed variables; it does not

@@ -79,44 +79,75 @@ impl SqliteStore {
         map_local_machine(&conn)
     }
 
-    pub fn observe_machine(&self, machine_id: &MachineId, route: &str) -> StoreResult<Machine> {
-        let route = route.trim();
-        if route.is_empty() {
+    pub fn add_machine(
+        &self,
+        machine_id: &MachineId,
+        target: &str,
+        label: &str,
+        repo: &str,
+    ) -> StoreResult<Machine> {
+        if target.is_empty() || target == "local" || label.trim().is_empty() || repo.is_empty() {
             return Err(StoreError::InvalidData(
-                "Machine route cannot be empty".to_string(),
+                "machine target, label and repository must be nonempty; local is reserved".into(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if map_machine_by_id(&tx, machine_id)?.is_some_and(|machine| machine.route == "local") {
+            return Err(StoreError::InvalidData(
+                "cannot add the local machine as a remote".into(),
+            ));
+        }
+        let now = now_unix();
+        tx.execute(
+            "INSERT INTO machines (id, route, label, repo, created_at, observed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(id) DO UPDATE SET route=excluded.route, label=excluded.label,
+                repo=excluded.repo, observed_at=excluded.observed_at",
+            params![machine_id.as_str(), target, label, repo, now],
+        ).map_err(|error| StoreError::InvalidData(format!("could not save machine: {error}; choose another label or remove the old connection")))?;
+        let machine = map_machine_by_id(&tx, machine_id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(machine)
+    }
+
+    pub fn machines(&self) -> StoreResult<Vec<Machine>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, route, created_at, observed_at, label, repo
+             FROM machines WHERE label IS NOT NULL ORDER BY label",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(map_machine_row(row)))?;
+        rows.map(|row| row?).collect()
+    }
+
+    pub fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
+        if name.trim().is_empty() {
+            return Err(StoreError::InvalidData(
+                "machine label cannot be empty".into(),
             ));
         }
         let conn = self.conn.lock().expect("store mutex poisoned");
-        if map_machine_by_id(&conn, machine_id)?
-            .is_some_and(|machine| machine.route == "local" && route != "local")
+        if conn.execute(
+            "UPDATE machines SET label=?2 WHERE label=?1",
+            params![label, name],
+        )? == 0
         {
-            return Err(StoreError::InvalidData(format!(
-                "cannot replace local Machine {machine_id} with remote route {route:?}"
-            )));
+            return Err(StoreError::NotFound);
         }
-        let existing_id = conn
-            .query_row("SELECT id FROM machines WHERE route=?1", [route], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()?;
-        if existing_id
-            .as_deref()
-            .is_some_and(|id| id != machine_id.as_str())
+        Ok(())
+    }
+
+    pub fn remove_machine(&self, label: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        if conn.execute(
+            "UPDATE machines SET label=NULL, repo=NULL WHERE label=?1",
+            [label],
+        )? == 0
         {
-            return Err(StoreError::InvalidData(format!(
-                "Machine route {route:?} is already observed for {}",
-                existing_id.expect("checked as present")
-            )));
+            return Err(StoreError::NotFound);
         }
-        let now = now_unix();
-        conn.execute(
-            "INSERT INTO machines (id, route, created_at, observed_at)
-             VALUES (?1, ?2, ?3, ?3)
-             ON CONFLICT(id) DO UPDATE SET
-                route=excluded.route, observed_at=excluded.observed_at",
-            params![machine_id.as_str(), route, now],
-        )?;
-        map_machine_by_id(&conn, machine_id)?.ok_or(StoreError::NotFound)
+        Ok(())
     }
 
     pub fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
@@ -432,54 +463,31 @@ impl SqliteStore {
 
 fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM machines WHERE route='local'",
+        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
         [],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
-    )
-    .map_err(StoreError::from)
-    .and_then(|(id, route, created_at, observed_at)| {
-        Ok(Machine {
-            id: MachineId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+        |row| Ok(map_machine_row(row)),
+    )?
 }
 
 fn map_machine_by_id(conn: &Connection, machine_id: &MachineId) -> StoreResult<Option<Machine>> {
     conn.query_row(
-        "SELECT id, route, created_at, observed_at FROM machines WHERE id=?1",
+        "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE id=?1",
         [machine_id.as_str()],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, i64>(3)?,
-            ))
-        },
+        |row| Ok(map_machine_row(row)),
     )
-    .optional()
-    .map_err(StoreError::from)?
-    .map(|(id, route, created_at, observed_at)| {
-        Ok(Machine {
-            id: MachineId::parse(&id).map_err(invalid_durable)?,
-            route,
-            created_at: OffsetDateTime::from_unix_timestamp(created_at).map_err(invalid_durable)?,
-            observed_at: OffsetDateTime::from_unix_timestamp(observed_at)
-                .map_err(invalid_durable)?,
-        })
-    })
+    .optional()?
     .transpose()
+}
+
+fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
+    Ok(Machine {
+        id: MachineId::parse(&row.get::<_, String>(0)?).map_err(invalid_durable)?,
+        route: row.get(1)?,
+        created_at: OffsetDateTime::from_unix_timestamp(row.get(2)?).map_err(invalid_durable)?,
+        observed_at: OffsetDateTime::from_unix_timestamp(row.get(3)?).map_err(invalid_durable)?,
+        label: row.get(4)?,
+        repo: row.get(5)?,
+    })
 }
 
 fn placement_in(conn: &Connection, work: &WorkRef) -> StoreResult<Placement> {

@@ -2004,7 +2004,7 @@ mod tests {
         let retained_placement = store.placement(&predecessor_work).await.unwrap();
         let next_home = crate::durable::MachineId::new();
         store
-            .observe_machine(&next_home, "ssh://fixture")
+            .add_machine(&next_home, "ssh://fixture", "ssh://fixture", ".")
             .await
             .unwrap();
         store
@@ -2763,7 +2763,10 @@ mod tests {
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
         let home = crate::durable::MachineId::new();
-        store.observe_machine(&home, "ssh://fixture").await.unwrap();
+        store
+            .add_machine(&home, "ssh://fixture", "ssh://fixture", ".")
+            .await
+            .unwrap();
         store
             .place_work(&WorkRef::Project(project.id.clone()), &home)
             .await

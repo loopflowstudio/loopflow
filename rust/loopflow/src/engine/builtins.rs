@@ -301,8 +301,8 @@ mod tests {
             "lf wave status <wave> --json",
             "lf roadmap --wave <wave> --json",
             "lf task run <ISSUE-ID>",
-            "lf observe <machine-id>",
-            "lf ssh <machine-id> --wave <wave> wave/operate",
+            "lf machine add <ssh-target>",
+            "lf --machine <machine-id> --wave <wave> wave/operate",
         ] {
             assert!(init.contains(command), "init omits {command:?}");
         }

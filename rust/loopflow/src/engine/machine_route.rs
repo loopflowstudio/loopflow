@@ -1,40 +1,67 @@
-//! Parse the mutable route observed for a stable Machine identity.
-//!
-//! A route is either this process's machine (`local`) or one SSH destination:
-//!
-//! - `local` — the stable local marker.
-//! - `ssh://jack@host[:port]` — the canonical remote form, reachable over SSH.
-//! - `jack@host` — readable shorthand that normalizes to `ssh://jack@host`.
-//!
-//! The route is observation, never identity; `MachineId` remains stable when it
-//! changes. Reachability is operational evidence.
-
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+//! SSH destinations are OpenSSH inputs, including config aliases and URIs.
+use std::fs::{self, DirBuilder};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::Path;
-use std::str::FromStr;
+
+use sha2::{Digest, Sha256};
 
 pub(crate) const SSH_CONNECT_TIMEOUT_SECS: u32 = 10;
-const SSH_SERVER_ALIVE_INTERVAL_SECS: u32 = 10;
-const SSH_SERVER_ALIVE_COUNT_MAX: u32 = 3;
 
-pub(crate) fn bounded_ssh_args(dest: &str, port: Option<u16>) -> Vec<String> {
-    let mut args = Vec::new();
-    if let Some(port) = port {
-        args.extend(["-p".to_string(), port.to_string()]);
+pub(crate) fn bounded_ssh_args(dest: &str, forward_agent: bool) -> std::io::Result<Vec<String>> {
+    // Keep sun_path short even for custom data directories. The per-store directory
+    // belongs only to this OS user; OpenSSH supplies the host/port/user socket key.
+    let home = crate::store::lf_home_dir();
+    let mut namespace = Sha256::new();
+    namespace.update(home.as_os_str().as_encoded_bytes());
+    if forward_agent {
+        namespace.update(b"agent");
+        namespace.update(
+            std::env::var_os("SSH_AUTH_SOCK")
+                .unwrap_or_default()
+                .as_encoded_bytes(),
+        );
     }
-    args.extend([
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
+    // SAFETY: geteuid has no preconditions.
+    let uid = unsafe { libc::geteuid() };
+    let directory = std::path::PathBuf::from(format!(
+        "/tmp/lf-ssh-{uid}-{}",
+        &hex::encode(namespace.finalize())[..16]
+    ));
+    match DirBuilder::new().mode(0o700).create(&directory) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    let metadata = fs::symlink_metadata(&directory)?;
+    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o077 != 0 {
+        return Err(std::io::Error::other(format!(
+            "SSH control directory {} must be owned by this user with mode 0700",
+            directory.display()
+        )));
+    }
+    Ok(vec![
+        if forward_agent { "-A" } else { "-a" }.into(),
+        "-x".into(),
+        "-T".into(),
+        "-o".into(),
+        "ControlMaster=auto".into(),
+        "-o".into(),
+        "ControlPersist=60".into(),
+        "-o".into(),
+        format!("ControlPath={}/%C", directory.display()),
+        "-o".into(),
+        "BatchMode=yes".into(),
+        "-o".into(),
+        "StrictHostKeyChecking=yes".into(),
+        "-o".into(),
         format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
-        "-o".to_string(),
-        format!("ServerAliveInterval={SSH_SERVER_ALIVE_INTERVAL_SECS}"),
-        "-o".to_string(),
-        format!("ServerAliveCountMax={SSH_SERVER_ALIVE_COUNT_MAX}"),
-        dest.to_string(),
-    ]);
-    args
+        "-o".into(),
+        "ServerAliveInterval=10".into(),
+        "-o".into(),
+        "ServerAliveCountMax=3".into(),
+        "--".into(),
+        dest.into(),
+    ])
 }
 
 pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> {
@@ -50,228 +77,4 @@ pub(crate) fn resolve_home_relative_repo(repo: &Path) -> Result<String, String> 
         .to_str()
         .map(str::to_string)
         .ok_or_else(|| format!("repo path {} is not UTF-8", repo.display()))
-}
-
-/// The current transport route to one Machine.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MachineRoute {
-    Local,
-    Ssh {
-        user: String,
-        host: MachineHost,
-        port: Option<u16>,
-    },
-}
-
-/// A remote location's host: a DNS name or a numeric IP. IPv6 is stored numeric
-/// and always rendered bracketed in the canonical URI.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MachineHost {
-    Name(String),
-    Ip(IpAddr),
-}
-
-impl MachineHost {
-    /// The bare host as `ssh` wants it in a `user@host` destination — no
-    /// brackets, since the ssh CLI takes an unbracketed IPv6 there.
-    fn as_ssh_host(&self) -> String {
-        match self {
-            Self::Name(name) => name.clone(),
-            Self::Ip(ip) => ip.to_string(),
-        }
-    }
-
-    /// The host as it appears in the canonical URI — IPv6 bracketed.
-    fn as_uri_host(&self) -> String {
-        match self {
-            Self::Name(name) => name.clone(),
-            Self::Ip(IpAddr::V4(v4)) => v4.to_string(),
-            Self::Ip(IpAddr::V6(v6)) => format!("[{v6}]"),
-        }
-    }
-}
-
-impl MachineRoute {
-    /// Parse a durable route or SSH shorthand. `None` for anything unrecognized, so a
-    /// typo fails loudly at the read site rather than silently routing wrong.
-    pub fn parse(raw: &str) -> Option<Self> {
-        let raw = raw.trim();
-        if raw.is_empty() {
-            return None;
-        }
-        if raw == "local" {
-            return Some(Self::Local);
-        }
-        // The `ssh://` scheme is optional on input; it is always emitted on
-        // output for the remote form.
-        let body = raw.strip_prefix("ssh://").unwrap_or(raw);
-        let (user, rest) = body.split_once('@')?;
-        let user = valid_user(user)?;
-        let (host, port) = parse_host_port(rest)?;
-        Some(Self::Ssh { user, host, port })
-    }
-
-    pub fn is_remote(&self) -> bool {
-        matches!(self, Self::Ssh { .. })
-    }
-
-    /// The `user@host` destination for `ssh`, when remote.
-    pub fn ssh_destination(&self) -> Option<String> {
-        match self {
-            Self::Local => None,
-            Self::Ssh { user, host, .. } => Some(format!("{user}@{}", host.as_ssh_host())),
-        }
-    }
-
-    /// The SSH port, when remote and explicitly set.
-    pub fn ssh_port(&self) -> Option<u16> {
-        match self {
-            Self::Ssh { port, .. } => *port,
-            Self::Local => None,
-        }
-    }
-}
-
-fn valid_user(user: &str) -> Option<String> {
-    let user = user.trim();
-    if user.is_empty() {
-        return None;
-    }
-    let ok = user
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'));
-    ok.then(|| user.to_string())
-}
-
-/// Parse the `host[:port]` (or `[ipv6][:port]`) location tail. Bracketed IPv6 is
-/// the only accepted IPv6 form — an unbracketed multi-colon token is ambiguous
-/// with a port and is rejected.
-fn parse_host_port(rest: &str) -> Option<(MachineHost, Option<u16>)> {
-    if let Some(inner) = rest.strip_prefix('[') {
-        let (v6, after) = inner.split_once(']')?;
-        let ip: Ipv6Addr = v6.parse().ok()?;
-        let port = match after {
-            "" => None,
-            _ => Some(after.strip_prefix(':')?.parse::<u16>().ok()?),
-        };
-        return Some((MachineHost::Ip(IpAddr::V6(ip)), port));
-    }
-    match rest.matches(':').count() {
-        0 => Some((parse_host(rest)?, None)),
-        1 => {
-            let (host, port) = rest.rsplit_once(':')?;
-            Some((parse_host(host)?, Some(port.parse::<u16>().ok()?)))
-        }
-        // Unbracketed IPv6 is ambiguous with host:port — require brackets.
-        _ => None,
-    }
-}
-
-/// A host token: an IPv4 literal or a DNS name. (Bracketed IPv6 is handled by
-/// the caller.)
-fn parse_host(token: &str) -> Option<MachineHost> {
-    let token = token.trim();
-    if token.is_empty() {
-        return None;
-    }
-    if let Ok(v4) = token.parse::<Ipv4Addr>() {
-        return Some(MachineHost::Ip(IpAddr::V4(v4)));
-    }
-    let ok = token
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'));
-    ok.then(|| MachineHost::Name(token.to_string()))
-}
-
-impl fmt::Display for MachineRoute {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Local => f.write_str("local"),
-            Self::Ssh { user, host, port } => {
-                write!(f, "ssh://{user}@{}", host.as_uri_host())?;
-                if let Some(port) = port {
-                    write!(f, ":{port}")?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl FromStr for MachineRoute {
-    type Err = String;
-
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        Self::parse(raw).ok_or_else(|| format!("invalid Machine route: {raw:?}"))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn home(raw: &str) -> MachineRoute {
-        MachineRoute::parse(raw).unwrap_or_else(|| panic!("parse {raw:?}"))
-    }
-
-    #[test]
-    fn canonical_forms_round_trip() {
-        for raw in [
-            "local",
-            "ssh://jack@mini-heart",
-            "ssh://jack@mini.example.com:2222",
-            "ssh://jack@10.0.0.5",
-            "ssh://jack@10.0.0.5:22",
-            "ssh://jack@[2001:db8::1]",
-            "ssh://jack@[::1]:22",
-        ] {
-            assert_eq!(home(raw).to_string(), raw, "canonical {raw}");
-        }
-    }
-
-    #[test]
-    fn shorthand_normalizes_to_ssh_uri() {
-        assert_eq!(home("jack@mini-heart").to_string(), "ssh://jack@mini-heart");
-        assert_eq!(
-            home("jack@10.0.0.5:22").to_string(),
-            "ssh://jack@10.0.0.5:22"
-        );
-        assert_eq!(home("ssh://jack@local").to_string(), "ssh://jack@local");
-    }
-
-    #[test]
-    fn ssh_user_is_required() {
-        assert_eq!(home("local"), MachineRoute::Local);
-        assert_eq!(MachineRoute::parse("ssh://mini-heart"), None);
-        assert_eq!(MachineRoute::parse("mini-heart"), None);
-        assert_eq!(MachineRoute::parse("@host"), None);
-        assert_eq!(MachineRoute::parse(""), None);
-    }
-
-    #[test]
-    fn ipv6_must_be_bracketed_and_ports_parse() {
-        // bracketed ok
-        assert!(home("ssh://jack@[fe80::1]").is_remote());
-        // unbracketed ipv6 is ambiguous with a port and is rejected
-        assert_eq!(MachineRoute::parse("ssh://jack@2001:db8::1"), None);
-        // bad port
-        assert_eq!(MachineRoute::parse("ssh://jack@host:notaport"), None);
-        assert_eq!(MachineRoute::parse("ssh://jack@host:99999"), None);
-    }
-
-    #[test]
-    fn ssh_destination_and_port_feed_the_transport() {
-        let h = home("ssh://jack@[::1]:2222");
-        assert_eq!(h.ssh_destination().as_deref(), Some("jack@::1"));
-        assert_eq!(h.ssh_port(), Some(2222));
-
-        let h = home("ssh://deploy@box.tail.ts.net");
-        assert_eq!(
-            h.ssh_destination().as_deref(),
-            Some("deploy@box.tail.ts.net")
-        );
-        assert_eq!(h.ssh_port(), None);
-
-        assert_eq!(home("local").ssh_destination(), None);
-    }
 }

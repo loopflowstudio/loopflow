@@ -450,7 +450,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     let state = session_state(session, !clients.is_empty());
     let mut actions = session_actions(state);
     let open_argv = if unavailable.is_none() {
-        match human_open_argv(remote, Some(&session.cwd), &session.id) {
+        match human_open_argv(remote, &session.id) {
             Ok(argv) => argv,
             Err(error) => {
                 unavailable = Some(format!("Session connection unavailable: {error}"));
@@ -959,7 +959,7 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
             .into_iter()
             .filter_map(|client| client.terminal_id)
             .collect(),
-        open_argv: human_open_argv(remote.as_ref(), Some(&session.cwd), &session.id)?,
+        open_argv: human_open_argv(remote.as_ref(), &session.id)?,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     Ok(reading)
@@ -1195,7 +1195,6 @@ pub(crate) fn resume_native_session(
 
 pub(crate) fn human_open_argv(
     remote_machine: Option<&crate::durable::MachineId>,
-    worktree: Option<&Path>,
     id: &str,
 ) -> Result<Vec<String>> {
     let context = crate::engine::process::execution_context()?;
@@ -1209,12 +1208,7 @@ pub(crate) fn human_open_argv(
         context.lf_bin.display().to_string(),
     ];
     if let Some(machine_id) = remote_machine {
-        argv.extend(["machine".to_string(), "ssh".to_string()]);
-        if let Some(worktree) = worktree {
-            let repo = crate::engine::machine_route::resolve_home_relative_repo(worktree)
-                .map_err(anyhow::Error::msg)?;
-            argv.extend(["--repo".to_string(), repo]);
-        }
+        argv.push("--machine".to_string());
         argv.push(machine_id.to_string());
     }
     argv.extend(["session".to_string(), "connect".to_string(), id.to_string()]);
@@ -1850,7 +1844,7 @@ mod tests {
     fn human_sessions_open_through_the_public_session_command() {
         let _lock = crate::journal::test_env_lock();
         let home = SessionHome::new();
-        let argv = human_open_argv(None, None, "session_123").unwrap();
+        let argv = human_open_argv(None, "session_123").unwrap();
 
         assert_eq!(
             &argv[argv.len() - 3..],

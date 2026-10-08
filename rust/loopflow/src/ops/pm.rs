@@ -422,7 +422,7 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
 async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
-    // A forwarded token wins over the local store: `lf machine ssh` resolves the PM
+    // A forwarded token wins over the local store: `lf --machine` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf repo refresh` could never authenticate.
@@ -588,7 +588,7 @@ async fn resolve_pm_token_from_store(
     unreachable!("both refresh attempts return or retry")
 }
 
-/// Env var carrying a PM access token forwarded by `lf machine ssh`.
+/// Env var carrying a PM access token forwarded by `lf --machine`.
 pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
 /// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
 pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
@@ -877,7 +877,7 @@ pub(crate) async fn require_planning_home(store: &Store, wave: &Wave) -> OpsResu
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if placement.machine_id != local.id {
         return Err(OpsError::Message(format!(
-            "Wave {} is placed on {}; run this command with `lf machine ssh {}`",
+            "Wave {} is placed on {}; run this command with `lf --machine {}`",
             wave.slug(),
             placement.machine_id,
             placement.machine_id

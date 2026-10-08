@@ -30,11 +30,11 @@ lf roadmap                             # tasks in this project, sorted by what t
 lf roadmap --all                       # every project on this computer
 lf top                                 # what is running right now
 lf usage --days 0 --wave infra                   # the record of each time the AI was started
-lf ssh <machine-id> roadmap               # ask another computer the same question
+lf --machine <machine-id> roadmap               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine
-at once; `lf ssh` is how you ask a different one.
+at once; `lf --machine` is how you ask a different one.
 
 ## See everything
 

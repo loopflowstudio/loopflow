@@ -1064,18 +1064,21 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (LOO-429, 2026-10-07)
 
-Jack Heart selected all assembled context in the system file: instructions,
-Wave memory/goals, scratch, docs, diff, clipboard, skill and Task brief. No curated
-split, fallback or lf-side refusal wording. The historical Claude block was a
-first-response error inside its terminal, not launch failure. His October 7
-headless readback probes proved file delivery on that account, not interactive
-acceptance. Publish for review; do not land before Jack's real first-response
-check in cmux, including large memory, Claude plan mode, Codex and titles.
+Jack Heart selected all assembled context in one system file, including skills
+and Task briefs; no split, fallback or lf-side refusal wording. The historical
+Claude block was a first-response error inside its terminal. Jack requested
+queue preparation then landing of PR #1498, superseding the review-only boundary;
+unobserved checks remain unproved.
 
-Terminal, batch and persistent harnesses share one context-file writer, preserving
-attribution and files for native resume. Stub-provider proofs establish transport
-and file retention, not native resume or acceptance. IDE deep links have no file
-channel. LOO-428 owns duplicate Codex flags and Flow output.
-`44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpointing,
+Jack's cmux screenshot shows Claude reading the exact fixture marker, OpenCode
+and the first Infrastructure memory heading. Its title was “Supplied context
+instructions”; auto mode supplies no plan-mode proof. Codex exited 2 on duplicate
+`--dangerously-bypass-hook-trust` before responding. LOO-428 owns that repair;
+retry its configured wrapper path afterward. Plan mode, Codex readback/title and
+native resume remain unverified. LOO-422 owns broader titles.
+
+Terminal, batch and persistent harnesses share one retained context-file writer;
+stubs prove transport/retention, not native resume. IDE deep links have no file
+channel. Demo evidence remains in branch history. `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpoint,
 common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
 remains unresolved. Claude success proves no repair.

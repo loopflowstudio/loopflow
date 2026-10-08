@@ -1,5 +1,23 @@
 # Sign a machine in as me — LOO-413
 
+October 8 delivery update: Jack Heart accepted the reported Codex demo with
+“sounds good. advance the task.” The saved `code` workflow is at `demo`; its
+forward edge is `ship` (gate, then `pr land -c`). This proceeds beyond the prior
+publication-and-review boundary. Gate owns the recorded version-warning repair,
+OAuth output-handle investigation and affected checks. Unperformed provider,
+later-refresh, reboot and installed-runtime acceptance remains unproved; the
+accepted Codex demo does not invent those results.
+
+October 8 update: Jack Heart authorized real-account verification for the
+second-login demo, superseding the fixture-only restriction below for that check.
+Codex immediate coexistence passed: original and second isolated login both
+passed authenticated requests after browser approval. Jack then authorized
+shipping the source binary to Mini. It is deployed with a separate data directory;
+registration, real login transfer, authenticated reads on both machines,
+account-selected remote execution and headless reconnect pass after Jack's
+second browser approval. The configured attempt and evidence limits are recorded in
+[machine sign-in demo](machine-sign-in-demo.md). Delivery now follows the update above.
+
 Jack Heart authorized step 4 on 2026-10-07: implement fresh laptop logins installed
 on an added machine, publish PR #1493, then stop for review. No landing,
 real login, real credential read or real-account provider contact is authorized.
@@ -71,7 +89,8 @@ refresh, historical captures, machine records and routes remain.
 - Source reconciliation found no additional product decision. The compression
   changes are checkpointed at `407bcde3eb54c079e9fd6cc2d2e7b97d411c6f5f`;
   their recorded focused results below still apply. Publication remains pending.
-- Republish PR #1493 against main and stop for Jack Heart's review. No landing.
+- Advance PR #1493 through the accepted `ship` edge, preserving the demo proof
+  and its limits in delivery copy.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
   token-key handling. Diagnose the retained output handle in
@@ -80,11 +99,17 @@ refresh, historical captures, machine records and routes remain.
   but its earlier Swift cause does not explain this Rust fixture. No installed
   store or real credential was used.
 - Hand verification, first: a second login for the same account leaves the first
-  signed in. Then independent Claude/Codex refresh chains; independent Linear
+  signed in. Codex now passes immediate coexistence and remote execution in the
+  source deployment; the other providers remain. Then independent Claude/Codex refresh chains; independent Linear
   grants refreshed on different days; copied gh token usable on both machines;
   Mac after reboot with a locked Keychain; at most one browser approval per account
   and no remote terminal. Fixtures cannot establish these results. Real-account
-  verification requires separate authorization under Jack Heart's fixture-only scope.
+  verification for the first check is now authorized by Jack Heart's October 8
+  reply; see the demo note for execution and evidence limits.
+- Correct the source-version warning: identical local/remote binaries compare
+  the remote build suffix against the local package version and report a false
+  difference. The successful source demo does not establish default installed
+  runtime or migration acceptance.
 
 Review repairs: interrupted file-to-SQLite registration reuses the received login;
 remote flags cannot relax the selected identity; credential-free and previously

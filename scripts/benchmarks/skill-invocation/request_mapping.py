@@ -1,15 +1,24 @@
 """Inspect Claude's native skill/context request mapping against a local fake API."""
 
 import argparse
+import errno
+import fcntl
 import hashlib
 import json
 import os
+import pty
+import select
 import shlex
 import shutil
 import signal
+import socket
+import struct
 import subprocess
+import sys
 import tempfile
+import termios
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -118,6 +127,191 @@ def _run(
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+class _Terminal:
+    def __init__(self, command: list[str], root: Path, env: dict[str, str]) -> None:
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+        self.process = subprocess.Popen(
+            command,
+            cwd=root,
+            env={**env, "TERM": "xterm-256color"},
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            start_new_session=True,
+        )
+        os.close(slave)
+        self.output = bytearray()
+
+    def pump(self, seconds: float) -> None:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([self.master], [], [], min(0.1, seconds))
+            if ready:
+                try:
+                    data = os.read(self.master, 65536)
+                except OSError as error:
+                    if error.errno == errno.EIO:
+                        return
+                    raise
+                if not data:
+                    return
+                self.output.extend(data)
+                if b"\x1b[6n" in self.output[-20:]:
+                    self.write(b"\x1b[1;1R")
+            if self.process.poll() is not None:
+                return
+
+    def write(self, value: bytes) -> None:
+        while value:
+            written = os.write(self.master, value)
+            if not written:
+                raise RuntimeError("terminal input closed")
+            value = value[written:]
+
+    def close(self) -> bool:
+        clean = False
+        try:
+            if self.process.poll() is None:
+                self.write(b"\x15/exit\r")
+                self.pump(3)
+            clean = self.process.poll() == 0
+        finally:
+            if self.process.poll() is None:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            self.process.wait(timeout=5)
+            os.close(self.master)
+        return clean
+
+
+def _await_request(terminal: _Terminal, requests: list[dict], count: int) -> None:
+    deadline = time.monotonic() + 20
+    while len(requests) < count and terminal.process.poll() is None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"expected {count} requests, received {len(requests)}")
+        terminal.pump(0.1)
+    if len(requests) < count:
+        raise RuntimeError(f"terminal exited {terminal.process.returncode} before request {count}")
+    terminal.pump(0.5)
+
+
+def _send_inbox(message_path: Path) -> None:
+    # The fixture's SessionStart child consumes its own provider-issued local
+    # capability directly from its environment. Never record or print the token.
+    deadline = time.monotonic() + 45
+    while not message_path.exists():
+        if not message_path.parent.exists():
+            return
+        if time.monotonic() >= deadline:
+            raise TimeoutError("no inbox message supplied")
+        time.sleep(0.05)
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(5)
+        connection.connect(os.environ["CLAUDE_CODE_MESSAGING_SOCKET"])
+        frames = [
+            {"type": "auth", "token": os.environ["CLAUDE_CODE_MESSAGING_TOKEN"]},
+            {"type": "user", "message": {"role": "user", "content": message_path.read_text()}},
+        ]
+        connection.sendall("".join(json.dumps(frame) + "\n" for frame in frames).encode())
+
+
+def _terminal_mapping(
+    claude: str,
+    workspace: Path,
+    env: dict[str, str],
+    model: str,
+    session: str,
+    requests: list[dict],
+    marker: str,
+) -> dict:
+    root = workspace.parent
+    socket_path = root / "inbox.sock"
+    inbox_message = root / "inbox-message.txt"
+    draft = "UNSUBMITTED_DRAFT_" + uuid.uuid4().hex
+    config = {
+        "hasCompletedOnboarding": True,
+        "theme": "dark",
+        "customApiKeyResponses": {"approved": [env["ANTHROPIC_API_KEY"][-20:]], "rejected": []},
+        "projects": {str(workspace): {"hasTrustDialogAccepted": True}},
+    }
+    for path in (
+        Path(env["HOME"]) / ".claude.json",
+        Path(env["CLAUDE_CONFIG_DIR"]) / ".claude.json",
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(config))
+    terminal = None
+    try:
+        hook = {
+            "type": "command",
+            "async": True,
+            "command": shlex.join(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve()),
+                    "--inbox-message",
+                    str(inbox_message),
+                ]
+            ),
+        }
+        settings = {"hooks": {"SessionStart": [{"hooks": [hook]}]}}
+        terminal = _Terminal(
+            [
+                claude,
+                "--setting-sources",
+                "project",
+                "--strict-mcp-config",
+                "--mcp-config",
+                '{"mcpServers":{}}',
+                "--tools",
+                "",
+                "--model",
+                model,
+                "--resume",
+                session,
+                "--messaging-socket-path",
+                str(socket_path),
+                "--settings",
+                json.dumps(settings),
+                "--",
+                "/lf-mapping alpha",
+            ],
+            workspace,
+            env,
+        )
+        _await_request(terminal, requests, 1)
+        # A person has a draft in the native editor when an external writer
+        # injects its command. Only this probe's own PTY receives input.
+        terminal.write(draft.encode())
+        terminal.pump(0.5)
+        terminal.write(b"/lf-mapping beta\r")
+        _await_request(terminal, requests, 2)
+        draft_users = _user_texts(requests[-1])
+        if socket_path.exists():
+            inbox_message.write_text("/lf-mapping gamma")
+            _await_request(terminal, requests, 3)
+        inbox_users = _user_texts(requests[-1])
+        checks = {
+            "draft_was_submitted": any(draft + "/lf-mapping beta" in text for text in draft_users),
+            "injected_skill_not_expanded": not any(
+                marker + "|beta|" in text for text in draft_users
+            ),
+            "inbox_delivered_text": any("/lf-mapping gamma" in text for text in inbox_users),
+            "inbox_skill_not_expanded": not any(marker + "|gamma|" in text for text in inbox_users),
+            "exact_request_count": len(requests) == 3,
+            "same_native_session": all(
+                session in json.dumps(body.get("metadata", {})) for body in requests
+            ),
+        }
+        checks["inbox_bound"] = socket_path.exists()
+        checks["clean_terminal_exit"] = terminal.close()
+        terminal = None
+        return {"requests": len(requests), "checks": checks}
+    finally:
+        if terminal is not None:
+            terminal.close()
+
+
 def _probe(claude: str, model: str, channel: str) -> bool:
     requests = []
 
@@ -139,7 +333,7 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             self.end_headers()
             self.wfile.write(response)
 
-    with tempfile.TemporaryDirectory(prefix="lf-request-mapping-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="lf-request-", dir="/tmp") as temporary:
         root = Path(temporary).resolve()
         home = root / "home"
         home.mkdir()
@@ -202,7 +396,7 @@ def _probe(claude: str, model: str, channel: str) -> bool:
             else:
                 context_message = _user_message([context_marker])
                 context_message["shouldQuery"] = False
-                if channel == "staged":
+                if channel in ("staged", "terminal"):
                     seeded = _run(initial, workspace, env, [context_message])
                     print(
                         json.dumps(
@@ -214,6 +408,15 @@ def _probe(claude: str, model: str, channel: str) -> bool:
                     initial = resume
                 else:
                     context_messages.append(context_message)
+
+            if channel == "terminal":
+                observation = _terminal_mapping(
+                    claude, workspace, env, model, session, requests, skill_marker
+                )
+                initial_facts = _assess(requests[:1], skill, skill_marker, context_marker, "alpha")
+                observation["checks"]["native_startup"] = all(initial_facts["checks"].values())
+                print(json.dumps({"channel": channel, **observation}), flush=True)
+                return passed and all(observation["checks"].values())
 
             for case, argument, command, messages in [
                 ("initial", "alpha", initial, context_messages),
@@ -255,8 +458,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claude", default=shutil.which("claude"))
     parser.add_argument("--model", default="sonnet")
-    parser.add_argument("--channel", choices=("hook", "queued", "staged"), default="queued")
+    parser.add_argument(
+        "--channel", choices=("hook", "queued", "staged", "terminal"), default="queued"
+    )
+    parser.add_argument("--inbox-message", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.inbox_message:
+        _send_inbox(args.inbox_message)
+        return 0
     if not args.claude:
         parser.error("a Claude executable is required")
     return 0 if _probe(str(Path(args.claude).resolve()), args.model, args.channel) else 1

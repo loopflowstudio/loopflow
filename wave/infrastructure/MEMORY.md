@@ -1073,9 +1073,11 @@ Sonnet/Opus. A `shouldQuery: false` user message followed by a native command
 preserves exact arguments and user context in one request, also after restart
 without resupply. A separate seed process saves context without a model call.
 These prove client mapping, not live-model or Loopflow behavior. Exclude answer leakage.
-Current resume replaces capture before claiming a driver; it cannot queue through
-a live native terminal. Live delivery versus inactive-only selection needs a
-design decision; no narrower outcome is approved. Installed 0.13.9 app launches recorded no native identity;
+Claude's live inbox delivers slash text without expansion; PTY injection submits
+an unfinished draft. Three fake-API requests share one native Session and exit
+cleanly. A stream-owned terminal is proposed, not an approved UI replacement.
+Resume still replaces capture before driver claim; no narrower scope is approved.
+Installed 0.13.9 app launches recorded no native identity;
 both reconnects failed. Jack then directed removal of `--ide` and its app-launch
 path. Keep terminal/headless execution and historical records. Launcher success
 proves no engine exit. Native dispatch, ports and fidelity remain unproved.

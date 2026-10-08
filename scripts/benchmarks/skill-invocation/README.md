@@ -113,6 +113,36 @@ driver. It cannot deliver through a surviving native terminal's current driver.
 A saved native Session and a live input queue require different admission;
 the design keeps that boundary unresolved rather than starting a second writer.
 
+## Native terminal admission
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/request_mapping.py --channel terminal
+```
+
+Reproduces two rejected delivery paths using a real Claude terminal, a disposable
+home and a fake local API. Only the probe's own PTY and native inbox receive input.
+The SessionStart fixture child consumes its own socket capability from the
+environment without recording it. External egress is denied; no real credentials
+or model are used. Exit zero means the counterexamples reproduced, not that live
+skill delivery works. A missing inbox or changed provider behavior fails the probe.
+
+Claude 2.1.294 (the digest above) produced three requests under one native Session
+ID: startup `/lf-mapping alpha` expanded the exact source and arguments with
+user-role context; PTY injection appended `/lf-mapping beta` to an unfinished
+draft and submitted both without expansion; the authenticated inbox delivered
+`/lf-mapping gamma` as text without expansion. `/exit` returned zero. The fake
+response contains no markers. These are API receipts, not assertions about a
+model's answer. Plain PTY injection loses editor fidelity; successful socket
+delivery does not prove native command handling.
+
+The tested binary's inbox handler deliberately skips slash parsing. The documented
+[background-resume path](https://code.claude.com/docs/en/sessions#resume-a-running-background-session)
+also refuses slash-prefixed prompts. An LF terminal over the persistent stream
+driver is a concrete alternative, but replaces native interactive controls and
+requires a product decision. These findings establish neither Loopflow admission,
+third-party fidelity nor the impossibility of a future provider transport.
+
 
 ## Decisions and remaining work
 

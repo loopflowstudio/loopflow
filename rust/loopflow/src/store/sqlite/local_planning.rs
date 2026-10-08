@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{PlanId, ProjectId};
 use crate::id::WaveId;
-use crate::planning::{PersonalWaveDefinition, PlanBinding, PlanningAuthority};
+use crate::planning::{PersonalWaveDefinition, PlanningAuthority};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
@@ -45,7 +45,14 @@ impl SqliteStore {
         for (input, rotation) in entries {
             let selected = super::project_selection::read_in(&tx, &input.wave_id)?;
             let original = serde_json::to_string(input)?;
-            let settled: Option<(Option<String>,bool,Option<String>)> = tx.query_row("SELECT reset_name,settled_at IS NOT NULL,local_plan_json FROM project_transitions WHERE wave_id=?1 AND successor_id=?2",params![input.wave_id,input.successor_id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional()?;
+            let settled: Option<(Option<String>, bool, Option<String>)> = tx
+                .query_row(
+                    "SELECT reset_name, settled_at IS NOT NULL, local_plan_json
+                     FROM project_transitions WHERE wave_id=?1 AND successor_id=?2",
+                    params![input.wave_id, input.successor_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()?;
             if let Some((reset, true, intent)) = settled {
                 if reset.as_deref() != Some(name)
                     || selected.as_deref() != Some(&input.successor_id)
@@ -64,10 +71,23 @@ impl SqliteStore {
                 ));
             }
             let now = now_unix();
+            let content = crate::pm::render_project_content(&input.content);
             let successor = ProjectId::parse(&input.successor_id)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?;
             if input.create {
-                tx.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context,status,workflow) VALUES(?1,?2,?3,?3,?4,?4,?5,'started',?6)",params![successor.as_str(),input.wave_id,now,input.project_name,crate::pm::render_project_content(&input.content),input.content.workflow])?;
+                tx.execute(
+                    "INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,
+                         project_prompt_context,status,workflow)
+                     VALUES(?1,?2,?3,?3,?4,?4,?5,'started',?6)",
+                    params![
+                        successor.as_str(),
+                        input.wave_id,
+                        now,
+                        input.project_name,
+                        content,
+                        input.content.workflow
+                    ],
+                )?;
                 durable::inherit_project_placement(&tx, &successor)?;
             } else {
                 if project_authority_on(&tx, &successor)? != PlanningAuthority::Local {
@@ -75,26 +95,59 @@ impl SqliteStore {
                         "destination belongs to Linear".into(),
                     ));
                 }
-                let changed = tx.execute("UPDATE projects SET project_name=?3,project_prompt_context=?4,workflow=?5,status='started',updated_at=?6 WHERE id=?1 AND wave_id=?2 AND status NOT IN ('completed','canceled')",params![successor.as_str(),input.wave_id,input.project_name,crate::pm::render_project_content(&input.content),input.content.workflow,now])?;
+                let changed = tx.execute(
+                    "UPDATE projects SET project_name=?3,project_prompt_context=?4,workflow=?5,
+                         status='started',updated_at=?6
+                     WHERE id=?1 AND wave_id=?2 AND status NOT IN ('completed','canceled')",
+                    params![
+                        successor.as_str(),
+                        input.wave_id,
+                        input.project_name,
+                        content,
+                        input.content.workflow,
+                        now
+                    ],
+                )?;
                 if changed != 1 {
                     return Err(StoreError::InvalidAuthority(
                         "destination is no longer available".into(),
                     ));
                 }
             }
-            tx.execute("INSERT INTO project_transitions(wave_id,successor_id,predecessor_id,reset_name,create_successor,created_at,settled_at,local_plan_json) VALUES(?1,?2,?3,?4,?5,?6,?6,?7)",params![input.wave_id,successor.as_str(),predecessor,name,input.create,now,original])?;
+            tx.execute(
+                "INSERT INTO project_transitions(wave_id,successor_id,predecessor_id,reset_name,
+                     create_successor,created_at,settled_at,local_plan_json)
+                 VALUES(?1,?2,?3,?4,?5,?6,?6,?7)",
+                params![
+                    input.wave_id,
+                    successor.as_str(),
+                    predecessor,
+                    name,
+                    input.create,
+                    now,
+                    original
+                ],
+            )?;
             for task in rotation
                 .tasks
                 .iter()
                 .filter(|t| t.disposition == crate::ops::chapter::TaskDisposition::Move)
             {
-                let changed = tx.execute("UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3 WHERE id=?1 AND project_id=?4",params![task.task.id,successor.as_str(),now,predecessor])?;
+                let changed = tx.execute(
+                    "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
+                     WHERE id=?1 AND project_id=?4",
+                    params![task.task.id, successor.as_str(), now, predecessor],
+                )?;
                 if changed != 1 {
                     return Err(StoreError::InvalidAuthority(
                         "Task membership changed before rotation".into(),
                     ));
                 }
-                tx.execute("INSERT INTO project_transition_items(wave_id,successor_id,issue_id) VALUES(?1,?2,?3)",params![input.wave_id,successor.as_str(),task.task.id])?;
+                tx.execute(
+                    "INSERT INTO project_transition_items(wave_id,successor_id,issue_id)
+                     VALUES(?1,?2,?3)",
+                    params![input.wave_id, successor.as_str(), task.task.id],
+                )?;
             }
             tx.execute(
                 "UPDATE waves SET current_project_id=?2 WHERE id=?1",
@@ -129,6 +182,7 @@ impl SqliteStore {
             })
             .transpose()
     }
+
     pub(crate) fn update_personal_wave_document(
         &self,
         wave: &WaveId,
@@ -150,6 +204,7 @@ impl SqliteStore {
         }
         Ok(())
     }
+
     pub fn update_local_project_content(
         &self,
         project: &ProjectId,
@@ -183,8 +238,14 @@ impl SqliteStore {
         task: &crate::durable::TaskId,
     ) -> StoreResult<(u32, Option<i64>)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row("SELECT planning_rank,(SELECT max(created_at) FROM task_events e WHERE e.task_id=t.id AND json_extract(e.kind_json,'$.kind')='completed') FROM tasks t WHERE id=?1",
-            [task.as_str()],|row| Ok((row.get(0)?,row.get(1)?)))?)
+        Ok(conn.query_row(
+            "SELECT planning_rank,
+                    (SELECT max(created_at) FROM task_events e
+                     WHERE e.task_id=t.id AND json_extract(e.kind_json,'$.kind')='completed')
+             FROM tasks t WHERE id=?1",
+            [task.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?)
     }
 
     pub fn local_task_comments(
@@ -192,7 +253,10 @@ impl SqliteStore {
         task: &crate::durable::TaskId,
     ) -> StoreResult<Vec<crate::ops::pm::TaskComment>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT id,body,author,created_at FROM task_comments WHERE task_id=?1 ORDER BY created_at,id")?;
+        let mut query = conn.prepare(
+            "SELECT id,body,author,created_at FROM task_comments
+             WHERE task_id=?1 ORDER BY created_at,id",
+        )?;
         let rows = query.query_map([task.as_str()], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -291,26 +355,6 @@ impl SqliteStore {
         project_authority_on(&conn, project)
     }
 
-    pub fn personal_plan(&self, repo: &str) -> StoreResult<Option<PlanBinding>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let id: Option<String> = conn
-            .query_row(
-                "SELECT id FROM personal_plans WHERE repo=?1",
-                [repo],
-                |row| row.get(0),
-            )
-            .optional()?;
-        id.map(|id| {
-            Ok(PlanBinding {
-                id: PlanId::parse(&id)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?,
-                repo: repo.to_string(),
-                authority: PlanningAuthority::Local,
-            })
-        })
-        .transpose()
-    }
-
     /// Explicit creation is the only provisioning boundary; reads never call this.
     pub fn ensure_personal_project(&self, repo: &str, name: &str) -> StoreResult<Project> {
         if name.trim().is_empty() || name.contains(['/', ':', '\\']) || matches!(name, "." | "..") {
@@ -398,22 +442,6 @@ impl SqliteStore {
         .optional()
         .map_err(StoreError::from)
     }
-
-    pub fn edit_personal_wave_definition(
-        &self,
-        wave: &WaveId,
-        definition: &PersonalWaveDefinition,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE personal_wave_definitions SET goal=?2,memory=?3 WHERE wave_id=?1",
-            params![wave, definition.goal, definition.memory],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -434,7 +462,7 @@ mod tests {
         let shared = Wave::new(WaveId::new(), "inbox".into(), canonical.to_string());
         store.create_wave(&shared).unwrap();
         assert!(store
-            .personal_plan(&canonical.to_string())
+            .personal_wave_definition(shared.id())
             .unwrap()
             .is_none());
         let project = store
@@ -444,9 +472,14 @@ mod tests {
             goal: "Private objective".into(),
             memory: "Private memory".into(),
         };
-        store
-            .edit_personal_wave_definition(&project.wave_id, &definition)
-            .unwrap();
+        for (document, content) in [
+            ("GOAL.md", &definition.goal),
+            ("MEMORY.md", &definition.memory),
+        ] {
+            store
+                .update_personal_wave_document(&project.wave_id, document, content)
+                .unwrap();
+        }
         let task = store
             .create_local_task(&NewTask {
                 id: TaskId::new(),
@@ -477,10 +510,19 @@ mod tests {
                 .id(),
             &project.wave_id
         );
-        let plan = store
-            .personal_plan(&canonical.to_string())
-            .unwrap()
-            .unwrap();
+        let plan_id = |store: &SqliteStore| {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT personal_plan_id FROM waves WHERE id=?1",
+                    [&project.wave_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+        };
+        let original_plan = plan_id(&store);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(
@@ -489,10 +531,7 @@ mod tests {
                 .unwrap(),
             project
         );
-        assert_eq!(
-            store.personal_plan(&canonical.to_string()).unwrap(),
-            Some(plan)
-        );
+        assert_eq!(plan_id(&store), original_plan);
         assert_eq!(
             store.personal_wave_definition(&project.wave_id).unwrap(),
             Some(definition)

@@ -1065,7 +1065,6 @@ async fn cancelled_acceptance(detail: bool) {
                 Some("team-1".into()),
                 url.clone(),
             ),
-            provider: crate::pm::PmProviderKind::Linear,
             repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
             team_id: "team-1".into(),
         },

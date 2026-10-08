@@ -21,9 +21,7 @@ use crate::ops::progress::Progress;
 use crate::ops::task_pm::ResolvedTask;
 use crate::ops::util::normalize_wave_name;
 use crate::pm::linear::LinearClient;
-use crate::pm::{
-    PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmProviderKind, PmSnapshot, PmWave,
-};
+use crate::pm::{PmError, PmItem, PmItemCreate, PmItemUpdate, PmProject, PmSnapshot, PmWave};
 use crate::provider_auth::{
     provider_token_refresh_due, refresh_stored_provider_token, Provider, TokenRefreshError,
 };
@@ -80,7 +78,7 @@ pub enum PmRefresh {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PmShowResult {
     pub wave: String,
-    pub provider: PmProviderKind,
+    pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
     pub projects: Vec<PmProject>,
@@ -217,7 +215,6 @@ pub struct PmResolvedTask {
 #[derive(Clone)]
 pub(crate) struct RepositoryPmContext {
     pub client: LinearClient,
-    pub provider: PmProviderKind,
     pub repo_id: RepoId,
     pub team_id: String,
 }
@@ -245,11 +242,17 @@ pub(crate) fn resolve_wave(wave: Option<&str>) -> OpsResult<String> {
         .ok_or_else(|| OpsError::Message("cannot determine wave; pass --wave <name>".to_string()))
 }
 
-fn parse_provider(value: &str) -> OpsResult<PmProviderKind> {
-    value.parse::<PmProviderKind>().map_err(pm_to_ops)
+fn require_linear_provider(value: &str) -> OpsResult<()> {
+    if value.trim().eq_ignore_ascii_case("linear") {
+        return Ok(());
+    }
+    Err(OpsError::Message(format!(
+        "unsupported PM provider {:?}; expected \"linear\"",
+        value.trim().to_ascii_lowercase()
+    )))
 }
 
-fn resolve_provider(repo: &Path) -> OpsResult<PmProviderKind> {
+fn require_linear_config(repo: &Path) -> OpsResult<()> {
     let config = load_repo_config(repo)
         .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
         .unwrap_or_default();
@@ -259,31 +262,29 @@ fn resolve_provider(repo: &Path) -> OpsResult<PmProviderKind> {
         .and_then(|pm| pm.provider.as_deref())
         .filter(|provider| !provider.trim().is_empty())
     {
-        return parse_provider(provider);
+        require_linear_provider(provider)?;
     }
-    Ok(PmProviderKind::Linear)
+    Ok(())
 }
 
-fn read_initiative(repo: &Path, wave: &str, provider: PmProviderKind) -> Option<String> {
-    let pm = read_wave_pm_config(repo, wave)?;
-    let initiative = match provider {
-        PmProviderKind::Linear => pm.linear_initiative,
-    }?;
-    Some(initiative).filter(|initiative| !initiative.trim().is_empty())
+fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
+    read_wave_pm_config(repo, wave)?
+        .linear_initiative
+        .filter(|initiative| !initiative.trim().is_empty())
 }
 
-fn read_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<Option<String>> {
+fn read_repository_team(repo: &Path) -> OpsResult<Option<String>> {
     let config = load_repo_config(repo)
         .map_err(|error| OpsError::Message(format!("failed to read .lf/config.yaml: {error}")))?
         .unwrap_or_default();
-    let team = match provider {
-        PmProviderKind::Linear => config.pm.and_then(|pm| pm.linear_team),
-    };
-    Ok(team.filter(|team| !team.trim().is_empty()))
+    Ok(config
+        .pm
+        .and_then(|pm| pm.linear_team)
+        .filter(|team| !team.trim().is_empty()))
 }
 
-fn require_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<String> {
-    read_repository_team(repo, provider)?.ok_or_else(|| {
+fn require_repository_team(repo: &Path) -> OpsResult<String> {
+    read_repository_team(repo)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
              Run `lf repo connect <wave> --team-key <KEY>` before creating or mutating work."
@@ -292,11 +293,8 @@ fn require_repository_team(repo: &Path, provider: PmProviderKind) -> OpsResult<S
     })
 }
 
-/// Whether a wave has a Linear Initiative pinned for its resolved provider.
 fn wave_has_pm_initiative(repo: &Path, wave: &str) -> bool {
-    resolve_provider(repo)
-        .ok()
-        .is_some_and(|provider| read_initiative(repo, wave, provider).is_some())
+    require_linear_config(repo).is_ok() && read_initiative(repo, wave).is_some()
 }
 
 fn legacy_pm_sentinels(repo: &Path) -> OpsResult<Vec<String>> {
@@ -336,8 +334,8 @@ pub(crate) fn require_repository_pm_ready(repo: &Path) -> OpsResult<()> {
 
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     require_repository_pm_ready(repo)?;
-    let provider = resolve_provider(repo)?;
-    require_repository_team(repo, provider)
+    require_linear_config(repo)?;
+    require_repository_team(repo)
 }
 
 /// Expected Team for strict cached reads after migration. During the deliberate
@@ -347,23 +345,17 @@ pub(crate) fn repository_team_for_snapshot_validation(repo: &Path) -> OpsResult<
     if !legacy_pm_sentinels(repo)?.is_empty() {
         return Ok(None);
     }
-    let provider = resolve_provider(repo)?;
-    read_repository_team(repo, provider)
+    require_linear_config(repo)?;
+    read_repository_team(repo)
 }
 
-async fn build_client(
-    _repo: &Path,
-    provider: PmProviderKind,
-    team: Option<String>,
-) -> OpsResult<LinearClient> {
-    let token = resolve_pm_token(provider).await?;
+async fn build_client(team: Option<String>) -> OpsResult<LinearClient> {
+    let token = resolve_pm_token().await?;
     #[cfg(test)]
     if let Ok(url) = PM_TEST_CONTEXT.try_with(|ctx| ctx.graphql_url.clone()) {
         return Ok(LinearClient::with_base_url(token, team, url));
     }
-    match provider {
-        PmProviderKind::Linear => Ok(LinearClient::new(token, team)),
-    }
+    Ok(LinearClient::new(token, team))
 }
 
 fn repository_id(repo: &Path) -> OpsResult<RepoId> {
@@ -377,17 +369,16 @@ fn repository_id(repo: &Path) -> OpsResult<RepoId> {
 
 async fn resolve_repository_context(repo: &Path) -> OpsResult<RepositoryPmContext> {
     require_repository_pm_ready(repo)?;
-    let provider = resolve_provider(repo)?;
-    let team_id = require_repository_team(repo, provider)?;
+    require_linear_config(repo)?;
+    let team_id = require_repository_team(repo)?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(repo, provider, Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone())).await?;
     client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
         .map_err(pm_to_ops)?;
     Ok(RepositoryPmContext {
         client,
-        provider,
         repo_id,
         team_id: team_id.clone(),
     })
@@ -400,17 +391,16 @@ pub async fn linear_client(repo: &Path) -> OpsResult<LinearClient> {
 
 /// A Task already names its linked issue; comment access needs no team discovery.
 pub(crate) async fn issue_client(repo: &Path) -> OpsResult<LinearClient> {
-    build_client(repo, resolve_provider(repo)?, None).await
+    require_linear_config(repo)?;
+    build_client(None).await
 }
 
 pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmContext> {
     let repository = resolve_repository_context(repo).await?;
-    let provider = repository.provider;
-    let initiative = read_initiative(repo, wave, provider).ok_or_else(|| {
+    let initiative = read_initiative(repo, wave).ok_or_else(|| {
         OpsError::Message(format!(
-            "wave/{wave}/GOAL.md has no `pm.{}`. \
-             Run `lf repo connect {wave}` to connect its Linear Initiative.",
-            provider.initiative_key()
+            "wave/{wave}/GOAL.md has no `pm.linear_initiative`. \
+             Run `lf repo connect {wave}` to connect its Linear Initiative."
         ))
     })?;
     Ok(PmContext {
@@ -421,16 +411,16 @@ pub(crate) async fn resolve_context(repo: &Path, wave: &str) -> OpsResult<PmCont
 
 /// Linear authenticates via OAuth: the access token and refresh grant live in
 /// store, and PM access refreshes the grant before the access token expires.
-async fn resolve_pm_token(provider: PmProviderKind) -> OpsResult<String> {
+async fn resolve_pm_token() -> OpsResult<String> {
     // A forwarded token wins over the local store: `lf --machine` resolves the PM
     // credential on the caller's machine (where store lives) and hands it to the
     // remote through the environment. The remote store holds no PM credential, so
     // without this hook remote `lf repo refresh` could never authenticate.
-    if let Some(token) = forwarded_pm_token(provider) {
+    if let Some(token) = forwarded_pm_token() {
         return Ok(token);
     }
 
-    resolve_local_pm_token(provider)
+    resolve_local_pm_token()
         .await?
         .ok_or_else(missing_linear_credential)
 }
@@ -452,13 +442,13 @@ fn credential_deadline() -> OpsError {
 }
 
 /// Optional local authority for SSH; forwarded bearer tokens are resolved separately.
-pub(crate) async fn resolve_local_pm_token(provider: PmProviderKind) -> OpsResult<Option<String>> {
+pub(crate) async fn resolve_local_pm_token() -> OpsResult<Option<String>> {
     let deadline = Instant::now() + PM_REFRESH_TIMEOUT;
     tokio::time::timeout(PM_REFRESH_TIMEOUT, async {
         let config = storage_config_from_env()?;
         let store = open_pm_store(&config).await?;
         let StorageConfig::Sqlite { path } = config;
-        resolve_pm_token_from_store(provider, &store, &path, deadline).await
+        resolve_pm_token_from_store(&store, &path, deadline).await
     })
     .await
     .map_err(|_| credential_deadline())?
@@ -512,14 +502,13 @@ async fn linear_refresh_lock(database: &Path, deadline: Instant) -> OpsResult<st
 }
 
 async fn resolve_pm_token_from_store(
-    provider: PmProviderKind,
     store: &Store,
     database: &Path,
     deadline: Instant,
 ) -> OpsResult<Option<String>> {
     let read = || async {
         store
-            .get_provider_token(provider.as_str())
+            .get_provider_token("linear")
             .await
             .map_err(|_| credential_retry("Could not read the Linear credential"))
     };
@@ -590,13 +579,11 @@ async fn resolve_pm_token_from_store(
 
 /// Env var carrying a PM access token forwarded by `lf --machine`.
 pub(crate) const FORWARDED_PM_TOKEN_ENV: &str = "LF_FORWARDED_PM_TOKEN";
-/// Env var naming the provider the forwarded token belongs to (e.g. `linear`).
+/// Env var naming the provider the forwarded token belongs to.
 pub(crate) const FORWARDED_PM_PROVIDER_ENV: &str = "LF_FORWARDED_PM_PROVIDER";
 
-/// A forwarded PM token from the environment, if present and matching `provider`.
-/// When `LF_FORWARDED_PM_PROVIDER` is set it must name `provider`; when it is
-/// absent the token is accepted for whatever provider the wave resolves to.
-fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
+/// A forwarded Linear token; an explicit different provider is never accepted.
+fn forwarded_pm_token() -> Option<String> {
     #[cfg(test)]
     if PM_TEST_CONTEXT.try_with(|_| ()).is_ok() {
         return None;
@@ -607,7 +594,7 @@ fn forwarded_pm_token(provider: PmProviderKind) -> Option<String> {
         .filter(|value| !value.is_empty())?;
     match std::env::var(FORWARDED_PM_PROVIDER_ENV) {
         Ok(name) if !name.trim().is_empty() => {
-            (name.trim().eq_ignore_ascii_case(provider.as_str())).then_some(token)
+            (name.trim().eq_ignore_ascii_case("linear")).then_some(token)
         }
         _ => Some(token),
     }
@@ -942,7 +929,7 @@ pub(crate) async fn refresh_pm_snapshot_locked(
         .put_pm_snapshot(
             PmSnapshotRow {
                 wave_id: wave.id().clone(),
-                provider: ctx.provider.as_str().to_string(),
+                provider: "linear".to_string(),
                 initiative: ctx.initiative.clone(),
                 synced_at: observed_at,
                 snapshot: snapshot.clone(),
@@ -977,14 +964,14 @@ async fn pm_init_async(
         )));
     }
 
-    let provider = resolve_provider(repo)?;
+    require_linear_config(repo)?;
     let repo_id = repository_id(repo)?;
-    let existing_initiative = read_initiative(repo, &wave, provider);
-    let existing_team = read_repository_team(repo, provider)?;
+    let existing_initiative = read_initiative(repo, &wave);
+    let existing_team = read_repository_team(repo)?;
 
     let summary = wave_summary(repo, &wave)?;
     let title = title_case(&wave);
-    let client = build_client(repo, provider, existing_team.clone()).await?;
+    let client = build_client(existing_team.clone()).await?;
 
     let team_name = options
         .team_name
@@ -1016,18 +1003,16 @@ async fn pm_init_async(
     let (initiative_id, created) = match existing_initiative {
         Some(id) => (id, false),
         None => {
-            progress.status(&format!(
-                "looking for {provider} Linear Initiative `{title}`"
-            ));
+            progress.status(&format!("looking for Linear Initiative `{title}`"));
             match matching_wave_id(&client.list_waves().await.map_err(pm_to_ops)?, &title)? {
                 Some(id) => {
                     progress.status(&format!(
-                        "linking wave/{wave} to existing {provider} Initiative {id}"
+                        "linking wave/{wave} to existing Linear Initiative {id}"
                     ));
                     (id, false)
                 }
                 None => {
-                    progress.status(&format!("creating {provider} Initiative for wave/{wave}"));
+                    progress.status(&format!("creating Linear Initiative for wave/{wave}"));
                     (
                         client
                             .create_wave(&title, &summary)
@@ -1040,10 +1025,10 @@ async fn pm_init_async(
         }
     };
     if initiative_missing {
-        write_initiative_to_goal(repo, &wave, provider, &initiative_id)?;
+        write_initiative_to_goal(repo, &wave, &initiative_id)?;
     }
     if team_changed {
-        write_repository_pm_config(repo, provider, &team.id)?;
+        write_repository_pm_config(repo, &team.id)?;
     }
 
     if initiative_missing || team_changed {
@@ -1051,7 +1036,7 @@ async fn pm_init_async(
             repo,
             &crate::ops::CommitOptions {
                 add: true,
-                message: Some(format!("lf repo connect: {wave} to {provider}")),
+                message: Some(format!("lf repo connect: {wave} to Linear")),
                 ..crate::ops::CommitOptions::for_task("pm")
             },
             progress,
@@ -1092,9 +1077,10 @@ pub(crate) async fn pm_show_async(
 ) -> OpsResult<PmShowResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
     let row = load_show_snapshot(repo, &wave, options.refresh, progress).await?;
+    require_linear_provider(&row.provider)?;
     Ok(PmShowResult {
         wave,
-        provider: row.provider.parse().map_err(pm_to_ops)?,
+        provider: "linear".into(),
         initiative: row.initiative,
         synced_at: row.synced_at,
         projects: row.snapshot.projects,
@@ -1471,7 +1457,7 @@ async fn apply_update(
     progress: &impl Progress,
 ) -> OpsResult<()> {
     let id = &options.id;
-    progress.status(&format!("updating {} task {id}", ctx.provider));
+    progress.status(&format!("updating Linear task {id}"));
     match &options.update {
         PmTaskUpdate::Edit(update) => {
             ctx.client
@@ -1483,7 +1469,7 @@ async fn apply_update(
             // A rejected completion must never leave a "Shipped" comment.
             ctx.client.complete_item(id).await.map_err(pm_to_ops)?;
             if let Some(pr) = pr.as_deref().map(str::trim).filter(|pr| !pr.is_empty()) {
-                progress.status(&format!("commenting PR link on {} task {id}", ctx.provider));
+                progress.status(&format!("commenting PR link on Linear task {id}"));
                 ctx.client
                     .comment(id, &format!("Shipped: {pr}"))
                     .await
@@ -1730,7 +1716,7 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
             })?;
     }
     let ctx = PmContext {
-        initiative: read_initiative(repo, &wave, repository.provider)
+        initiative: read_initiative(repo, &wave)
             .ok_or_else(|| OpsError::Message(format!("wave/{wave} has no Linear Initiative")))?,
         repository,
     };
@@ -1818,10 +1804,10 @@ async fn inspect_task_planning_async(
     let scope = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?
         .to_string();
-    let provider = resolve_provider(repo)?;
+    require_linear_config(repo)?;
     let store = pm_store().await?;
     let existing = store
-        .pm_task_observation(&scope, provider.as_str(), issue)
+        .pm_task_observation(&scope, "linear", issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1891,7 +1877,7 @@ async fn inspect_task_planning_async(
         let Some((item, project)) = observation else {
             if let Some(expected) = &existing.record {
                 store
-                    .invalidate_pm_task(&scope, provider.as_str(), expected.clone(), acquisition)
+                    .invalidate_pm_task(&scope, "linear", expected.clone(), acquisition)
                     .await
                     .map_err(|error| OpsError::Message(error.to_string()))?;
             }
@@ -1908,7 +1894,7 @@ async fn inspect_task_planning_async(
         store
             .put_pm_task(
                 &scope,
-                provider.as_str(),
+                "linear",
                 PmTaskRecord {
                     item,
                     project,
@@ -1930,7 +1916,7 @@ async fn inspect_task_planning_async(
     };
     // Read again: an event may have invalidated the record while acquisition ran.
     let mut observation = store
-        .pm_task_observation(&scope, provider.as_str(), selector)
+        .pm_task_observation(&scope, "linear", selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
@@ -2004,10 +1990,10 @@ pub(crate) fn singular_project_initiative(project: &PmProject) -> OpsResult<Stri
 }
 
 pub(crate) fn wave_for_initiative(repo: &Path, initiative_id: &str) -> OpsResult<String> {
-    let provider = resolve_provider(repo)?;
+    require_linear_config(repo)?;
     let matches = list_local_waves(repo)?
         .into_iter()
-        .filter(|wave| read_initiative(repo, wave, provider).as_deref() == Some(initiative_id))
+        .filter(|wave| read_initiative(repo, wave).as_deref() == Some(initiative_id))
         .collect::<Vec<_>>();
     match matches.as_slice() {
         [wave] => Ok(wave.clone()),
@@ -2051,8 +2037,8 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 }
 
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
-    let provider = resolve_provider(repo)?;
-    let team_id = read_repository_team(repo, provider)?.ok_or_else(|| {
+    require_linear_config(repo)?;
+    let team_id = read_repository_team(repo)?.ok_or_else(|| {
         OpsError::Message(
             ".lf/config.yaml has no repository `pm.linear_team`. \
              Run `lf repo connect <wave> --team-key <KEY>` to establish the migration target."
@@ -2060,7 +2046,7 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
         )
     })?;
     let repo_id = repository_id(repo)?;
-    let client = build_client(repo, provider, Some(team_id.clone())).await?;
+    let client = build_client(Some(team_id.clone())).await?;
     let binding = client
         .validate_team_claim(&team_id, repo_id.as_str())
         .await
@@ -2072,7 +2058,6 @@ async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext>
     Ok(ResolvedReteamContext {
         repository: RepositoryPmContext {
             client,
-            provider,
             repo_id,
             team_id,
         },
@@ -2127,7 +2112,7 @@ async fn accept_reteam_project(
         .store
         .reconcile_pm_project_teams(
             wave.id(),
-            resolved.repository.provider.as_str(),
+            "linear",
             &project.initiative_ids[0],
             confirmed,
             observed_at,
@@ -2154,7 +2139,7 @@ async fn accept_reteam_task(
         .ok_or_else(|| OpsError::Message(format!("Task {issue} disappeared during reteam")))?;
     let project = project
         .ok_or_else(|| OpsError::Message(format!("Task {issue} lost its Project during reteam")))?;
-    let initiative = read_initiative(repo, wave.slug(), resolved.repository.provider)
+    let initiative = read_initiative(repo, wave.slug())
         .ok_or_else(|| OpsError::Message(format!("Wave {} lost its Initiative", wave.slug())))?;
     if item.team_id.as_deref() != Some(resolved.repository.team_id.as_str())
         || project.initiative_ids.as_slice() != [initiative.as_str()]
@@ -2174,7 +2159,7 @@ async fn accept_reteam_task(
         .store
         .put_pm_task(
             wave.repo(),
-            resolved.repository.provider.as_str(),
+            "linear",
             PmTaskRecord {
                 item,
                 project: Some(project),
@@ -2246,12 +2231,11 @@ async fn apply_or_plan_repository_reteam(
     let mut task_updates = 0usize;
 
     for wave in &waves {
-        let initiative =
-            read_initiative(repo, wave, resolved.repository.provider).ok_or_else(|| {
-                OpsError::Message(format!(
-                    "wave/{wave} has no Linear Initiative; initialize every Wave before reteam"
-                ))
-            })?;
+        let initiative = read_initiative(repo, wave).ok_or_else(|| {
+            OpsError::Message(format!(
+                "wave/{wave} has no Linear Initiative; initialize every Wave before reteam"
+            ))
+        })?;
         if let Some(owner) = seen_initiatives.insert(initiative.clone(), wave.clone()) {
             return Err(OpsError::Message(format!(
                 "Linear Initiative {initiative} is bound by both wave/{owner} and wave/{wave}; repair GOAL.md ownership before reteam"
@@ -2450,8 +2434,8 @@ async fn apply_or_plan_repository_reteam(
         // Re-fetch and validate the complete repository before deleting any
         // migration sentinel. A crash before cleanup remains loudly resumable.
         for wave in &waves {
-            let initiative = read_initiative(repo, wave, resolved.repository.provider)
-                .expect("preflight required every Initiative");
+            let initiative =
+                read_initiative(repo, wave).expect("preflight required every Initiative");
             let ctx = PmContext {
                 repository: resolved.repository.clone(),
                 initiative,
@@ -2512,8 +2496,8 @@ async fn pm_sync_async(
     let mut actions = Vec::new();
     let mut diagnostics = Vec::new();
     let mut blocking = Vec::new();
-    let provider = resolve_provider(repo)?;
-    let team_id = read_repository_team(repo, provider)?;
+    require_linear_config(repo)?;
+    let team_id = read_repository_team(repo)?;
 
     if let Some(store) = open_existing_store().await {
         let origin = crate::work::wave::context::wave_origin(repo);
@@ -2556,7 +2540,7 @@ async fn pm_sync_async(
 
     let mut initiative_waves: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for wave in &all_waves {
-        if let Some(initiative) = read_initiative(repo, wave, provider) {
+        if let Some(initiative) = read_initiative(repo, wave) {
             initiative_waves
                 .entry(initiative)
                 .or_default()
@@ -2576,7 +2560,7 @@ async fn pm_sync_async(
         }
     }
 
-    let client = build_client(repo, provider, team_id.clone()).await?;
+    let client = build_client(team_id.clone()).await?;
     let repo_id = repository_id(repo)?;
     if let Some(team_id) = &team_id {
         client
@@ -2584,9 +2568,7 @@ async fn pm_sync_async(
             .await
             .map_err(pm_to_ops)?;
     }
-    progress.status(&format!(
-        "checking {provider} repository Initiatives, Projects, and Tasks"
-    ));
+    progress.status("checking Linear repository Initiatives, Projects, and Tasks");
     let linear_waves = client.list_waves().await.map_err(pm_to_ops)?;
     let linear_waves_by_id: BTreeMap<String, String> = linear_waves
         .iter()
@@ -2603,7 +2585,7 @@ async fn pm_sync_async(
 
     let mut seen_projects: BTreeMap<String, String> = BTreeMap::new();
     for wave in &waves {
-        let Some(initiative_id) = read_initiative(repo, wave, provider) else {
+        let Some(initiative_id) = read_initiative(repo, wave) else {
             blocking.push(format!("wave/{wave} has no Linear Initiative"));
             continue;
         };
@@ -2726,8 +2708,8 @@ async fn pm_sync_async(
     if !options.plan {
         let team_id = team_id.expect("non-plan sync requires repository Team");
         for wave in &waves {
-            let initiative = read_initiative(repo, wave, provider)
-                .expect("preflight required every selected Initiative");
+            let initiative =
+                read_initiative(repo, wave).expect("preflight required every selected Initiative");
             let expected_initiative_name = title_case(wave);
             if linear_waves_by_id.get(&initiative) != Some(&expected_initiative_name) {
                 client
@@ -2738,7 +2720,6 @@ async fn pm_sync_async(
             let ctx = PmContext {
                 repository: RepositoryPmContext {
                     client: client.clone(),
-                    provider,
                     repo_id: repo_id.clone(),
                     team_id: team_id.clone(),
                 },
@@ -2766,8 +2747,8 @@ pub(crate) async fn pm_rename(
     let wave = resolve_wave(options.wave.as_deref())?;
     let ctx = resolve_context(repo, &wave).await?;
     progress.status(&format!(
-        "renaming {} Linear Initiative {} to {}",
-        ctx.provider, ctx.initiative, options.title
+        "renaming Linear Initiative {} to {}",
+        ctx.initiative, options.title
     ));
     ctx.client
         .rename_wave(&ctx.initiative, &options.title)
@@ -2816,12 +2797,7 @@ fn collect_local_waves(root: &Path, directory: &Path, waves: &mut Vec<String>) -
 
 // ── helpers ─────────────────────────────────────────────────────────
 
-fn write_initiative_to_goal(
-    repo: &Path,
-    wave: &str,
-    provider: PmProviderKind,
-    initiative_id: &str,
-) -> OpsResult<()> {
+fn write_initiative_to_goal(repo: &Path, wave: &str, initiative_id: &str) -> OpsResult<()> {
     update_wave_goal_config(repo, wave, |map| {
         let pm_key = serde_yaml_ng::Value::String("pm".to_string());
         let mut pm_map = map
@@ -2830,7 +2806,7 @@ fn write_initiative_to_goal(
             .cloned()
             .unwrap_or_default();
         pm_map.insert(
-            serde_yaml_ng::Value::String(provider.initiative_key().to_string()),
+            serde_yaml_ng::Value::String("linear_initiative".to_string()),
             serde_yaml_ng::Value::String(initiative_id.to_string()),
         );
         map.insert(pm_key, serde_yaml_ng::Value::Mapping(pm_map));
@@ -2839,11 +2815,7 @@ fn write_initiative_to_goal(
     .map_err(OpsError::Message)
 }
 
-fn write_repository_pm_config(
-    repo: &Path,
-    provider: PmProviderKind,
-    team_id: &str,
-) -> OpsResult<()> {
+fn write_repository_pm_config(repo: &Path, team_id: &str) -> OpsResult<()> {
     let path = repo.join(".lf/config.yaml");
     let mut root = match std::fs::read_to_string(&path) {
         Ok(content) if !content.trim().is_empty() => {
@@ -2874,7 +2846,7 @@ fn write_repository_pm_config(
         .unwrap_or_default();
     pm.insert(
         serde_yaml_ng::Value::String("provider".to_string()),
-        serde_yaml_ng::Value::String(provider.as_str().to_string()),
+        serde_yaml_ng::Value::String("linear".to_string()),
     );
     pm.insert(
         serde_yaml_ng::Value::String("linear_team".to_string()),
@@ -3313,7 +3285,6 @@ mod tests {
                     Some("team-123".to_string()),
                     base_url,
                 ),
-                provider: PmProviderKind::Linear,
                 repo_id: RepoId::parse("loopflowstudio/loopflow").unwrap(),
                 team_id: "team-123".to_string(),
             },
@@ -3453,13 +3424,11 @@ mod tests {
         );
 
         assert_eq!(
-            read_repository_team(repo.path(), PmProviderKind::Linear)
-                .unwrap()
-                .as_deref(),
+            read_repository_team(repo.path()).unwrap().as_deref(),
             Some("team-loo")
         );
         assert_eq!(
-            read_initiative(repo.path(), "product", PmProviderKind::Linear).as_deref(),
+            read_initiative(repo.path(), "product").as_deref(),
             Some("initiative-product")
         );
         assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
@@ -3660,7 +3629,6 @@ mod tests {
         let resolved = ResolvedReteamContext {
             repository: RepositoryPmContext {
                 client,
-                provider: PmProviderKind::Linear,
                 repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
                 team_id: "team-loo".to_string(),
             },
@@ -3682,9 +3650,7 @@ mod tests {
         assert_eq!(identifiers, BTreeSet::from(["LOO-1", "LOO-2"]));
         assert!(legacy_pm_sentinels(repo.path()).unwrap().is_empty());
         assert_eq!(
-            read_repository_team(repo.path(), PmProviderKind::Linear)
-                .unwrap()
-                .as_deref(),
+            read_repository_team(repo.path()).unwrap().as_deref(),
             Some("team-loo")
         );
         for wave in ["survival", "survival/infrastructure"] {
@@ -3890,7 +3856,6 @@ mod tests {
                     Some("team-loo".to_string()),
                     base_url,
                 ),
-                provider: PmProviderKind::Linear,
                 repo_id: RepoId::parse("loopflowstudio/fixture").unwrap(),
                 team_id: "team-loo".to_string(),
             },
@@ -4312,7 +4277,7 @@ mod tests {
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
 
         // Returns the forwarded token without ever opening the store store.
-        let token = block_on_pm(resolve_pm_token(PmProviderKind::Linear)).expect("token");
+        let token = block_on_pm(resolve_pm_token()).expect("token");
         assert_eq!(token, "forwarded-secret");
 
         std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
@@ -4324,19 +4289,16 @@ mod tests {
 
         std::env::set_var(FORWARDED_PM_TOKEN_ENV, "tok");
         std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "linear");
-        assert_eq!(
-            forwarded_pm_token(PmProviderKind::Linear).as_deref(),
-            Some("tok")
-        );
+        assert_eq!(forwarded_pm_token().as_deref(), Some("tok"));
 
         // A provider that doesn't match falls through to the store.
         std::env::set_var(FORWARDED_PM_PROVIDER_ENV, "github");
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
+        assert_eq!(forwarded_pm_token(), None);
 
         // A blank token is treated as absent.
         std::env::set_var(FORWARDED_PM_TOKEN_ENV, "   ");
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);
-        assert_eq!(forwarded_pm_token(PmProviderKind::Linear), None);
+        assert_eq!(forwarded_pm_token(), None);
 
         std::env::remove_var(FORWARDED_PM_TOKEN_ENV);
         std::env::remove_var(FORWARDED_PM_PROVIDER_ENV);

@@ -867,7 +867,7 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
         store
             .put_pm_task(
                 entry.wave.repo(),
-                entry.ctx.provider.as_str(),
+                "linear",
                 crate::store::PmTaskRecord {
                     item,
                     project,

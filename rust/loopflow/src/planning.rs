@@ -9,14 +9,6 @@ pub enum PlanningAuthority {
     Linear,
 }
 
-/// A personal plan has its own identity even when it uses a shared code repository.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PlanBinding {
-    pub id: crate::durable::PlanId,
-    pub repo: String,
-    pub authority: PlanningAuthority,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PersonalWaveDefinition {
     pub goal: String,

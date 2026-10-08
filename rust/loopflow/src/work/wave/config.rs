@@ -54,7 +54,7 @@ pub fn write_wave_document(
     document: &str,
     content: &str,
 ) -> std::io::Result<()> {
-    super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
+    let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
     if !matches!(document, "GOAL.md" | "MEMORY.md") {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -71,7 +71,6 @@ pub fn write_wave_document(
     }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)
         .map_err(std::io::Error::other)?;
-    let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
     let wave = store
         .get_wave_at(&locator)
         .map_err(std::io::Error::other)?

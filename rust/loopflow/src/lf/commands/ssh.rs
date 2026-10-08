@@ -29,7 +29,6 @@ use std::process::{Command, Stdio};
 use anyhow::{anyhow, Context};
 
 use crate::durable::Machine;
-use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
 };
@@ -252,7 +251,7 @@ async fn resolve_credentials(
         provider_authority,
         opencode_token: _resolve_opencode_token(&home).await,
         pm_token: resolve_pm_token().await,
-        pm_provider: Some(PmProviderKind::Linear.as_str().to_string()),
+        pm_provider: Some("linear".to_string()),
         secrets,
     })
 }
@@ -300,7 +299,7 @@ fn resolve_doppler_secret(name: &str) -> anyhow::Result<String> {
 /// PM/Linear access token from the local store credential store. Absent when no
 /// store exists or no Linear credential is stored.
 async fn resolve_pm_token() -> Option<String> {
-    match crate::ops::pm::resolve_local_pm_token(PmProviderKind::Linear).await {
+    match crate::ops::pm::resolve_local_pm_token().await {
         Ok(token) => token,
         Err(error) => {
             tracing::warn!(%error, "local Linear credential unavailable; forwarding no PM token");

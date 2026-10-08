@@ -23,7 +23,8 @@ Personal goal/memory stay in SQLite, including prompt curation. Local subprocess
 proofs and retained serialized provider-payload readback pass against one draft;
 these establish no installation, hosted delivery or Desktop outcome. Owned Linear
 issue import, paired fields, remaining private-definition operations, complete
-CLI/Desktop/hosted acceptance and provider-routing deletion remain unfinished.
+CLI/Desktop/hosted acceptance remain unfinished. Single-variant provider routing
+and unused personal-definition APIs are removed; plan IDs and recovery evidence remain.
 Release's inspected child memory reinforces public-entry recovery and strict stubs.
 The full one-PR scope remains; no product decision blocks its implementation.
 

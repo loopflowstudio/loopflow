@@ -344,7 +344,7 @@ pub(crate) async fn accept_project(
     let project = store
         .put_pm_project(
             wave.id(),
-            ctx.provider.as_str(),
+            "linear",
             &ctx.initiative,
             project,
             observed_at,

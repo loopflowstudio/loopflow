@@ -1,32 +1,10 @@
 pub mod linear;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::str::FromStr;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[non_exhaustive]
-pub enum PmProviderKind {
-    Linear,
-}
-
-impl PmProviderKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-        }
-    }
-
-    pub fn initiative_key(self) -> &'static str {
-        match self {
-            Self::Linear => "linear_initiative",
-        }
-    }
-}
 
 /// The result of adopting or creating a provider team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
@@ -35,25 +13,6 @@ pub struct TeamBinding {
     pub id: String,
     pub key: String,
     pub created: bool,
-}
-
-impl std::fmt::Display for PmProviderKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl FromStr for PmProviderKind {
-    type Err = PmError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "linear" => Ok(Self::Linear),
-            other => Err(PmError::Message(format!(
-                "unsupported PM provider {other:?}; expected \"linear\""
-            ))),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

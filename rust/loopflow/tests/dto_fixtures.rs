@@ -87,15 +87,16 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
 }
 
 #[test]
-fn pm_show_requires_team_identity_even_without_project_ownership() {
+fn pm_show_preserves_an_unmapped_team_as_null() {
     let mut fixture: serde_json::Value = serde_json::from_str(PM_SHOW).unwrap();
-    fixture["items"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("team_id");
+    fixture["items"][0]["team_id"] = serde_json::Value::Null;
 
-    let error = serde_json::from_value::<PmShowResult>(fixture).unwrap_err();
-    assert!(error.to_string().contains("team_id"));
+    let snapshot: PmShowResult = serde_json::from_value(fixture.clone()).unwrap();
+    assert_eq!(snapshot.items[0].team_id, None);
+    assert_eq!(
+        serde_json::to_value(&snapshot.items[0]).unwrap(),
+        fixture["items"][0]
+    );
 }
 
 #[test]

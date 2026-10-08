@@ -48,13 +48,18 @@ or resetting them. Each machine owns its Workflow, Sessions and history.
 - Forwarding the origin's machine-local Work declaration over SSH.
 - The duplicate issue field and one-use constructor wrapper in `TaskSource`.
 - The second parent-branch fetch after `prepare_new_task` fetches all origin refs.
+- The separate `find_task` selector parser; the store's existing issue query
+  resolves Task IDs, issue IDs and issue names, including retained legacy IDs.
+
+Keep pushed-code validation before planning lookup so provider failure cannot
+hide unpushed work. Checkout validation remains at each preparation entry point.
 
 Preserve stored Task/PR IDs, local edits, Workflow state and history. Transport
 requirements cannot move an existing Task's checkout or branch. A retained
 checkout lacking the requested commit reports the needed branch/commit and
 `lf sync`; no automatic reset or replay.
 
-## Remaining
+## Source and evidence
 
 Reconciled 2026-10-07 against main `35e759aaf4e79e7dc8eef2e8d30048f10172b45a`.
 The Task source is attached to the registered-machine transport. Target parsing,
@@ -65,14 +70,27 @@ then rejects a later required commit while retaining local notes and HEAD.
 Source legacy Task IDs travel as issue names. SSH networking and providers are
 simulated; no installed machine or real credentials are exercised.
 
-Publication of #1491 for review remains. Gate owns full affected suites, real
-two-machine SSH acceptance and focused preservation of existing Project
-selection/pending rotation and Workflow/Session history. The empty Workflow
-assertion proves no eager creation, not an existing Workflow's preservation.
-
 Review retains Release's entry-point lesson: the public selector must exercise
 the new transport and the actual recipient, not just call adoption directly.
 The other fixtures cover two-store identity, observation age, missing pushed
-code, source dirtiness and target removal evidence.
+code, source dirtiness and target removal evidence. Source-dirtiness errors use
+the transport operation directly; only the adoption/reuse fixture traverses the
+public machine selector. The shared store query already accepts Task IDs, issue
+IDs and issue names, so removing the extra selector parser preserves that API.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `task_remote_tests` (5) pass; full affected suites and real SSH acceptance remain with gate.
+## Remaining
+
+- Gate owns affected suites and preservation checks with an existing target
+  Workflow, Session history and legacy Task/PR IDs. Current fixtures preserve an
+  origin legacy ID and reuse a newly adopted target; they do not exercise two
+  pre-existing Tasks with different IDs. The empty Workflow assertion proves
+  no eager creation, not an existing Workflow's preservation.
+- Cold adoption must leave an existing Project selection or pending rotation
+  intact, and copied planning must retain target invalidation as well as removal
+  evidence. The code retains these boundaries; focused preservation proofs remain.
+- Real two-machine SSH acceptance remains unobserved. A capable gate/CI environment
+  owns that check; simulated transport and providers establish no installed result.
+- Republish #1491 for Jack Heart's review after verification. No landing or later
+  remote-work slice is authorized.
+
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated `task_remote_tests` (5), `global_commands` (7 passed; 2 installation cases deferred to disposable-account CI), and `test_loopflow_skill_alignment.py` (4) pass; full affected suites and real SSH acceptance remain with gate.

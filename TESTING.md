@@ -881,6 +881,20 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+### Native Codex terminal capture
+
+```bash
+uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py \
+  --lf target/debug/lf --codex /path/to/native/codex
+```
+
+Use a native Codex binary supporting profile files. This headless PTY fixture
+uses disposable provider and Loopflow homes, a loopback model endpoint, and an
+independently authored wrapper supplying trust plus SessionStart/Stop hooks.
+It verifies completed turns, exact native capture, both host hooks, reconnect,
+unchanged configuration and temporary-profile cleanup. It uses no account or
+login. This proves native composition, not cmux's actual tab tracking.
+
 ### Released capture-history preservation
 
 ```bash

@@ -1057,22 +1057,23 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (LOO-428 / LOO-429, 2026-10-07)
 
-Jack Heart's later LOO-429 decisions supersede 428's retained-argv and fixed-only
-system-content direction: all assembled context goes in the system/instructions
-file, one path, a short user trigger, no split, relaunch fallback or lf-side refusal
-wording. PR #1498 owns that change. Its design records Claude interactive readback;
-plan mode and Codex remain unproved. Codex failed on 428's duplicate trust flag.
+Jack Heart's LOO-429 decisions supersede 428's argv/fixed-system constraints:
+all assembled context goes in one system/instructions file, with a short user
+trigger, no split, relaunch fallback or lf-side refusal wording. PR #1498 owns
+transport and combined oversized-launch acceptance. Recorded Claude interactive
+readback proves neither plan mode, cmux tracking nor the combined candidate.
 
-Jack narrowed remaining 428 work to setup-free Codex flag/hook coexistence;
-existing Flow-output and Task Started changes stay preserved. He requires original
-oversized-launch success through 429 and rejects one-time hook setup.
-Combined acceptance depends on 429; do not reopen prompt transport here. Reconcile
-428's argv diagnostics and fixture with 429 before publication. Native config
-readback showed whole-table replacement, not runtime hook loss or coexistence.
-Exact native capture and cmux tracking remain required; earlier separate-window
-access was denied and live Sessions were untouched. Publication only is authorized.
+Jack approved setup-free Codex coexistence and publication only. Source uses a
+temporary native profile for lf's capture hook and a bounded incomplete-argument
+probe for wrapper-supplied trust. Existing configuration/trust stays unchanged;
+normal exits remove the profile, interrupted launches can leave it unselected.
+Codex 0.160.1 executes profile and CLI hooks together; two CLI hook tables replace
+one another, and config-based bypass is ignored. Native loopback PTY proofs pass
+plain/wrapped launch, both host hooks, exact capture and reconnect. Actual cmux
+tracking and installed acceptance remain unproved; live Sessions stay untouched.
 
-Measured macOS ARG_MAX was 1,048,576 bytes; cmux's Claude cap was 122,880.
-Earlier prompt history: `44fe36620:wave/infrastructure/MEMORY.md`. Preserve common
-invocation loading and caller-owned checkpointing. Codex rejected-turn recovery
-remains unresolved. 429's first-response proof is not installed or combined acceptance.
+Flow readability and transactional Task Started remain preserved. Superseded argv
+diagnostics are removed; 429 still owns oversized-context proof. Earlier limits
+and prompt history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
+Preserve caller-owned checkpointing and common invocation loading. Codex
+rejected-turn recovery remains unresolved. Homepage capture follows installation.

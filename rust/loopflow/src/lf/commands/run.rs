@@ -10,7 +10,7 @@ use crate::lf::Cli;
 use crate::session_record::{
     AgentProcessRequest, CaptureHandle, FinalAnswer, SessionCaptureSpec, SubjectAttribution,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -642,8 +642,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
             &built.prompt,
             &environment,
             provider_session_id.as_deref(),
-        )
-        .with_context(|| interactive_launch_diagnostic(built));
+        );
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
@@ -694,47 +693,6 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         (Ok(()), Err(error)) => Err(anyhow!("Session completed but did not settle: {error}")),
         (Ok(()), Ok(())) => Ok(capture.final_answer()?),
     }
-}
-
-fn interactive_launch_diagnostic(built: &PromptBuild) -> String {
-    // Reattribute the exact interactive argv, which combines the system and
-    // user channels that headless providers receive separately.
-    let context = attributed_context(&built.components, "", &built.prompt, &[]);
-    let mut sections = std::collections::BTreeMap::<&str, u64>::new();
-    for asset in context.assets() {
-        *sections.entry(asset.kind.as_str()).or_default() += asset.bytes;
-    }
-    let mut message = format!(
-        "{} interactive command failed; prompt argument: {} UTF-8 bytes.\nPrompt bytes by section:",
-        built.harness,
-        crate::lf::output::format_int(built.prompt.len() as u64),
-    );
-    for (section, bytes) in sections {
-        message.push_str(&format!(
-            "\n  {section}: {}",
-            crate::lf::output::format_int(bytes)
-        ));
-    }
-    #[cfg(unix)]
-    {
-        // SAFETY: sysconf only queries the process's operating-system limit.
-        let limit = unsafe { libc::sysconf(libc::_SC_ARG_MAX) };
-        if limit > 0 {
-            message.push_str(&format!(
-                "\nOS ARG_MAX: {} bytes for arguments and environment together; other arguments, environment and OS overhead reduce the available prompt space.",
-                crate::lf::output::format_int(limit as u64),
-            ));
-        }
-    }
-    if built.harness == "claude" && built.prompt.len() > 122_880 {
-        message.push_str(&format!(
-            "\nIf the preceding error is from cmux: its Claude wrapper caps each argument at 122,880 bytes, independently of ARG_MAX. This prompt exceeds that cap by {} bytes.",
-            crate::lf::output::format_int((built.prompt.len() - 122_880) as u64),
-        ));
-    }
-    message
-        .push_str("\nFor an argument-size error, reduce the largest context sections and retry.");
-    message
 }
 
 fn run_headless_prompt(

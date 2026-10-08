@@ -414,6 +414,7 @@ fn lf_command(repo: &Path, home: &Path, args: &[&str], path: Option<&str>) -> Co
         .args(args)
         .current_dir(repo)
         .env("HOME", home)
+        .env("CODEX_HOME", home.join(".codex"))
         .env("LF_HOME", home)
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("NO_COLOR", "1");
@@ -717,7 +718,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let bin = TempDir::new().unwrap();
         let launched = bin.path().join("launched");
         write_executable(&bin.path().join("codex"), &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\nprintf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" > '{}'\n", launched.display(),
         ));
         let path = format!(
             "{}:{}",
@@ -1302,7 +1303,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     write_executable(
         &bin.path().join("codex"),
         &format!(
-            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\n\
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then exit 0; fi\nif [ \"$1\" = --dangerously-bypass-hook-trust ] && [ \"$2\" = --model ]; then echo \"a value is required for '--model <MODEL>'\" >&2; exit 2; fi\n\
              printf '%s' '{{\"session_id\":\"ses-'\"$LF_CAPTURE_KEY\"'\"}}' \
              | \"$LF_BIN\" __provider-session || exit $?\necho \"$LF_CAPTURE_KEY\" >> '{}'\n",
             launched.display()
@@ -1463,7 +1464,7 @@ fn bound_flows_keep_task_context_and_leave_other_flows_and_shared_edits_alone() 
 
     register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
-    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi\npwd >> \"$LF_HOME/cwds\"").replace(
+    let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
         "read -r turn_start\nprintf '%s\\n' \"$turn_start\" >> \"$LF_HOME/prompts\"\nprintf '%s\\n' 'Evidence from preceding step.' > scratch/step.md",
     );

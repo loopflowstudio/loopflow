@@ -2,9 +2,9 @@
 
 Behavioral comparison for [LOO-427](https://linear.app/loopflow/issue/LOO-427),
 2026-10-07 Pacific. Jack Heart asked for command-by-command judgments after an
-agent arranged his work in cmux. **Direction: at most one repository window, spanning machines; expose its
-existing workspace to agents.** Jack selected the repository-window direction in
-this conversation. The command dispositions remain proposed product judgments.
+agent arranged his work in cmux. Jack selected **at most one repository window
+across machines**, with identity inspection, arrangement and targeted terminal
+I/O in one LOO-427 PR. Command dispositions remain proposed product judgments.
 
 The missing loop is **identify → open → arrange → observe → target input → verify**.
 Loopflow already owns the work being arranged. It should not require an agent
@@ -68,10 +68,6 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   launching anything or changing Work, and offer the ordinary terminal path.
   Linux still supports lf's Tasks, Sessions and machine routing. The Mac displaying
   remote work is not the machine executing that work; preserve that distinction.
-- **Reuse the existing owners:** LOO-416 owns saved panes and reattachment;
-  LOO-402 owns Waiting navigation, including blocked shell panes (Sessions use
-  Rust's judgment; shell-only roll-up uses shared Swift). LOO-403 owns shortcuts
-  and palette, LOO-387 draft preparation. This comparison adds programmatic access.
 - **No new host:** LOO-415 owns a transparent per-Session relay, no emulation;
   Codex keeps its engine socket. Desktop screen reads are of its actual terminal,
   not a requirement to turn the relay into a terminal emulator. LOO-398 is the
@@ -80,12 +76,9 @@ retained execution is abandoned. Neither failure was repaired as a prerequisite.
   app opening, and outright HTML screenshot removal. LOO-418 selects zero or one
   PR per Task and follow-through as another Task. LOO-406's plan-store changes
   remain exploration; they do not establish a new planning authority here.
-- **Known host failures have owners:** LOO-428 covers duplicate launch flags and
-  noisy output, retaining argument delivery in its slice. LOO-429's latest
-  decision moves *all* assembled context to the system file, with no split,
-  relaunch fallback or lf-side interactive error wording. LOO-420 uses native
-  invocation for native skills and translated ports for the other harness;
-  builtins stay inlined. No new wrapper or prompt workaround belongs here.
+
+The [owner map](#implementation-scope-and-existing-owners) below retains the
+related Tasks' boundaries; this Task exposes the existing workspace owners.
 
 ## Open and arrange
 
@@ -239,47 +232,28 @@ screen and command receipts do not meet the chapter's sustained-use KRs.
 
 ## Implementation scope and existing owners
 
-Existing Tasks retain their scope:
+LOO-427 delivers the identity → arrange → observe/input path in one PR;
+premature LOO-430/431/432 are folded back. Jack Heart authorized advancement
+through the demo review boundary. Transport, command spelling, repository
+correspondence and draft-conflict UX remain in the working design at
+`scratch/compare-cmux-s-command-line.md`. Browser, cloud, checkpoint vault,
+custom sidebars and host terminal administration remain outside this diff.
 
-- [LOO-397](https://linear.app/loopflow/issue/LOO-397): command map and discovery.
-- [LOO-426](https://linear.app/loopflow/issue/LOO-426): opening Task/Session and
-  Waiting conversations, building on the links; coordinate with
-  [LOO-401](https://linear.app/loopflow/issue/LOO-401)'s launch-command move.
-- [LOO-422](https://linear.app/loopflow/issue/LOO-422): host-visible titles/status
-  and standard terminal reports. It explicitly avoids a host-specific integration
-  when the host consumes none of the existing mechanisms. Arbitrary cmux progress
-  setters are not an extension of its scope.
-- [LOO-424](https://linear.app/loopflow/issue/LOO-424): history adoption and resume
-  across hosts/machines, with [LOO-415](https://linear.app/loopflow/issue/LOO-415)
-  and the machine Tasks providing transport.
-- [LOO-421](https://linear.app/loopflow/issue/LOO-421) and
-  [LOO-423](https://linear.app/loopflow/issue/LOO-423): actual lf-in-host trials
-  and their small repairs. This page's host-only exercise does not replace them.
+Reuse these owners without duplicating their outcomes:
 
-- [LOO-416](https://linear.app/loopflow/issue/LOO-416): saved pane arrangement
-  and restoring conversation attachments; not a second layout store here.
-- [LOO-402](https://linear.app/loopflow/issue/LOO-402),
-  [LOO-403](https://linear.app/loopflow/issue/LOO-403), and
-  [LOO-387](https://linear.app/loopflow/issue/LOO-387): Waiting navigation,
-  commands/shortcuts and native draft preparation.
-- [LOO-428](https://linear.app/loopflow/issue/LOO-428) and
-  [LOO-429](https://linear.app/loopflow/issue/LOO-429): observed host launch/output
-  problems and revised prompt placement, respecting their later comments.
-
-Jack Heart corrected the scope: the following belong to **this LOO-427 diff**,
-implemented in internal slices and delivered as one PR:
-
-1. **Identity explanation:** resolved Work context and why it was selected.
-2. **Repository window and arrangement:** one window across machines, addressed
-   by repo; placement, supported operations, legal actions and retained panes.
-3. **Terminal observation and input:** bounded screen/selection reads and explicit
-   text/key delivery, preserving drafts and focus.
-
-LOO-430/431/432 were filed prematurely; their scope is consolidated here.
-The design is `scratch/compare-cmux-s-command-line.md`. Transport, command spelling,
-repository correspondence and draft-conflict UX remain design questions.
-Browser, cloud, checkpoint vault, custom sidebars and host terminal administration
-remain outside this diff. Existing Tasks above retain their distinct outcomes.
+| Task | Boundary |
+|---|---|
+| [LOO-397](https://linear.app/loopflow/issue/LOO-397) | Command map and discovery. |
+| [LOO-426](https://linear.app/loopflow/issue/LOO-426), [LOO-401](https://linear.app/loopflow/issue/LOO-401) | Task/Session and Waiting opening through existing links; launch-command move. |
+| [LOO-416](https://linear.app/loopflow/issue/LOO-416) | Saved panes and restored attachments; reuse the layout store. |
+| [LOO-402](https://linear.app/loopflow/issue/LOO-402) | Waiting navigation, including blocked shells: Rust judges Sessions, shared Swift rolls up shell reports. |
+| [LOO-403](https://linear.app/loopflow/issue/LOO-403), [LOO-387](https://linear.app/loopflow/issue/LOO-387) | Shortcuts/palette and native draft preparation. |
+| [LOO-422](https://linear.app/loopflow/issue/LOO-422) | Host titles/status through standard reports. No host-specific integration when the host consumes none of the existing mechanisms, or arbitrary cmux progress setters. |
+| [LOO-424](https://linear.app/loopflow/issue/LOO-424), [LOO-415](https://linear.app/loopflow/issue/LOO-415) | History adoption/resume across hosts and machines; relay and machine Tasks provide transport. |
+| [LOO-421](https://linear.app/loopflow/issue/LOO-421), [LOO-423](https://linear.app/loopflow/issue/LOO-423) | Actual lf-in-host trials and small repairs; this host-only exercise does not replace them. |
+| [LOO-428](https://linear.app/loopflow/issue/LOO-428) | Duplicate launch flags/noisy output, retaining argument delivery. |
+| [LOO-429](https://linear.app/loopflow/issue/LOO-429) | All assembled context in the system file; no split, relaunch fallback or lf-side interactive error wording. |
+| [LOO-420](https://linear.app/loopflow/issue/LOO-420) | Native invocation for native skills, translated ports across harnesses, builtins inlined. No new wrapper/prompt workaround here. |
 
 ## Loopflow source anchors
 

@@ -5,20 +5,21 @@
 Jack Heart authorized the rename, then two changes to PR #1484 and republication
 only: discard old Desktop caches and name the installation scope `installation`.
 A machine is one OS user and data directory; `LF_HOME` retains its filesystem
-meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive.
-Cron reads released JSON keys. Desktop discards version-1 caches; this supersedes
-the earlier translation decision. Jack Heart's October 7 LOO-401 steer supersedes
+meaning. Opaque `home_…` IDs, cron plist keys and historical payloads survive;
+cron reads released JSON keys. Desktop discards version-1 caches, superseding
+translation. Jack Heart's October 7 LOO-401 steer supersedes
 `installation` with `self` for install, doctor and skill export; `config user`
 reads the display name. The implementation selects root `open`, removes screenshot
 and its supervisor, and preserves the GUI-browser capture prohibition. Desktop's
 native snapshot is independent. No aliases; short install/doctor/user commands
-stay. LOO-401 publishes for review without landing; source checks prove no install.
-Retain `~/.lf-machine/install` and the promotion lock path because released gates, receipts and jobs pin them; no relocation is
-proved. Retained binaries use the shared `install` shorthand. Exact-frontier
+stay. LOO-401 supplies LOO-397's command map; publication stops at review.
+Retain `~/.lf-machine/install` and the promotion lock path: released gates,
+receipts and jobs pin them. Retained binaries use the shared `install` shorthand. Exact-frontier
 fixtures seed released SQL without drafts. Local checks prove neither installed
 migration nor remote continuity. Schedule ownership and activation stay intact. Release's
 operation-entry lesson also applies to command removal: reject the retired
 option beneath a valid current owner; an unknown owner can produce a false pass.
+Root words may resolve to authored skills; public lookup proves builtin removal.
 Corrected installation fixtures still require disposable OS-account isolation.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)

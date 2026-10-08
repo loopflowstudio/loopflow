@@ -732,25 +732,21 @@ drafts and broke its older CLI; Jack then forbade branch-binary access and
 promotion. Source proofs use disposable Homes without inherited authority.
 Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
-## Task convergence (LOO-319, curated 2026-10-02)
+## Task convergence (LOO-319, curated 2026-10-07)
 
-[LOO-319](https://linear.app/loopflow/issue/LOO-319) and
-[PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301) retain ownership.
-[Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#task-convergence-loo-319-branch-evidence-2026-09-27)
-preserves exact slice/demo evidence and superseded Flow compositions.
+LOO-319 / PR #1301 own this work. Exact slice/demo evidence and superseded
+Flow compositions remain at `cc18c992b:wave/infrastructure/MEMORY.md` under this
+heading and its linked prior memory.
 
-Jack Heart selected reconciliation before decision/publication and retained human
-demo and authored delivery. Captured invocations keep their definitions; tests
-must locate captured policy rather than copy current catalog indices. Feedback
-never supplies a verdict, and failed decisions cannot regain authority. Task
-agent choice survives PM refresh and reloads at each launch, including review.
-A PATH-only provider repair failed: executable and Home must agree. The real
-Codex fixture used synthetic feedback and predates generic loop-decide; configured
-Claude launch/resume, real five-minute stall and rendered Desktop agreement
-remain unverified. Local simulated liveness is not signal authority. Preserve
-first PID/birth identity across missing samples; active tool work prevents a
-false stall. TESTING.md owns fixture isolation and disk-resource policy. Source
-verification uses disposable stores; no old branch binary may migrate main.
+Jack Heart selected reconciliation before decision/publication, demo and authored
+delivery. Preserve captured definitions; locate policy rather than catalog indices.
+Feedback is not a verdict; failed decisions cannot regain authority. Reload Task
+agent choice at each launch, including review, despite PM refresh. Executable and
+Home must agree. The real Codex fixture used synthetic feedback and predates
+generic loop-decide; Claude launch/resume, real five-minute stall and rendered
+Desktop agreement remain unverified. Simulated liveness grants no signal authority;
+preserve first PID/birth across missing samples and account for active tools.
+TESTING.md owns fixture/disk isolation; no branch binary may migrate main.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 

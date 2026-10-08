@@ -1342,6 +1342,83 @@ mod tests {
     }
 
     #[test]
+    fn task_checkout_machine_migration_preserves_locations_and_history() {
+        let conn = open();
+        apply_before_current_draft(&conn, "task_checkout_machine");
+        if !_draft_is_canonical("task_checkout_machine") {
+            for draft in crate::build_info::migration_draft_manifest()
+                .iter()
+                .take_while(|draft| draft.name != "task_checkout_machine")
+            {
+                conn.execute_batch(draft.sql).unwrap();
+            }
+        }
+        conn.execute_batch(r#"
+            INSERT INTO waves(id,name,repo,created_at) VALUES('w','proof','/repo',1);
+            INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES('p','w','external-p',1);
+            INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,worktree)
+                VALUES('t','p','external-t','PROOF-1',1,'/repo/task'),
+                      ('unknown','p','external-unknown','PROOF-2',1,'/repo/unknown'),
+                      ('no-checkout','p','external-empty','PROOF-3',1,'');
+            INSERT INTO machines(id,route,created_at,observed_at) VALUES('machine-b','worker',1,1);
+            INSERT INTO work_placements(task_id,machine_id,placed_at)
+                SELECT 't',id,1 FROM machines WHERE route='local';
+            INSERT INTO work_placements(task_id,machine_id,placed_at)
+                SELECT 'no-checkout',id,1 FROM machines WHERE route='local';
+            INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+                VALUES('pr','t',1,'proof','proof','abc',1,1);
+            INSERT INTO processes(lfid,trace_id,command,cwd,started_at)
+                VALUES('process','trace','lf run code','/repo/task',1);
+            INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_process_lfid,input_published)
+                VALUES('session','Keep draft','human',1,'/repo/task','t','w','process',0);
+        "#).unwrap();
+        let history = || -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+            ["task_prs", "processes", "agent_sessions"]
+                .iter()
+                .map(|table| {
+                    let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+                    let count = query.column_count();
+                    query
+                        .query_map([], |row| (0..count).map(|i| row.get(i)).collect())
+                        .unwrap()
+                        .collect::<Result<_, _>>()
+                        .unwrap()
+                })
+                .collect()
+        };
+        let before = history();
+        let local: String = conn
+            .query_row("SELECT id FROM machines WHERE route='local'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("task_checkout_machine"))
+            .unwrap();
+        conn.execute(
+            "UPDATE work_placements SET machine_id='machine-b' WHERE task_id='t'",
+            [],
+        )
+        .unwrap();
+        let locations: Vec<(String, String, Option<String>)> = conn
+            .prepare("SELECT id,worktree,checkout_machine_id FROM tasks ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            locations,
+            vec![
+                ("no-checkout".into(), "".into(), None),
+                ("t".into(), "/repo/task".into(), Some(local)),
+                ("unknown".into(), "/repo/unknown".into(), None),
+            ]
+        );
+        assert_eq!(history(), before);
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn process_names_preserves_released_history_and_constraints() {
         let conn = open();
         apply_before_current_draft(&conn, "process_names");

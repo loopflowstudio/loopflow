@@ -1,7 +1,7 @@
 # Desktop control on shared Work — LOO-427
 
-**Status:** implementation authorized by Jack Heart; 0 implementation slices
-complete. One PR through demo review. No production code has changed.
+**Status:** implementation authorized by Jack Heart; slice 1 implemented locally.
+One PR through demo review; slices 2–5 remain. Q1 blocks shared-source work.
 The implementation sequence below replaces the earlier combined architecture
 slice. [Findings](findings.md) hold the source evidence;
 [questions](questions.md) hold only unresolved product decisions.
@@ -44,31 +44,27 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Implementation sequence — one PR
 
-### 1. Separate recorded checkout location from delegation — This slice
+### 1. Separate recorded checkout location from delegation — Implemented locally
 
-**Ready. Depends on no shared-source choice.** Preserve current routing behavior
-while removing the concrete coupling that makes delegation unsafe.
+`tasks.checkout_machine_id` records location beside `worktree`. The one Task draft,
+`task_checkout_machine.sql`, backfills existing placement evidence and leaves
+missing Machine evidence unknown. New checkouts record the preparing Machine;
+creation-time Work assignment still inherits from the Project.
 
-- Keep authored machine assignment in the existing placement owner. Store the
-  Task checkout's actual Machine alongside its recorded path in the existing
-  checkout/Task representation; do not introduce another generic placement table.
-- Backfill recorded location from the pre-change placement facts for existing
-  checkouts. Preserve unresolved historical evidence as unknown, never infer it
-  from the executing process. Preserve Work, PR, Session and Process IDs.
-- Cut over `SqliteStore::task_checkouts`, `task_snapshot`, Task-file access and
-  checkout-based Session association together to recorded checkout location.
-  Update their wire fixtures/Swift consumers wherever the changed contract reaches.
-- **Delete — do not maintain:** checkout Machine inference from mutable
-  `work_placements`. Retain current creation-time assignment behavior until slice
-  2; this slice does not silently select new inheritance or move running work.
-- Use one Task migration draft against the released frontier. Later slices edit
-  that same draft; no intermediate schemas ship.
+`task_checkouts` no longer joins `work_placements`. Status, Task-file access,
+comparisons and Session workspace resolution consume recorded location. SQL
+Session/Process membership now includes Machine, while explicit bindings survive.
+Git read-ahead skips remote/unknown checkouts. Existing DTOs already carry an
+optional Machine; wire shapes and Swift decoding need no change.
 
-**Focused proof:** migrate a fixture with a Task checkout on A, change its authored
-assignment to B, and verify files, status and Session association still identify
-that checkout on A. A new checkout explicitly prepared on B records B. Verify
-unchanged identities and unknown-history handling. Build changed Rust and run
-these behavioral tests; no installed-store experiment.
+**Deleted:** mutable-placement inference for checkout location and path-only
+local membership. Unknown location cannot authorize local file reads or infer
+membership from an unavailable path. No delegation inheritance or live move was
+introduced. Later slices must edit the same migration draft.
+
+Focused fixtures cover migration/history retention, reassignment A→B with retained
+files/status/Session identity on A, creation on the preparing Machine, unknown
+history, alias pagination and explicit bindings. No installed store was changed.
 
 ### 2. Shared Work identity, delegation and routing
 
@@ -141,8 +137,9 @@ behavior/migration suites and
 `cargo test -p loopflow --test dto_fixtures` for Rust wire fixtures, plus
 `cargo test -p loopflow --test documented_commands` for command ambiguity only.
 Use `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel` for headless Desktop
-build/tests. Select exact focused Rust test names when the tests are introduced;
-empty filters are not proof. Clear inherited execution markers per TESTING.md.
+build/tests. Include the full `session_lifecycle_tests` suite and the disposable installation
+migration harness for the changed association/schema. Materialized migration and
+Desktop checks remain with gate; empty filters are not proof. Clear inherited execution markers per TESTING.md.
 
 Demo: one repository window shows two Tasks on different Machines. Explain their
 identity/delegation, open them, add shell/Files panes, retain an unfinished draft,
@@ -151,5 +148,4 @@ original input target and draft survive. Review native usability separately from
 headless gate. Preserve comparison dispositions and evidence limits; no real
 provider accounts or live user terminals.
 
-Check: local-link/whitespace validation, `git diff --check` and `lf context
---skill kickoff --json` pass; prose-only, no build. Implementation/native proof remains.
+Check: focused `cargo test -p loopflow --lib` filters (14 distinct tests), `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context --skill implement --json` pass; gate owns materialized/installation migrations, full Session lifecycle and Desktop; native demo remains.

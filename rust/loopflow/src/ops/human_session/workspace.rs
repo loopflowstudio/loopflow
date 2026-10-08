@@ -70,7 +70,7 @@ impl WorkspaceResolver {
                 .get(&root)
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            let missing_placement = self.checkouts.iter().any(|checkout| {
+            let missing_machine = self.checkouts.iter().any(|checkout| {
                 checkout.machine_id.is_none()
                     && (checkout.worktree == root || checkout.worktree == cwd)
             });
@@ -80,8 +80,8 @@ impl WorkspaceResolver {
                 task_id: (tasks.len() == 1).then(|| tasks[0].clone()),
                 unavailable: if tasks.len() > 1 {
                     Some("Multiple Tasks claim this checkout".into())
-                } else if missing_placement {
-                    Some("Task placement is unavailable".into())
+                } else if missing_machine {
+                    Some("Task checkout Machine is unknown".into())
                 } else {
                     None
                 },
@@ -103,12 +103,15 @@ impl WorkspaceResolver {
         Some(SessionWorkspace {
             machine_id: self.home.clone(),
             worktree: checkout.worktree.clone(),
-            task_id: (!ambiguous).then(|| checkout.task_id.clone()),
+            task_id: (!ambiguous
+                && (checkout.machine_id.as_ref() == Some(&self.home)
+                    || matches!(work, Some(WorkRef::Task(id)) if id == &checkout.task_id)))
+            .then(|| checkout.task_id.clone()),
             unavailable: Some(
                 if ambiguous {
                     "Multiple Tasks claim this unavailable checkout"
                 } else if checkout.machine_id.is_none() {
-                    "Task placement and checkout are unavailable"
+                    "Task checkout Machine is unknown and checkout is unavailable"
                 } else {
                     "Task checkout is unavailable"
                 }
@@ -146,7 +149,7 @@ pub(super) async fn associate(store: &SharedStore, sessions: &mut [SessionRecord
         if let Some(workspace) = &session.workspace {
             session.task_ids = workspace.task_id.iter().cloned().collect();
         }
-        // Checkout placement and explicit binding both grant membership.
+        // Recorded checkout location and explicit binding both grant membership.
         if let Some(WorkRef::Task(task)) = &session.work {
             if !session.task_ids.contains(task) {
                 session.task_ids.push(task.clone());
@@ -164,7 +167,7 @@ mod tests {
     use crate::work::task::TaskId;
 
     #[tokio::test]
-    async fn unavailable_placement_snapshot_is_not_an_empty_inventory() {
+    async fn unavailable_checkout_snapshot_is_not_an_empty_inventory() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("store.db");
         let store = std::sync::Arc::new(
@@ -174,7 +177,7 @@ mod tests {
         );
         rusqlite::Connection::open(path)
             .unwrap()
-            .execute_batch("PRAGMA foreign_keys=OFF; DROP TABLE work_placements;")
+            .execute_batch("ALTER TABLE tasks RENAME COLUMN checkout_machine_id TO unavailable;")
             .unwrap();
         assert!(super::associate(&store, &mut []).await.is_err());
     }
@@ -261,6 +264,15 @@ mod tests {
         let unplaced = resolver.resolve(repo.path(), None, None).unwrap();
         assert!(unplaced.task_id.is_none());
         assert!(unplaced.unavailable.is_some());
+        missing.machine_id = None;
+        let mut resolver = WorkspaceResolver::new(home.clone(), vec![missing.clone()]);
+        let unknown = resolver.resolve(&missing.worktree, None, None).unwrap();
+        assert!(unknown.task_id.is_none());
+        assert!(unknown.unavailable.is_some());
+        let bound = resolver
+            .resolve(&missing.worktree, None, Some(&WorkRef::Task(id.clone())))
+            .unwrap();
+        assert_eq!(bound.task_id, Some(id));
         let mut duplicate = checkout.clone();
         duplicate.task_id = TaskId::new();
         let mut resolver = WorkspaceResolver::new(home, vec![checkout, duplicate]);

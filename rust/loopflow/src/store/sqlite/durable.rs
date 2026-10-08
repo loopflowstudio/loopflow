@@ -461,7 +461,7 @@ impl SqliteStore {
     }
 }
 
-fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
+pub(super) fn map_local_machine(conn: &Connection) -> StoreResult<Machine> {
     conn.query_row(
         "SELECT id, route, created_at, observed_at, label, repo FROM machines WHERE route='local'",
         [],

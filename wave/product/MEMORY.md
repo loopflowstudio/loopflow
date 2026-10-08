@@ -60,22 +60,20 @@ per request. Current placements copy inheritance once; delegation is unimplement
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
-October 7: `task_checkouts` reads `work_placements`; separate delegation from
-checkout location before changing inheritance. WorkRef lacks a repository root.
-LOO-412 (`0cd8e7f14`) keeps independent
-IDs; LOO-406 excludes sync. Jack's Git leaning and Linear plans (`f929c7f5`,
-`25b3eede`) leave shared authority unresolved. LOO-427 remains unimplemented.
-Cold opens overwrite one pending URL; cover reversed registration and repeat opens.
-No native proof.
+October 8: LOO-427's local slice separates `tasks.checkout_machine_id` from
+assignment. Files/status and Session association retain recorded location;
+unknown Machines stay unknown. No DTO change. Shared authority still blocks
+slice 2: WorkRef lacks a repository root; LOO-412 (`0cd8e7f14`) keeps independent
+IDs and LOO-406 excludes sync. Jack's Git leaning and Linear plans (`f929c7f5`,
+`25b3eede`) select no write protocol. Cold opens still overwrite one pending URL;
+cover reversed registration and repeat opens. No shared-source or native proof.
 
 ## Live Home reconciliation (2026-10-05)
 
-Jack Heart requested cleanup first (LOO-380). Desktop/CLI 0.13.3 shared one
-Home; supported operations reconciled completion/cancel writebacks and stopped
-Flows. Full receipts and recency caveat: `7c3072d64:wave/product/MEMORY.md`.
-Unresolved then, not rechecked: LOO-367's handoff, Intelligence's backlog
-Project (LOO-366), test Waves, LOO-343's dead claim; no rendered proof.
-This branch preserves the sidebar fix; parent #1439 has landed.
+Jack Heart's LOO-380 cleanup receipts: `7c3072d64:wave/product/MEMORY.md`.
+Still unverified: LOO-367's handoff, Intelligence's backlog Project (LOO-366),
+test Waves and LOO-343's dead claim; no rendered proof. The sidebar fix remains;
+parent #1439 landed. Dated reconciliation detail: `c88ae1522:wave/product/MEMORY.md`.
 
 ## Reactive workspace (2026-10-05)
 

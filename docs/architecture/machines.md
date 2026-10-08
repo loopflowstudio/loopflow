@@ -76,6 +76,14 @@ and inherited once by new Projects; new Tasks inherit their Project's Machine. I
 does not move existing child work or launch a process. `lf wave status` reads
 planning, Task conditions, metrics and Session history; no process needs to be running.
 
+Task checkout location is recorded separately: `tasks.checkout_machine_id` and
+`worktree` identify the Machine and path prepared for execution. New checkouts
+record the preparing Machine. Existing checkouts retain their recorded location
+when Work assignment changes; no process or checkout is moved. Status, file access
+and checkout-based Session/Process membership use that location. Unknown historical
+Machines stay unknown, and file access cannot treat their paths as local. Explicit
+Session bindings retain membership independently of checkout location.
+
 ## Process topology
 
 ```text

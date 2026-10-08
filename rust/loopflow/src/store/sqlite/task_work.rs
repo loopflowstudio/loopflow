@@ -28,13 +28,13 @@ const SESSION_HAS_PENDING_TURN: &str = "SELECT EXISTS(
         WHERE retired.session_id=?1 AND retired.receipt_key='task_restart:stopped')";
 
 fn tasks(selector: &str) -> String {
-    format!("SELECT id,worktree FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
+    format!("SELECT id,worktree,checkout_machine_id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
 
 fn checkout(cwd: &str) -> String {
     // Component boundaries avoid /repo.task matching /repo.task-other. Paths
     // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
-    format!("tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
+    format!("tw.checkout_machine_id=(SELECT id FROM machines WHERE route='local') AND tw.worktree!='' AND ({cwd}=rtrim(tw.worktree,'/') OR instr({cwd},rtrim(tw.worktree,'/')||'/')=1)")
 }
 
 fn session_membership(session: &str) -> String {
@@ -766,7 +766,7 @@ mod tests {
         )
         .unwrap();
         conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)", params![task.as_str(), project.as_str()]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
         // The Session is bound, and its Processes ran elsewhere: only event
         // history associates them with the Task.
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
@@ -821,7 +821,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_and_orphan_filters_resolve_aliases_before_pagination() {
+    async fn task_checkout_machine_keeps_session_filters_after_delegation() {
         let repo = loopflow_test_support::TestRepo::new();
         let other = loopflow_test_support::TestRepo::new();
         let dir = tempfile::tempdir().unwrap();
@@ -847,7 +847,7 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str(),repo.path().to_str().unwrap()]).unwrap();
             conn.execute(
                 "INSERT INTO work_placements(task_id,machine_id,placed_at) VALUES(?1,?2,1)",
                 params![task.as_str(), home.as_str()],
@@ -867,6 +867,21 @@ mod tests {
                 );
             }
         }
+        let remote = crate::durable::MachineId::new();
+        store
+            .sqlite
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE work_placements SET machine_id=?1 WHERE task_id=?2",
+                params![remote.as_str(), task.as_str()],
+            )
+            .unwrap();
         let mut filter = SessionFilter {
             task: Some("PROOF-1".into()),
             limit: 1,
@@ -880,6 +895,7 @@ mod tests {
             assert_eq!(page.len(), 1);
             assert_eq!(page[0].id, expected);
             assert_eq!(page[0].task_ids, vec![task.clone()]);
+            assert_eq!(page[0].workspace.as_ref().unwrap().machine_id, home);
             filter.after = Some(page[0].id.clone());
         }
         filter.task = None;
@@ -911,7 +927,7 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1)",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1','/repo/task',1,(SELECT id FROM machines WHERE route='local'))",params![task.as_str(),project.as_str()]).unwrap();
             for (id, scope, wave_id, cwd) in [
                 ("a-task", None, None, "/repo/task/sub"),
                 ("b-repo", Some("repository"), None, "/repo/task"),
@@ -976,7 +992,7 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1','/missing/task%_',1)", params![task.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1','/missing/task%_',1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str()]).unwrap();
             for (id, cwd, bound, complete) in [
                 ("manual", "/missing/task%_/src", false, false),
                 ("conversation", "/missing/task%_", false, false),
@@ -1163,7 +1179,7 @@ mod tests {
         let child = TaskId::new();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1)", params![child.as_str(), project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'child','PROOF-2','/missing/task%_/child',1,(SELECT id FROM machines WHERE route='local'))", params![child.as_str(), project.as_str()]).unwrap();
             conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
         }
         // A nested checkout's work is also its enclosing Task's.

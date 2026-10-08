@@ -1258,7 +1258,7 @@ mod discovery_tests {
             .unwrap();
             // A Flow's driver recorded both Processes as steps in the first Task's checkout.
             conn.execute(
-                "UPDATE tasks SET worktree='/repo.first' WHERE id=?1",
+                "UPDATE tasks SET worktree='/repo.first',checkout_machine_id=(SELECT id FROM machines WHERE route='local') WHERE id=?1",
                 [first.as_str()],
             )
             .unwrap();

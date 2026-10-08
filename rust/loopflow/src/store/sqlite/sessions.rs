@@ -1395,7 +1395,7 @@ mod metadata_tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at) VALUES(?1,?2,'issue','PROOF-1',?3,1)", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,created_at,checkout_machine_id) VALUES(?1,?2,'issue','PROOF-1',?3,1,(SELECT id FROM machines WHERE route='local'))", params![task.as_str(), project.as_str(), session.cwd.to_str().unwrap()]).unwrap();
         }
         assert_eq!(store.task_work(&task).unwrap().sessions.len(), 1);
         let exclusion = store.lock_checkout(&session.cwd).unwrap();

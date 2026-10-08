@@ -3,7 +3,7 @@
 The [plan](compare-cmux-s-command-line.md) owns implementation; [findings](findings.md)
 own evidence. Jack Heart has already selected one shared Work tree, subtree
 delegation, one repository window across machines, macOS-only view control and
-one PR. Those are not questions to re-derive. Slice 1 can proceed without Q1–Q3.
+one PR. Those are not questions to re-derive. Slice 1 is implemented locally; slices 2–5 still depend on these decisions.
 
 ## Q1 — Shared source availability and writes (blocks slice 2)
 

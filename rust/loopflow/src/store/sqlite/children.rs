@@ -32,17 +32,17 @@ impl SqliteStore {
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.machine_id
-             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id",
+            "SELECT id, external_issue_id, issue_identifier, worktree, checkout_machine_id
+             FROM tasks",
         )?;
         let rows = statement.query_map([], |row| {
-            let home: Option<String> = row.get(4)?;
+            let machine: Option<String> = row.get(4)?;
             Ok(super::TaskCheckout {
                 task_id: TaskId::from_raw(row.get::<_, String>(0)?),
                 issue_id: row.get(1)?,
                 issue_identifier: row.get(2)?,
                 worktree: PathBuf::from(row.get::<_, String>(3)?),
-                machine_id: home
+                machine_id: machine
                     .map(|id| crate::durable::MachineId::parse(&id))
                     .transpose()
                     .map_err(|error| invalid_column(4, error))?,
@@ -51,7 +51,7 @@ impl SqliteStore {
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
-    // Durable Tasks: Linear identity, immutable placement, commands,
+    // Durable Tasks: Linear identity, recorded checkout location, commands,
     // and lifecycle events share one sqlite transaction boundary.
 
     pub fn insert_task(
@@ -1030,6 +1030,7 @@ fn insert_initial_task(
             task.created_at.unix_timestamp(),
             task.updated_at.unix_timestamp(),
             task.agent,
+            super::durable::map_local_machine(conn)?.id.as_str(),
         ],
     )?;
     inherit_task_placement(conn, task)?;
@@ -1086,9 +1087,9 @@ const TASK_INSERT: &str = "INSERT INTO tasks (
     id, project_id, external_issue_id, issue_identifier, issue_title,
     issue_description, pm_snapshot_synced_at, pm_writeback_json,
     worktree, workspace_slug,
-    abandon_requested_at, abandon_reason, created_at, updated_at, agent
+    abandon_requested_at, abandon_reason, created_at, updated_at, agent, checkout_machine_id
 ) VALUES (
-    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
 )";
 const TASK_VISIBLE: &str = "NOT EXISTS (
     SELECT 1 FROM task_deletions d WHERE d.wave_id=p.wave_id AND d.issue_id=t.external_issue_id

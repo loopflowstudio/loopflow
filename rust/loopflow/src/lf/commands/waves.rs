@@ -757,10 +757,11 @@ struct SharedTaskReads {
 impl SharedTaskReads {
     async fn read(store: &SharedStore) -> Result<Self> {
         let checkouts = store.task_checkouts().await?;
-        ask_checkouts_ahead(&checkouts);
+        let local_machine = store.local_machine().await?.id;
+        ask_checkouts_ahead(&checkouts, &local_machine);
         Ok(Self {
             checkouts,
-            local_machine: store.local_machine().await?.id,
+            local_machine,
         })
     }
 }
@@ -768,13 +769,17 @@ impl SharedTaskReads {
 /// Git is asked about each existing checkout in turn by the Task details. A
 /// process that retains answers asks about several checkouts at once first,
 /// so the details find them waiting; any other process would only ask twice.
-fn ask_checkouts_ahead(checkouts: &[crate::store::sqlite::TaskCheckout]) {
+fn ask_checkouts_ahead(
+    checkouts: &[crate::store::sqlite::TaskCheckout],
+    local_machine: &crate::durable::MachineId,
+) {
     const AT_ONCE: usize = 8;
     if !crate::engine::git::retains_reads() {
         return;
     }
     let existing = checkouts
         .iter()
+        .filter(|checkout| checkout.machine_id.as_ref() == Some(local_machine))
         .map(|checkout| checkout.worktree.as_path())
         .filter(|worktree| worktree.is_dir())
         .collect::<Vec<_>>();

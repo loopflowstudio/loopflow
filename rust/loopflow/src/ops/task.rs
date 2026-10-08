@@ -233,7 +233,7 @@ fn active_pr(task: &Task) -> OpsResult<TaskPr> {
     })
 }
 
-// File access reads recorded placement without reconciling PR or execution state.
+// File access reads recorded checkout location without reconciling PR or execution state.
 fn file_store() -> OpsResult<crate::store::sqlite::SqliteStore> {
     #[cfg(test)]
     let test_path = super::pm::PM_TEST_CONTEXT
@@ -272,17 +272,19 @@ fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
             "multiple stable Tasks resolve to {issue:?}"
         )));
     }
-    if let Some(home) = &checkout.machine_id {
-        if *home != store.local_machine().map_err(task_error)?.id {
-            return Err(task_error(format!(
-                "Task checkout belongs to Machine {home}; read its files on that Machine"
-            )));
-        }
+    let machine = checkout.machine_id.as_ref().ok_or_else(|| {
+        task_error("Task checkout Machine is unknown; its files cannot be located")
+    })?;
+    if *machine != store.local_machine().map_err(task_error)?.id {
+        return Err(task_error(format!(
+            "Task checkout belongs to Machine {machine}; read its files on that Machine"
+        )));
     }
     Ok(checkout)
 }
 
 fn comparison_context(issue: &str) -> OpsResult<(Task, TaskPr)> {
+    file_context(issue)?;
     let store = file_store()?;
     let task = store
         .task_by_issue(issue)
@@ -5661,14 +5663,36 @@ mod tests {
     }
 
     #[test]
-    fn task_files_use_recorded_placement_without_lifecycle_reconciliation() {
+    fn task_checkout_machine_survives_delegation_without_lifecycle_reconciliation() {
         let repo = loopflow_test_support::TestRepo::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(task_fixture_at("FILES-1", repo.path().to_path_buf()));
+        let local = fixture.store.sqlite.local_machine().unwrap().id;
+        let remote = crate::durable::MachineId::new();
+        fixture
+            .store
+            .sqlite
+            .add_machine(&remote, "worker", "worker", "/repo")
+            .unwrap();
+        fixture
+            .store
+            .sqlite
+            .place_work(&fixture.work, &remote)
+            .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .placement(&fixture.work)
+                .unwrap()
+                .machine_id,
+            remote
+        );
         let mut pr = runtime
             .block_on(fixture.store.active_task_pr(&fixture.task.id))
             .unwrap()
             .unwrap();
+        repo.create_branch(&pr.branch);
         pr.base_commit = super::git_output(repo.path(), &["rev-parse", "HEAD"])
             .unwrap()
             .trim()
@@ -5687,6 +5711,23 @@ mod tests {
             .unwrap()
             .unwrap();
         let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('checkout-session','Retained','human',1,0,?1)",
+                [repo.path().to_str().unwrap()],
+            )
+            .unwrap();
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_work(&fixture.task.id)
+                .unwrap()
+                .sessions
+                .len(),
+            1
+        );
         connection.execute_batch(
             "CREATE TRIGGER no_file_task_update BEFORE UPDATE ON tasks BEGIN SELECT RAISE(FAIL,'file access cannot update Task'); END;
              CREATE TRIGGER no_file_pr_update BEFORE UPDATE ON task_prs BEGIN SELECT RAISE(FAIL,'file access cannot reconcile PR'); END;"
@@ -5698,6 +5739,10 @@ mod tests {
                 graphql_url: "http://127.0.0.1:1".into(),
             },
             || {
+                let snapshot = super::task_snapshot(&fixture.task).unwrap();
+                assert_eq!(snapshot.machine_id, Some(local.clone()));
+                assert_eq!(snapshot.task_id, fixture.task.id.as_str());
+                assert_eq!(snapshot.active_pr, Some(pr.id.clone()));
                 for issue in [
                     "FILES-1",
                     fixture.task.id.as_str(),
@@ -5771,6 +5816,125 @@ mod tests {
                 assert!(!conflict.published);
                 assert_eq!(conflict.file.content, saved.file.content);
             },
+        );
+    }
+
+    #[test]
+    fn task_checkout_machine_records_preparing_machine_not_assignment() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
+        let store = &fixture.store.sqlite;
+        let preparing_machine = store.local_machine().unwrap().id;
+        let assigned_machine = crate::durable::MachineId::new();
+        store
+            .add_machine(&assigned_machine, "assigned", "assigned", "/repo")
+            .unwrap();
+        store
+            .place_work(
+                &WorkRef::Project(fixture.task.project_id.clone()),
+                &assigned_machine,
+            )
+            .unwrap();
+        let mut task = fixture.task.clone();
+        task.id = TaskId::new();
+        task.plan.id = LinearIssueId::new("another-issue").unwrap();
+        task.plan.identifier = "LOCATION-2".into();
+        task.worktree = repo.path().join("another-checkout");
+        let mut pr = store.active_task_pr(&fixture.task.id).unwrap().unwrap();
+        pr.id = TaskPrId::new();
+        pr.task_id = task.id.clone();
+        pr.branch = "another-branch".into();
+        store.insert_task(task.clone(), &pr, true).unwrap();
+        assert_eq!(
+            store
+                .placement(&WorkRef::Task(task.id.clone()))
+                .unwrap()
+                .machine_id,
+            assigned_machine
+        );
+        let checkout = store
+            .task_checkouts()
+            .unwrap()
+            .into_iter()
+            .find(|row| row.task_id == task.id)
+            .unwrap();
+        assert_eq!(checkout.machine_id, Some(preparing_machine));
+        assert_eq!(checkout.worktree, task.worktree);
+    }
+
+    #[test]
+    fn task_checkout_machine_unknown_or_remote_never_reads_a_local_path() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(task_fixture_at("LOCATION-1", repo.path().into()));
+        std::fs::write(repo.path().join("note.md"), "local file").unwrap();
+        let remote = crate::durable::MachineId::new();
+        fixture
+            .store
+            .sqlite
+            .add_machine(&remote, "remote", "remote", "/repo")
+            .unwrap();
+        let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        connection
+            .execute(
+                "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('unbound','Local conversation','human',1,0,?1),
+                   ('bound','Explicit conversation','human',1,0,?1)",
+                [repo.path().to_str().unwrap()],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='bound'",
+                rusqlite::params![fixture.task.id.as_str(), fixture.task.wave_id.as_str()],
+            )
+            .unwrap();
+        for machine in [None, Some(remote.as_str())] {
+            connection
+                .execute(
+                    "UPDATE tasks SET checkout_machine_id=?1 WHERE id=?2",
+                    rusqlite::params![machine, fixture.task.id.as_str()],
+                )
+                .unwrap();
+            crate::ops::pm::PM_TEST_CONTEXT.sync_scope(
+                crate::ops::pm::PmTestContext {
+                    path: fixture.database_path.clone(),
+                    store: fixture.store.clone(),
+                    graphql_url: "http://127.0.0.1:1".into(),
+                },
+                || {
+                    let expected = if machine.is_none() {
+                        "Machine is unknown"
+                    } else {
+                        "belongs to Machine"
+                    };
+                    assert!(super::task_file("LOCATION-1", "note.md", false)
+                        .unwrap_err()
+                        .to_string()
+                        .contains(expected));
+                    assert!(super::task_changes("LOCATION-1", "head")
+                        .unwrap_err()
+                        .to_string()
+                        .contains(expected));
+                    assert!(super::task_files("LOCATION-1", "", None, false)
+                        .unwrap_err()
+                        .to_string()
+                        .contains(expected));
+                    let work = fixture.store.sqlite.task_work(&fixture.task.id).unwrap();
+                    assert_eq!(
+                        work.sessions
+                            .iter()
+                            .map(|s| s.id.as_str())
+                            .collect::<Vec<_>>(),
+                        ["bound"]
+                    );
+                },
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("note.md")).unwrap(),
+            "local file"
         );
     }
 

@@ -3,7 +3,7 @@
 Dated source evidence, not additional requirements or a second plan. The
 [implementation plan](compare-cmux-s-command-line.md) owns scope, sequence and
 acceptance. [Open questions](questions.md) own unresolved product judgments.
-Two implementation attempts produced these findings; no production code changed.
+The earlier implementation attempts below found the storage coupling; the October 8 cut removes it locally.
 
 ## Identity finding and existing owners
 
@@ -91,3 +91,17 @@ The related Tasks do not close this gap:
 Current alternatives rejected by the accepted direction: repository-pairing
 registry; independent per-machine planning trees merged by Desktop; clone-name
 or remote-URL matching as Work identity; rewriting Machine defaults per request.
+
+## October 8 implementation review
+
+Checkout location now lives on `tasks`, using the existing `TaskCheckout` reader.
+Review found two paths outside that reader: SQL membership matched only paths,
+and comparisons bypassed file-location validation. Both now use recorded Machine
+evidence. Unknown Machine evidence previously allowed local file reads and
+missing-path Session association; it now stays unavailable, preserving explicit
+bindings. No new DTO or parallel placement store was needed.
+
+The first focused run failed on fixture setup (missing required `input_published`
+and a nonexistent PR branch); both fixtures were corrected. Gate still owns
+materialized/installation migration and complete Session lifecycle verification.
+This is slice-1 evidence, not shared-source or native Desktop proof.

@@ -82,6 +82,8 @@ Closing the pane keeps its drafts in this window.
 **File** retains editable UTF-8 drafts and selection in this window; **Diff**
 shows the draft comparison read-only. Task headers show the recorded checkout;
 terminal and files follow that Task without a separate worktree selector.
+Changing Work assignment leaves the recorded checkout Machine and path intact.
+Files on another or unknown Machine remain unavailable to the local file reader.
 Switching files, hiding Files and returning to the Task keeps the draft.
 Files reached through symlinks remain readable within the checkout and show a
 read-only explanation. If a regular file becomes a symlink, its retained draft

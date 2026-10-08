@@ -41,15 +41,12 @@ brand/navigation now fails the retained desktop and mobile checks.
 
 The cmux capture is still absent, as permitted by the directive; its absence
 must be disclosed in the PR. Download and Source links retain production
-destinations. Remaining work is the full website suite at gate and PR publication;
-landing/deployment remain outside this directive. No product decision is pending.
-
-The implementation's full-suite result was 78 passed, 3 skipped before the later
-style and test cleanup. The focused result below covers that cleanup; it does not
-replace the Task's required `cd website && uv run pytest tests/` at gate.
+destinations. PR #1496 is published for review. The final full-suite result is
+recorded below. Landing/deployment remain outside this directive.
+No product decision is pending.
 
 Earlier implementation checks resolved every displayed command/skill with `lf help
 --all` and named help, and captured 1440/390 with `lf screenshot`, including loaded
 fonts embedded for deterministic capture. Live document/body widths were 390.
 
-Check: `cd website && uv run pytest tests/e2e/test_homepage.py tests/e2e/test_mobile.py tests/e2e/test_navigation.py tests/e2e/test_download.py tests/test_portable_architecture.py -q` — 39 passed; changed Python files pass Ruff; architecture output regenerated.
+Check: `cd website && uv run pytest tests/` — 75 passed after final cleanup; `git diff --check 626789dcd0382c6754ba3b7c61ea2448b57658ce` passed; prior Ruff, CLI help and capture evidence retained.

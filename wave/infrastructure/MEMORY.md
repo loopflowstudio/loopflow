@@ -2,12 +2,13 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized demo without provider accounts or driving his cmux windows;
-no landing. lf names use requests, skills or Task titles.
-Preserve request/Goal attribution; LOO-429's trigger is not the request. Human names survive. Account-free Task-bound
-Claude/Codex launch, rename and reconnect pass. Plain-native/resumed naming and
-visible agreement remain unfinished: Claude has title hooks; Codex documents
-app-server naming, not hook title output. cmux denied creation outside it.
+Jack Heart authorized demo without provider accounts or driving existing cmux windows;
+no landing. Request/Goal attribution supplies lf names; human names survive.
+Task-bound stub launch/rename/reconnect pass, superseding random-seed feedback.
+Plain-native/resumed naming remains unimplemented; prior hook/API research proves
+no TUI adoption. Live cmux rename updates workspace/tab only; launch-only OSC
+leaves window-bar agreement unproved. cmux denied outside-origin creation;
+that does not block independent work.
 Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)

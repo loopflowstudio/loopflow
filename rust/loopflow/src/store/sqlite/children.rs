@@ -282,16 +282,6 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub fn update_task_pm_writeback(
-        &self,
-        task_id: &TaskId,
-        state: &PmWritebackState,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        update_task_pm_writeback_in(&conn, task_id, state, updated_at)
-    }
-
     pub fn set_task_agent(&self, task_id: &TaskId, agent: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let changed = conn.execute(
@@ -353,6 +343,15 @@ impl SqliteStore {
             )));
         }
         if super::task_work::reach_end_in(&transaction, &task.id, how, by, note)? {
+            if let Some(summary) = note {
+                insert_task_event_in(
+                    &transaction,
+                    &task.id,
+                    &TaskEventKind::Progress {
+                        summary: summary.into(),
+                    },
+                )?;
+            }
             insert_task_event_in(
                 &transaction,
                 &task.id,
@@ -360,10 +359,10 @@ impl SqliteStore {
                     summary: "Task completed".to_string(),
                 },
             )?;
+            super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
         } else if super::durable::task_state_in(&transaction, &task.id)? != TaskState::Done {
             return Ok(false);
         }
-        update_task_pm_writeback_in(&transaction, &task.id, &task.pm_writeback, task.updated_at)?;
         transaction.commit()?;
         Ok(true)
     }
@@ -1106,26 +1105,6 @@ impl SqliteStore {
 fn validate_task(task: &Task) -> StoreResult<()> {
     task.validate()
         .map_err(|error| StoreError::InvalidData(error.to_string()))
-}
-
-fn update_task_pm_writeback_in(
-    conn: &Connection,
-    task_id: &TaskId,
-    state: &PmWritebackState,
-    updated_at: OffsetDateTime,
-) -> StoreResult<()> {
-    let changed = conn.execute(
-        "UPDATE tasks SET pm_writeback_json=?2, updated_at=?3 WHERE id=?1",
-        params![
-            task_id.as_str(),
-            serde_json::to_string(state).expect("Task PM writeback state must serialize"),
-            updated_at.unix_timestamp(),
-        ],
-    )?;
-    if changed == 0 {
-        return Err(StoreError::NotFound);
-    }
-    Ok(())
 }
 
 fn resolve_current_task(key: &str, mut tasks: Vec<Task>) -> StoreResult<Option<Task>> {

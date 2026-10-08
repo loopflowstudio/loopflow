@@ -29,8 +29,6 @@ pub enum OpsError {
         reason: String,
         continuation: String,
     },
-    #[error("Task {issue} is {state} and cannot be completed")]
-    TaskCompletionConflict { issue: String, state: String },
     #[error("sync onto {onto} failed ({detail})")]
     SyncConflict {
         onto: String,

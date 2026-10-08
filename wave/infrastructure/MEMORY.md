@@ -21,21 +21,21 @@ delayed completion cannot overwrite explicit reopening. Machine clocks prove no 
 LOO-412's transport, scope and active-owner choices remain under review; no restart
 or replication here is authorized.
 
-Source atomically saves comments and UUID delivery receipts. The common runner
-covers native/batch paths; Desktop synchronizes its selected Task through a writable
-connection alongside its read-only projection. Isolated runner, public CLI/watch and
-headless view proofs cover comments, lost replies and echoes, not live or installed
-outcomes. State/membership acquisition and the ownership cut remain unfinished.
-No webhook receiver was found; preserve native Flow interaction. Late acknowledgements
-must retain newer conflicts; streamed values must fence older reads. Both comment
-races were repaired. Explicit conflict resolution remains absent.
+Comments and completion/reopening now save decisions and delivery identities before
+provider I/O. The foreground runner and selected Desktop Task independently acquire
+comments and repository state/membership and deliver pending repository effects.
+No resident or turn retry is introduced. Incoming completion never moves a Workflow.
+Fixtures cover atomic rollback, lost replies, late acknowledgement and retained
+conflicts. Public CLI/watch and headless views exercise pending display; native
+comment proofs remain narrower than composed state/reconnect acceptance.
 
-Compression routes uncached completion through ingestion and the same local lifecycle,
-retaining identity, reason and no checkout in the lost-reply fixture. Linear is still
-attempted before local completion; eventual Done with pending writeback proves no
-immediate offline save. Decision, reason and delivery identity need one transaction
-before provider I/O. Release's operation-entry lesson applies: a shared helper's
-success proves neither caller ordering nor active propagation.
+A provider effect lock must not block local saves or inbound acquisition. A receipt
+can settle only its captured decision; explicit state resolution supersedes its
+identity and retains both values. `lf task sync --resolve local|linear` owns that
+choice. Comment resolution, the ownership deletion and general field writes remain
+unfinished. Provider read-before-write leaves a concurrency interval unproved;
+fixture success establishes no conditional provider mutation or installed outcome.
+Release's operation-entry lesson still applies. No webhook receiver was found.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

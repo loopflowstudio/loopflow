@@ -90,7 +90,8 @@
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
               "provider": "claude",
-              "started": false
+              "started": false,
+              "pending_sync": "Saved locally; pending Linear synchronization"
             },
             "next_move": {
               "owner": "task",
@@ -454,7 +455,8 @@
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
               "provider": "claude",
-              "started": true
+              "started": true,
+              "pending_sync": null
             },
             "next_move": {
               "owner": "user",
@@ -903,7 +905,8 @@
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
               "provider": "claude",
-              "started": true
+              "started": true,
+              "pending_sync": null
             },
             "next_move": {
               "owner": "wave",

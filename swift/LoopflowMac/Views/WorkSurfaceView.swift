@@ -279,6 +279,13 @@ struct WorkSurfaceView: View {
                     }
                     .tint(palette.accentInk)
                     .foregroundStyle(palette.accentInk)
+                    if let pending = task.runtime?.pendingSync {
+                        Text(pending)
+                            .font(Typography.body(12))
+                            .foregroundStyle(palette.textSecondary)
+                            .textSelection(.enabled)
+                            .accessibilityIdentifier("task-pending-sync")
+                    }
                 }
                 if let unavailable = found.wave.unavailableTasks.first(where: { $0.taskId == task.id }) {
                     evidenceBanner(title: "Retained Task · planning unavailable", detail: unavailable.reason)

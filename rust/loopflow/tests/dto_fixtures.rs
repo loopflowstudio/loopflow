@@ -109,6 +109,13 @@ fn wave_detail_preserves_flow_and_requires_machine() {
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
     assert!(snapshot.project_readiness.activation.is_none());
+    let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
+        panic!("missing Tasks")
+    };
+    assert_eq!(
+        tasks[0].runtime.as_ref().unwrap().pending_sync.as_deref(),
+        Some("Saved locally; pending Linear synchronization")
+    );
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };

@@ -833,6 +833,12 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
+    /// Synchronize a Task; explicitly resolve a completion/reopening conflict
+    Sync {
+        issue: String,
+        #[arg(long, value_parser = ["local", "linear"])]
+        resolve: Option<String>,
+    },
     /// Inspect or reset this Task's captured Workflow
     Workflow {
         #[command(subcommand)]
@@ -1074,6 +1080,7 @@ impl TaskCommand {
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
             Self::Checkout { issue, .. }
+            | Self::Sync { issue, .. }
             | Self::Run { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }

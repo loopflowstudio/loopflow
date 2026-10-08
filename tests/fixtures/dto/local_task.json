@@ -62,7 +62,8 @@
       "started": false,
       "status": "not_ready",
       "updated_at": "2026-10-08T00:00:00Z",
-      "work_id": "task_0123456789ab40008000000000000001"
+      "work_id": "task_0123456789ab40008000000000000001",
+      "pending_sync": null
     },
     "section": "waiting",
     "task": {

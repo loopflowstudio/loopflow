@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::id::WaveId;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::{
-    LinearObservationApply, LinearObservationOutcome, PmWritebackState, Task, TaskEvent,
-    TaskEventKind, TaskId, TaskLinearObservation, TaskPr, TaskPrId,
+    LinearObservationApply, LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId,
+    TaskLinearObservation, TaskPr, TaskPrId,
 };
 use time::OffsetDateTime;
 
@@ -87,20 +87,6 @@ impl Store {
         let agent = agent.to_string();
         run_sqlite(&self.sqlite, move |store| {
             store.set_task_agent(&task_id, &agent)
-        })
-        .await
-    }
-
-    pub async fn update_task_pm_writeback(
-        &self,
-        task_id: &TaskId,
-        state: &PmWritebackState,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let task_id = task_id.clone();
-        let state = state.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.update_task_pm_writeback(&task_id, &state, updated_at)
         })
         .await
     }

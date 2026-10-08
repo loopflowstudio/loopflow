@@ -310,12 +310,21 @@ a person; an arrival is the edge's own.
 A Task's state is read from that position and stored nowhere else: not ready
 with no Workflow, ready at `start`, active at a node or on an edge, done at
 `end`. Abandoned is the Task's own mark. Any move that reaches `end` is
-completion: one transaction writes the position, the Completed event and the
-retirement of an empty unpublished PR, after the settled-PR and
-unresolved-execution checks and the Linear write. A Task with no Workflow
+completion: one transaction writes the position, reason, Completed event, pending
+delivery identity and retirement of an empty unpublished PR after the delivery
+checks. Linear I/O follows independently. Reopening queues its own delivery in the
+same transaction as the explicit Workflow move. A Task with no Workflow
 reaches `end` on `unplanned`, which has nothing between. Linear calling an
 active Task complete is read as `planning_conflict`; `end` then takes `--force`,
 kept in the move's note.
+
+Foreground Task connections acquire repository membership/state independently of
+comment and state delivery. Delivery receipts retain their original provider revision,
+attempt evidence and conflicting value. A response can acknowledge only the current
+decision; explicit state resolution supersedes its delivery identity without changing
+the Workflow. No local/provider clock comparison orders edits. The complete unified
+planning-owner cutover remains in progress; creation, edits and rotation still use
+the split paths described above.
 
 ## Read each step's result
 

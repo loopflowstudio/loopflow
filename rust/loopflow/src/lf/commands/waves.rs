@@ -157,6 +157,7 @@ pub struct TaskRuntimeSnapshot {
     pub status: TaskState,
     /// Linear calls the Task complete while it is active here.
     pub planning_conflict: Option<String>,
+    pub pending_sync: Option<String>,
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
@@ -1055,6 +1056,10 @@ fn snapshot_task_runtime(
         },
         status,
         planning_conflict,
+        pending_sync: match &task.pm_writeback {
+            crate::work::task::PmWritebackState::Current => None,
+            crate::work::task::PmWritebackState::Pending { error, .. } => Some(error.clone()),
+        },
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
         started,
@@ -3080,6 +3085,7 @@ mod tests {
                 provider: "codex".to_string(),
                 started: true,
                 planning_conflict: None,
+                pending_sync: None,
             };
             derive_task_condition(
                 Some(&runtime),
@@ -3131,6 +3137,7 @@ mod tests {
             provider: "codex".to_string(),
             started: true,
             planning_conflict: None,
+            pending_sync: None,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -3241,6 +3248,7 @@ mod tests {
                         provider: "codex".into(),
                         started: true,
                         planning_conflict: None,
+                        pending_sync: None,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),

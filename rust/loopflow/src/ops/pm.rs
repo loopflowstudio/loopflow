@@ -89,13 +89,7 @@ pub struct PmShowResult {
 pub struct PmUpdateOptions {
     pub wave: Option<String>,
     pub id: String,
-    pub update: PmTaskUpdate,
-}
-
-#[derive(Debug, Clone)]
-pub enum PmTaskUpdate {
-    Edit(PmItemUpdate),
-    Complete { pr: Option<String> },
+    pub update: PmItemUpdate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1360,16 +1354,6 @@ fn task_description_with_marker(description: &str, marker: &str) -> String {
     format!("{}\n\n{}", description.trim(), marker)
 }
 
-fn validate_completion_outcome(item: &PmItem) -> OpsResult<()> {
-    if let Some(state @ ("canceled" | "duplicate")) = item.state.as_deref() {
-        return Err(OpsError::TaskCompletionConflict {
-            issue: item.identifier.clone(),
-            state: state.to_string(),
-        });
-    }
-    Ok(())
-}
-
 pub(crate) async fn pm_update_async(
     repo: &Path,
     options: &PmUpdateOptions,
@@ -1390,20 +1374,14 @@ pub(crate) async fn pm_update_async(
     let ctx = resolve_context(repo, &wave).await?;
     let mut options = options.clone();
     options.id = item.id.clone();
-    if let PmTaskUpdate::Edit(update) = &mut options.update {
-        update.description = update
-            .description
-            .as_deref()
-            .map(|notes| preserve_creation_marker(notes, &item.description));
-    }
-    if matches!(options.update, PmTaskUpdate::Complete { .. }) {
-        validate_completion_outcome(&item)?;
-    }
-    if !matches!(options.update, PmTaskUpdate::Complete { .. }) || !item.completed {
-        apply_update(&ctx, &options, progress).await?;
-    }
+    options.update.description = options
+        .update
+        .description
+        .as_deref()
+        .map(|notes| preserve_creation_marker(notes, &item.description));
+    apply_update(&ctx, &options, progress).await?;
     let reconcile = async {
-        if matches!(&options.update, PmTaskUpdate::Edit(update) if update.rank.is_some()) {
+        if options.update.rank.is_some() {
             refresh_pm_snapshot(repo, &wave, &ctx).await?;
         }
         progress.status(&format!("confirming Linear task {}", item.identifier));
@@ -1415,29 +1393,18 @@ pub(crate) async fn pm_update_async(
             )));
         }
         let item = &record.item;
-        if let PmTaskUpdate::Edit(update) = &options.update {
+        {
+            let update = &options.update;
             if update.name.as_ref().is_some_and(|name| name != &item.name)
                 || update.description.as_ref().is_some_and(|description| description != &item.description)
                 || update.assignee.as_ref().is_some_and(|assignee| assignee != &item.assignee) {
                 return Err(OpsError::Message("Task edit was sent but its readback differs".into()));
             }
         }
-        if matches!(options.update, PmTaskUpdate::Complete { .. }) {
-            validate_completion_outcome(item)?;
-        }
-        if matches!(options.update, PmTaskUpdate::Complete { .. }) && !item.completed {
-            return Err(OpsError::Message(format!(
-                "Linear has not confirmed completion of {}",
-                item.identifier
-            )));
-        }
         Ok::<(), OpsError>(())
     }
     .await;
-    reconcile.map_err(|error| match error {
-        conflict @ OpsError::TaskCompletionConflict { .. } => conflict,
-        error => OpsError::Message(format!("Linear task {} was updated, but local refresh failed: {error}. Retry the same Task command to reconcile it.", item.identifier)),
-    })?;
+    reconcile.map_err(|error| OpsError::Message(format!("Linear task {} was updated, but local refresh failed: {error}. Retry the same Task command to reconcile it.", item.identifier)))?;
     Ok(PmUpdateResult { wave, id: item.id })
 }
 
@@ -1461,25 +1428,10 @@ async fn apply_update(
 ) -> OpsResult<()> {
     let id = &options.id;
     progress.status(&format!("updating Linear task {id}"));
-    match &options.update {
-        PmTaskUpdate::Edit(update) => {
-            ctx.client
-                .update_item(id, update)
-                .await
-                .map_err(pm_to_ops)?;
-        }
-        PmTaskUpdate::Complete { pr } => {
-            // A rejected completion must never leave a "Shipped" comment.
-            ctx.client.complete_item(id).await.map_err(pm_to_ops)?;
-            if let Some(pr) = pr.as_deref().map(str::trim).filter(|pr| !pr.is_empty()) {
-                progress.status(&format!("commenting PR link on Linear task {id}"));
-                ctx.client
-                    .comment(id, &format!("Shipped: {pr}"))
-                    .await
-                    .map_err(pm_to_ops)?;
-            }
-        }
-    };
+    ctx.client
+        .update_item(id, &options.update)
+        .await
+        .map_err(pm_to_ops)?;
 
     Ok(())
 }
@@ -4045,60 +3997,6 @@ mod tests {
             snapshot.items[1].revision.as_deref(),
             Some("2026-10-05T12:00:01Z")
         );
-    }
-
-    #[tokio::test]
-    async fn apply_update_closes_then_comments_pr_link() {
-        let (base_url, requests) = test_server::spawn(vec![
-            // complete_item: read the issue team, resolve its completed state,
-            // then transition — before any comment, so a rejected close never
-            // leaves a "Shipped" comment behind.
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issue": { "team": { "id": "team-9" } } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "workflowStates": { "nodes": [{ "id": "state-done" }] } } }),
-            ),
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "issueUpdate": { "issue": { "id": "task-9" } } } }),
-            ),
-            // comment (commentCreate) carrying the PR link, posted last
-            json_response(
-                StatusCode::OK,
-                json!({ "data": { "commentCreate": { "comment": { "id": "comment-1" } } } }),
-            ),
-        ])
-        .await;
-        let ctx = linear_test_ctx(base_url, "initiative-123");
-        let options = PmUpdateOptions {
-            wave: None,
-            id: "task-9".to_string(),
-            update: PmTaskUpdate::Complete {
-                pr: Some("https://github.com/acme/repo/pull/42".to_string()),
-            },
-        };
-
-        apply_update(&ctx, &options, &NullProgress)
-            .await
-            .expect("update succeeds");
-
-        let requests = requests.lock().await;
-        let comment_at = requests
-            .iter()
-            .position(|req| req.body.contains("commentCreate"))
-            .expect("PR link is posted as a comment");
-        let state_at = requests
-            .iter()
-            .position(|req| req.body.contains("SetIssueState"))
-            .expect("issue state is transitioned to done");
-        // The comment must follow the state transition: a rejected close never
-        // leaves a "Shipped" comment on a still-open issue.
-        assert!(state_at < comment_at);
-        assert!(requests[comment_at].body.contains("Shipped:"));
-        assert!(requests[comment_at].body.contains("pull/42"));
     }
 
     fn attachment_link_response(id: &str) -> QueuedResponse {

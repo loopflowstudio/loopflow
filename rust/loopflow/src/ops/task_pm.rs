@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::ops::error::{OpsError, OpsResult};
-use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult, PmTaskUpdate, PmUpdateOptions};
+use crate::ops::pm::{PmRefresh, PmShowOptions, PmShowResult};
 use crate::pm::{PmItem, PmProject};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,25 +115,4 @@ where
         )));
     }
     Ok((resolved, prepared))
-}
-
-pub async fn complete_task(
-    repo: &Path,
-    wave: &str,
-    item_id: &str,
-    pr: Option<&str>,
-) -> OpsResult<()> {
-    crate::ops::pm::pm_update_async(
-        repo,
-        &PmUpdateOptions {
-            wave: Some(wave.to_string()),
-            id: item_id.to_string(),
-            update: PmTaskUpdate::Complete {
-                pr: pr.map(str::to_string),
-            },
-        },
-        &crate::ops::NullProgress,
-    )
-    .await?;
-    Ok(())
 }

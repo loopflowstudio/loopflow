@@ -60,6 +60,7 @@ mod tests {
         "access_profiles",
         "personal_plans",
         "task_creation_intents",
+        "task_state_deliveries",
         "pm_project_name_cutover",
         "project_binding_imports",
         "auth_browser_bindings",

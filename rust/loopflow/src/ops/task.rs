@@ -40,8 +40,8 @@ use crate::store::{
 };
 use crate::work::task::{
     AfterMerge, CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult,
-    GithubPr, Observation, PmWritebackOperation, PmWritebackState, PrMergeMode, PrMergeRequest,
-    PrPhase, PrPresentation, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication,
+    Task, TaskEventKind, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
 use fs2::FileExt;
@@ -699,7 +699,14 @@ pub fn workflow_set(
 ) -> OpsResult<String> {
     if node == END {
         let task = task_end(repo, issue, note, end)?;
-        return Ok(format!("Task {} is at end: done", task.plan.identifier));
+        let sync = match &task.pm_writeback {
+            crate::work::task::PmWritebackState::Current => String::new(),
+            crate::work::task::PmWritebackState::Pending { error, .. } => format!("; {error}"),
+        };
+        return Ok(format!(
+            "Task {} is at end: done{sync}",
+            task.plan.identifier
+        ));
     }
     if end.force {
         return Err(task_error("--force applies only to reaching `end`"));
@@ -3012,13 +3019,9 @@ pub(crate) async fn settle_task_landing(
             .task_follow_up(&task.id)
             .map_err(task_error)?
             .is_none()
+        && task_work_status(store, &task).await? != WorkStatus::Done
     {
-        if let PmWritebackState::Pending { error, .. } = &task.pm_writeback {
-            return Err(task_error(format!("Linear completion pending: {error}")));
-        }
-        if task_work_status(store, &task).await? != WorkStatus::Done {
-            return Err(task_error("Task completion gate is not yet satisfied"));
-        }
+        return Err(task_error("Task completion gate is not yet satisfied"));
     }
     Ok(())
 }
@@ -4029,14 +4032,9 @@ pub(crate) async fn planning_conflict(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Option<String>> {
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
+    let Some(issue_id) = &task.plan.linear_id else {
         return Ok(None);
-    }
+    };
     let state = store.task_state(&task.id).await.map_err(task_error)?;
     if state != TaskState::Active {
         return Ok(None);
@@ -4044,7 +4042,7 @@ pub(crate) async fn planning_conflict(
     let wave = owning_wave(store, task).await?;
     let record = crate::ops::pm::read_task_planning_async(
         Path::new(wave.repo()),
-        task.plan.linear_id()?.as_str(),
+        issue_id.as_str(),
         crate::ops::pm::PmRefresh::Never,
     )
     .await;
@@ -4133,6 +4131,66 @@ pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) 
     })
 }
 
+pub fn task_sync(issue: &str, resolve: Option<&str>) -> OpsResult<String> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        if let Some(choice) = resolve {
+            if !matches!(choice, "local" | "linear") {
+                return Err(task_error("resolution must be local or linear"));
+            }
+            let delivery = store
+                .sqlite
+                .pending_task_state(&task.id)
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Task has no pending state delivery"))?;
+            let wave = owning_wave(&store, &task).await?;
+            super::pm::repository_team_id(Path::new(wave.repo()))?;
+            let observed = tokio::time::timeout(Duration::from_secs(5), async {
+                let client = super::pm::issue_client(Path::new(wave.repo())).await?;
+                let (observed, _) = client
+                    .issue_ownership(task.plan.linear_id()?.as_str())
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| task_error("Linked Linear issue is unavailable"))?;
+                Ok::<_, OpsError>(observed)
+            })
+            .await
+            .map_err(|_| {
+                task_error("Linear read timed out; conflict and saved decision retained")
+            })??;
+            store
+                .sqlite
+                .resolve_task_state(&delivery, &observed, choice == "local")
+                .map_err(task_error)?;
+        }
+        // Independent effects do not make each other a prerequisite.
+        let (state, comments) = tokio::join!(
+            super::linear_observe::sync_task_state(&store, &task),
+            super::linear_observe::sync_task_comments(&store, &task),
+        );
+        state?;
+        comments?;
+        let saved = store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Task is missing"))?;
+        Ok(match saved.pm_writeback {
+            crate::work::task::PmWritebackState::Current => {
+                format!("{}: state synchronized", saved.plan.identifier)
+            }
+            crate::work::task::PmWritebackState::Pending { error, .. } => {
+                format!("{}: {error}", saved.plan.identifier)
+            }
+        })
+    })
+}
+
 /// Put the Task at `end` of its Workflow by `how`. Reaching `end` is
 /// completion: refused while delivery is unsettled, it writes
 /// Linear and retires the checkout, unless the edge taken ran nothing.
@@ -4181,18 +4239,6 @@ async fn reach_end(
     if let Some(refusal) = gate.refusal(&task.plan.identifier) {
         return Err(task_error(refusal));
     }
-    reconcile_pm_writeback(store, task, None).await?;
-    if let Some(summary) = note {
-        store
-            .append_task_event(
-                &task.id,
-                &TaskEventKind::Progress {
-                    summary: summary.to_string(),
-                },
-            )
-            .await
-            .map_err(task_error)?;
-    }
     let forced = conflict.map(|_| match note {
         Some(note) => format!("{note} (forced: Linear already called it complete)"),
         None => "forced: Linear already called it complete".to_string(),
@@ -4212,6 +4258,11 @@ async fn reach_end(
     {
         return Ok(false);
     }
+    *task = store
+        .get_task(&task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("completed Task is missing"))?;
     if keeps_checkout {
         eprintln!(
             "Task {} is complete; retained its checkout.",
@@ -4247,14 +4298,6 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
 async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
-    match store.sqlite.project_planning_authority(&task.project_id) {
-        Ok(crate::planning::PlanningAuthority::Local) => return,
-        Ok(crate::planning::PlanningAuthority::Linear) => {}
-        Err(error) => {
-            pr.linear_link_error = Some(error.to_string());
-            return;
-        }
-    }
     let Some(issue_id) = task.plan.linear_id.as_ref() else {
         return;
     };
@@ -4297,72 +4340,6 @@ async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
     pr.linear_attachment_id = outcome.ids.attachment_id;
     pr.linear_comment_id = outcome.ids.comment_id;
     pr.linear_link_error = outcome.error;
-}
-
-fn writeback_state(result: OpsResult<()>) -> PmWritebackState {
-    match result {
-        Ok(()) => PmWritebackState::Current,
-        Err(error) => PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: error.to_string(),
-        },
-    }
-}
-
-async fn reconcile_pm_writeback(
-    store: &SharedStore,
-    task: &mut Task,
-    pr_url: Option<&str>,
-) -> OpsResult<()> {
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        == crate::planning::PlanningAuthority::Local
-    {
-        task.pm_writeback = PmWritebackState::Current;
-        return Ok(());
-    }
-    let result = async {
-        let wave = owning_wave(store, task).await?;
-        crate::ops::task_pm::complete_task(
-            Path::new(wave.repo()),
-            wave.slug(),
-            task.plan.linear_id()?.as_str(),
-            pr_url,
-        )
-        .await
-    }
-    .await;
-    // A known conflicting outcome refuses new success. Transport and refresh
-    // failures retain the existing pending writeback contract.
-    if let Err(error @ OpsError::TaskCompletionConflict { .. }) = result {
-        task.pm_writeback = PmWritebackState::Pending {
-            operation: PmWritebackOperation::CompleteTask,
-            error: error.to_string(),
-        };
-        return Err(error);
-    }
-    task.pm_writeback = writeback_state(result);
-    if let Some(refreshed) = store.get_task(&task.id).await.map_err(task_error)? {
-        task.plan = refreshed.plan;
-    }
-    Ok(())
-}
-
-async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) -> OpsResult<()> {
-    let prs = store.task_prs(&task.id).await.map_err(task_error)?;
-    let pr_url = prs
-        .iter()
-        .rev()
-        .find_map(|pr| pr.github().map(|github| github.url.as_str()));
-    // Already-Done history remains Done even if Linear later conflicts.
-    let result = reconcile_pm_writeback(store, task, pr_url).await;
-    task.updated_at = time::OffsetDateTime::now_utc();
-    match result {
-        Err(OpsError::TaskCompletionConflict { .. }) => Ok(()),
-        result => result,
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4585,19 +4562,12 @@ pub(crate) async fn reconcile_task_completion(
 ) -> OpsResult<()> {
     match task_work_status(store, task).await? {
         WorkStatus::Done => {
-            if matches!(task.pm_writeback, PmWritebackState::Pending { .. }) {
-                retry_pm_writeback(store, task).await?;
-                store
-                    .update_task_pm_writeback(&task.id, &task.pm_writeback, task.updated_at)
-                    .await
-                    .map_err(task_error)?;
-            }
             return Ok(());
         }
         WorkStatus::Abandoned => return Ok(()),
         WorkStatus::Ready => {}
     }
-    let Some(pr) = merged_completing_pr(store, task).await? else {
+    let Some(_pr) = merged_completing_pr(store, task).await? else {
         return Ok(());
     };
     let gate = task_completion_gate(store, task).await?;
@@ -4611,8 +4581,6 @@ pub(crate) async fn reconcile_task_completion(
             "Task has uncommitted follow-up work; retained it for delivery or explicit abandonment",
         ));
     }
-    let url = pr.github().map(|github| github.url.as_str());
-    reconcile_pm_writeback(store, task, url).await?;
     // PR reconciliation already persisted the merge. Completion writes only
     // the Task's position and writeback facts, never a stale copy of the
     // settled PR.
@@ -4620,6 +4588,11 @@ pub(crate) async fn reconcile_task_completion(
         .complete_task(task, None, EndMove::Set, Some("its pull request merged"))
         .await
         .map_err(task_error)?;
+    *task = store
+        .get_task(&task.id)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("completed Task is missing"))?;
     Ok(())
 }
 
@@ -5324,7 +5297,7 @@ pub fn task_edit(
         &super::pm::PmUpdateOptions {
             wave: wave.map(str::to_string),
             id: issue.to_string(),
-            update: super::pm::PmTaskUpdate::Edit(update),
+            update,
         },
         &super::NullProgress,
     )
@@ -5521,8 +5494,8 @@ mod tests {
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
-        AfterMerge, GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest,
-        PrPresentation, PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
+        AfterMerge, GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation,
+        PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::work::wave::Wave;
     use std::ffi::OsString;
@@ -6161,7 +6134,7 @@ mod tests {
                 description: String::new(),
                 pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
-            pm_writeback: PmWritebackState::Current,
+            pm_writeback: crate::work::task::PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
             worktree: Some(repository),

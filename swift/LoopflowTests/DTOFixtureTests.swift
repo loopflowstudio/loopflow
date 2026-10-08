@@ -243,6 +243,7 @@ struct DTOFixtureTests {
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
+        #expect(detail.tasks.items[0].runtime?.pendingSync == "Saved locally; pending Linear synchronization")
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].prs.compactMap(\.publication?.github?.number) == [912])
         #expect(detail.tasks.items[0].activePr == "pr_33333333333333333333333333333333")

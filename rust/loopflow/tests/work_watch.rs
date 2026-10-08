@@ -800,6 +800,70 @@ fn selection_only_commit_reaches_two_open_work_readers() {
 }
 
 #[test]
+fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
+    let home = Machine::new();
+    repository(Path::new(home.wave.repo()));
+    home.plan(1);
+    let mut watch = home.watch();
+    let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
+        "headless":false, "task":"FIX-1", "wave":null, "activity":null});
+    watch.request(scope.clone());
+    let await_state = |watch: &Watch, expected| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let frame = watch
+                .next(deadline.saturating_duration_since(Instant::now()))
+                .expect("saved decision did not reach Desktop");
+            if let WorkContent::Planning(Some(part)) = frame.content {
+                for wave in part.roadmap.waves {
+                    if let Evidence::Ok { items, .. } = wave.tasks {
+                        for task in items {
+                            if let Some(runtime) = task.runtime {
+                                if runtime.status == expected && runtime.pending_sync.is_some() {
+                                    return runtime;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for (node, state) in [
+        ("end", loopflow::durable::TaskState::Done),
+        ("start", loopflow::durable::TaskState::Ready),
+    ] {
+        let output = lf(
+            home.path(),
+            &[
+                "task",
+                "move",
+                "FIX-1",
+                node,
+                "--reason",
+                "Offline decision",
+            ],
+        )
+        .current_dir(home.wave.repo())
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        await_state(&watch, state);
+    }
+    drop(watch);
+    let mut reopened = home.watch();
+    reopened.request(scope);
+    await_state(&reopened, loopflow::durable::TaskState::Ready);
+    let task = home.store.task_by_issue("FIX-1").unwrap().unwrap();
+    assert!(task.worktree.is_none());
+    assert!(home.store.task_prs(&task.id).unwrap().is_empty());
+}
+
+#[test]
 fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));

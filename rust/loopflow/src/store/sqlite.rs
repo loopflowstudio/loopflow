@@ -36,6 +36,7 @@ mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+pub(crate) mod task_state_delivery;
 mod task_work;
 
 #[cfg(test)]

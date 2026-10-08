@@ -319,6 +319,19 @@ Completing an uncached Linear issue first retains its Task locally, without a
 checkout. The completion reason stays in Task history; retries reuse that identity
 and preserve the recorded outcome while provider writeback is pending.
 
+Completion and reopening save locally before contacting Linear. An active Task
+Session or Desktop connection delivers pending decisions independently of comments
+and incoming planning. Status and Desktop retain pending synchronization feedback.
+
+```bash
+lf task sync EXP-12                     # attempt pending delivery once
+lf task sync EXP-12 --resolve local     # explicitly retain the local state decision
+lf task sync EXP-12 --resolve linear    # retain Linear's state; leave the Workflow alone
+```
+
+An uncertain delivery followed by a different Linear state retains both values.
+Resolution records a new decision; old delivery identities and Workflow history remain.
+
 ## Check authorized deliveries in the background
 
 ```bash

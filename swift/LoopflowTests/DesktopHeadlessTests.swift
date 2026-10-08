@@ -526,6 +526,10 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
+        let task = try #require(roadmap.waves.first?.tasks.items.first)
+        model.select(.task(id: task.id))
+        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "task-pending-sync").text().string()
+        #expect(pending == "Saved locally; pending Linear synchronization")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

@@ -573,6 +573,7 @@ impl TaskPr {
 #[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
+    ReopenTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

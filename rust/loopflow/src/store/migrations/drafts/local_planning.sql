@@ -206,6 +206,27 @@ CREATE TABLE task_creation_intents (
     description TEXT NOT NULL
 );
 
+-- Delivery metadata belongs to the decision that produced it. Superseding a
+-- decision preserves its attempted effect, without granting it write authority.
+CREATE TABLE task_state_deliveries (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    move_seq INTEGER NOT NULL REFERENCES task_workflow_moves(seq),
+    target TEXT NOT NULL CHECK(target IN ('completed','unstarted')),
+    base_revision TEXT,
+    base_state TEXT,
+    attempted INTEGER NOT NULL DEFAULT 0 CHECK(attempted IN (0,1)),
+    conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json))
+);
+CREATE INDEX task_state_deliveries_task ON task_state_deliveries(task_id,seq);
+
+INSERT INTO task_state_deliveries(id,task_id,move_seq,target,attempted)
+SELECT lower(hex(randomblob(16))),t.id,max(m.seq),'completed',1
+FROM tasks t JOIN task_workflow_moves m ON m.task_id=t.id
+WHERE json_extract(t.pm_writeback_json,'$.state')='pending'
+GROUP BY t.id;
+
 CREATE TABLE task_comments (
     id TEXT PRIMARY KEY,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,

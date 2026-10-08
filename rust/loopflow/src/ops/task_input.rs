@@ -100,8 +100,8 @@ impl TaskInput {
         );
     }
 
-    pub(crate) fn refresh(&self) -> std::io::Result<crate::ops::linear_observe::CommentSync> {
-        crate::ops::linear_observe::CommentSync::start(self.store.clone(), self.task.clone())
+    pub(crate) fn refresh(&self) -> std::io::Result<crate::ops::linear_observe::PlanningSync> {
+        crate::ops::linear_observe::PlanningSync::start(self.store.clone(), self.task.clone())
     }
 
     pub(crate) async fn poll(

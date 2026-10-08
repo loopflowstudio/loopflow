@@ -956,6 +956,13 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Ok(())
             }
         },
+        TaskCommand::Sync { issue, resolve } => {
+            println!(
+                "{}",
+                loopflow::ops::task::task_sync(issue, resolve.as_deref())?
+            );
+            Ok(())
+        }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
         TaskCommand::Move {
             issue,

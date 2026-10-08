@@ -286,7 +286,8 @@ async fn task_comments_read_and_publish_without_starting_work() {
                 operation: crate::work::task::PmWritebackOperation::CompleteTask,
                 error: "unrelated completion remains pending".into(),
             };
-            store.update_task_pm_writeback(&task.id, &pending, time::OffsetDateTime::now_utc()).await.unwrap();
+            rusqlite::Connection::open(directory.path().join("registry.db")).unwrap()
+                .execute("UPDATE tasks SET pm_writeback_json=?2 WHERE id=?1", rusqlite::params![task.id.as_str(),serde_json::to_string(&pending).unwrap()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
                 .await.unwrap();

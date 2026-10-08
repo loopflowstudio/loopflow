@@ -368,7 +368,7 @@ struct Reader {
     /// The sessions revision a quiet deadline was read at, and that deadline.
     quiet: Option<(i64, Option<i64>)>,
     runtime: tokio::runtime::Runtime,
-    comment_sync: Option<(String, crate::ops::linear_observe::CommentSync)>,
+    comment_sync: Option<(String, crate::ops::linear_observe::PlanningSync)>,
 }
 
 impl Reader {
@@ -415,7 +415,8 @@ impl Reader {
                 .get_task_by_issue(selector)
                 .await?
                 .ok_or_else(|| anyhow!("Task {selector} is not stored"))?;
-            crate::ops::linear_observe::CommentSync::start(store, task).map_err(anyhow::Error::from)
+            crate::ops::linear_observe::PlanningSync::start(store, task)
+                .map_err(anyhow::Error::from)
         });
         match result {
             Ok(sync) => self.comment_sync = Some((selector.clone(), sync)),

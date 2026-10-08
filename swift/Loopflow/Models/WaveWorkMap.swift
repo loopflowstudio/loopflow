@@ -113,6 +113,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let status: TaskState
     /// Linear calls the Task complete while it is active here.
     public let planningConflict: String?
+    public let pendingSync: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -123,6 +124,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
         case status, reason, provider, started
         case workId = "work_id"
         case planningConflict = "planning_conflict"
+        case pendingSync = "pending_sync"
         case updatedAt = "updated_at"
     }
 }

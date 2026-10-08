@@ -2,7 +2,7 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized account-free demo; no existing-window changes or landing.
+Jack Heart requested the ship edge after review October 8; complete after merge.
 `283fa7b5-3fdd-4457-9170-0de821534803` selects maximum supported future
 coverage: lf/plain, interactive/headless, Task/taskless. Existing conversations
 and provider work are out; resume-only code removed.

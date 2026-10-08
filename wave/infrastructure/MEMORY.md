@@ -1064,29 +1064,27 @@ readback proves neither plan mode, cmux tracking nor the combined candidate.
 Jack later authorized 429's landing after queued preparation despite these gaps;
 Jack separately authorized 428's queue and landing on October 8.
 
-Jack approved setup-free Codex coexistence. Source uses a
-temporary native profile for lf's capture hook and a bounded incomplete-argument
-probe for wrapper-supplied trust. Existing configuration/trust stays unchanged;
-normal exits remove the profile, interrupted launches can leave it unselected.
-Codex 0.160.1 executes profile and CLI hooks together; two CLI hook tables replace
-one another, and config-based bypass is ignored. Native PTYs prove launch hooks,
-exact capture and reconnect. Fresh reconnect hooks are absent even without lf;
-previous assertions reread launch receipts. Actual cmux tracking and installation
-remain unproved; live Sessions stay untouched.
-Release's entry-point lesson applies per operation: launch receipts establish no
-fresh reconnect hooks, and native composition establishes no host tracking.
+Jack approved setup-free Codex coexistence: a temporary native capture profile
+and bounded parser probe for wrapper-supplied trust. Saved config/trust stays
+unchanged; normal exits remove the profile, interruption can leave it unselected.
+Codex 0.160.1 composes profile and CLI hooks; two CLI hook tables replace one
+another, and config-based bypass is ignored. Native PTYs prove exact capture,
+launch hooks and reconnect. Fresh reconnect hooks are absent even without lf;
+earlier assertions reread launch receipts. Actual cmux tracking and installation
+remain unproved; live Sessions stay untouched. Release's operation-entry lesson
+applies: launch receipts prove neither fresh reconnect hooks nor host tracking.
 
-Flow output now prints step position/name and agent messages; verbose enables
-accounting and INFO, never prompts. Started commits with Flow registration.
-429 owns oversized-context proof. Earlier limits and prompt history:
-`64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620` there.
-Jack Heart removed `--tui` on October 8: terminal is the interactive default;
-`-i` forces interactive execution and `-b` remains headless. Native PTYs pass.
-Compression removed `default`'s mode override. Reconciliation removed upstream
-#1500's stale `tui` forwarding reference; earlier passes did not cover that merge.
-OSC 7501 follow-up is LOO-422, after demonstrated provider/host adoption.
-Preserve caller-owned checkpointing and common invocation loading. Codex
-rejected-turn recovery remains unresolved. Homepage capture follows installation.
+Flow output prints position/name and agent messages; verbose adds accounting/INFO,
+never prompts. Started commits with Flow registration. 429 owns oversized input.
+Earlier limits/history: `64ea39be9:wave/infrastructure/MEMORY.md` and `44fe36620`.
+Jack Heart removed `--tui` October 8: terminal defaults interactive; `-i` forces
+it and `-b` stays headless. Removed `default`'s mode override and #1500's stale
+`tui` forwarding. Gate: 1,803 passes, two repaired fixture reruns pass, one planning
+migration passes after materialization; native PTYs, 76 website checks and static
+checks pass. CI retains the full materialized matrix. LOO-422 owns OSC 7501
+simplification after demonstrated adoption. Preserve caller-owned checkpoints
+and common invocation loading. Codex rejected-turn recovery stays unresolved;
+homepage capture follows installation.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
 translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,

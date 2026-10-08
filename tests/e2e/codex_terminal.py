@@ -177,9 +177,7 @@ trust_level="trusted"
     assert (native / "config.toml").read_text() == config
     assert not list(native.glob("lf-capture-*.config.toml"))
     assert not (native / "hooks.json").exists()
-    status = _terminal(
-        [str(lf), "session", "connect", session_id], env, root, root / "resume.txt"
-    )
+    status = _terminal([str(lf), "session", "connect", session_id], env, root, root / "resume.txt")
     assert status == 0, (status, root / "resume.txt")
     assert native_id.encode() in (root / "resume.txt").read_bytes()
     print(

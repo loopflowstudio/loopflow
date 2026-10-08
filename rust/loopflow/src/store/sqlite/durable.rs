@@ -1230,11 +1230,11 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn chapter_evidence_retains_taskless_mechanical_work_without_marking_started() {
+    fn chapter_evidence_marks_taskless_flows_started_in_their_checkout() {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         assert!(!store.chapter_task_evidence(&task_id).unwrap().begun);
-        // A Flow run from the checkout names no Task; its step is still work there.
+        // A Flow run from the checkout starts its Task without an explicit bind.
         store.test_flow(
             "sync",
             &task.worktree.to_string_lossy(),
@@ -1242,7 +1242,7 @@ mod durable_store_tests {
             None,
         );
         assert!(store.chapter_task_evidence(&task_id).unwrap().begun);
-        assert!(!store.task_started(&task_id).unwrap());
+        assert!(store.task_started(&task_id).unwrap());
     }
 
     fn unregistered_task(

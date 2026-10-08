@@ -168,6 +168,52 @@ fn driver_in(conn: &rusqlite::Connection, session: &str) -> StoreResult<Option<S
     }))
 }
 
+pub(super) fn claim_driver_in(
+    tx: &rusqlite::Transaction<'_>,
+    session: &str,
+    expected: Option<&SessionDriver>,
+    process: &ProcessLfid,
+    replace_provider: bool,
+) -> StoreResult<SessionDriver> {
+    let current = driver_in(tx, session)?;
+    if current.as_ref() != expected {
+        return Err(StoreError::InvalidAuthority(
+            "Session driver changed".into(),
+        ));
+    }
+    let driver = SessionDriver {
+        process_lfid: Some(process.clone()),
+        generation: current.as_ref().map_or(1, |value| value.generation + 1),
+        provider_generation: current.as_ref().map_or(1, |value| {
+            value.provider_generation + i64::from(replace_provider)
+        }),
+        provider_process_lfid: current.as_ref().filter(|_| !replace_provider).map_or_else(
+            || process.clone(),
+            |value| value.provider_process_lfid.clone(),
+        ),
+    };
+    tx.execute(
+        "UPDATE agent_sessions SET driver_process_lfid=?2,driver_generation=?3,
+            provider_generation=?4,provider_process_lfid=?5,
+            provider_endpoint=CASE WHEN ?6 THEN NULL ELSE provider_endpoint END,
+            provider_pid=CASE WHEN ?6 THEN NULL ELSE provider_pid END,
+            provider_started_at=CASE WHEN ?6 THEN NULL ELSE provider_started_at END
+         WHERE id=?1",
+        params![
+            session,
+            driver.process_lfid,
+            driver.generation,
+            driver.provider_generation,
+            driver.provider_process_lfid,
+            replace_provider
+        ],
+    )?;
+    if current.is_none() || replace_provider {
+        record_provider_launch(tx, session, &driver, "reserved")?;
+    }
+    Ok(driver)
+}
+
 fn record_provider_launch(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
@@ -718,42 +764,7 @@ impl SqliteStore {
         let _dispatch = self.lock_session_driver(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = driver_in(&tx, session)?;
-        if current.as_ref() != expected {
-            return Err(StoreError::InvalidAuthority(
-                "Session driver changed".into(),
-            ));
-        }
-        let driver = SessionDriver {
-            process_lfid: Some(process.clone()),
-            generation: current.as_ref().map_or(1, |value| value.generation + 1),
-            provider_generation: current.as_ref().map_or(1, |value| {
-                value.provider_generation + i64::from(replace_provider)
-            }),
-            provider_process_lfid: current.as_ref().filter(|_| !replace_provider).map_or_else(
-                || process.clone(),
-                |value| value.provider_process_lfid.clone(),
-            ),
-        };
-        tx.execute(
-            "UPDATE agent_sessions SET driver_process_lfid=?2,driver_generation=?3,
-                provider_generation=?4,provider_process_lfid=?5,
-                provider_endpoint=CASE WHEN ?6 THEN NULL ELSE provider_endpoint END,
-                provider_pid=CASE WHEN ?6 THEN NULL ELSE provider_pid END,
-                provider_started_at=CASE WHEN ?6 THEN NULL ELSE provider_started_at END
-             WHERE id=?1",
-            params![
-                session,
-                driver.process_lfid,
-                driver.generation,
-                driver.provider_generation,
-                driver.provider_process_lfid,
-                replace_provider
-            ],
-        )?;
-        if current.is_none() || replace_provider {
-            record_provider_launch(&tx, session, &driver, "reserved")?;
-        }
+        let driver = claim_driver_in(&tx, session, expected, process, replace_provider)?;
         tx.commit()?;
         Ok(driver)
     }
@@ -886,6 +897,54 @@ mod discovery_tests {
             )
             .unwrap();
         id
+    }
+
+    #[test]
+    fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session =
+            store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let first = insert_process(&store, 1, 1);
+        let second = insert_process(&store, 2, 2);
+        let driver = store
+            .claim_session_driver(&session.id, None, &first, true)
+            .unwrap();
+        let mut next = session.clone();
+        next.artifact_key = crate::session_record::new_artifact_key();
+        next.input_published = false;
+        let before = store.session_history(&session.id, 0, 0).unwrap();
+        assert!(store
+            .claim_session_input(next.clone(), None, &second, true)
+            .is_err());
+        assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
+        assert_eq!(
+            store.session_driver(&session.id).unwrap(),
+            Some(driver.clone())
+        );
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
+        assert!(store
+            .session_for_artifact(&next.artifact_key)
+            .unwrap()
+            .is_none());
+
+        let (admitted, claimed) = store
+            .claim_session_input(next.clone(), Some(&driver), &second, true)
+            .unwrap();
+        assert_eq!(admitted.artifact_key, next.artifact_key);
+        assert_ne!(admitted.captured, session.captured);
+        assert_eq!(claimed.process_lfid, Some(second.clone()));
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let reserved_capture: i64 = store.conn.lock().unwrap().query_row(
+            "SELECT captured_event FROM session_events WHERE session_id=?1 AND receipt_key='provider:2:reserved'",
+            [&session.id], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(Some(reserved_capture), admitted.captured);
+        next.artifact_key = crate::session_record::new_artifact_key();
+        assert!(store
+            .claim_session_input(next, Some(&claimed), &first, true)
+            .is_err());
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
     }
 
     #[test]

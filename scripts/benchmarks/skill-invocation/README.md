@@ -1,134 +1,114 @@
-# Native skill invocation
+# Installed skill launch checks
 
 ```sh
-uv run python scripts/benchmarks/skill-invocation/probe.py \
-  --claude /path/to/claude --codex /path/to/codex
+uv run python scripts/benchmarks/skill-invocation/launch.py \
+  --fetch --fixtures /tmp/lf-skill-fixtures
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/launch.py --lf target/debug/lf \
+  --fixtures /tmp/lf-skill-fixtures --source internal-comms --provider codex
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/request_mapping.py --lf target/debug/lf --flow
+uv run pytest scripts/benchmarks/skill-invocation/test_request_mapping.py -q
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/launch.py --fixtures /tmp/lf-skill-fixtures \
+  --source internal-comms --provider claude --terminal --warm-machine \
+  --output /tmp/lf-skill-comparison
 ```
 
-Runs six bounded, live-provider probes in a temporary ordinary directory. Uses
-existing provider authentication without reading credentials. No installed skills
-or settings are edited. Claude has no model tools or MCP servers; its context
-hook reads one fixture file. Codex runs read-only with user config disabled.
-These calls consume normal provider usage.
+Fetch immutable third-party bundles before network containment. `launch.py` copies
+them unchanged into a fresh workspace without `.lf` configuration, runs ordinary
+lf commands with default Loopflow context, and makes the real provider read a
+bundled file. The local fake API receives the resulting tool output. Provider
+homes, Machine directories and credentials are isolated; external egress is denied.
 
-The output records versions, elapsed seconds, marker observations and whether
-Claude's replayed native arguments match. A plausible model answer does not prove native
-dispatch or argument substitution. Exit zero requires both standalone invocations
-and Claude's separate context hook to return their fixture markers; Claude must
-also replay the exact original argument. Prefix, suffix and multi-block cases
-record counterexamples without assuming future providers retain those limitations.
+Sources are pinned in `launch.py`:
 
-On 2026-10-07, Claude 2.1.293 recognized standalone stream-json invocation.
-Prefixing context or using separate text blocks bypassed native expansion.
-Suffixing context put it inside the provider's `<command-args>` receipt. A
-`UserPromptSubmit` hook supplied context while preserving the argument. Codex
-0.160.1 `exec` returned the `.agents/skills` fixture marker for its `$name`
-invocation; this script does not inspect Codex's native expansion receipt.
+- Anthropic [internal-comms at 683bc88e](https://github.com/anthropics/skills/tree/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/internal-comms).
+- OpenAI [skill-installer at 49f948fa](https://github.com/openai/skills/tree/49f948faa9258a0c61caceaf225e179651397431/skills/.system/skill-installer).
 
-These are synthetic native fixtures. They establish neither third-party ports,
-frontmatter/tool/model fidelity, bundled-file behavior, IDE handoff, Session
-continuation, nor Loopflow capture. The one-shot timings are diagnostic samples,
-not an lf-versus-slash-command latency comparison. App-server's explicit skill
-input is documented but has not been exercised by this script.
+Use either source with `--provider claude` or `--provider codex`. `--terminal`
+exercises lf's terminal command builder, substituting provider print/exec mode
+for unattended execution. It proves neither terminal rendering nor interactive
+behavior. Claude terminal exercises native expansion with separate gathered user
+context. `--flow` removes the source
+file after capture and checks that its instructions still reach the provider.
 
-## Native continuity
+Matching-provider cases run lf then a plain native skill serially, with identical
+context text and freshly restored provider homes. `--warm-machine` initializes the
+disposable Loopflow store before timing; omit it to include first-use setup.
+JSON separates provider startup, first request and time after the last request
+from total duration. `--output` saves fake-API requests and debug traces for
+attribution. Both launches use the same timestamping wrapper. Run comparisons
+without competing builds or benchmarks. JSON also reports request size and checks
+exact quoted/multiline arguments,
+user-only context, source retention and actual asset reads. Request size is not
+a token measurement; local fake-API latency is not real API latency. Equal request
+counts do not establish a blanket performance improvement. Both the lf case and
+plain baseline must expand the source, preserve exact arguments and return the
+bundled asset through a provider tool. `--folder .codex/skills` exercises a source
+outside the automatically discovered catalog. `--custom-prompt` checks a synthetic
+Codex prompt's one-based positions and named arguments against the same API.
 
-```sh
-uv run python scripts/benchmarks/skill-invocation/continuity.py \
-  --provider codex --executable /path/to/codex
-uv run python scripts/benchmarks/skill-invocation/continuity.py \
-  --provider claude --executable /path/to/claude
-```
+`request_mapping.py` uses a synthetic Claude skill to test native argument parsing,
+model declaration application, unknown-declaration reporting and separate user
+context. `--terminal --command` exercises a single-file command with a competing
+personal skill; JSON-decoded context must retain literal argument and shell syntax. `--flow` removes its
+source after capture and adds a same-name collision. Manifest bytes prove captured
+source retention. Its reference-file assertion is filesystem reachability only;
+`launch.py` supplies the actual provider tool read.
 
-Use the provider binary directly to avoid terminal wrappers. Each run creates
-synthetic skills in a temporary ordinary directory and uses native authentication.
-Claude disables model tools and MCP; Codex uses read-only sandboxing, disables
-MCP/apps/plugins through launch overrides, and asks for no tools. Existing skills,
-settings and conversations are not edited. These calls consume provider usage and
-leave their new native conversations available for receipt inspection after the
-temporary fixtures are removed. Output names those conversations and transcripts.
-Each protocol wait is bounded to 55 seconds; cleanup waits five seconds before
-killing only the probe's process group.
+Observed client boundaries: Claude 2.1.294 sends hook `additionalContext` in the
+API system field, including UserPromptSubmit hooks. Codex 0.160.1 ignores a native
+skill input whose path is outside its discovered catalog. Neither can be accepted
+from successful exit or assistant text alone. Explicit Markdown skill links load
+Codex sources outside that catalog. Native Claude terminal snapshots encode context
+as a JSON literal in the skill's user message, preserving declarations and arguments.
+A shell preprocessing directive is insufficient: Claude 2.1.294 rewrites it as an
+instruction to call a tool, leaving the first request without its context.
 
-Codex sends an explicit `skill` item beside the invocation and a separate text
-context item through `turn/start`. After restarting app-server, it resumes the
-same thread and repeats with a new argument, supplying context again. This checks
-history retention and new input delivery, not recall without context resupply.
-Checks require returned skill/path and text items, unchanged first-turn history,
-and native user-role expansion of
-the selected file for each turn. Claude checks native command replay, source
-directory and substituted arguments across three processes. Before its second
-turn, the probe deletes the hook program and omits hook settings; the original
-context attachment must survive. The first answer and reasoning cannot echo the
-context marker, preventing answer recall from masquerading as context retention.
-The third process explicitly reinstalls the hook. Receipt parsing has offline
-tests for wrong sources, altered arguments, assistant echoes and stale turns.
-Both scripts share Claude launch settings and receipt parsing; continuity consumes
-decoded events directly. Run the offline checks with
-`uv run pytest scripts/benchmarks/skill-invocation/test_continuity.py -q`.
+Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`;
+provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640eb`.
+Exact argument checks read the provider's model request directly.
+Baseline reconnect and plain-provider continuity remain in
+`tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.
 
-On 2026-10-07, Codex 0.160.1 and Claude 2.1.293 passed these transport checks.
-**This is not a fidelity pass:** Claude records `hook_additional_context` with
-`renderedRole: "system"`. This rendering field does not establish the role sent
-to the model. [Claude's glossary](https://code.claude.com/docs/en/glossary#system-reminder)
-describes reminders inside user messages or, for some models, system-role messages.
-The earlier claim of a proven authority conflict is withdrawn; preserving
-user-level reference authority still needs request-mapping evidence. Cross-session hook
-isolation, active-turn steering, GUI handoff, third-party controls and Loopflow's
-own capture/dispatch remain unproved. The probe does not use Codex's experimental
-`additionalContext` field; its context is a separate user text block.
+## Startup comparison (2026-10-08)
 
+Jack Heart requested comparison with regular LF before landing PR #1504.
+Three alternating pairs per harness compare PR base `35bb84ef1496` with
+candidate `510bf4abbc95`, using the same debug profile, initialized disposable
+Machines, pinned bundles and a local fake API with external egress denied.
 
-## Decisions and remaining work
+| Median seconds | Base | Candidate |
+| --- | ---: | ---: |
+| Claude terminal, before provider start | 0.772 | 0.628 |
+| Claude terminal, first model request | 0.995 | 0.866 |
+| Codex headless, before provider start | 0.717 | 0.672 |
+| Codex headless, first model request | 0.803 | 0.746 |
 
-Jack Heart selected native invocation on the skill's own harness, translated
-ports on the other harness, and inlined Loopflow builtins on October 7, 2026.
-Jack then selected `--agent` / `-a` for the harness and optional model, and
-removed `--ide` after the installed reconnect probe below. The selector rename
-and app-launch removal are implemented. LOO-420's native discovery, dispatch and
-ports remain unfinished; these probes do not implement them.
+All twelve launches delivered source, arguments, user context and a bundled
+asset read. Base cannot discover `.claude/skills`, so both revisions also received
+the unchanged Claude source in `.claude/commands`. Base failed its post-provider
+Git status check in the ordinary-folder fixture; candidate exited successfully.
+These are startup comparisons, not successful end-to-end baseline timings.
+The small sample shows no added startup second relative to regular LF; it proves
+neither production latency nor parity with a slash command in a running terminal.
+Raw samples, exact-source archive and binary hashes remain in
+`/tmp/loo420-base-comparison` on the measuring machine.
 
-The remaining design has these constraints:
+Separate equal-context comparisons with plain native launches retained 875 extra
+request JSON bytes for Claude terminal and 122 for Codex headless. Warm-Machine
+samples added 0.988/0.702 seconds respectively, with 0.606/0.626 seconds before
+provider startup. Request bytes are not token counts. Removing the executable
+version probe reduced one Claude launch-preparation trace from 288 to 37 ms;
+removing repeated budget counts established no overall latency improvement.
+The remaining cost buys context, durable capture and launch ownership; it remains
+measured overhead, not evidence of a blanket performance improvement.
 
-- One catalog must supply discovery, help, execution and export source collection.
-  Replace the separate resolver, rams alias, fuzzy npx fetching and recursive
-  Markdown scan together. Installed npx skills remain ordinary skill folders.
-  Repository-before-personal-before-builtin ordering is proposed; the precise
-  cross-format ordering is unselected. Honor provider home overrides and prove
-  the invoked native source is the selected file when names collide.
-- Carry selected source, dialect, exact arguments and separate bounded context
-  through canonical prompt preparation, capture and retained Flow instructions.
-  Preserve supporting-file access and source bytes. Do not confuse Claude's
-  subagent declaration with Loopflow's harness selector. Generated builtin
-  exports cannot override current embedded instructions.
-- Translate cross-harness arguments, tool and model declarations; report loss
-  in one line and continue with runnable instructions for unfamiliar shapes.
-  Permission hints do not establish enforced tool policy. Never overwrite an
-  existing native skill to stage a port. No database migration is selected.
-- An invocation in an existing Session must retain native history and Work
-  attribution and enter through its current driver. Selecting another skill
-  needs an explicit interface and admission proof; active-turn steering is
-  unproved. Lost acknowledgements cannot justify duplicate execution.
-- Resolve Claude's hook request-role mapping, then prove Loopflow capture and
-  unchanged third-party skills on both harnesses, including controls and bundled
-  assets. Compare repeated matched plain-versus-lf startup and whole-turn context
-  costs, including context read from disk and resumed conversations. Retention
-  with resupplied context does not prove recall.
-
-### Installed app-launch counterexample
-
-On October 7, installed lf 0.13.9 launched Claude and Codex with `--ide` in
-separate disposable data directories. Both commands exited zero and recorded a
-launcher Process and interactive Session, but no native thread, endpoint,
-provider PID or birth identity. Both actual `session connect` commands exited
-1 because no connection or confirmed engine exit was recorded. OS acceptance
-proved neither visible app execution nor a reconnectable conversation. The
-candidate removes this path; it does not repair historical app Sessions.
-
-The installed binary SHA-256 was
-`4cf8c9e9a39a916dbe57be9abc3e6eb688ed3ad776ff9243b68537d69592103a`.
-The disposable Sessions were `session_787c00c79b9142e38145b3b927fe147c`
-(Claude) and `session_8896e66e4c034126ab7ec36aca19b899` (Codex). Native probe
-receipts remain in Codex thread `01a11922-4b62-7011-9213-ce33542394a3` and Claude
-Session `a162c8e3-4001-43fe-af9b-d6af17181c38`. These are evidence identities,
-not control authority over a running provider.
+Gate on October 8 exercised both pinned sources on both harnesses and surfaces,
+including actual asset reads, exact arguments and user-only gathered context.
+All eight cases pass after fixing Codex terminal's missing `--` prompt separator:
+translated YAML frontmatter had been parsed as an option. Captured-source removal,
+native model/declaration mapping, native-home continuity and Codex reconnect with
+stale-client rejection also pass. Print/exec substitutes still do not prove terminal
+rendering or live model compliance.

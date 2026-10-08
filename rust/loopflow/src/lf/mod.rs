@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 pub mod commands;
-pub mod discovery;
 pub mod navigation;
 pub mod output;
 
@@ -45,6 +44,12 @@ pub struct Cli {
     /// Agent to use (harness or harness:model)
     #[arg(short = 'a', long = "agent")]
     pub agent: Option<String>,
+
+    /// Captured skill and arguments supplied by the invoking Flow process.
+    #[arg(long, hide = true)]
+    pub skill_input: Option<std::path::PathBuf>,
+    #[arg(skip)]
+    pub resolved_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
 
     /// Prefer this managed provider login before the normal route. Repeat to
     /// select provider-qualified preferences such as `claude=jack@`.
@@ -218,6 +223,12 @@ impl Cli {
         if let Some(agent) = &self.agent {
             args.extend(["--agent".to_string(), agent.clone()]);
         }
+        if let Some(input) = &self.skill_input {
+            args.extend([
+                "--skill-input".to_string(),
+                input.to_string_lossy().into_owned(),
+            ]);
+        }
         if let Some(turns) = self.max_turns {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
         }
@@ -227,7 +238,7 @@ impl Cli {
         args
     }
 
-    pub(crate) fn process_options(&self) -> Self {
+    pub fn process_options(&self) -> Self {
         Self {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
@@ -235,6 +246,8 @@ impl Cli {
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
+            skill_input: self.skill_input.clone(),
+            resolved_invocation: self.resolved_invocation.clone(),
             account: self.account.clone(),
             only_account: self.only_account.clone(),
             isolate: self.isolate,

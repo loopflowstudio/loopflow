@@ -48,7 +48,10 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
-    public let flow: TaskFlowSnapshot
+    public let workflowName: String?
+    public let latestFlowProcess: FlowProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
     public let directive: WorkDirectiveSnapshot?
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
@@ -57,7 +60,10 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let activePr: String?
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs, flow
+        case task, reference, runtime, directive, condition, actions, prs, execution
+        case workflowName = "workflow_name"
+        case latestFlowProcess = "latest_flow_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
         case activePr = "active_pr"
     }
@@ -165,12 +171,18 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let flow: TaskFlowSnapshot
+    public let workflowName: String?
+    public let latestFlowProcess: FlowProcessDetail?
+    public let execution: TaskExecutionSnapshot?
+    public let runControl: TaskRunControl
     public let activePr: PrSnapshot?
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, flow, section
+        case task, reference, runtime, condition, actions, execution, section
+        case workflowName = "workflow_name"
+        case latestFlowProcess = "latest_flow_process"
+        case runControl = "run_control"
         case nextMove = "next_move"
         case activePr = "active_pr"
     }

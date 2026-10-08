@@ -172,7 +172,7 @@ user / agent --> lf CLI --------+----------+-----------+
                               v
                   status / roadmap / usage / app
 
-another machine is another Machine; cross it explicitly with `lf ssh`
+another machine is another Machine; cross it explicitly with `lf --machine`
 ```
 
 There is no central Loopflow server. A Machine owns its processes, credentials,
@@ -310,8 +310,8 @@ conversation.
 ### Another machine
 
 ```bash
-lf ssh build-home session list --json
-lf ssh build-home --wave product wave/operate
+lf --machine build-home session list --json
+lf --machine build-home --wave product wave/operate
 ```
 
 The origin transports one command. The target resolves its own Machine state and

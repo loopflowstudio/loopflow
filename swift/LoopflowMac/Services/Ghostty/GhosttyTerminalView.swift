@@ -5,6 +5,7 @@ import SwiftUI
 import AppKit
 import OSLog
 import QuartzCore
+import Observation
 import Loopflow
 
 #if GHOSTTY_ENABLED
@@ -152,7 +153,7 @@ final class GhosttyTerminalMount: NSView {
 /// churn and Sessions↔Work navigation never free a surface. Each window owns
 /// its own pool: an NSView can only live in one view hierarchy, so sharing a
 /// pool across windows would silently steal terminals between them.
-@MainActor
+@MainActor @Observable
 final class GhosttySurfacePool {
     private var views: [TerminalIdentity: GhosttyMetalView] = [:]
 
@@ -162,6 +163,28 @@ final class GhosttySurfacePool {
         view.pool = self
         views[id] = view
         return view
+    }
+
+    func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? {
+        views[id]?.programStatus
+    }
+
+    func associateProgramStatus(_ records: [SessionRecord]) {
+        for view in views.values {
+            let marker = view.terminalMarker
+            if case .session(let id) = view.terminal {
+                if let record = records.first(where: { $0.id == id }) {
+                    view.programStatus.associate(sessionId: id, terminalId: marker, generation: record.providerGeneration)
+                }
+                continue
+            }
+            let matches = records.filter { $0.state == .active && $0.terminalIds.contains(marker) }
+            view.programStatus.associate(
+                sessionId: matches.count == 1 ? matches[0].id : nil,
+                terminalId: matches.count == 1 ? marker : nil,
+                generation: matches.count == 1 ? matches[0].providerGeneration : nil
+            )
+        }
     }
 
     func title(for id: TerminalIdentity) -> String? {
@@ -324,6 +347,13 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
     /// a Session or shell is an explicit action that mints a fresh view.
     private(set) var childExited = false
+    let programStatus = ProgramStatusSurface()
+    var terminalMarker: String {
+        switch terminal {
+        case .shell(let id): id
+        case .session: programStatus.incarnation.uuidString.lowercased()
+        }
+    }
     var terminalTitle: String?
     nonisolated(unsafe) var surface: ghostty_surface_t?
 
@@ -354,6 +384,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     init(terminal: TerminalIdentity, frame frameRect: NSRect = .zero) {
         self.terminal = terminal
         super.init(frame: frameRect)
+        if case .session(let id) = terminal {
+            programStatus.associate(sessionId: id, terminalId: terminalMarker, generation: nil)
+        }
         setupView()
     }
 
@@ -373,9 +406,16 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     func createSurface(manager: GhosttyManager) {
         guard surface == nil else { return }
 
+        let surfaceCommand: String?
+        if case .session = terminal, let command {
+            let script = "export LF_TERMINAL_ID=\(shellEscape(terminalMarker)); export LF_TERMINAL_TTY=\"$(tty)\"; exec \(command)"
+            surfaceCommand = ["/bin/sh", "-c", script].map(shellEscape).joined(separator: " ")
+        } else {
+            surfaceCommand = command
+        }
         surface = manager.createSurface(
             workingDirectory: workingDirectory,
-            command: command,
+            command: surfaceCommand,
             view: self
         )
 
@@ -424,6 +464,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     func destroySurface() {
+        programStatus.close()
         // A released view may still be mounted until SwiftUI reconciles it.
         // Only an explicit reopen with a fresh view may launch another child.
         childExited = true
@@ -746,6 +787,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             super.keyDown(with: event)
             return
         }
+        programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         if keyToDraw == nil {
             keyToDraw = Perf.signposter.beginInterval(Perf.terminalKeyToDraw, id: Perf.signposter.makeSignpostID())
         }
@@ -1158,6 +1200,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
 
     private func insertTerminalText(_ text: String) -> Bool {
         guard let surface else { return false }
+        programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
@@ -1260,9 +1303,11 @@ func terminalPasteText(from pasteboard: NSPasteboard) -> String? {
 #else
 
 // Stub view when GhosttyKit is not available
-@MainActor
+@MainActor @Observable
 final class GhosttySurfacePool {
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
+    func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
+    func associateProgramStatus(_ records: [SessionRecord]) {}
     func title(for id: TerminalIdentity) -> String? { nil }
     func release(_ id: TerminalIdentity) {}
     func focus(_ id: TerminalIdentity) {}

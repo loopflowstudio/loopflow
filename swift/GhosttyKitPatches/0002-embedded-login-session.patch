@@ -1,6 +1,7 @@
+diff --git a/src/config/Config.zig b/src/config/Config.zig
 --- a/src/config/Config.zig
 +++ b/src/config/Config.zig
-@@ -1158,6 +1158,13 @@
+@@ -1157,6 +1157,13 @@
  /// This flag sets the `initial-command` configuration, see that for more
  /// information.
  command: ?Command = null,
@@ -11,12 +12,13 @@
 +/// not create a login accounting session, reset identity variables, or print
 +/// login banners. Other platforms are unaffected.
 +@"macos-login-session": bool = true,
- 
+
  /// This is the same as "command", but only applies to the first terminal
  /// surface created when Ghostty starts. Subsequent terminal surfaces will use
+diff --git a/src/Surface.zig b/src/Surface.zig
 --- a/src/Surface.zig
 +++ b/src/Surface.zig
-@@ -630,6 +630,7 @@
+@@ -663,6 +663,7 @@
          // Initialize our IO backend
          var io_exec = try termio.Exec.init(alloc, .{
              .command = command,
@@ -24,17 +26,18 @@
              .env = env,
              .env_override = config.env,
              .shell_integration = config.@"shell-integration",
+diff --git a/src/termio/Exec.zig b/src/termio/Exec.zig
 --- a/src/termio/Exec.zig
 +++ b/src/termio/Exec.zig
-@@ -558,6 +558,7 @@
- 
+@@ -567,6 +567,7 @@
+
  pub const Config = struct {
      command: ?configpkg.Command = null,
 +    macos_login_session: bool = true,
      env: EnvMap,
      env_override: configpkg.RepeatableStringMap = .{},
      shell_integration: configpkg.Config.ShellIntegration = .detect,
-@@ -817,6 +818,7 @@
+@@ -825,6 +826,7 @@
          const args: []const [:0]const u8 = execCommand(
              alloc,
              shell_command,
@@ -42,7 +45,7 @@
              internal_os.passwd,
          ) catch |err| switch (err) {
              // If we fail to allocate space for the command we want to
-@@ -1411,12 +1413,18 @@
+@@ -1839,12 +1841,18 @@
  fn execCommand(
      alloc: Allocator,
      command: configpkg.Command,
@@ -61,10 +64,10 @@
          const passwd = passwdpkg.get(alloc) catch |err| {
              log.warn("failed to read passwd, not using a login shell err={}", .{err});
              break :darwin;
-@@ -1508,27 +1516,7 @@
+@@ -1936,27 +1944,7 @@
              // searching.
              .direct => |v| try args.appendSlice(alloc, v),
- 
+
 -            .shell => |v| {
 -                // Use "exec" to replace the bash process with
 -                // our intended command so we don't have a parent
@@ -88,12 +91,12 @@
 -            },
 +            .shell => |v| try args.appendSlice(alloc, try loginShellCommand(alloc, v)),
          }
- 
+
          return try args.toOwnedSlice(alloc);
-@@ -1580,6 +1568,18 @@
-     };
+@@ -2059,6 +2047,18 @@
+     return self.subprocess.getProcessInfo(info);
  }
- 
+
 +// Keep the parsing shell free of startup files. exec -l preserves macOS login
 +// shell startup and replaces the parser process, with or without login(1).
 +fn loginShellCommand(alloc: Allocator, command: []const u8) Allocator.Error![]const [:0]const u8 {
@@ -108,17 +111,17 @@
 +
  test "execCommand darwin: shell command" {
      if (comptime !builtin.os.tag.isDarwin()) return error.SkipZigTest;
- 
-@@ -1588,7 +1588,7 @@
+
+@@ -2067,7 +2067,7 @@
      defer arena.deinit();
      const alloc = arena.allocator();
- 
+
 -    const result = try execCommand(alloc, .{ .shell = "foo bar baz" }, struct {
 +    const result = try execCommand(alloc, .{ .shell = "foo bar baz" }, true, struct {
          fn get(_: Allocator) !PasswdEntry {
              return .{
                  .name = "testuser",
-@@ -1618,7 +1618,7 @@
+@@ -2097,7 +2097,7 @@
      const result = try execCommand(alloc, .{ .direct = &.{
          "foo",
          "bar baz",
@@ -127,7 +130,7 @@
          fn get(_: Allocator) !PasswdEntry {
              return .{
                  .name = "testuser",
-@@ -1645,6 +1645,7 @@
+@@ -2124,6 +2124,7 @@
      const result = try execCommand(
          alloc,
          .{ .shell = "foo bar baz" },
@@ -135,7 +138,7 @@
          struct {
              fn get(_: Allocator) !PasswdEntry {
                  // Empty passwd entry means we can't construct a macOS
-@@ -1671,6 +1672,7 @@
+@@ -2150,6 +2151,7 @@
      const result = try execCommand(
          alloc,
          .{ .shell = "foo bar baz" },
@@ -143,7 +146,7 @@
          struct {
              fn get(_: Allocator) !PasswdEntry {
                  // Failed passwd entry means we can't construct a macOS
-@@ -1699,7 +1701,7 @@
+@@ -2178,7 +2180,7 @@
              "foo",
              "bar baz",
          },
@@ -152,19 +155,20 @@
          fn get(_: Allocator) !PasswdEntry {
              // Failed passwd entry means we can't construct a macOS
              // login command and falls back to POSIX behavior.
-@@ -1729,7 +1731,7 @@
+@@ -2208,7 +2210,7 @@
          },
      }).clone(command_alloc);
- 
+
 -    const result = try execCommand(alloc, command, struct {
 +    const result = try execCommand(alloc, command, true, struct {
          fn get(_: Allocator) !PasswdEntry {
              // Failed passwd entry means we can't construct a macOS
              // login command and falls back to POSIX behavior.
-@@ -1743,3 +1745,34 @@
-     try testing.expectEqualStrings(result[0], "foo");
-     try testing.expectEqualStrings(result[1], "bar baz");
+@@ -2303,3 +2305,35 @@
+     try testing.expectEqualStrings("C:\\tools\\foo.exe", result[0]);
+     try testing.expectEqualStrings("arg with spaces", result[1]);
  }
++
 +
 +test "execCommand darwin: embedded login shell without login session" {
 +    if (comptime !builtin.os.tag.isDarwin()) return error.SkipZigTest;

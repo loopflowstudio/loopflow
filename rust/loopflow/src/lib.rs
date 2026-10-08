@@ -20,6 +20,7 @@ pub mod planning;
 pub mod pm;
 pub mod pr_landing;
 pub mod profile;
+pub mod program_status;
 pub(crate) mod promotion_lock;
 pub mod provider_account;
 pub mod provider_auth;

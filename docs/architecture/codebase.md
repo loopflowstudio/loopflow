@@ -77,7 +77,7 @@ Flows may invoke the named internal operations that own their exact boundary.
 | `lf wt`, `commit`, `sync`, `pr`, `ci` | worktree and delivery operations |
 | `lf mon show`, `usage`, `activity` | durable execution/history projections |
 | `lf ps`, `top`, `prune`, `doctor` | local OS and command-journal observation |
-| `lf machine`, `lf ssh` | Machine identity, placement, command routing |
+| `lf machine`, `lf --machine` | Machine identity, placement, command routing |
 | `lf account` | provider credential and account authority |
 | `lf install`, `release` | artifact selection and release workflow |
 
@@ -112,7 +112,7 @@ not resolve either from the planning store.
 
 The CLI talks to planning and model providers. The independent Discord bridge
 uses outbound REST requests. Remote execution reaches the target Machine through
-`lf ssh`; see [Machines and processes](machines.md).
+`lf --machine`; see [Machines and processes](machines.md).
 
 ## Add a provider
 

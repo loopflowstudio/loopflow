@@ -287,6 +287,20 @@ mod tests {
     const START: i64 = 1_000;
     const QUIET: i64 = crate::session::WAITING_QUIET_SECONDS;
 
+    #[test]
+    fn automated_auth_and_permission_requests_do_not_wait_for_input() {
+        assert!(codex(
+            &json!({"id": 7, "method": "account/chatgptAuthTokens/refresh", "params": {}}),
+            false
+        )
+        .is_empty());
+        assert!(opencode(
+            &json!({"type": "permission.asked", "properties": {"sessionID": "thread", "id": "permission"}}),
+            "thread"
+        )
+        .is_empty());
+    }
+
     impl Driven {
         fn new(interactive: bool) -> Self {
             let home = tempfile::tempdir().unwrap();

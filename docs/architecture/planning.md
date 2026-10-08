@@ -218,7 +218,7 @@ across the combined migration frontier remain unfinished.
 
 ```bash
 lf flow build
-lf flow show DRIVER_PROCESS --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 ```
 
 A Flow is one lf process and the step processes it starts; its ID is the driver
@@ -304,7 +304,7 @@ or resumes a stopped Flow.
 
 ```bash
 lf task status INF-124
-lf flow show DRIVER_PROCESS --sessions --json
+lf flow show DRIVER_PROCESS --processes --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```

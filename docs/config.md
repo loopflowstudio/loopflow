@@ -522,8 +522,10 @@ with gathered context separate from command arguments. Captured Flow definitions
 survive source-file changes or removal. Existing sibling resources remain reachable;
 parent-relative paths and resources removed with the bundle are not preserved.
 Codex sources sent to Claude receive tool-mapping instructions and a notice for
-controls without an enforced equivalent. Builtins remain inline. Native Codex,
-terminal delivery and complete cross-harness declaration translation remain unfinished.
+controls without an enforced equivalent. Codex and terminal launches currently
+inline the skill body without its source declarations; native invocation and
+cross-harness argument/control translation remain unfinished there. Builtins
+remain inline.
 
 `lf sync-skills` exports personal sources and builtins, preserves third-party
 files at destination paths, and leaves repository skills local. Cross-harness

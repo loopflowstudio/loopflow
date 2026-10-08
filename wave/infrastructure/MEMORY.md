@@ -1072,8 +1072,11 @@ These checks establish no native Codex skill, terminal fidelity or unchanged
 third-party acceptance. No landing or Task completion occurred.
 
 The follow-up removes unreachable ClaudeHarness plugin state and its injected-state
-test. Native skill preparation selects headless Claude, whose file-backed runner
-owns that launch. Test the operation that can receive the prepared input; a
-private-state fixture can keep an unused second implementation looking necessary.
-Release's entry-point lesson applies; its relevant child memory was re-read,
-without re-reviewing unrelated release evidence.
+test. Preparation selects only headless Claude; Codex and terminal launches inline
+the body without source declarations, and the Claude-to-Codex port helper is not
+reached there. Test the operation that can receive the prepared input; a private-state
+fixture can keep an unused second implementation looking necessary. LF/Flow probes
+use `--no-loopflow`, `alpha` and fixture-side asset reads: they establish no default
+context, declaration enforcement or provider tool read. Retaining metadata is not
+applying it. Release's entry-point lesson applies; its child goal and relevant
+failure-boundary memory were read, leaving unrelated release evidence unreviewed.

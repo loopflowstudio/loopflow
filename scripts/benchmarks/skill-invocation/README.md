@@ -11,13 +11,15 @@ uv run pytest scripts/benchmarks/skill-invocation/ -q
 The real Claude client runs against a local fake Messages API, with external
 egress denied and a disposable home. The ordinary case installs a skill without
 `.lf` configuration. The Flow case captures it, removes the source and adds a
-same-name collision before dispatch. Checks require exact native arguments,
-selected source bytes, user-only context and reachable bundled resources.
+same-name collision before dispatch. Both use `--no-loopflow` and check the
+argument `alpha`, selected source bytes and supplied context in user messages.
+The fixture reads the linked reference file itself; the provider does not read it.
 A context acknowledgement cannot substitute for the command's result.
 
 These are synthetic skills and API receipts, not unchanged third-party or live
-model proofs. Complete native Codex and terminal dispatch, declaration translation
-and third-party fidelity still need entry-point checks. Baseline reconnect and
+model proofs. Default Loopflow context, quoted/multiline arguments, applied
+declarations, provider asset reads, native Codex and terminal dispatch, and
+third-party fidelity still need entry-point checks. Baseline reconnect and
 plain-provider continuity remain in `tests/e2e/codex_connect.py` and
 `tests/e2e/claude_shared_home.py`.
 

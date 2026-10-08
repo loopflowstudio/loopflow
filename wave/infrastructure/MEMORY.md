@@ -64,23 +64,26 @@ alias or per-call repository override remains.
 Jack Heart's October 7 steer records LOO-411 / PR #1489 merged; main `35e759aaf`
 is integrated. Parent landing grants no later-slice or LOO-413 landing authority.
 
-## Resident machine logins (LOO-413, 2026-10-07)
+## Resident machine logins (LOO-413, 2026-10-08)
 
-Jack Heart authorized publication for review, forbidding real credential experiments
-and landing. Transfer over stdin only to added machines. Preserve received logins
-across registration failure; remote preferences cannot relax selected identity.
-Retain the encryption key atomically in a private file. An unreadable Keychain
-permits a new key only without existing encrypted tokens.
-Jack requested republication of #1493 after main sync. Sync is integrated.
-Reorder arguments before account selection: after-skill
-flags otherwise bypass restriction. Preserve `--` literals and target-owned
-resolution. Broker, lent routes, secret forwarding, route-source metadata and the
-optional token resolver are deleted. Linear uses one required-token path, preserving
-refresh races, deletion and rollback. Check inherited consumers; website assertions
-now cover resident logins. Focused assertions pass; gate/CI owns an output-handle
-leak. Release's bounded-cleanup lesson applies, not its Swift diagnosis.
-Independent refresh chains, one-approval login, rebooted Mac access and installed
-acceptance remain unproved.
+Jack Heart authorized #1493 publication, real Codex/source verification, then
+accepted the demo and requested `ship`. Transfer stdin only to added machines.
+Preserve received logins after registration failure and selected identity despite
+remote preferences. Keep keys atomic/private; unreadable Keychain permits a new
+key only without encrypted tokens. Reorder account arguments before selection;
+preserve `--` literals and target-owned resolution.
+
+Browser-approved Codex transfer to MINI (`mini-heart`), authenticated reads on
+both machines, selected remote execution and headless reconnect passed. Source
+deployments use isolated stores; standard installs remain unchanged.
+Later refresh independence, other providers, locked-Keychain reboot and installed
+acceptance remain unproved. Identical binaries falsely report a version difference
+from mismatched version formatting. Evidence:
+`scratch/machine-sign-in-demo.md`.
+
+Main sync, forwarding removal and Linear preservation proofs:
+`178abab13:wave/infrastructure/MEMORY.md`. Gate/CI owns the OAuth output-handle
+leak; Release's cleanup lesson applies, not its Swift diagnosis.
 
 ## Task decisions and delivered work (LOO-408, 2026-10-07)
 

@@ -1073,12 +1073,12 @@ proves no engine exit. Native dispatch, ports and fidelity remain unproved.
 
 Jack Heart authorized landing PR #1505 on October 8, superseding review-only
 publication. The Task stays open for cold-cache verification. Delivery includes
-the directory-pass-through gain, evidence and credential-free CI smoke.
+directory reuse, evidence and the offline CI smoke.
 [The report](../../scripts/benchmarks/agent-startup/README.md) owns numbers,
 release wall-stack SVGs and rejected patches. Provider-probe removal, absent-Wave
 resolution and directory reuse have matched evidence; capture-store reuse and
 ancestor-probe deferral did not and were removed. The last rejection meets
-the attempted-gains stopping condition, not exhaustion.
+the stopping condition, not exhaustion.
 Claude reconnect's native median worsens; the later handoff gain cannot repair it.
 
 Readiness requires unsubmitted text echoed by the raw-mode application. Codex

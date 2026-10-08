@@ -55,14 +55,7 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         WorkRef::Project(id) => PlanningChanges::Project(id),
         _ => return Err(message("field delivery requires a Task or Project")),
     };
-    let (kind, id) = owner.owner();
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(message)?
-        .join("locks/planning-fields")
-        .join(format!("{kind}-{id}.lock"));
-    let Some(_lock) = lock_delivery(&path)? else {
+    let Some(_lock) = lock_fields(store, owner)? else {
         return Ok(());
     };
     let changes = pending(store, owner)?;
@@ -170,6 +163,18 @@ async fn sync_deletion(
         .acknowledge_task_deletion(id, change, None)
         .map_err(message)?;
     Ok(())
+}
+
+// Creation and field delivery share one effect lock per planning object.
+pub(super) fn lock_fields(store: &Store, owner: PlanningChanges<'_>) -> OpsResult<Option<File>> {
+    let (kind, id) = owner.owner();
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(message)?
+        .join("locks/planning-fields")
+        .join(format!("{kind}-{id}.lock"));
+    Ok(lock_delivery(&path)?)
 }
 
 // Serialize provider effects only; saves and acquisition never take this lock.

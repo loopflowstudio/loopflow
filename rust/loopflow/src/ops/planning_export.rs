@@ -48,14 +48,7 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         WorkRef::Project(id) => PlanningChanges::Project(id),
         _ => return Err(message("export requires a Task or Project")),
     };
-    let (kind, id) = owner.owner();
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(message)?
-        .join("locks/planning-fields")
-        .join(format!("{kind}-{id}.lock"));
-    let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+    let Some(_lock) = super::planning_delivery::lock_fields(store, owner)? else {
         return Ok(());
     };
     let attempt = async {
@@ -96,11 +89,10 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         if observe(store, repo, owner, &client, &export, &wave_id).await? {
             return Ok(());
         }
-        let (_, attempted, _) = store
+        let (attempted, _) = store
             .sqlite
-            .planning_export(owner)
-            .map_err(message)?
-            .ok_or_else(|| message("creation receipt is missing"))?;
+            .planning_export_attempts(owner)
+            .map_err(message)?;
         if attempted {
             return Err(message(
                 "Creation remains uncertain; no repeated create issued",
@@ -164,11 +156,10 @@ async fn observe(
     export: &PlanningExport,
     wave: &crate::id::WaveId,
 ) -> OpsResult<bool> {
-    let (_, attempted, link_attempted) = store
+    let (attempted, link_attempted) = store
         .sqlite
-        .planning_export(owner)
-        .map_err(message)?
-        .ok_or_else(|| message("creation receipt is missing"))?;
+        .planning_export_attempts(owner)
+        .map_err(message)?;
     match owner {
         PlanningChanges::Project(_) => {
             let Some(mut project) = client.find_project(&export.id).await.map_err(message)? else {

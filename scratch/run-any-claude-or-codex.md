@@ -31,20 +31,17 @@ the original skill. Existing native history, fences and engine settlement remain
 
 ## Delete — do not maintain
 
-- Codex `seed_capture`/per-dispatch native message IDs and `dispatch_codex_input`.
-- `has_codex_input_dispatch`, `record_codex_input_receipts`, their comparison and
-  exclusive storage/reconnect tests. Baseline history recovery stays unchanged.
-- `codex_request_mapping.py` and its exclusive tests: competing writers, queue
-  admission, lost acknowledgements, draft injection and engine-restart experiments.
-- `codex_connect --queued-exit` and Claude PTY/inbox injection probes.
-- Busy-owner delivery, queue lifetime, native writer release, per-input capture
-  settlement and generic engine recovery as requirements of this Task.
+Removed: Codex dispatch identities/receipts, queue and engine-restart probes,
+Claude PTY/inbox injection, and their exclusive tests. Exact deletion inventory
+and historical observations: `7dd9819b2:scratch/run-any-claude-or-codex.md`
+and `1e4ae02a5:scripts/benchmarks/skill-invocation/README.md`.
 
-Historical observations and failed candidates remain at
-`1e4ae02a5:scratch/run-any-claude-or-codex.md` and
-`1e4ae02a5:scripts/benchmarks/skill-invocation/README.md`. The uncommitted
-compression notes were preserved before reconciliation. They do not constrain
-ordinary launch acceptance.
+Also removed: `ClaudeHarness::native_skill`, its plugin startup/context-message
+branches, and `native_input_tests`. Prompt preparation creates a native invocation
+only for headless Claude, which dispatches through `_run_agent_once`, not
+`ClaudeHarness`. The deleted test bypassed that boundary by assigning private
+state. Baseline Claude Session input/result accounting stays intact; the ordinary
+LF/Flow fake-API proofs exercise the surviving file-backed input path.
 
 ## Remaining implementation
 
@@ -65,6 +62,8 @@ Session owner or busy-terminal transport is selected.
 
 The dispatch ledger and recovery additions are absent from the surviving Codex
 harness, connection and event store: those files match the active PR base.
+ClaudeHarness production code also matches that base; its only diff is the new
+optional AgentConfig field in two existing test literals.
 The retained resume transaction is an independent preservation fix, not a pending
 queue. The public reconnect fixture retains stale-client rejection, native history,
 sibling work and ancestry checks. Its tool-name and current CLI-flag repairs stay.
@@ -73,8 +72,10 @@ provider-only alternatives are archived. Release child memory was read selective
 for its operation-entry lesson; unrelated release sections were not re-reviewed.
 
 Before reduction against `35bb84ef1`: 56 files, +5,818/-1,833; Rust production
-+2,297/-1,419. After deletion, Rust production is +1,862/-1,414. This reduces
-speculative execution machinery while preserving the one-catalog implementation.
++2,297/-1,419. This pass starts at 51 files, +2,852/-1,914 and removes another
+88 net lines from ClaudeHarness. After this pass: 51 files, +2,769/-1,911,
+including reconciled notes. This reduces speculative execution machinery while
+preserving the one-catalog implementation.
 The full third-party/Codex/terminal outcome is not yet ready for review.
 
-Check (2026-10-08, isolated LF authority): cargo build; focused skill (70), CLI discovery (1), headless resume (2), continuation (6), pytest (17), fmt/clippy, Ruff, native Claude LF/Flow fake-API and Codex public-connect checks pass; full fidelity and gate remain.
+Check (2026-10-08, isolated LF authority): `cargo build -p loopflow --bin lf`, `cargo test -p loopflow --lib harness::claude` (31 pass, 2 live-login ignored), `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and network-contained `request_mapping.py --lf target/debug/lf` with/without `--flow` pass; unaffected checks retained at `7dd9819b2`; full fidelity and gate remain.

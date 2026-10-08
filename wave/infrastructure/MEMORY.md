@@ -1070,3 +1070,10 @@ clients rejected and native/sibling history retained. The reduced Claude LF/Flow
 fake-API checks pass with one request, exact arguments and separate user context.
 These checks establish no native Codex skill, terminal fidelity or unchanged
 third-party acceptance. No landing or Task completion occurred.
+
+The follow-up removes unreachable ClaudeHarness plugin state and its injected-state
+test. Native skill preparation selects headless Claude, whose file-backed runner
+owns that launch. Test the operation that can receive the prepared input; a
+private-state fixture can keep an unused second implementation looking necessary.
+Release's entry-point lesson applies; its relevant child memory was re-read,
+without re-reviewing unrelated release evidence.

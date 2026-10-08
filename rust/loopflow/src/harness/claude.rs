@@ -31,7 +31,6 @@ pub struct ClaudeHarness {
     raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
     should_seed_task_prompt: bool,
-    native_skill: Option<(std::path::PathBuf, String)>,
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
     provider_session_id: Arc<Mutex<Option<String>>>,
@@ -76,7 +75,6 @@ impl ClaudeHarness {
             raw_provider: None,
             config: None,
             should_seed_task_prompt: true,
-            native_skill: None,
             provider_session_id: Arc::new(Mutex::new(None)),
             account_route: None,
             requested_account_id: None,
@@ -111,9 +109,6 @@ impl ClaudeHarness {
         let args = build_claude_stream_session_args(config, resume_id.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
-        if let Some((plugin, _)) = &self.native_skill {
-            cmd.arg("--plugin-dir").arg(plugin);
-        }
         super::configure_agent_env(&mut cmd, config);
         let activation = match &self.account_route {
             Some(route) => route.launch_as(cmd.as_std_mut()).await?,
@@ -403,11 +398,6 @@ impl Harness for ClaudeHarness {
             }
         }
 
-        self.native_skill = config
-            .skill_invocation
-            .as_ref()
-            .map(|invocation| invocation.claude_plugin(config))
-            .transpose()?;
         self.config = Some(config.clone());
         self.should_seed_task_prompt = true;
         Ok(())
@@ -425,7 +415,6 @@ impl Harness for ClaudeHarness {
 
         // The first message of a run carries the task prompt as a preamble.
         let mut turn_content = content.to_string();
-        let mut context_message = String::new();
         if self.should_seed_task_prompt {
             let task_prompt = self
                 .config
@@ -437,16 +426,6 @@ impl Harness for ClaudeHarness {
             self.should_seed_task_prompt = false;
             if !task_prompt.is_empty() {
                 turn_content = format!("{task_prompt}\n\n{content}");
-            }
-            if let Some((_, command)) = &self.native_skill {
-                context_message = format!(
-                    "{}\n",
-                    serde_json::json!({
-                        "type": "user", "shouldQuery": false,
-                        "message": {"role": "user", "content": turn_content}
-                    })
-                );
-                turn_content = command.clone();
             }
         }
 
@@ -462,10 +441,8 @@ impl Harness for ClaudeHarness {
             .current_turn_id
             .lock()
             .expect("claude turn id lock poisoned") = Some(turn_id.clone());
-        // Claude acknowledges the non-query context separately from the command.
-        // Neither that acknowledgement nor a queued steer can close the seed early.
-        self.pending_results
-            .store(1 + i64::from(!context_message.is_empty()), Ordering::SeqCst);
+        // One result owed for this seed; each accepted steer adds another.
+        self.pending_results.store(1, Ordering::SeqCst);
         let _ = self.events.send(ConversationEvent::TurnStarted {
             turn_id: turn_id.clone(),
         });
@@ -475,13 +452,7 @@ impl Harness for ClaudeHarness {
             .as_mut()
             .ok_or_else(|| anyhow!("claude stdin not available"))?;
         if let Err(error) = stdin
-            .write_all(
-                format!(
-                    "{context_message}{}",
-                    user_message_line(&turn_content, &turn_id)
-                )
-                .as_bytes(),
-            )
+            .write_all(user_message_line(&turn_content, &turn_id).as_bytes())
             .await
         {
             // The process died between spawn and write; tear it down so the
@@ -637,65 +608,6 @@ mod activity_tests {
         .expect("a live Claude child must have observable CPU without a process group");
         assert_eq!(harness.process_group_id(), None);
         harness.stop().await.unwrap();
-    }
-}
-
-#[cfg(all(test, unix))]
-mod native_input_tests {
-    use crate::chat::types::ConversationEvent;
-    use crate::engine::AgentConfig;
-    use crate::harness::{claude::ClaudeHarness, Harness};
-    use std::os::unix::fs::PermissionsExt;
-    use std::time::Duration;
-    use tokio::sync::mpsc;
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)] // Provider selection is process-local.
-    async fn context_acknowledgement_does_not_finish_the_skill() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
-        let fixture = tempfile::tempdir().unwrap();
-        let script = fixture.path().join("claude");
-        std::fs::write(
-            &script,
-            r##"#!/bin/sh
-read -r context
-printf '%s\n' '{"type":"result","subtype":"success","num_turns":0,"result":""}'
-read -r command
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"skill ran"}]}}'
-printf '%s\n' '{"type":"result","subtype":"success","num_turns":1,"result":"skill ran"}'
-"##,
-        )
-        .unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let lf = fixture.path().join("lf");
-        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &lf).unwrap();
-        std::env::set_var("LF_HOME", fixture.path());
-        // Vendor setup prepends this directory only to the child's PATH.
-        std::env::set_var("LF_BIN", lf);
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let mut harness = ClaudeHarness::new(tx);
-        harness.config = Some(AgentConfig {
-            cwd: Some(fixture.path().into()),
-            ..Default::default()
-        });
-        harness.native_skill = Some((fixture.path().into(), "/fixture:invoke argument".into()));
-        harness.send_input("separate user context").await.unwrap();
-        let observed = tokio::time::timeout(Duration::from_secs(5), async {
-            let mut text = String::new();
-            while let Some(event) = rx.recv().await {
-                match event {
-                    ConversationEvent::TextDelta { content, .. } => text.push_str(&content),
-                    ConversationEvent::TurnCompleted { .. } => return text,
-                    _ => {}
-                }
-            }
-            text
-        })
-        .await;
-        harness.stop().await.unwrap();
-        assert_eq!(observed.unwrap(), "skill ran");
     }
 }
 

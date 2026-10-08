@@ -12,7 +12,7 @@ precedence over a single mechanism. No provider capability work is authorized.
 Existing conversations are entirely out: no instruction-title repair or old
 unnamed reconnect handling. Concurrent manual-rename preservation remains unproved.
 The demo must show a short start-path coverage table, including unsupported future
-starts and the exact missing capability. No question or scope decision blocks it.
+starts and the exact missing capability.
 
 Sidebar/tab/window agreement, readable Task-first titles, plain terminal/herdr
 presentation and retained latest-message hooks remain host acceptance. Request
@@ -54,7 +54,7 @@ to gate; helper fixtures establish merging and repeated installation only.
 | How the Session starts | Titled? | Evidence or missing capability |
 | --- | --- | --- |
 | lf interactive, Task | Yes: Task id and purpose | Public CLI/PTY fixture; live cmux rendering still unavailable. |
-| lf interactive, taskless | Yes: Session name | Same fixture proves agreement with `lf session list` and live host rename commands. |
+| lf interactive, taskless | Yes: Session name | Same fixture proves agreement with `lf session list` and rename commands received by a cmux stub. |
 | lf headless, Task or taskless | Yes in Loopflow | Shared capture creation names every agent Session before provider launch; no terminal title without a terminal. |
 | New plain Claude TUI | Yes | Real 2.1.295 TUI emits request title; manual rename survives the next turn. |
 | New plain `claude -p` | Yes | Real 2.1.295 headless run saves `Plan store migration` in native history. |
@@ -97,8 +97,8 @@ rename preservation. Old unnamed/named resume probes and all resume-only naming
 code are removed.
 
 The twelve-launch public CLI fixture covers Task/taskless names, rename/reconnect
-and host failure in isolated homes. Only stderr has a PTY; this proves no native
-TUI or rendered host. Lifecycle/capture/attribution fixtures retain human precedence
+and host failure in isolated homes, with stub providers and cmux. Only stderr has
+a PTY; this proves no native TUI or rendered host. Lifecycle/capture/attribution fixtures retain human precedence
 and request/Goal identity. Gate retains driver replacement, missing cmux executable,
 captured-Flow launch and installation-entry acceptance.
 
@@ -110,6 +110,10 @@ workspace/tab names only; window-bar propagation needs observation. No
 unsynchronized terminal writer is planned. No publication, landing or acceptance
 is claimed. Release's entry-point lesson applies: native callback, actual hook,
 TUI/headless launch, installation and configured-host proofs are distinct.
+The installation helper is reached after published promotion when skill sync is
+enabled; its unit tests do not exercise that entry point or recovery. Gate's
+installation proof requires disposable OS-account isolation, as `account_home`
+does not follow fixture `HOME` or `LF_HOME`.
 
 ## Delete — do not maintain
 
@@ -128,7 +132,7 @@ readback. Hooks derive one title before provider work; empty requests need no
 database or socket. The interactive runner owns its observer directly. Review
 also fixed an outside-repository assertion previously masked by the generic trigger.
 
-Checks: `cargo build -p loopflow --bin lf`, isolated `native_titles` units (2), public CLI title/rename/reconnect fixture (12 launches), Claude/Codex TUI probes, fmt, all-target Clippy, Ruff and `git diff --check` pass; TUI captures: `/tmp/lf-title-compress-{claude,codex}-20261008/`; prior headless proofs retained at `b1feca0eb:scratch/every-lf-session-in-cmux.md`; host/installation acceptance remains demo/gate-owned.
+Checks: `git diff --check` passes (October 8 realign, prose only); reuse `ca5a28b31` build, native-title units, twelve-launch CLI fixture, Claude/Codex TUI, fmt, Clippy and Ruff passes and `b1feca0eb` headless evidence; host judgment remains demo-owned, installation proof gate-owned.
 
 Earlier request/Goal and Task-primary proof: `91c4d07f9:scratch/every-lf-session-in-cmux.md`.
 Earlier transport/demo plan: `04027f096:scratch/every-lf-session-in-cmux.md`.

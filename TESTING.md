@@ -114,8 +114,8 @@ saves the name; Codex currently records the missing embedded naming endpoint.
 Old conversations and resume repair are out of scope. No installed
 accounts, host shims, or cmux windows participate.
 The probe uses native terminal-title defaults and checks the latest OSC title,
-so an earlier correct title cannot hide a later overwrite. This does not cover
-embedded execution or the configured shim.
+so an earlier correct title cannot hide a later overwrite. The TUI probe does not
+cover embedded Codex or the configured shim; `--headless` records `codex exec` separately.
 
 ```bash
 uv sync

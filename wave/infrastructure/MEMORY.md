@@ -2,14 +2,15 @@
 
 ## Session titles (LOO-439, 2026-10-08)
 
-Jack Heart authorized account-free demo, preserving windows; no landing.
-October 8 correction `283fa7b5-3fdd-4457-9170-0de821534803` selects maximum
-supported future coverage: lf/plain, interactive/headless, Task/taskless. Existing
-conversations are out; resume hooks/readers/probes removed. No provider work.
-Claude TUI/headless and shared-server Codex TUI name new requests. Embedded Codex
-and plain exec lack the inspected naming endpoint; demo table records gaps.
-cmux denied unfocused creation. No host/shim/installation acceptance; settings
-and windows unchanged. Plan: `scratch/every-lf-session-in-cmux.md`.
+Jack Heart authorized account-free demo; no window changes or landing.
+`283fa7b5-3fdd-4457-9170-0de821534803` selects maximum supported future
+coverage: lf/plain, interactive/headless, Task/taskless. Existing conversations
+and provider work are out; resume-only code removed.
+Claude TUI/headless and shared-server Codex TUI name requests; embedded Codex/exec
+lack the inspected endpoint. Stub cmux/native OSC prove no host agreement.
+cmux denied unfocused creation; host/shim/installation remain unproved.
+Live cmux renames use its control channel.
+Plan: `scratch/every-lf-session-in-cmux.md`.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

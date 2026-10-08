@@ -560,6 +560,139 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let home = tempfile::tempdir().unwrap();
+    let saved = home.path().join("saved");
+    let caller = home.path().join("caller");
+    let bin = home.path().join("bin");
+    for (path, marker) in [(&saved, "SAVED_CONTEXT"), (&caller, "CALLER_CONTEXT")] {
+        std::fs::create_dir_all(path.join("scratch")).unwrap();
+        std::fs::write(path.join("scratch/context.md"), marker).unwrap();
+    }
+    std::fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "${1:-}" = --version ]; then exit 0; fi
+pwd -P > "$LF_TEST_RESUME_PROOF.cwd"
+printf '%s\n' "$@" > "$LF_TEST_RESUME_PROOF.args"
+printf '%s\n' "$LF_AGENT_CALLER" > "$LF_TEST_RESUME_PROOF.caller"
+cat > "$LF_TEST_RESUME_PROOF.input"
+printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success","result":"continued"}'
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (id, input, dir) = prepare_conversation(home.path(), &saved, "claude", "Original input");
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    database
+        .execute(
+            "UPDATE agent_sessions SET provider_thread='fixture-native',skill='missing-original-skill' WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    let original = std::fs::read(dir.join("manifest.json")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let wave = loopflow::work::wave::Wave::new(
+        loopflow::id::WaveId::new(),
+        "caller-wave".into(),
+        caller.to_str().unwrap().into(),
+    );
+    store.create_wave(&wave).unwrap();
+    std::fs::create_dir_all(saved.join("wave/caller-wave")).unwrap();
+    std::fs::write(
+        saved.join("wave/caller-wave/GOAL.md"),
+        "CALLER_WAVE_CONTEXT",
+    )
+    .unwrap();
+    let before = store.session(&id).unwrap().unwrap();
+    let history = store.session_history(&id, 0, 0).unwrap();
+    let path = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let output = command(
+        home.path(),
+        &[
+            "-b",
+            "--no-loopflow",
+            "session",
+            "resume",
+            &id,
+            "Continue here",
+        ],
+    )
+    .current_dir(&caller)
+    .env("PATH", path)
+    .env("HOME", home.path())
+    .env("LF_TEST_RESUME_PROOF", home.path().join("proof"))
+    // A calling agent's Wave must not supply a different conversation's context.
+    .env("LF_WAVE_ID", wave.id().as_str())
+    .output()
+    .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sent = std::fs::read_to_string(home.path().join("proof.input")).unwrap();
+    assert!(sent.contains("SAVED_CONTEXT"), "{sent}");
+    assert!(sent.contains("Continue here"), "{sent}");
+    assert!(!sent.contains("CALLER_CONTEXT"), "{sent}");
+    assert!(!sent.contains("CALLER_WAVE_CONTEXT"), "{sent}");
+    assert!(!sent.contains("missing-original-skill"), "{sent}");
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("proof.cwd"))
+            .unwrap()
+            .trim(),
+        saved.canonicalize().unwrap().to_str().unwrap()
+    );
+    let args = std::fs::read_to_string(home.path().join("proof.args")).unwrap();
+    assert!(args.contains("--resume\nfixture-native\n"), "{args}");
+    let after = store.session(&id).unwrap().unwrap();
+    assert_eq!(after.cwd, before.cwd);
+    assert_eq!(after.skill, before.skill);
+    assert_eq!(after.task_id, before.task_id);
+    assert_eq!(after.wave_id, before.wave_id);
+    assert_ne!(after.artifact_key, input);
+    assert_eq!(std::fs::read(dir.join("manifest.json")).unwrap(), original);
+    assert!(store
+        .session_history(&id, 0, 0)
+        .unwrap()
+        .starts_with(&history));
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            home.path()
+                .join("runs")
+                .join(&after.artifact_key[..2])
+                .join(&after.artifact_key)
+                .join("manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["cwd"], saved.to_str().unwrap());
+    let agent_caller: loopflow::process::AgentCaller =
+        serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
+    assert_eq!(agent_caller.session_id, id);
+    let process_cwd = store
+        .process(&agent_caller.origin_process_lfid)
+        .unwrap()
+        .unwrap()
+        .cwd
+        .unwrap();
+    assert_eq!(
+        std::path::Path::new(&process_cwd).canonicalize().unwrap(),
+        caller.canonicalize().unwrap()
+    );
+}
+
 #[test]
 fn waiting_lists_only_conversations_waiting_on_a_person() {
     let home = tempfile::tempdir().unwrap();

@@ -38,6 +38,7 @@ async def _native(
     context: str,
     additive: str | None,
     source: Path,
+    delivery: tuple[threading.Event, threading.Event] | None = None,
 ) -> dict:
     process = await asyncio.create_subprocess_exec(
         codex,
@@ -61,6 +62,8 @@ async def _native(
             },
         )
         await _send(process, {"method": "initialized"})
+        if delivery:
+            return await _steer_redelivery(process, workspace, source, context, delivery)
         roots = snapshot.parent.parent
         listed = await _request(
             process,
@@ -144,6 +147,68 @@ async def _native(
             await process.wait()
 
 
+async def _steer_redelivery(
+    process: asyncio.subprocess.Process,
+    workspace: Path,
+    source: Path,
+    marker: str,
+    delivery: tuple[threading.Event, threading.Event],
+) -> dict:
+    received, release = delivery
+    inputs = [
+        {"type": "skill", "name": "audit", "path": str(source)},
+        {"type": "text", "text": f"$audit {marker}"},
+    ]
+    checks = {}
+    for count in [2, 1]:
+        received.clear()
+        release.clear()
+        thread = await _request(
+            process,
+            "thread/start",
+            {"cwd": str(workspace), "approvalPolicy": "never", "sandbox": "read-only"},
+        )
+        thread_id = thread["thread"]["id"]
+        turn = await _request(
+            process,
+            "turn/start",
+            {"threadId": thread_id, "input": [{"type": "text", "text": "Start the fixture."}]},
+        )
+        if not await asyncio.to_thread(received.wait, 15):
+            raise RuntimeError("fake API did not receive the initial turn")
+        request_id = uuid.uuid4().hex
+        request = {
+            "id": request_id,
+            "method": "turn/steer",
+            "params": {
+                "threadId": thread_id,
+                "expectedTurnId": turn["turn"]["id"],
+                "input": inputs,
+            },
+        }
+        replies = []
+        try:
+            for _ in range(count):
+                await _send(process, request)
+                # Keep replies as evidence; a caller losing the first reply
+                # would resend these exact bytes with the same RPC id.
+                replies.append(await _until(process, lambda event: event.get("id") == request_id))
+        finally:
+            release.set()
+        await _until(process, lambda event: event.get("method") == "turn/completed")
+        history = await _request(
+            process, "thread/read", {"threadId": thread_id, "includeTurns": True}
+        )
+        case = "duplicate" if count == 2 else "single"
+        checks[f"{case}_accepted"] = all(
+            reply.get("result", {}).get("turnId") == turn["turn"]["id"] for reply in replies
+        )
+        checks[f"{case}_thread_retained"] = history["thread"]["id"] == thread_id
+    # A fresh turn establishes that the same definition and input are valid.
+    await _turn(process, workspace, inputs)
+    return checks
+
+
 def _skill_paths(request: dict) -> list[str]:
     return [
         block["text"].split("<path>", 1)[1].split("</path>", 1)[0]
@@ -157,8 +222,11 @@ def _skill_paths(request: dict) -> list[str]:
     ]
 
 
-def _probe(lf: Path | None, codex: str, additive: str | None = None) -> bool:
+def _probe(
+    lf: Path | None, codex: str, additive: str | None = None, redelivery: bool = False
+) -> bool:
     requests = []
+    received, release = threading.Event(), threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: object) -> None:
@@ -166,6 +234,11 @@ def _probe(lf: Path | None, codex: str, additive: str | None = None) -> bool:
 
         def do_POST(self) -> None:
             requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if redelivery and len(requests) in (1, 3):
+                received.set()
+                if not release.wait(20):
+                    self.send_error(504, "steering probe did not release the fixture")
+                    return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -236,8 +309,57 @@ def _probe(lf: Path | None, codex: str, additive: str | None = None) -> bool:
                 snapshot.parent.mkdir(parents=True)
                 snapshot.write_text(source)
                 checks = asyncio.run(
-                    _native(codex, workspace, env, snapshot, context, additive, skill)
+                    _native(
+                        codex,
+                        workspace,
+                        env,
+                        snapshot,
+                        context,
+                        additive,
+                        skill,
+                        (received, release) if redelivery else None,
+                    )
                 )
+                if redelivery:
+                    texts = (
+                        [
+                            block.get("text", "")
+                            for item in requests[1].get("input", [])
+                            if item.get("role") == "user"
+                            for block in item.get("content", [])
+                        ]
+                        if len(requests) >= 2
+                        else []
+                    )
+                    checks.update(
+                        expected_requests=len(requests) == 5,
+                        duplicate_model_input=sum(text.count(f"$audit {context}") for text in texts)
+                        == 2,
+                        steer_skill_not_expanded=len(requests) >= 2
+                        and not _skill_paths(requests[1]),
+                        single_steer_not_expanded=len(requests) >= 4
+                        and not _skill_paths(requests[3])
+                        and sum(
+                            block.get("text", "").count(f"$audit {context}")
+                            for item in requests[3].get("input", [])
+                            if item.get("role") == "user"
+                            for block in item.get("content", [])
+                        )
+                        == 1,
+                        start_skill_expanded=len(requests) == 5
+                        and str(skill) in _skill_paths(requests[4]),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "mode": "steer-redelivery",
+                                "requests": len(requests),
+                                "checks": checks,
+                            }
+                        ),
+                        flush=True,
+                    )
+                    return all(checks.values())
                 checks.update(
                     expected_requests=len(requests) == (5 if additive else 2),
                     unregistered_path_ignored=len(requests) >= 2
@@ -352,12 +474,23 @@ def main() -> int:
         choices=["original", "alias"],
         help="Probe a skill link while preserving sibling roots and plain invocation",
     )
+    parser.add_argument(
+        "--redelivery",
+        action="store_true",
+        help="Check duplicate structured steering with an identical RPC id",
+    )
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")
-    if args.lf and args.additive:
-        parser.error("--additive probes provider catalog behavior without --lf")
-    return 0 if _probe(args.lf.resolve() if args.lf else None, args.codex, args.additive) else 1
+    if sum([bool(args.lf), bool(args.additive), args.redelivery]) > 1:
+        parser.error("--lf, --additive and --redelivery are separate probes")
+    return (
+        0
+        if _probe(
+            args.lf.resolve() if args.lf else None, args.codex, args.additive, args.redelivery
+        )
+        else 1
+    )
 
 
 if __name__ == "__main__":

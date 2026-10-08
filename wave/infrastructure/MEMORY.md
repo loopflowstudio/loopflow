@@ -691,28 +691,24 @@ Claude probe returned `invalid_grant`. No source binary may migrate the installe
 Home. Synthetic passes establish no live or installed outcome. Remaining caveats:
 `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
-## Task deletion and command ownership (LOO-305, curated 2026-10-05)
+## Task deletion and command ownership (LOO-305, curated 2026-10-08)
 
-Jack Heart selected provider/local deletion, command consolidation and delivery
-through the saved Flow; execution settlement remained deferred. Detailed branch
-proofs, command mappings and the source-demo incident remain at
-`c4373492cfc0c77fc27a7887045f74c48b381e72:wave/infrastructure/MEMORY.md`
-under this heading, with original artifacts at `4a14c0a47dc6e04be9668fb72b737828565a931d`.
-[CLI docs](../../docs/lf.md) and [planning architecture](../../docs/architecture/planning.md)
-own current mechanics; historical command spellings are not aliases.
+Jack Heart selected provider/local deletion, command consolidation and saved-Flow
+delivery; execution settlement stayed deferred. Decisions, proofs and the incident:
+`423ff2ec2:wave/infrastructure/MEMORY.md` under this heading. Current mechanics:
+[CLI](../../docs/lf.md), [planning](../../docs/architecture/planning.md).
 
-Fresh ownership authorizes deletion; acknowledgement or explicit trash evidence
-confirms it. Missing membership proves neither. Preserve terminal times, Done
-outcomes, PRs and Git; stale snapshots cannot erase positive confirmation.
-Completion and planning have separate writers. Retain merged-PR evidence and
-original completion time on retry. Planning-only creation needs neither checkout
-nor agent; post-create allocation failure retains identity for recovery rather
-than compensating deletion. Upstream tracking never defines checkout identity.
+Fresh ownership authorizes deletion; acknowledgement or explicit trash confirms it.
+Missing membership proves neither. Preserve terminal times, Done outcomes, PRs,
+Git and positive confirmation across stale reads. Completion and planning have
+separate writers; retry retains merged-PR evidence and original completion time.
+Planning-only creation needs no checkout or agent. Allocation failure preserves
+created identity; upstream tracking never defines checkout identity.
 
-The configured deletion demo removed LOO-299–302 but advanced installed-Home
-drafts and broke its older CLI; Jack then forbade branch-binary access and
-promotion. Source proofs use disposable Homes without inherited authority.
-Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
+The deletion demo removed LOO-299–302 but migrated the installed Home and broke
+its older CLI. Jack forbade branch-binary access and promotion: use disposable
+Homes without inherited authority. Removal is not termination. Exact incident:
+`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
 ## Task convergence (LOO-319, curated 2026-10-07)
 
@@ -1086,10 +1082,16 @@ not recall.
 Claude's hook maps context to system on tested Sonnet/Opus; queued user context
 survives resume without resupply or answer leakage. PTY injection submits drafts;
 inbox slash text stays unexpanded. A replacement terminal remains unapproved.
-Headless resume atomically reserves capture and claims driver. CLI fixtures retain
-held-owner captures on both harnesses; store/capture proofs cover losing claims,
-handoff and failed publication. Preserving a refused input is not delivery through
-its owner, uncertain-acknowledgement recovery or installed continuity. Resume context
-still follows caller cwd despite retained Session placement. Release's entry-point
-lesson applies: admission, acknowledgement and application need separate proof.
+Headless resume atomically admits capture and driver. Fixtures prove held-owner
+preservation, losing claims, handoff and failed publication, not current-owner
+delivery or installed continuity. Cross-directory CLI proof now establishes saved
+Session context/provider cwd and unchanged LF Process caller cwd, native identity
+and historical bytes. Prior evidence: `423ff2ec2:wave/infrastructure/MEMORY.md`.
+
+Codex 0.160.1 single/duplicate structured steers omit native skill expansion;
+identical RPC ids repeat model input. Five fake-API requests include a successful
+fresh-turn expansion control. Both replies were collected: this disproves safe
+redelivery, not recovery from an actual lost reply. Widening `send_current` cannot
+supply native skill delivery; native-boundary admission and receipt correlation
+remain unproved. Admission, acknowledgement and application differ.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

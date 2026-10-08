@@ -243,6 +243,35 @@ documents the ineffective per-cwd field and separately describes process-wide ro
 replacement; provider receipts govern these version-specific observations.
 
 
+## Structured steering and redelivery
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --redelivery
+```
+
+October 8, Codex 0.160.1: five fake-API requests distinguish duplicate steering,
+single steering and a fresh-turn control. The server holds each initial response
+until the client submits the steer, so the input addresses an active turn.
+Two identical `turn/steer` messages, including the same JSON-RPC id and expected
+turn, both succeed and appear twice in the next model request. A single steer
+appears once. Neither expands the explicit skill input. A fresh `turn/start`
+with the same skill path and arguments expands it natively.
+
+Exit zero reproduces these counterexamples; it does not certify delivery.
+Both acknowledgements are collected as evidence, not literally dropped. This
+shows why resending after a lost acknowledgement can duplicate input. It proves
+neither LF admission nor cancellation/handoff recovery. No live model, credentials,
+native terminal or external side effects participate. A successful steer receipt
+cannot stand in for native expansion or application exactly once. The official
+[App Server reference](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn)
+describes steering and its turn-id acknowledgement; that acknowledgement is not
+an idempotency contract.
+
+Current-owner skill delivery needs a native turn boundary and durable correlation
+before any retry. Widening LF's text-only `send_current` would retain both faults.
+Existing best-effort Task steers are not a Session skill-input queue.
+
 ## Decisions and remaining work
 
 Jack Heart selected native invocation on the skill's own harness, translated

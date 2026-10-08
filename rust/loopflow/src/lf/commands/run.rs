@@ -63,10 +63,22 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
             (provider, _) => provider.clone(),
         };
     }
-    turn.resume = Some(session.id);
+    turn.resume = Some(session.id.clone());
     turn.skill_input = None;
     turn.resolved_invocation = None;
-    run(None, Some(message), &turn)
+    turn.task = session.task_id.as_ref().map(ToString::to_string);
+    turn.wave = session
+        .wave_id
+        .as_ref()
+        .map(|id| store.get_wave(id))
+        .transpose()?
+        .flatten()
+        .map(|wave| wave.slug().to_string());
+    // Continuation belongs to the saved conversation, even when invoked from
+    // another Task's checkout. Do not rediscover Work from the caller's cwd.
+    let built = build_prompt_at(None, Some(message), message, &turn, session.cwd, None)?;
+    print_context_header(&built, &turn);
+    run_prompt(&built, &turn).map(|_| ())
 }
 
 #[doc(hidden)]
@@ -342,10 +354,12 @@ fn build_prompt_at(
         Surface::Headless
     };
 
-    let wave = cli
-        .wave
-        .clone()
-        .or_else(crate::work::wave::context::resolve_ambient_wave_name);
+    let wave = cli.wave.clone().or_else(|| {
+        cli.resume
+            .is_none()
+            .then(crate::work::wave::context::resolve_ambient_wave_name)
+            .flatten()
+    });
     let prepared = prepare_process_prompt(
         &config,
         ProcessPromptInput {

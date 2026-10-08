@@ -157,6 +157,7 @@ lf mon prune --dry-run     # inspect dead receipts and registered orphan provide
 lf session list
 lf resume                         # last interactive Session in this worktree
 lf resume SESSION                 # Loopflow, Claude, or Codex ID
+lf -b resume SESSION "Continue"    # headless turn in the saved Session workspace
 lf session list --interactive false --history --json
 lf session connect SESSION
 lf session history SESSION --json
@@ -173,6 +174,8 @@ ones, and `--waiting` keeps those waiting on you. `--all` means all repositories
 in this worktree, falling back per Session to its last opening when native input
 history is unavailable. Assistant output and background work do not change that
 order. A Flow is never resumed; `lf task run ISSUE` runs a fresh one.
+Headless continuation reads the saved workspace's context and native history,
+even from another directory, without re-running the original skill.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 

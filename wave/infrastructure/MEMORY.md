@@ -1,5 +1,27 @@
 # infrastructure wave memory
 
+## Plan ownership exploration (LOO-406, 2026-10-07)
+
+Jack Heart requested exploration only. His leaning is a Git remote plan ref
+outside code branches, allowing pending local data;
+the laptop authors work and development machines remain disposable. Cover one
+person's machines, a startup sharing Linear, and independent company developers
+whose code remote may prohibit custom refs or private planning. Namespaces separate
+writes, not access; personal Wave definitions must not leak into shared repo files.
+
+Jack proposed a connection back from `lf --machine X` to the host's task store.
+Host means origin in the draft; X retains execution. Jack questioned pending-update
+complexity and leans toward Linear authority when connected, through the host
+online. Disconnect retry and direct Linear fallback remain open. No resident or
+automatic turn/Flow retry is selected. A callback supplies no laptop-loss recovery.
+
+Jack selected local lifecycle first, echoing Linear APIs/fields with attention to
+ID generation, then requested pursuit through review, not landing.
+Draft: `scratch/explore-loopflow-s-own-store.md`; callback, Git and export follow
+separately. Existing IDs survive; UUID/selector/provider mapping remain distinct.
+Prior attempts are inventoried there. A write-once external ID alone cannot prevent
+concurrent export creation before assignment.
+
 ## Program Status direction (LOO-398, 2026-10-07)
 
 Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
@@ -689,25 +711,18 @@ authority and pin the compiled CLI in fixtures. Synthetic passes prove no live
 OAuth or installed outcome. State remains Home-local; no installed repair is
 authorized.
 
-## Account auth consolidation (LOO-320, curated 2026-10-04)
+## Account auth consolidation (LOO-320, curated 2026-10-07)
 
-Jack Heart approved LOO-320's scope and delivery; cross-account continuation,
-native refresh coordination and headroom ranking were excluded. Detailed branch
-proofs and retained failures remain in
-[the October 4 source memory](https://github.com/loopflowstudio/loopflow/blob/49f8385f0f41194434ce208a2b63ea10b570e723/wave/infrastructure/MEMORY.md#account-auth-consolidation-loo-320-branch-evidence-2026-09-27).
-Current mechanics belong in [subscriptions](../../docs/subscriptions.md).
-
-Native providers own OAuth and callback completion; a printed OSC URL or cached
-login cannot prove the current attempt succeeded. Cached inspection must avoid
-launch, decryption/import, broker contact and directory creation. Persist usage
-windows with their original time/owner; missing windows and reset success never
-prove new capacity. Record selected account before native Session discovery.
-
-Browser login without pasted code, first-time connection, remembered Linear
-profile targeting and live Claude/Codex windows remain unproved; the configured
-Claude probe returned `invalid_grant`. No source binary may migrate the installed
-Home. Synthetic passes establish no live or installed outcome. Remaining caveats:
-`abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
+Jack Heart approved scope/delivery excluding cross-account continuation, native
+refresh coordination and headroom ranking. Native providers own OAuth completion;
+a URL or cached login proves no current success. Cached inspection must have no
+launch/import/broker effects. Preserve usage age/owner; reset proves no capacity.
+Select the account before native Session discovery. Browser/first connection,
+Linear profile targeting and live windows remain unproved; the configured Claude
+probe returned `invalid_grant`. No source-binary migration or installed repair is
+authorized. Full decision, evidence and source links survive at
+`35e759aaf4e:wave/infrastructure/MEMORY.md` under this heading; current mechanics
+belong in [subscriptions](../../docs/subscriptions.md).
 
 ## Task deletion and command ownership (LOO-305, curated 2026-10-05)
 
@@ -732,25 +747,17 @@ drafts and broke its older CLI; Jack then forbade branch-binary access and
 promotion. Source proofs use disposable Homes without inherited authority.
 Removal is not termination. Detail: `abd039b2a818669c43e7c189f6a37382335639f2:wave/infrastructure/MEMORY.md`.
 
-## Task convergence (LOO-319, curated 2026-10-02)
+## Task convergence (LOO-319, curated 2026-10-07)
 
-[LOO-319](https://linear.app/loopflow/issue/LOO-319) and
-[PR #1301](https://github.com/loopflowstudio/loopflow/pull/1301) retain ownership.
-[Prior memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#task-convergence-loo-319-branch-evidence-2026-09-27)
-preserves exact slice/demo evidence and superseded Flow compositions.
-
-Jack Heart selected reconciliation before decision/publication and retained human
-demo and authored delivery. Captured invocations keep their definitions; tests
-must locate captured policy rather than copy current catalog indices. Feedback
-never supplies a verdict, and failed decisions cannot regain authority. Task
-agent choice survives PM refresh and reloads at each launch, including review.
-A PATH-only provider repair failed: executable and Home must agree. The real
-Codex fixture used synthetic feedback and predates generic loop-decide; configured
-Claude launch/resume, real five-minute stall and rendered Desktop agreement
-remain unverified. Local simulated liveness is not signal authority. Preserve
-first PID/birth identity across missing samples; active tool work prevents a
-false stall. TESTING.md owns fixture isolation and disk-resource policy. Source
-verification uses disposable stores; no old branch binary may migrate main.
+Jack Heart selected reconciliation before publication, human demo and authored
+delivery for LOO-319 / PR #1301. Captured invocations retain their definitions;
+feedback supplies no verdict. Task agent selection survives PM refresh and reloads
+at launch. PATH and provider Home must agree. Configured Claude continuation,
+real stall and Desktop agreement remain unproved; synthetic liveness grants no
+signal authority. Retain first PID/birth evidence across missing samples and
+recognize active tools. The historical synthetic Codex proof, remaining acceptance
+and original source references are preserved at
+`35e759aaf4e:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Data model and performance decisions (reconciled 2026-09-30)
 

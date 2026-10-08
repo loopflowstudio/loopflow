@@ -11,11 +11,10 @@ October 8: end triggers completion; status, Workflow position and Process livene
 are independent. Linear completion preserves execution; failed end requests retry
 without replaying the Flow. Reopening supersedes old completion intent.
 
-LOO-406's writer remains unfinished (`de000c24f` plus uncommitted changes).
-Preserve local save/optional sync without
-end coupling. Its recorded failing regression overwrites concurrent reopening;
-matching readback proves no concurrency guarantee. Neither automatic propagation
-nor concurrent-change preservation has been relaxed.
+October 8, Jack Heart authorized stacking LOO-418 on LOO-406 `558a39232`: local
+planning, optional placement, independent completion. Observed conflicts adopt Linear; the enabled unseen
+read/write-race regression remains. Matching readback proves no concurrency
+guarantee. Integration proves no acceptance.
 
 Task owns placement and one optional PR, preserving history and unresolved scope.
 LOO-385 overlaps without closure authority. Jack accepted ship or the next
@@ -27,12 +26,12 @@ Linear due dates, including removal; retry intent stays immutable. Failed promot
 retains confirmed copy. Handoffs preserve child edits; Task placement owns the
 validated PR copy. Admission records performed location; Flow/Started commit atomically.
 
-The composed fixture at `432f37065` proves simulated merge → linked follow-up →
-independent completion → actual Flow arrival across CLI/monitor and Rust/Swift.
-Its capture is `tests/fixtures/dto/task_lifecycle.json`. Reads reuse delivery
-evidence; settlement rechecks it transactionally. Local-only integration, provider
-concurrency, full gate and native acceptance remain unproven. Earlier gate repairs
-and fixture limits remain in that commit's design.
+`432f37065` retains earlier Rust/Swift proof. The integrated
+Docker fixture proves local filing → completion during a real Flow → actual
+arrival through CLI/monitor. Its `tests/fixtures/dto/task_lifecycle.json` passes
+Rust decoding. Observed reopening and durable end retry pass; the unseen-write
+race fails. Provider relation sync, combined Swift/full gate and native acceptance
+remain. Reads reuse evidence; settlement rechecks it transactionally.
 
 ## Terminal-host adoption (2026-10-07)
 

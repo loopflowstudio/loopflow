@@ -1564,7 +1564,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "UPDATE tasks SET completed_at=1 WHERE id=?1",
+            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
             [bound_task.as_str()],
         )
         .unwrap();

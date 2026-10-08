@@ -607,6 +607,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     for (id, title) in [(first, "First"), (second, "Second")] {
         store
             .create_task(&loopflow::planning::NewTask {
+                due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
                 title: title.into(),
@@ -1825,6 +1826,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         }
         let active = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Started work".into(),
@@ -1833,6 +1835,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             .unwrap();
         let backlog = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: project.id.clone(),
                 title: "Unreviewed backlog".into(),
@@ -2107,6 +2110,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         }
         let task = store
             .create_task(&NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: projects[0].id.clone(),
                 title: "Refile me".into(),

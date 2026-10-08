@@ -677,7 +677,7 @@ impl SkillExecutor for &Driver<'_> {
     async fn run_command(
         &self,
         ops: &crate::engine::ConcreteCommand,
-        ctx: ExecutionContext,
+        _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
         eprintln!("op: {label}");

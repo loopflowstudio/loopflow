@@ -1,5 +1,5 @@
 use super::{block_on_task, owning_wave, task_error, task_store};
-use crate::ops::{OpsError, OpsResult};
+use crate::ops::OpsResult;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
 use crate::work::task::{PrPhase, Task};
 use std::path::Path;
@@ -71,17 +71,31 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("destination Wave is not initialized"))?;
             let project = crate::ops::project::current_project(&store, &wave)?;
-            let (issue_id, title, existing) = if let Some(existing) = &options.existing {
-                let client = crate::ops::pm::issue_client(repo).await?;
-                let (item, _) = client
-                    .issue_ownership(existing)
+            let (issue_id, title, existing) = if let Some(selector) = &options.existing {
+                let saved = match store
+                    .get_task_by_issue(selector)
                     .await
                     .map_err(task_error)?
-                    .ok_or_else(|| task_error("follow-up Task not found"))?;
-                if item.id == task.plan.id.as_str() {
+                {
+                    Some(saved) => saved,
+                    None => {
+                        let acquired = crate::ops::task_pm::resolve_task_async(
+                            repo,
+                            selector,
+                            crate::ops::pm::PmRefresh::Force,
+                        )
+                        .await?;
+                        store
+                            .get_task_by_issue(&acquired.item.id)
+                            .await
+                            .map_err(task_error)?
+                            .ok_or_else(|| task_error("follow-up Task was not retained"))?
+                    }
+                };
+                if saved.id == task.id {
                     return Err(task_error("a Task cannot follow up itself"));
                 }
-                (item.id, item.name, true)
+                (saved.id.to_string(), saved.plan.title, true)
             } else {
                 let title = options
                     .title
@@ -99,7 +113,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                         "a new follow-up needs --notes with the evidence condition",
                     ));
                 }
-                (uuid::Uuid::new_v4().to_string(), title, false)
+                (crate::durable::TaskId::new().to_string(), title, false)
             };
             if let Some(due) = &options.due {
                 let format = time::format_description::parse_borrowed::<2>("[year]-[month]-[day]")
@@ -120,19 +134,13 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                     .as_deref()
                     .unwrap_or("Linked accepted follow-through")
             );
-            let context = crate::ops::pm::resolve_context(repo, wave_name).await?;
-            let (team_id, state_id) = context
-                .client
-                .follow_up_creation_state()
-                .await
-                .map_err(task_error)?;
             let candidate = FollowThroughIntent {
                 key: key.into(),
                 issue_id,
                 relation_id: uuid::Uuid::new_v4().to_string(),
                 project_id: project.id,
-                team_id,
-                state_id,
+                team_id: String::new(),
+                state_id: None,
                 wave: wave_name.into(),
                 title,
                 notes,
@@ -158,25 +166,78 @@ async fn confirm_intent(
     task: &Task,
     intent: &FollowThroughIntent,
 ) -> OpsResult<FollowThroughLink> {
-    let ctx = crate::ops::pm::resolve_context(repo, &intent.wave).await?;
-    let item = ctx
-        .client
-        .confirm_follow_up(intent)
+    let store = task_store().await?;
+    let saved = if let Some(saved) = store
+        .get_task_by_issue(&intent.issue_id)
         .await
-        .map_err(|error| {
-            OpsError::Message(format!(
-                "Follow-up {} remains pending: {error}; retry the same --key {}",
-                intent.issue_id, intent.key
-            ))
-        })?;
-    ctx.client
-        .ensure_follow_up_relation(task.plan.id.as_str(), &intent.issue_id, &intent.relation_id)
-        .await
-        .map_err(task_error)?;
+        .map_err(task_error)?
+    {
+        saved
+    } else if intent.issue_id.starts_with("task_") && !intent.existing {
+        let project = store
+            .get_project_by_project(&intent.project_id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
+        let wave = store
+            .get_wave(&project.wave_id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("follow-up destination Wave is unavailable"))?;
+        store
+            .create_task(
+                &crate::planning::NewTask {
+                    id: crate::durable::TaskId::parse(&intent.issue_id).map_err(task_error)?,
+                    project_id: project.id,
+                    title: intent.title.clone(),
+                    description: intent.notes.clone(),
+                    due_date: intent.due.clone(),
+                },
+                crate::ops::pm::lock_wave_planning(&wave).await?,
+            )
+            .await
+            .map_err(task_error)?
+    } else {
+        // Historical provider receipts retain their UUID and payload. Acquire an
+        // already-created issue through the common owner; never issue another create.
+        let acquired = crate::ops::task_pm::resolve_task_async(
+            repo,
+            &intent.issue_id,
+            crate::ops::pm::PmRefresh::Force,
+        )
+        .await?;
+        store
+            .get_task_by_issue(&acquired.item.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("historical follow-up filing remains unconfirmed"))?
+    };
+    let item = super::task_planning_item(&store, &saved)?;
+    if let (Some(source), Some(target)) = (&task.plan.linear_id, &saved.plan.linear_id) {
+        let wave = owning_wave(&store, task).await?;
+        if crate::ops::linear_observe::connected(wave.repo()) {
+            // Local linkage is durable even while its optional provider relation is pending.
+            let result = async {
+                crate::ops::pm::issue_client(repo)
+                    .await?
+                    .ensure_follow_up_relation(
+                        source.as_str(),
+                        target.as_str(),
+                        &intent.relation_id,
+                    )
+                    .await
+                    .map_err(task_error)
+            }
+            .await;
+            if let Err(error) = result {
+                tracing::warn!(%error, "follow-up relation synchronization pending");
+            }
+        }
+    }
     Ok(FollowThroughLink {
         key: intent.key.clone(),
-        issue_id: item.id,
-        identifier: item.identifier,
+        issue_id: intent.issue_id.clone(),
+        identifier: saved.plan.identifier,
         url: item.url,
         due: item.due_date,
     })

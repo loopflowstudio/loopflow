@@ -658,7 +658,7 @@ fn print_task_snapshot(
                 format!("pending: {error}")
             }
         };
-        let branch = &snapshot.branch;
+        let branch = snapshot.branch.as_deref().unwrap_or("unplaced");
         let body = format!(
             "agent {}, provider {}",
             snapshot.agent.as_deref().unwrap_or("default"),
@@ -1641,7 +1641,7 @@ fn dispatch(
             &cli,
             &task.plan.identifier,
             &flow,
-            &task.worktree,
+            task.worktree()?,
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }

@@ -186,17 +186,6 @@ impl SqliteStore {
         Ok(Some((flow, entry)))
     }
 
-    /// A Flow process from a Task's checkout is work begun for that Task.
-    #[cfg(test)]
-    pub(crate) fn mark_task_started(&self, task: &TaskId) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE tasks SET started_at=?2 WHERE id=?1 AND started_at IS NULL",
-            params![task.as_str(), crate::store::rows::now_unix()],
-        )?;
-        Ok(())
-    }
-
     /// Flows run from `cwd`, oldest first.
     pub(crate) fn flows_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<FlowProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

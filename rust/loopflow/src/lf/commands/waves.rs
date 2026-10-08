@@ -1110,7 +1110,7 @@ async fn snapshot_tasks(
                 continue;
             }
         }
-        let parent = parent
+        parent
             .ok_or_else(|| anyhow!("Task {} has no owning Project {}", task.id, task.project_id))?;
         let item = crate::ops::task::task_planning_item(store, task)?;
         let recommended = current_plan

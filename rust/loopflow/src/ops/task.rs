@@ -40,8 +40,8 @@ use crate::store::{
 use crate::work::task::follow_through::FollowThrough;
 use crate::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
-    Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation,
-    PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
+    Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
+    TaskEventKind, TaskPr, TaskPrId,
 };
 use crate::work::wave::Wave;
 use fs2::FileExt;
@@ -4203,8 +4203,8 @@ mod tests {
     use crate::store::{SharedStore, StorageConfig};
     use crate::work::project::{Project, ProjectId};
     use crate::work::task::{
-        GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPresentation,
-        PrPublication, Task, TaskEventKind, TaskId, TaskPr, TaskPrId,
+        GithubPr, Observation, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, Task,
+        TaskEventKind, TaskId, TaskPr, TaskPrId,
     };
     use crate::work::wave::Wave;
     use std::ffi::OsString;
@@ -5417,7 +5417,7 @@ mod tests {
         // This is a reader proof, not a provider-deletion fixture.
         connection
             .execute(
-                "UPDATE tasks SET completed_at=123 WHERE id=?1",
+                "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
                 [fixture.task.id.as_str()],
             )
             .unwrap();

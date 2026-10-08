@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rusqlite::TransactionBehavior;
+use rusqlite::{OptionalExtension, TransactionBehavior};
 
 use crate::store::{StoreError, StoreResult};
 use crate::work::task::follow_through::{
@@ -123,7 +123,7 @@ impl SqliteStore {
     pub fn follow_up_sources(&self) -> StoreResult<HashMap<String, Vec<FollowThroughSource>>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
-            "SELECT t.external_issue_id, t.issue_identifier, e.kind_json
+            "SELECT COALESCE(t.external_issue_id,t.id), t.issue_identifier, e.kind_json
              FROM task_events e JOIN tasks t ON t.id = e.task_id
              WHERE json_extract(e.kind_json, '$.kind') = 'follow_through_linked'
              ORDER BY e.id",
@@ -146,9 +146,15 @@ impl SqliteStore {
                     issue_id,
                     identifier,
                 };
-                let children = sources.entry(link.issue_id).or_default();
-                if !children.contains(&source) {
-                    children.push(source);
+                let alias: Option<String> = conn.query_row(
+                    "SELECT COALESCE(external_issue_id,id) FROM tasks WHERE id=?1 OR external_issue_id=?1",
+                    [&link.issue_id], |row| row.get(0),
+                ).optional()?;
+                for key in std::iter::once(link.issue_id).chain(alias) {
+                    let children = sources.entry(key).or_default();
+                    if !children.contains(&source) {
+                        children.push(source.clone());
+                    }
                 }
             }
         }

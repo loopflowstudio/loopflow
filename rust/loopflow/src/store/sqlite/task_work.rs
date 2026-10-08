@@ -311,9 +311,6 @@ fn set_node_in(
         by,
         note,
     )?;
-    if from == END && node != END {
-        super::task_state_delivery::queue_in(tx, task, "unstarted")?;
-    }
     Ok(true)
 }
 
@@ -721,7 +718,7 @@ mod tests {
             )
             .unwrap();
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
-            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json) VALUES(?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1,json_object('state','current'))",params![task.as_str(),project.as_str()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES(?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1)",params![task.as_str(),project.as_str()]).unwrap();
             conn.execute_batch("CREATE TRIGGER refuse_request BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='completion_requested' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
             {
                 let tx = conn.transaction().unwrap();

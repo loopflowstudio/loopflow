@@ -104,7 +104,7 @@ impl SqliteStore {
                 })?;
                 let item = record.item;
                 let input = json!({"id":uuid,"teamId":team,"projectId":external,"title":item.name,
-                    "description":item.description,"assigneeId":item.assignee});
+                    "description":item.description,"assigneeId":item.assignee,"dueDate":item.due_date});
                 (serde_json::to_value(item)?, input)
             }
             PlanningChanges::Project(id) => {

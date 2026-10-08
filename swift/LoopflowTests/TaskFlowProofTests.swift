@@ -55,11 +55,12 @@ struct TaskFlowTests {
         #expect(try merged.inspect().find(text: "Merged · Follow-through pending").string()
                 == "Merged · Follow-through pending")
         for phase in ["completed", "arrived"] {
-            let view = TaskDeliveryView(task: try #require(snapshots[phase]).row)
-            #expect(try view.inspect().find(text: "Done · Follow-up FIX-2").string()
-                    == "Done · Follow-up FIX-2")
-            #expect(try view.inspect().find(ViewType.Link.self).url().absoluteString
-                    == "https://linear.app/fixture/issue/FIX-2")
+            let row = try #require(snapshots[phase]).row
+            let identifier = try #require(row.followThrough.links.first).identifier
+            let view = TaskDeliveryView(task: row)
+            #expect(try view.inspect().find(text: "Done · Follow-up \(identifier)").string()
+                    == "Done · Follow-up \(identifier)")
+            #expect(row.followThrough.links.first?.url == nil)
         }
     }
 

@@ -642,13 +642,13 @@ fn project_accepted_planning(
                  planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
                  planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
                  planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
-                 planning_team_id=?11,planning_assignee=?12,
+                 planning_team_id=?11,planning_assignee=?12,planning_due_date=?15,
                  pm_snapshot_synced_at=?13,project_id=?14,
                  planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
                      OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
              WHERE id=?1",
             params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
-                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project],
+                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project,item.due_date],
         )?;
     }
     let mut query = tx.prepare(&format!(
@@ -686,10 +686,10 @@ fn project_accepted_planning(
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
              issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
-             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17)",
+             planning_completed_at,planning_provider_revision,planning_url,planning_branch_name,planning_team_id,planning_assignee,planning_due_date)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?8,?9,'',?10,?11,?12,?13,?14,?15,?16,?17,?18)",
             params![crate::durable::TaskId::new().as_str(),project,item.id,item.identifier,
-                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
+                item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.due_date],
         )?;
     }
     Ok(())
@@ -948,15 +948,15 @@ pub(super) fn put_item(
                 "INSERT INTO task_events(task_id,kind_json,created_at)
                  SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
                  FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.completed_at IS NULL",
+                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_completed=0",
                 params![item.id,repo,observed_at])?;
         }
         conn.execute(
-            "UPDATE tasks SET completed_at=CASE WHEN ?3 THEN COALESCE(completed_at,?4) ELSE NULL END,
-             completion_request=NULL,completion_error=NULL,pm_writeback_json=json_object('state','current')
+            "UPDATE tasks SET completion_request=NULL,completion_error=NULL
              WHERE external_issue_id=?1 AND project_id IN
              (SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?2)",
-            params![item.id,repo,item.is_complete(),observed_at])?;
+            params![item.id, repo],
+        )?;
     }
     Ok(true)
 }

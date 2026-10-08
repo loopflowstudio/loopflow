@@ -444,7 +444,10 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
-    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.worktree.as_deref(),
+        Some("/src/loopflow.workspace")
+    );
     assert!(snapshot.pr.is_none());
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(

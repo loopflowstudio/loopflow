@@ -43,7 +43,7 @@ struct DTOFixtureTests {
             #expect(row.pr?.id == merged.row.pr?.id)
         }
         #expect(completed.row.followThrough.links.count == 1)
-        #expect(completed.row.followThrough.links[0].identifier == "FIX-2")
+        #expect(completed.row.followThrough.links[0].identifier.hasPrefix("lf-"))
         #expect(completed.row.followThrough.links[0].due == "2026-10-09")
         #expect(arrived.row.followThrough == completed.row.followThrough)
     }

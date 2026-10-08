@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use axum::{extract::State, routing::post, Json, Router};
+use axum::{extract::State, Json};
 use serde_json::{json, Value};
 
 use super::{task_follow_up, FollowUpOptions};
@@ -116,192 +116,91 @@ async fn respond(
 }
 
 #[test]
-fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
+fn local_follow_up_retries_keep_identity_and_allow_independent_completion() {
+    let _lock = crate::journal::test_env_lock();
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let (directory, store, repo, task, wave) = fixture(&runtime);
-    let database = directory.path().join("loopflow.db");
-    let now = time::OffsetDateTime::now_utc();
+    let (directory, store, repo, task, _) = fixture(&runtime);
     let mut pr = runtime
         .block_on(store.active_task_pr(&task.id))
         .unwrap()
         .unwrap();
     pr.merge_commit = Some(repo.head_sha());
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
-    let select_chapter = |id: &str, expected: Option<&str>| {
-        let plan = serde_json::from_value(json!({"id": id, "slug": id, "name": id, "summary": "",
-            "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
-            "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]}))
-        .unwrap();
-        store
-            .sqlite
-            .put_pm_project(
-                wave.id(),
-                "linear",
-                "initiative-1",
-                &plan,
-                now.unix_timestamp(),
-            )
-            .unwrap();
-        crate::store::sqlite::project_selection::write_project_binding(
-            &store.sqlite,
-            wave.id(),
-            expected,
-            id,
-            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
-        )
-        .unwrap();
-    };
-    select_chapter("project-1", Some("project-1"));
-    let provider = Arc::new(Mutex::new(Linear {
-        lose_responses: true,
-        ..Default::default()
-    }));
-    let (url, server) = runtime.block_on(async {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let app = Router::new()
-            .route("/", post(respond))
-            .with_state(provider.clone());
-        (
-            url,
-            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
-        )
-    });
     PM_TEST_CONTEXT.sync_scope(
         PmTestContext {
-            path: database,
+            path: directory.path().join("loopflow.db"),
             store: store.clone(),
-            graphql_url: url,
+            graphql_url: "http://127.0.0.1:1".into(),
         },
         || {
             let options = FollowUpOptions {
                 key: Some("installed".into()),
                 title: Some("Verify installed release".into()),
                 notes: Some("Run the released command and retain its result".into()),
-                due: Some("2026-10-08".into()),
-                ..Default::default()
-            };
-            let finish = FollowUpOptions {
-                finish: Some("Accepted installed check filed".into()),
-                ..Default::default()
-            };
-            let pending = || {
-                let receipt = store.sqlite.task_follow_through(&task.id).unwrap();
-                assert!(!receipt.resolved());
-                assert!(!runtime
-                    .block_on(task_completion_gate(&store, &task))
-                    .unwrap()
-                    .satisfied());
-                assert!(runtime
-                    .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
-                    .is_err());
-                assert_ne!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
-                receipt
-            };
-
-            let error = task_follow_up(repo.path(), "FIX-1", &options).unwrap_err();
-            assert!(error.to_string().contains("remains pending"), "{error}");
-            let original = pending().intents.into_iter().next().unwrap();
-            assert_eq!(
-                uuid::Uuid::parse_str(&original.issue_id)
-                    .unwrap()
-                    .get_version_num(),
-                4
-            );
-            assert_eq!(
-                uuid::Uuid::parse_str(&original.relation_id)
-                    .unwrap()
-                    .get_version_num(),
-                4
-            );
-            assert_eq!(original.project_id, "project-1");
-            assert_eq!(original.team_id, "team-1");
-            assert_eq!(original.state_id.as_deref(), Some("todo"));
-            assert!(original
-                .notes
-                .contains("Follow-up to FIX-1 https://github.com/loopflowstudio/fixture/pull/1"));
-            assert!(task_follow_up(repo.path(), "FIX-1", &finish).is_err());
-            pending();
-
-            select_chapter("project-2", Some("project-1"));
-            {
-                let mut linear = provider.lock().unwrap();
-                assert_eq!(linear.issues.len(), 1);
-                assert_eq!(linear.issues[&original.issue_id], json!({
-                    "id": original.issue_id, "teamId": original.team_id,
-                    "projectId": original.project_id, "stateId": original.state_id,
-                    "title": original.title, "description": original.notes, "dueDate": original.due,
-                }));
-                let issue = linear.issues.get_mut(&original.issue_id).unwrap();
-                issue["title"] = json!("Edited after filing");
-                issue["projectId"] = json!("moved-project");
-                issue["dueDate"] = json!("2026-10-12");
-                linear.unavailable = false;
-            }
-            // Changed arguments and a now-invalid destination must not replace a receipt.
-            let retry = FollowUpOptions {
-                title: Some("Different title".into()),
-                wave: Some("removed-wave".into()),
                 due: Some("2026-10-09".into()),
-                ..options.clone()
+                ..Default::default()
             };
-            assert!(task_follow_up(repo.path(), "FIX-1", &retry).is_err());
-            let receipt = pending();
-            assert_eq!(receipt.intents, std::slice::from_ref(&original));
-            assert!(receipt.links.is_empty());
-            {
-                let mut linear = provider.lock().unwrap();
-                assert_eq!(linear.relations.len(), 1);
-                assert_eq!(
-                    linear.relations[&original.relation_id]["relatedIssueId"],
-                    original.issue_id
-                );
-                assert_eq!(
-                    linear.relations[&original.relation_id]["issueId"],
-                    "source-issue"
-                );
-                assert_eq!(linear.relations[&original.relation_id]["type"], "related");
-                linear.unavailable = false;
-            }
-            assert!(task_follow_up(repo.path(), "FIX-1", &retry)
+            task_follow_up(repo.path(), "FIX-1", &options).unwrap();
+            let first = store.sqlite.task_follow_through(&task.id).unwrap();
+            let child = runtime
+                .block_on(store.get_task_by_issue(&first.intents[0].issue_id))
                 .unwrap()
-                .contains("FIX-2 linked"));
-            let linked = pending();
-            assert_eq!(linked.intents, std::slice::from_ref(&original));
-            assert_eq!(linked.links.len(), 1);
-            assert_eq!(linked.links[0].issue_id, original.issue_id);
-            assert_eq!(linked.links[0].due.as_deref(), Some("2026-10-12"));
-            provider.lock().unwrap().relations_unavailable = true;
-            let error = task_follow_up(repo.path(), "FIX-1", &finish).unwrap_err();
-            assert!(
-                error.to_string().contains("relation read unavailable"),
-                "{error}"
-            );
-            assert_eq!(pending(), linked);
-            provider.lock().unwrap().relations_unavailable = false;
-            provider.lock().unwrap().issues.get_mut(&original.issue_id).unwrap()["dueDate"] =
-                Value::Null;
-            task_follow_up(repo.path(), "FIX-1", &finish).unwrap();
-            let filed = store.sqlite.task_follow_through(&task.id).unwrap();
-            assert!(filed.resolved());
-            assert_eq!(filed.intents, std::slice::from_ref(&original));
-            assert_eq!(filed.links.len(), 1);
-            assert_eq!(filed.links[0].issue_id, original.issue_id);
-            assert_eq!(filed.links[0].due, None);
-            assert_eq!(filed.reason, finish.finish);
+                .unwrap();
+            assert!(child.worktree.is_none());
+            assert!(child.plan.linear_id.is_none());
             assert!(runtime
+                .block_on(store.task_prs(&child.id))
+                .unwrap()
+                .is_empty());
+            assert_eq!(
+                super::super::task_planning_item(&store, &child)
+                    .unwrap()
+                    .due_date
+                    .as_deref(),
+                Some("2026-10-09")
+            );
+            // Retry arguments cannot change the pinned destination, identity or payload.
+            task_follow_up(
+                repo.path(),
+                "FIX-1",
+                &FollowUpOptions {
+                    title: Some("Changed retry".into()),
+                    wave: Some("missing-wave".into()),
+                    ..options
+                },
+            )
+            .unwrap();
+            assert_eq!(store.sqlite.task_follow_through(&task.id).unwrap(), first);
+            assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 2);
+            assert!(!runtime
                 .block_on(task_completion_gate(&store, &task))
                 .unwrap()
                 .satisfied());
-            assert!(runtime
-                .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
-                .unwrap());
+            task_follow_up(
+                repo.path(),
+                "FIX-1",
+                &FollowUpOptions {
+                    finish: Some("Installed proof belongs to the follow-up".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let request = store
+                .sqlite
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap();
+            runtime
+                .block_on(store.complete_task(&task, request))
+                .unwrap();
             assert_eq!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
+            assert_eq!(store.sqlite.workflow(&task.id).unwrap(), None);
+            assert_ne!(store.sqlite.task_state(&child.id).unwrap(), TaskState::Done);
             let events = runtime
                 .block_on(store.task_events_after(&task.id, 0))
                 .unwrap();
             assert!(runtime
-                .block_on(store.complete_task(&task, store.sqlite.request_task_completion(&task.id, None).unwrap().unwrap_or(0)))
+                .block_on(store.complete_task(&task, request))
                 .unwrap());
             assert_eq!(
                 runtime
@@ -309,20 +208,13 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
                     .unwrap(),
                 events
             );
-            let linear = provider.lock().unwrap();
-            assert_eq!(linear.issues.len(), 1);
-            assert_eq!(linear.relations.len(), 1);
-            assert_eq!(
-                linear.issues[&original.issue_id]["title"],
-                "Edited after filing"
-            );
-            assert_eq!(
-                linear.issues[&original.issue_id]["projectId"],
-                "moved-project"
-            );
+            assert!(store
+                .sqlite
+                .follow_up_sources()
+                .unwrap()
+                .contains_key(child.id.as_str()));
         },
     );
-    server.abort();
 }
 
 mod lifecycle;
@@ -369,6 +261,10 @@ fn fixture(
         "---\npm:\n  linear_initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();
+    repo.create_file(
+        ".lf/workflows/delivery.yaml",
+        "edges:\n  - {from: start, to: end, flow: delivery}\n",
+    );
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
         WaveId::new(),
@@ -378,13 +274,14 @@ fn fixture(
     let project = Project {
         id: ProjectId::new(),
         plan: ProjectPlan {
-            id: LinearProjectId::new("project-1").unwrap(),
+            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+            summary: String::new(),
             slug: "chapter".into(),
             name: "Chapter".into(),
             workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
             prompt_context: String::new(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -395,16 +292,17 @@ fn fixture(
     let task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new("source-issue").unwrap(),
+            linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
+            revision: 0,
             identifier: "FIX-1".into(),
             title: "Deliver the command".into(),
             description: String::new(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: repo.path().canonicalize().unwrap(),
+        worktree: Some(repo.path().canonicalize().unwrap()),
         workspace_slug: "delivery".into(),
         branch: "main".into(),
         base_commit: repo.head_sha(),
@@ -450,11 +348,11 @@ fn fixture(
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.id.as_str(),
+            project.plan.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
-        store.create_task(&task, Some(&pr), None).await.unwrap();
+        store.seed_task(&task, &pr).await.unwrap();
         store
             .upsert_provider_token(&ProviderToken {
                 provider: "linear".into(),

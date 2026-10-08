@@ -78,7 +78,8 @@ checks; use authored fixture Flows when a test needs a fixed sequence independen
 of product defaults.
 
 The composed delivery fixture runs a real CLI/Flow against an isolated Home and
-simulated providers, then checks its captured CLI and monitor population in Rust
+simulated provider observations, local follow-up filing and independent completion,
+then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
 `LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,

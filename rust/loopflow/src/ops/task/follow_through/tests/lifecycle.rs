@@ -50,8 +50,9 @@ fn build_cli() -> PathBuf {
         .unwrap();
     assert!(
         output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
     );
     String::from_utf8(output.stdout)
         .unwrap()
@@ -176,7 +177,18 @@ fn contract(population: &Value) -> Value {
             .as_array()
             .unwrap()
             .iter()
-            .map(|link| json!([link["identifier"], link["due"]]))
+            .map(|link| {
+                json!([
+                    link["identifier"]
+                        .as_str()
+                        .map(|id| if id.starts_with("lf-") {
+                            "local-follow-up"
+                        } else {
+                            id
+                        }),
+                    link["due"]
+                ])
+            })
             .collect();
         let history: Vec<_> = workflow["history"]
             .as_array()
@@ -234,10 +246,6 @@ fi
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
     for (path, contents) in [
         (
-            ".lf/workflows/delivery.yaml",
-            "edges:\n  - {from: start, to: end, flow: delivery}\n",
-        ),
-        (
             ".lf/flows/delivery.yaml",
             "- cmd: __telemetry-scorecard\n- cmd: task complete FIX-1\n",
         ),
@@ -270,7 +278,7 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     PM_TEST_CONTEXT.sync_scope(PmTestContext {
         path: home.path().join("loopflow.db"), store: store.clone(), graphql_url: url,
     }, || {
-        let planning = crate::ops::task_pm::resolve_task(repo.path(), "FIX-1", PmRefresh::Force).unwrap();
+        let planning = runtime.block_on(crate::ops::task_pm::resolve_task_async(repo.path(), "FIX-1", PmRefresh::Force)).unwrap();
         store.sqlite.put_pm_snapshot(&crate::store::PmSnapshotRow {
             wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative-1".into(),
             synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
@@ -314,11 +322,13 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
         assert_eq!(completions, 1);
         let flows: i64 = db.query_row("SELECT count(*) FROM flow_processes f JOIN processes p ON p.lfid=f.process_lfid WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
         assert_eq!(flows, 1);
-        let linear = provider.lock().unwrap();
-        assert!(linear.completed);
-        assert_eq!(linear.issues.len(), 1);
-        assert_eq!(linear.relations.len(), 1);
-        assert_eq!(linear.issues.values().next().unwrap()["stateId"], "todo");
+        let child_id = store.sqlite.task_follow_through(&source.id).unwrap().intents[0].issue_id.clone();
+        let child = runtime.block_on(store.get_task_by_issue(&child_id)).unwrap().unwrap();
+        assert!(child.worktree.is_none());
+        assert!(child.plan.linear_id.is_none());
+        assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
+        // Completion and filing are saved locally; provider delivery has its own receipt.
+        assert!(provider.lock().unwrap().issues.is_empty());
         let population = json!({"merged":merged,"completed":completed,"arrived":arrived});
         if std::env::var_os("LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE").is_some() {
             let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/dto/task_lifecycle.json");

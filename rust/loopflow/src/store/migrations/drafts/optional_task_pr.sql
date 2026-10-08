@@ -1,3 +1,4 @@
+-- depends_on: local_planning
 -- Retire serial disposition authority while preserving its original evidence.
 INSERT INTO task_events(task_id,kind_json,created_at)
 SELECT task_id,json_object('kind','follow_through_conversion','reason',
@@ -131,27 +132,18 @@ WHEN NEW.historical=0 AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.id=NEW.task_i
  AND t.branch=NEW.branch AND t.base_commit=NEW.base_commit AND t.parent_pr_id IS NEW.parent_pr_id)
 BEGIN SELECT RAISE(ABORT, 'Task PR placement differs from Task'); END;
 
--- Completion is independent of Workflow position. Seed only from released facts.
-ALTER TABLE tasks ADD COLUMN completed_at INTEGER;
+-- Completion is owned by local planning; retain only the durable end trigger here.
 ALTER TABLE tasks ADD COLUMN completion_request INTEGER;
 ALTER TABLE tasks ADD COLUMN completion_error TEXT;
-UPDATE tasks SET completed_at=COALESCE(
- (SELECT MAX(created_at) FROM task_events WHERE task_id=tasks.id AND json_extract(kind_json,'$.kind')='completed'),updated_at)
-WHERE abandoned_at IS NULL AND EXISTS(
+UPDATE tasks SET planning_completed=1, planning_state='completed',
+ planning_completed_at=COALESCE(planning_completed_at,strftime('%Y-%m-%dT%H:%M:%SZ',updated_at,'unixepoch'))
+WHERE abandoned_at IS NULL AND planning_provider_revision IS NULL AND EXISTS(
  SELECT 1 FROM task_workflows WHERE task_id=tasks.id AND node='end' AND edge IS NULL);
--- Preserve unfinished provider writebacks from already completed historical Tasks.
-INSERT INTO task_events(task_id,kind_json,created_at)
-SELECT id,json_object('kind','completion_requested','reason','Retained completion writeback'),unixepoch()
-FROM tasks WHERE json_extract(pm_writeback_json,'$.state')='pending';
-UPDATE tasks SET completion_request=(SELECT MAX(id) FROM task_events WHERE task_id=tasks.id
- AND json_extract(kind_json,'$.kind')='completion_requested')
-WHERE json_extract(pm_writeback_json,'$.state')='pending';
--- Previously conflicting accepted provider completion now owns status without
--- moving an active Workflow or settling any Process.
-UPDATE tasks SET completed_at=COALESCE(completed_at,(
- SELECT i.observed_at FROM pm_items i JOIN projects p ON p.id=tasks.project_id
- JOIN waves w ON w.id=p.wave_id
- WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear'
- AND i.needs_refresh=0 AND (json_extract(i.body,'$.state')='completed'
- OR (json_extract(i.body,'$.state') IS NULL AND json_extract(i.body,'$.completed')=1))
-)) WHERE abandoned_at IS NULL;
+-- Pending provider delivery was migrated by local_planning; it remains independent
+-- of Workflow arrival and is never replayed as a new completion request.
+
+ALTER TABLE tasks ADD COLUMN planning_due_date TEXT;
+ALTER TABLE task_creation_intents ADD COLUMN due_date TEXT;
+UPDATE tasks SET planning_due_date=(SELECT json_extract(i.body,'$.due_date') FROM pm_items i
+ JOIN projects p ON p.id=tasks.project_id JOIN waves w ON w.id=p.wave_id
+ WHERE i.id=tasks.external_issue_id AND i.repo=w.repo AND i.provider='linear');

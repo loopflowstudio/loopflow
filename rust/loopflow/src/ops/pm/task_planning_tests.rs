@@ -12,9 +12,8 @@ use super::{PmRefresh, PM_TEST_CONTEXT};
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
 use crate::work::task::{
-    GithubObservation, GithubObservationResult, GithubPr, Observation, PmWritebackState,
-    PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEventKind,
-    TaskPr, TaskPrId,
+    GithubPr, Observation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation,
+    PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
 
 async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
@@ -230,7 +229,7 @@ async fn planning_graphql(
         } else {
             let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
                 "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
-                "branchName":null,"completedAt":null,"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
+                "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
                 "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local chapter"}});
             mark_issue_updated(&mut issue);
             state.issues.push(issue);
@@ -505,7 +504,7 @@ fn seed_provider_task(
         let id = format!("issue-{index}");
         state.issues.push(json!({
             "id":id,"identifier":format!("FIX-{index}"),"url":null,
-            "title":title,"description":description,"completedAt":null,
+            "title":title,"description":description,"completedAt":null,"dueDate":null,
             "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
             "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
@@ -1604,6 +1603,13 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .item;
         assert_eq!(adopted.state.as_deref(), Some("unstarted"));
         assert!(!adopted.completed);
+        assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(fixture
+            .store
+            .sqlite
+            .task_completion_pending(&task.id)
+            .unwrap()
+            .is_none());
         assert_eq!(
             runtime
                 .block_on(
@@ -1612,7 +1618,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                         .work_status(&crate::durable::WorkRef::Task(task.id.clone()))
                 )
                 .unwrap(),
-            WorkStatus::Done
+            WorkStatus::Ready
         );
         // A delayed acknowledgement cannot erase an already observed collision.
         fixture
@@ -1709,7 +1715,7 @@ fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
                 state.lock().await.issues.push(json!({
                     "id":"issue-1", "identifier":"FIX-1", "url":null,
                     "title":"Finish without checkout", "description":"Retain the completion",
-                    "completedAt":null, "prioritySortOrder":0.0, "sortOrder":0.0,
+                    "completedAt":null,"dueDate":null, "prioritySortOrder":0.0, "sortOrder":0.0,
                     "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
                     "state":{"type":"unstarted"}, "team":{"id":"team-1"},
                     "project":{"id":"project-1","name":"Chapter"}
@@ -2092,7 +2098,7 @@ esac
                 .into_iter()
                 .find(|project| project.plan.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
-            let mut task = Task {
+            let task = Task {
                 id: runtime
                     .block_on(fixture.store.get_task_by_issue(&item.id))
                     .unwrap()

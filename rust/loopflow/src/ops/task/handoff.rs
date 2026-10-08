@@ -48,9 +48,9 @@ pub(super) fn read_design(caller: &Path, path: &Path) -> OpsResult<DesignHandoff
 }
 
 pub(super) fn write_design(task: &Task, design: &DesignHandoff) -> OpsResult<()> {
-    let _mutation = lock_task_pr_mutation(&task.worktree)?;
+    let _mutation = lock_task_pr_mutation(task.worktree()?)?;
     // Common metadata survives removal of the child's worktree registration.
-    let root = git_common_dir(&task.worktree)?
+    let root = git_common_dir(task.worktree()?)?
         .join("loopflow-design-handoffs")
         .join(task.id.as_str());
     // HEAD may advance between retries; the selected source and bytes identify input.
@@ -74,7 +74,7 @@ pub(super) fn write_design(task: &Task, design: &DesignHandoff) -> OpsResult<()>
         return Ok(());
     }
 
-    let scratch = task.worktree.join("scratch");
+    let scratch = task.worktree()?.join("scratch");
     match fs::create_dir(&scratch) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}

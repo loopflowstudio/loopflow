@@ -71,10 +71,20 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ## Place Work
 
 `Placement` maps one `WorkRef` to one `MachineId`. It records where Work belongs,
-not whether a process exists. `lf wave place` sets the Machine used by Wave schedules
-and inherited once by new Projects; new Tasks inherit their Project's Machine. It
-does not move existing child work or launch a process. `lf wave status` reads
+not whether a process exists. `lf wave place` sets the Machine used by Wave schedules.
+The current LOO-427 working tree prototypes nearest-assignment resolution through
+Task, Project and ancestor Waves; this inheritance rule is still under design,
+not an accepted routing contract. New children store no assignment copy, so later
+delegation applies to existing
+unassigned children as well as future ones. An explicit narrower assignment wins,
+even when it selected the same Machine as its parent. The read exposes `source`
+and `provenance`; historical rows remain `legacy` because an explicit choice cannot
+be distinguished from a copied value. With no assignment, the root Wave supplies
+a `local_default`. Delegation does not move a checkout or launch a process. `lf wave status` reads
 planning, Task conditions, metrics and Session history; no process needs to be running.
+Work-directed launch/restore routing is not implemented by this resolver. Started
+Tasks must continue on their recorded execution Machine rather than following a
+later delegation edit; shared repository identity and that routing cut remain open.
 
 Task checkout location is recorded separately: `tasks.checkout_machine_id` and
 `worktree` identify the Machine and path prepared for execution. New checkouts

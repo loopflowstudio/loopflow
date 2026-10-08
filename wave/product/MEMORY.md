@@ -49,25 +49,33 @@ LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
 Shared Work replaces repository pairing; never rewrite a Machine default per
-request. Started Tasks stay on their Machine; inheritance remains open. Placements
-still copy once; delegation, Work opening, Linux guidance and pane control remain.
+request. Started Tasks stay on their Machine; inheritance remains unapproved.
 Exact targets do not protect unsent drafts; retain LOO-387's boundary.
 
-October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
-assignment; unknown stays unavailable. Jack selected local operations and Git-ref
-Task sync: 406 owns writes/Linear, 412 exchange. Workflow, Sessions, Processes,
-checkouts and control stay local; imported completion cannot move or clean them.
-Preserve pending changes, semi-live comments/completion, causal reopening and
-stable mutation IDs. No real plan publication is authorized. Jack authorized stacking
-on 406's committed common writer. Local identity/Desktop work can proceed;
-412 exchange integration still gates cross-machine proof.
+October 8: LOO-427's checkout-location cut (`21ce4e495`, `f8d3386da`, integrated
+at `f5f742058`) leaves unknown location unavailable. Its later working tree
+removes copied placements and prototypes nearest stored assignment, with explicit,
+legacy and local-default provenance. Legacy rows remain overrides, not inferred
+intent; equal-valued choices can be deliberate narrower assignments. This is an
+uncompiled prototype, not Jack's acceptance of inheritance. Read-side location
+safety does not establish routing: Task preparation still allocates/restores
+locally. Shared repository identity, routing, Desktop control and composed proof
+remain. Product has no child memories in this checkout.
+
+Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
+writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control
+stay local; imported completion cannot move or clean them. Preserve pending edits,
+semi-live comments/completion, causal reopening and stable mutation IDs. No real
+plan publication is authorized. Jack authorized stacking on 406's common writer;
+412's committed `5d336868f` also removes independent adoption, but peer import/export
+and public dispatch remain unfinished. Neither gates independent local Desktop work.
+
 Jack's later decisions (`f027890ab:wave/infrastructure/MEMORY.md`): user-keyed Git
-plans by default, shared plans by explicit opt-in through the same records/APIs.
-A code remote implies neither shared planning nor permission to publish it.
-Linear wins planning conflicts; otherwise prefer the host where possible, then
-last-write-wins with recoverable losing edits. 412 owns keys, binding and ordering;
-its `985ed148c` causal prototype predates this policy. Precedence cannot fix
-Linear's read/write race or grant execution authority.
+plans by default, explicit shared-plan opt-in through the same records/APIs. A code
+remote grants neither shared identity nor publication permission. Linear wins
+planning conflicts; otherwise prefer the host where possible, then last-write-wins
+with recoverable losing edits. 412 owns binding and ordering. Precedence cannot
+fix Linear's read/write race or grant execution authority.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -188,22 +196,12 @@ demo notes are at `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
 - Operational Flows hold autonomous loops and XORs only; deciders use
   `loop-or-next`.
 
-**October 5.** Jack rejected the first cut's front door: it "should have been
-DELETING the task worker APIs and routing more things through the basic (e.g.
-flow -b) apis."
-
-- `-b` prints and blocks; the caller backgrounds ("cant you just background
-  with &"). `--mode` is taken back.
-- `--task` and running from the Task's worktree are one path with one set of
-  checks. A Task helper may place and fill defaults, then enters `lf run`: "i
-  dont want to introduce parallel paths or drivers." Launch-time PR
-  preparation is unjustified.
-- "I hate __ and hidden arguments." A step is the plain command and "doesnt
-  need to know its part of a flow"; Flow logic and tracking live in the driver.
-  Every Flow is tracked alike, none primary for a Task, read-only to all but
-  its driver; the only control is ending the driver.
-- Two records: FlowExec, append-only per driver, and a mutable outer one owned
-  by this Task. "I dont think we need the FlowSession datatype."
+**October 5.** Jack rejected parallel Task-worker drivers: Task launch must enter
+ordinary `lf run`; `-b` blocks and callers background it. Steps are plain commands,
+tracked only by their driver; launch-time PR preparation is unjustified. October
+7's Process vocabulary supersedes the FlowExec/FlowSession naming discussion.
+Original feedback and record proposals: `f5f742058:wave/product/MEMORY.md`, this
+heading. Task Workflow and Flow execution remain separate owners.
 
 **October 6.**
 
@@ -905,9 +903,11 @@ mid-turn delivery is provider-dependent.
 
 ### Planning authority and historical migration lessons
 
-- Linear owns authored chapter and Task content. No local `projects/*.md`, issue
-  mirror, or roadmap table is authoritative. Shared current reads expose one chapter
-  summary and direct Tasks; historical Project identity remains readable provenance.
+- October 8's LOO-406 decision supersedes provider-only planning: the common local
+  writer owns records/APIs, with optional Linear synchronization; Linear wins
+  observed conflicts. No file mirror or Desktop plan becomes another authority.
+  Current reads expose one chapter and direct Tasks; historical Projects retain
+  provenance.
 - PM writes resolve stable provider edges, not names or Issue prefixes. Task creation
   selects its Wave's current Project; ordinary Task saves cannot restore an old
   parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;

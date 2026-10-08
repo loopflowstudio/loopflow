@@ -8,15 +8,15 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 Jack Heart decided: zero or one PR per Task. Every merge requires follow-ups
 filed or “none needed” recorded before completion. End means completed;
-`task complete` returns locally as an alias for `task move end`, with identical checks
-and no separate flag. Dependent PRs use stacked Tasks; research needs no PR.
+`task complete` is locally an alias for `task move end`, with today's checks.
+Optional PRs and post-merge filing remain unbuilt. Dependent PRs use stacked Tasks.
 Jack accepted a waited landing Flow with follow-through, recovered by the next
 Task/Wave operation, without a new watcher. No schedule means no automatic wake.
 These decisions supersede older serial-chain and keep-open directions below.
 Jack requested advancement: first Flow visibility and the completion alias;
 no landing. `scratch/make-a-task-up-to.md` retains unresolved lifecycle choices.
 
-Base `626789dcd` includes #1488: bare land already defaults to completion, while
+Integrated `35e759aaf` includes #1488/#1495: bare land defaults to completion, while
 `TaskFollowUp` keeps an obligation on the source Task. Replace that writer as
 well as rotation; retain existing obligations and multi-PR history. LOO-385's
 no-PR/Workflow scope overlaps; its inspected planning was unstarted, not closed.
@@ -25,8 +25,8 @@ Admission must record performed location after placement, retaining caller
 ancestry. The local fix makes Flow registration and Started atomic and shares
 membership predicates with inventory. Isolated mechanical CLI evidence is not
 installed or Desktop acceptance; historical rows remain unchanged. Stack sync
-preserves child code; scratch needs explicit handoff. Operator guidance still
-needs follow-through and completion beyond landing.
+preserves child code; scratch needs explicit handoff. Operator guidance and ship
+still stop at landing. The alias retains dirty-checkout/unpublished-commit checks.
 
 ## Live Home reconciliation (2026-10-05)
 
@@ -307,8 +307,8 @@ Own benchmark process groups; overlapping runs prove nothing. October 5, same
 snapshot/`lf`, five samples, load 32–65: warm 152 ms and reopen 38 ms versus
 9–10 s; one window, no Task-link sheet. Cold stays 8.4 s behind one `lf` read.
 Fast OCR split `LOO- 368` and timed out a 9/9 sweep: verify the observer
-before blaming the product. LOO-376 owns startup and `launch.py`;
-extend it for Task links. See [the evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+before blaming the product. LOO-376 owned startup; its performance acceptance
+was retired October 7 (see below). [Evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time
@@ -942,16 +942,15 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 - Receipts: `scripts/benchmarks/desktop-performance/`. First frame went
   850 → 617 ms under heavy load (20261005-first-render). Profile before
   guessing: the cost was getters re-normalizing paths per render, not drawing.
-- A benchmark that reopens one bundle hides the launch Jack gets. Both recorded
-  real launches were first runs of a new version: 625–790 ms before `main`.
-  20261005-first-launch: the system charges a new binary about 390 ms, partly
-  by file size, so no post-update launch meets 400 ms through app work.
-  Stripping local symbols saves 40–100 ms but unnames crash-report frames;
-  shipping it with a retained dSYM is Jack's open choice. Reopened: 430 ms
-  first frame (4 samples, loaded host).
-- Still open on LOO-376: quiet-host proof of 400 ms; cold file cache and
-  selection/repository-change refresh scenarios; unsaved launch waits on `lf`;
-  `session list` runs 2–3 times (refresh owner: LOO-382/LOO-304).
+- Reopening hides first-version launch costs: 625–790 ms before `main`,
+  versus 430 ms reopened (4 loaded-host samples). Stripping
+  saved 40–100 ms but unnames crash frames; shipping with a retained dSYM is
+  Jack's open choice. `a7492b78e:wave/product/MEMORY.md` retains detail.
+- October 7, Jack retired performance acceptance for LOO-371/376/375;
+  LOO-408 owns installed settlement with historical uncertainty preserved.
+  Closure is unobserved. [Infrastructure evidence](../infrastructure/MEMORY.md#task-decisions-and-delivered-work-loo-408-2026-10-07)
+  supersedes those targets, without changing Product's chapter KRs or proving
+  the unmeasured startup scenarios.
 
 ## Sessions projection and native resume (reconciled 2026-09-24)
 

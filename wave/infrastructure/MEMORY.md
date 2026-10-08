@@ -26,15 +26,19 @@ independently acquire selected comments/inventory and deliver mapped Tasks' effe
 Receipts replace the duplicate writeback column, preserving legacy decisions without
 inventing Workflow history. Effect locks exclude neither saves nor inbound reads.
 Acknowledgements cannot settle newer decisions; `lf task sync --resolve local|linear`
-supersedes identity while retaining conflict evidence.
+supersedes identity while retaining conflict evidence. At `5a786d905`, inbound
+direction is derived inside the observation transaction; comment threads and Steers
+commit together. Removed intermediate writers grant no outbound concurrency guarantee.
 
 October 8's enabled regression `task_completion_preserves_linear_reopening_during_delivery`
 fails: between ownership read and unconditional mutation, Linear reopening is
 overwritten; matching readback falsely settles delivery. The published Linear schema
 at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
-Dependent writer expansion needs a verified provider fence or contract review;
-extra reads and post-write observation cannot prevent that overwrite. Acceptance
-is unchanged. The schema does accept UUIDs for issue/Project creation.
+Extra reads and matching readback cannot prove preserved concurrent changes.
+The October 8 iteration direction keeps the ownership cut and provider-guarantee
+investigation authorized without further approval. Safe outbound updates remain
+unproved; weakening preservation or automatic propagation would need a product
+decision. Acceptance is unchanged. The schema accepts UUIDs for issue/Project creation.
 
 Ownership deletion, fields, offline abandonment, comment resolution and unmapped
 export remain unfinished. Abandonment is provider-first. Rollback/lost/late-reply

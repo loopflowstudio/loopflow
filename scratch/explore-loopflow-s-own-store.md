@@ -541,3 +541,5 @@ Before conflict reconciliation, exact scratch and Wave memory bytes were preserv
 with a SHA-256 manifest at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-conflicts-w_8arsgw`.
 
 Compression preservation: scratch, review artifacts and Wave GOAL/memory bytes with SHA-256 manifest are retained at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-compress-qpevyw5s`.
+
+Check (2026-10-08 sync onto `24db5d4d6`): `documented_commands` test binary, built with `cargo test -p loopflow --test documented_commands --no-run` and run through `scripts/test_network.py`, 3 PASS; historical memory shortened to fit 16,000 tokens, with pre-curation bytes/SHA-256 at `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo406-sync-memory-j5prjjde/`.

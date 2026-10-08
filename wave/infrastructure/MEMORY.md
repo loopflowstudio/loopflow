@@ -891,7 +891,7 @@ identity, execution eligibility and consumed launch evidence stay separate.
 ## Installation and command scope (curated 2026-10-02)
 
 LOO-292's installation acceptance closed below; LOO-287 retains command-scope
-reduction. Detailed September 24–October 2 evidence and installation constraints:
+reduction. Earlier installation evidence:
 `24db5d4d68b1e4a5efe11781712a321b564e01ca:wave/infrastructure/MEMORY.md`, this heading.
 Current mechanics and proofs belong in docs/lf.md and TESTING.md.
 

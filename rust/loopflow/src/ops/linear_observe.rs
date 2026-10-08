@@ -10,20 +10,13 @@
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
-use crate::pm::linear::LinearClient;
 use crate::store::SharedStore;
 
-use crate::pm::{IssueComment, IssueObservation};
+use crate::pm::IssueObservation;
 use crate::store::{Store, StoreResult};
 use crate::work::task::{
     LinearFollowUp, LinearObservationApply, LinearObservationOutcome, Task, TaskLinearObservation,
 };
-
-/// Explicit steering is eligible even when published by an integration. Participant-authored
-/// comments include the account used by Loopflow; exclude writebacks by content.
-pub(crate) fn is_human_comment(comment: &IssueComment, _viewer_id: &str) -> bool {
-    is_direction_comment(&comment.body, comment.author_id.as_deref())
-}
 
 /// Explicit steering carries its marker, whichever account published it.
 pub(crate) fn is_steer(body: &str) -> bool {
@@ -43,25 +36,6 @@ pub(crate) fn is_direction_comment(body: &str, author: Option<&str>) -> bool {
         && !body.starts_with("Shipped: ")
         && !body.starts_with("Reteamed by loopflow:")
         && !body.starts_with("[GitHub PR #")
-}
-
-pub(crate) async fn publish_comment(
-    client: &LinearClient,
-    issue_id: &str,
-    text: &str,
-    marker: &str,
-) -> OpsResult<String> {
-    // One identity per authored instruction. Equal text can intentionally recur.
-    let body = format!("{text}\n\n{marker}");
-    match client.comment(issue_id, &body).await {
-        Ok(id) => Ok(id),
-        Err(error) => match client.find_comment_with_marker(issue_id, marker).await {
-            Ok(Some(id)) => Ok(id),
-            _ => Err(OpsError::Message(format!(
-                "Linear did not confirm this comment: {error}. Check Linear for {marker} before resubmitting; no local-only comment was accepted."
-            ))),
-        },
-    }
 }
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -85,7 +59,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .observe_issue(issue.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    reconcile_linear_observation(store, &task, observation, "", OffsetDateTime::now_utc())
+    reconcile_linear_observation(store, &task, observation, OffsetDateTime::now_utc())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     Ok(())
@@ -260,11 +234,10 @@ pub async fn reconcile_linear_observation(
     store: &Store,
     task: &Task,
     observation: IssueObservation,
-    viewer_id: &str,
     observed_at: OffsetDateTime,
 ) -> StoreResult<LinearObservationOutcome> {
     let cursor = store.task_linear_observation(&task.id).await?;
-    let apply = plan_apply(task, observation, viewer_id, observed_at, cursor.as_ref());
+    let apply = plan_apply(task, observation, observed_at, cursor.as_ref());
     store.apply_linear_observation(apply).await
 }
 
@@ -275,7 +248,6 @@ pub async fn reconcile_linear_observation(
 pub(crate) fn plan_apply(
     task: &Task,
     observation: IssueObservation,
-    viewer_id: &str,
     observed_at: OffsetDateTime,
     cursor: Option<&TaskLinearObservation>,
 ) -> LinearObservationApply {
@@ -294,7 +266,7 @@ pub(crate) fn plan_apply(
     let follow_ups = observation
         .comments
         .iter()
-        .filter(|comment| is_human_comment(comment, viewer_id))
+        .filter(|comment| is_direction_comment(&comment.body, comment.author_id.as_deref()))
         .map(|comment| LinearFollowUp {
             comment_id: comment_revision_id(&comment.id, comment.revision.as_deref()),
             text: render_comment(
@@ -319,41 +291,10 @@ pub(crate) fn plan_apply(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{is_human_comment, plan_apply};
+    use super::{is_direction_comment, plan_apply};
     use crate::planning::{LinearIssueId, TaskPlan};
     use crate::pm::{IssueComment, IssueObservation};
     use crate::work::task::{Task, TaskId, TaskLinearObservation};
-
-    use crate::pm::test_server::{self, json_response};
-    use axum::http::StatusCode;
-    use serde_json::json;
-
-    #[tokio::test]
-    async fn uncertain_publication_reconciles_the_existing_linear_comment() {
-        let marker = "<!-- loopflow-steer:request-1 -->";
-        let page = |nodes| json!({"data": {"issue": {"comments": {"nodes": nodes, "pageInfo": {"hasNextPage": false, "endCursor": null}}}}});
-        let (url, _) = test_server::spawn(vec![
-            json_response(
-                StatusCode::OK,
-                json!({"errors": [{"message": "response interrupted"}]}),
-            ),
-            json_response(
-                StatusCode::OK,
-                page(
-                    json!([{"id": "posted-comment", "body": format!("keep the API\n\n{marker}")}]),
-                ),
-            ),
-        ])
-        .await;
-        let client =
-            crate::pm::linear::LinearClient::with_base_url("fixture-token".into(), None, url);
-        assert_eq!(
-            super::publish_comment(&client, "issue-1", "keep the API", marker)
-                .await
-                .unwrap(),
-            "posted-comment"
-        );
-    }
 
     const VIEWER: &str = "user-loopflow";
 
@@ -376,7 +317,7 @@ pub(crate) mod tests {
                 ),
             ],
         );
-        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
+        let apply = plan_apply(&task(), obs, time::OffsetDateTime::now_utc(), None);
         assert_eq!(
             apply
                 .follow_ups
@@ -407,7 +348,6 @@ pub(crate) mod tests {
         let apply = plan_apply(
             &task(),
             observation("title", "body", comments),
-            VIEWER,
             time::OffsetDateTime::now_utc(),
             None,
         );
@@ -496,20 +436,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn own_account_comments_are_direction_but_writebacks_are_not() {
-        assert!(is_human_comment(
-            &comment("c", "hi", Some("user-human")),
-            VIEWER
-        ));
-        assert!(is_human_comment(
-            &comment("c", "please fix this", Some(VIEWER)),
-            VIEWER
-        ));
-        assert!(!is_human_comment(
-            &comment("c", "PR: x", Some(VIEWER)),
-            VIEWER
-        ));
-        assert!(!is_human_comment(&comment("c", "bot", None), VIEWER));
+    fn account_identity_does_not_filter_direction() {
+        for author in ["user-human", VIEWER] {
+            assert!(is_direction_comment("please fix this", Some(author)));
+            assert!(!is_direction_comment("PR: x", Some(author)));
+        }
+        assert!(!is_direction_comment("bot", None));
     }
 
     #[test]
@@ -524,7 +456,7 @@ pub(crate) mod tests {
                 comment("c-2", "PR: x", Some(VIEWER)),
             ],
         );
-        let apply = plan_apply(&task(), obs, VIEWER, time::OffsetDateTime::now_utc(), None);
+        let apply = plan_apply(&task(), obs, time::OffsetDateTime::now_utc(), None);
         assert!(apply.content_steer.is_none());
         assert_eq!(apply.follow_ups.len(), 1);
         assert_eq!(apply.follow_ups[0].comment_id, "c-1");
@@ -536,7 +468,6 @@ pub(crate) mod tests {
         let apply = plan_apply(
             &task(),
             obs,
-            VIEWER,
             time::OffsetDateTime::now_utc(),
             Some(&cursor("Old title", "Old body")),
         );
@@ -551,7 +482,6 @@ pub(crate) mod tests {
         let apply = plan_apply(
             &task(),
             obs,
-            VIEWER,
             time::OffsetDateTime::now_utc(),
             Some(&cursor("Old title", "Old body")),
         );

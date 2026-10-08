@@ -6,11 +6,8 @@ use loopflow_test_support::TestRepo;
 use support::{register_task, EnvGuard};
 use time::OffsetDateTime;
 
-const VIEWER: &str = "user-loopflow";
-
 fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
-    // The webhook issue-edit path (and the catch-up read) carry no comments —
-    // comments arrive one at a time through `apply_linear_comment`.
+    // This fixture applies issue edits and individual comments separately.
     IssueObservation {
         revision: revision.to_string(),
         title: title.to_string(),
@@ -19,10 +16,8 @@ fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
     }
 }
 
-/// The durable substrate under the webhook receiver: the cursor is seeded at
-/// Task creation, an issue edit becomes exactly one Steer (and a
-/// stale/duplicate delivery reverts nothing), and a user comment becomes one
-/// FIFO Steer that a redelivered webhook cannot double-apply.
+/// The store retains ordered direction across duplicate and stale observations.
+/// This proves ingestion, not provider delivery or a webhook receiver.
 #[test]
 fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     let home = tempfile::TempDir::new().expect("temp home");
@@ -54,7 +49,6 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             &task.store,
             &task.task,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
-            VIEWER,
             now,
         ))
         .expect("edit");
@@ -77,13 +71,12 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
             &task.store,
             &persisted_task,
             edit("2026-07-15T01:00:00.000Z", "New title", "New body"),
-            VIEWER,
             now,
         ))
         .expect("re-deliver");
     assert!(!outcome.content_steer_applied);
 
-    // 3. A user comment → one FIFO Steer; a redelivered webhook adds nothing.
+    // 3. A user comment → one FIFO Steer; redelivery adds nothing.
     let created = rt
         .block_on(task.store.apply_linear_comment(
             &task.task.id,
@@ -119,7 +112,6 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
                 &task.task.plan.title,
                 &task.task.plan.description,
             ),
-            VIEWER,
             now,
         ))
         .expect("stale edit");

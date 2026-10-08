@@ -326,17 +326,6 @@ const CREATE_COMMENT_MUTATION: &str = r#"mutation CreateComment($issueId: String
   }
 }"#;
 
-// Loopflow's own OAuth user. Its id lets the observer distinguish a participant's edit or
-// comment from Loopflow's own writeback, so ingestion never feeds itself.
-const VIEWER_QUERY: &str = r#"query Viewer {
-  viewer {
-    id
-  }
-}"#;
-
-// Register the webhook that streams issue/comment changes for this repository's
-// one Team. The caller owns the signing secret and public URL.
-
 const UPDATE_COMMENT_MUTATION: &str = r#"mutation UpdateComment($id: String!, $body: String!) {
   commentUpdate(id: $id, input: { body: $body }) {
     comment {
@@ -1581,52 +1570,6 @@ impl LinearClient {
         }
     }
 
-    /// Find a previously-created comment by its stable body marker.
-    ///
-    /// Comment publication records an attempt before calling Linear. If that call
-    /// succeeds but the local process dies before recording the returned id, a
-    /// retry scans the issue's comments and adopts the existing one rather than
-    /// creating a duplicate.
-    pub async fn find_comment_with_marker(
-        &self,
-        issue_id: &str,
-        marker: &str,
-    ) -> PmResult<Option<String>> {
-        let mut after = None;
-        loop {
-            let response: IssueCommentsData = self
-                .graphql(
-                    ISSUE_COMMENTS_QUERY,
-                    json!({
-                        "id": issue_id,
-                        "comments": OBSERVATION_COMMENT_PAGE,
-                        "after": after,
-                    }),
-                )
-                .await?;
-            let issue = response
-                .issue
-                .ok_or_else(|| PmError::Message(format!("linear issue {issue_id} not found")))?;
-            if let Some(comment) = issue
-                .comments
-                .nodes
-                .into_iter()
-                .find(|comment| comment.body.contains(marker))
-            {
-                return Ok(Some(comment.id));
-            }
-            if !issue.comments.page_info.has_next_page {
-                return Ok(None);
-            }
-            after = issue.comments.page_info.end_cursor;
-            if after.is_none() {
-                return Err(PmError::Message(format!(
-                    "Linear comments for issue {issue_id} have another page without a cursor"
-                )));
-            }
-        }
-    }
-
     pub async fn update_comment(&self, comment_id: &str, body: &str) -> PmResult<()> {
         let _: Value = self
             .graphql(
@@ -1732,12 +1675,6 @@ impl LinearClient {
             )
             .await?;
         Ok(())
-    }
-
-    /// Loopflow's own Linear user id, used to skip its own comments and edits.
-    pub async fn viewer_id(&self) -> PmResult<String> {
-        let response: ViewerData = self.graphql(VIEWER_QUERY, json!({})).await?;
-        Ok(response.viewer.id)
     }
 
     /// Read one issue's title, description, comments, and revision marker.
@@ -1926,11 +1863,6 @@ struct AttachmentPayload {
 #[derive(Deserialize)]
 struct IdNode {
     id: String,
-}
-
-#[derive(Deserialize)]
-struct ViewerData {
-    viewer: IdNode,
 }
 
 #[derive(Deserialize)]
@@ -2668,21 +2600,6 @@ mod tests {
             Some("Linear Task is duplicate")
         );
         assert_eq!(crate::pm::terminal_reason(Some("unknown"), false), None);
-    }
-
-    #[tokio::test]
-    async fn viewer_id_reads_loopflows_own_user() {
-        let (base_url, _requests) = test_server::spawn(vec![json_response(
-            StatusCode::OK,
-            json!({ "data": { "viewer": { "id": "user-loopflow" } } }),
-        )])
-        .await;
-        let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
-
-        assert_eq!(
-            client.viewer_id().await.expect("viewer id"),
-            "user-loopflow"
-        );
     }
 
     #[tokio::test]

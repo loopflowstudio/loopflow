@@ -315,6 +315,10 @@ live process controls remain intact; uncertain or occupied checkouts are retaine
 Cancellation follows the same separation. Open PRs and additional committed work
 still need delivery or explicit abandonment.
 
+Completing an uncached Linear issue first retains its Task locally, without a
+checkout. The completion reason stays in Task history; retries reuse that identity
+and preserve the recorded outcome while provider writeback is pending.
+
 ## Check authorized deliveries in the background
 
 ```bash

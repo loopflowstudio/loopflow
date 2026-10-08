@@ -1106,7 +1106,7 @@ struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>
 
 #[test]
 fn task_completion_preserves_planning_identity_and_summary_on_retry() {
-    assert_unplaced_completion_retry(false);
+    assert_unplaced_completion_retry(false, false);
 }
 
 #[test]
@@ -1116,7 +1116,7 @@ fn task_completion_retries_pending_writeback_after_local_done() {
 
 #[test]
 fn task_completion_reconciles_lost_planning_response() {
-    assert_unplaced_completion_retry(true);
+    assert_unplaced_completion_retry(true, false);
 }
 
 #[test]
@@ -1134,7 +1134,12 @@ fn task_completion_reconciles_provider_outcome_after_landing() {
     assert_task_completion_retry(true, Some(PrMergeMode::Auto));
 }
 
-fn assert_unplaced_completion_retry(lose_response: bool) {
+#[test]
+fn uncached_task_completion_retains_local_done_after_a_lost_reply() {
+    assert_unplaced_completion_retry(true, true);
+}
+
+fn assert_unplaced_completion_retry(lose_response: bool, uncached: bool) {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1145,18 +1150,30 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
     let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        let item = crate::ops::task::task_create(
-            &repo,
-            Some("product"),
-            Some("Finish without checkout".into()),
-            Some("Retain the completion".into()),
-            crate::durable::TaskId::new(),
-        )
-        .unwrap();
-        let task = runtime
-            .block_on(fixture.store.get_task_by_issue(&item.id))
+        let identifier = if uncached {
+            runtime.block_on(async {
+                state.lock().await.issues.push(json!({
+                    "id":"issue-1", "identifier":"FIX-1", "url":null,
+                    "title":"Finish without checkout", "description":"Retain the completion",
+                    "completedAt":null, "prioritySortOrder":0.0, "sortOrder":0.0,
+                    "updatedAt":"2026-09-29T12:00:00.123Z", "assignee":null,
+                    "state":{"type":"unstarted"}, "team":{"id":"team-1"},
+                    "project":{"id":"project-1","name":"Chapter"}
+                }));
+            });
+            assert!(runtime.block_on(fixture.store.list_tasks(None)).unwrap().is_empty());
+            "FIX-1".to_string()
+        } else {
+            crate::ops::task::task_create(
+                &repo,
+                Some("product"),
+                Some("Finish without checkout".into()),
+                Some("Retain the completion".into()),
+                crate::durable::TaskId::new(),
+            )
             .unwrap()
-            .unwrap();
+            .identifier
+        };
         runtime.block_on(async {
             let mut provider = state.lock().await;
             provider.fail_completion = !lose_response;
@@ -1165,7 +1182,7 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
         let complete = || {
             crate::ops::task::workflow_set(
                 &repo,
-                &item.identifier,
+                &identifier,
                 "end",
                 Some("Delivered the requested outcome"),
                 &Default::default(),
@@ -1173,7 +1190,7 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
         };
         complete().unwrap();
         let pending = runtime
-            .block_on(fixture.store.get_task(&task.id))
+            .block_on(fixture.store.get_task_by_issue(&identifier))
             .unwrap()
             .unwrap();
         assert!(matches!(
@@ -1181,15 +1198,19 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
             PmWritebackState::Pending { .. }
         ));
         assert!(pending.worktree.is_none());
+        assert_eq!(
+            runtime.block_on(fixture.store.work_status(&crate::durable::WorkRef::Task(pending.id.clone()))).unwrap(),
+            WorkStatus::Done
+        );
         complete().unwrap();
         let retained = runtime
-            .block_on(fixture.store.get_task(&task.id))
+            .block_on(fixture.store.get_task(&pending.id))
             .unwrap()
             .unwrap();
         assert_eq!(retained.pm_writeback, PmWritebackState::Current);
         assert!(retained.worktree.is_none());
         let events = runtime
-            .block_on(fixture.store.task_events_after(&task.id, 0))
+            .block_on(fixture.store.task_events_after(&pending.id, 0))
             .unwrap();
         assert_eq!(
             events
@@ -1198,8 +1219,13 @@ fn assert_unplaced_completion_retry(lose_response: bool) {
                 .count(),
             1
         );
+        assert_eq!(
+            events.iter().filter(|event| matches!(&event.kind, TaskEventKind::Progress { summary } if summary == "Delivered the requested outcome")).count(),
+            1
+        );
+        assert_eq!(runtime.block_on(fixture.store.list_tasks(None)).unwrap().len(), 1);
         assert!(runtime
-            .block_on(fixture.store.task_prs(&task.id))
+            .block_on(fixture.store.task_prs(&pending.id))
             .unwrap()
             .is_empty());
     });
@@ -1367,7 +1393,7 @@ fi
                 } else {
                     settlement?;
                 }
-                Ok(Some(retained))
+                Ok(retained)
             }),
         };
 
@@ -1462,7 +1488,7 @@ fi
         let first = complete("Delivered the requested outcome");
 
 
-            let first = first.unwrap().unwrap();
+            let first = first.unwrap();
             if merge.is_none() {
                 assert!(matches!(first.observation, Observation::Cached { .. }));
             } else {
@@ -1500,9 +1526,7 @@ fi
                 provider.issues[0]["description"] = json!("Retain the provider's latest notes");
                 mark_issue_updated(&mut provider.issues[0]);
             });
-            let retry = complete("Delivered the requested outcome")
-                .unwrap()
-                .unwrap();
+            let retry = complete("Delivered the requested outcome").unwrap();
             assert!(matches!(
                 retry.pm_writeback,
                 PmWritebackState::Pending { ref error, .. }
@@ -1511,7 +1535,6 @@ fi
 
         let result = complete("Delivered the requested outcome").unwrap();
 
-            let result = result.unwrap();
             assert_eq!(result.pm_writeback, PmWritebackState::Current);
             assert_eq!(result.plan.title, "Updated before completion retry");
             assert_eq!(
@@ -1541,7 +1564,7 @@ fi
                         retained.updated_at,
                     ).await.unwrap();
                 });
-                let historical = complete("Must preserve recorded success").unwrap().unwrap();
+                let historical = complete("Must preserve recorded success").unwrap();
                 assert!(matches!(historical.pm_writeback, PmWritebackState::Pending { ref error, .. } if error.contains("cannot be completed")));
                 runtime.block_on(async {
                     let work = fixture.store.work_for_child(&ChildRef::Task(task.id.clone())).await.unwrap();

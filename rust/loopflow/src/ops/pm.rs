@@ -1441,50 +1441,6 @@ pub(crate) async fn pm_update_async(
     Ok(PmUpdateResult { wave, id: item.id })
 }
 
-pub(crate) async fn complete_planning_task(
-    repo: &Path,
-    issue: &str,
-    summary: &str,
-) -> OpsResult<()> {
-    let result = pm_update_async(
-        repo,
-        &PmUpdateOptions {
-            wave: None,
-            id: issue.to_string(),
-            update: PmTaskUpdate::Complete { pr: None },
-        },
-        &super::NullProgress,
-    )
-    .await
-    .map_err(|cause| OpsError::Message(format!(
-        "Task {issue} completion was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
-    )))?;
-    let publish_summary = async {
-        let client = issue_client(repo).await?;
-        // Completion has one summary, including after an uncertain publication.
-        // Its marker also keeps this outcome from becoming new Task direction.
-        let marker = format!("<!-- loopflow-completed:{} -->", result.id);
-        if client
-            .find_comment_with_marker(&result.id, &marker)
-            .await
-            .map_err(pm_to_ops)?
-            .is_none()
-        {
-            super::linear_observe::publish_comment(
-                &client,
-                &result.id,
-                &format!("Completed: {summary}"),
-                &marker,
-            )
-            .await?;
-        }
-        Ok::<(), OpsError>(())
-    };
-    publish_summary.await.map_err(|cause| OpsError::Message(format!(
-        "Task {issue} is complete, but its summary was not confirmed: {cause}. Retry `lf task move {issue} end --reason <original-reason>`."
-    )))
-}
-
 fn preserve_creation_marker(notes: &str, previous: &str) -> String {
     let mut description = notes.to_string();
     for tail in previous.split("<!-- loopflow-task-start:").skip(1) {

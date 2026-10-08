@@ -12,43 +12,45 @@ or automatic turn/Flow retry. This supersedes the branch's mixed-authority desig
 
 Jack Heart's October 8 comment `e36cf3ec-5376-4d29-8ab0-a69a64d70919` requires
 independent inbound completion, membership and comments during pending writes and
-after reconnect. Source now saves comments and UUID delivery receipts atomically.
-The common runner covers native and batch paths; Desktop synchronizes its selected
-Task and streams the saved thread. Isolated runner, public CLI/watch and headless
-view proofs cover comments, lost replies and echo rejection. They prove no installed
-or live-provider outcome. State/membership acquisition and the ownership cut remain
-unfinished. No webhook receiver was found; preserve merged native Flow interaction.
-Release's operation-entry lesson applies to each remaining caller. A late delivery
-acknowledgement must retain newer conflict evidence; streamed values must fence older
-in-flight reads. Both races were repaired in the comment path.
-
-Jack's comment `93690dc2-5526-4ecf-a203-5e248339b0c9` requires immediate local
+after reconnect. Comment `93690dc2-5526-4ecf-a203-5e248339b0c9` adds immediate local
 comment/completion saves and active CLI/Desktop propagation without another turn,
-manual refresh or unrelated outbound drain. Incoming facts enter the common store
-and visible plan. Disconnect retains pending changes; reconnect deduplicates Tasks
-and comments. Stable mutation identities prevent echoes through the common writer.
-Preserve both field-conflict values. Remote completion grants no captured Workflow
-movement, Process control or checkout cleanup; delayed completion cannot overwrite
-newer explicit reopening. Machine clocks prove no order. Operation-entry proofs
-remain required. LOO-412's machine transport, scope and active-owner choices remain
-under review; neither its restart nor replication here is authorized.
+manual refresh or unrelated outbound drain. The common writer retains pending
+changes, stable mutation identities, both conflict values and reconnect deduplication.
+Remote completion grants no Workflow movement, Process control or checkout cleanup;
+delayed completion cannot overwrite explicit reopening. Machine clocks prove no order.
+LOO-412's transport, scope and active-owner choices remain under review; no restart
+or replication here is authorized.
 
-Jack also selected Git-like Task prefixes: accept four or more hex digits, bare or
-prefixed, reject ambiguity, and retain full IDs. Display abbreviations can lengthen.
-Stable identity, creation receipts, provider mapping and placement stay distinct.
-The revision remains authorized through publication for review, not landing or
-installation. Current design: `scratch/explore-loopflow-s-own-store.md`.
+Source atomically saves comments and UUID delivery receipts. The common runner
+covers native/batch paths; Desktop synchronizes its selected Task through a writable
+connection alongside its read-only projection. Isolated runner, public CLI/watch and
+headless view proofs cover comments, lost replies and echoes, not live or installed
+outcomes. State/membership acquisition and the ownership cut remain unfinished.
+No webhook receiver was found; preserve native Flow interaction. Late acknowledgements
+must retain newer conflicts; streamed values must fence older reads. Both comment
+races were repaired. Explicit conflict resolution remains absent.
 
-PR #1503 at `dfe18ab60` passed a six-suite gate and disposable Linux adoption proof
-for the earlier split architecture. Those results establish neither the new unified
-path nor live/installed continuity. Its exact implementation, retained deletion
-recovery, selection-race repair and ten mixed-rotation failure points remain at
+Compression routes uncached completion through ingestion and the same local lifecycle,
+retaining identity, reason and no checkout in the lost-reply fixture. Linear is still
+attempted before local completion; eventual Done with pending writeback proves no
+immediate offline save. Decision, reason and delivery identity need one transaction
+before provider I/O. Release's operation-entry lesson applies: a shared helper's
+success proves neither caller ordering nor active propagation.
+
+Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
+reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
+Identity, creation receipts, mapping and placement stay distinct. Publication is
+for review only; no landing or installation. Design: `scratch/explore-loopflow-s-own-store.md`.
+
+PR #1503 at `dfe18ab60` passed six suites and disposable Linux adoption for the
+superseded split, proving no unified path or live/installed continuity. Implementation,
+deletion recovery, selection-race repair and ten mixed-rotation failure points remain at
 `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-Git refs outside code branches and the host callback remain follow-ups. The laptop
-authors; workers remain disposable. Cover personal machines, shared Linear and
-independent company developers. Namespaces provide no privacy; callbacks provide
-no laptop-loss recovery; write-once mappings prove no concurrent-export uniqueness.
+Git refs and host callbacks remain follow-ups. The laptop authors; workers are
+disposable. Cover personal machines, shared Linear and independent developers.
+Namespaces prove no privacy, callbacks no laptop-loss recovery, and write-once
+mappings no concurrent-export uniqueness.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

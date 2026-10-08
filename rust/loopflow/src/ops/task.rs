@@ -688,8 +688,8 @@ pub fn workflow_show(issue: &str) -> OpsResult<Option<crate::ops::workflow::Work
 /// Put the Task at `node` of its Workflow without running anything: go back,
 /// skip ahead, or record work that finished elsewhere. A Flow still running
 /// on an edge is left alone and no longer moves the Task when it ends.
-/// `end` completes the Task, with or without a Workflow; for a Task `lf` holds
-/// no record of, it completes the planning item.
+/// `end` completes the Task, with or without a Workflow. Uncached Linear
+/// issues are ingested before entering the same completion path.
 pub fn workflow_set(
     repo: &Path,
     issue: &str,
@@ -698,10 +698,8 @@ pub fn workflow_set(
     end: &EndOptions,
 ) -> OpsResult<String> {
     if node == END {
-        return Ok(match task_end(repo, issue, note, end)? {
-            Some(task) => format!("Task {} is at end: done", task.plan.identifier),
-            None => format!("{issue}: completed"),
-        });
+        let task = task_end(repo, issue, note, end)?;
+        return Ok(format!("Task {} is at end: done", task.plan.identifier));
     }
     if end.force {
         return Err(task_error("--force applies only to reaching `end`"));
@@ -4105,27 +4103,33 @@ pub fn task_follow_up(
 }
 
 /// Put the Task at `end`, completing it. A Task with no Workflow ends on one
-/// with nothing between. `None` is a Task `lf` holds no record of: its
-/// planning item is completed without a checkout.
-pub fn task_end(
-    repo: &Path,
-    issue: &str,
-    note: Option<&str>,
-    end: &EndOptions,
-) -> OpsResult<Option<Task>> {
+/// with nothing between. Acquisition retains an uncached issue's identity
+/// before completion, without allocating a checkout.
+pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) -> OpsResult<Task> {
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     block_on_task(async {
         let store = task_store().await?;
-        let Some(mut task) = store
+        let task = store
             .get_task_by_issue(issue)
             .await
-            .map_err(|error| task_error(format!("failed to read Task: {error}")))?
-        else {
-            super::pm::complete_planning_task(repo, issue, note.unwrap_or("Completed")).await?;
-            return Ok(None);
+            .map_err(|error| task_error(format!("failed to read Task: {error}")))?;
+        let mut task = match task {
+            Some(task) => task,
+            None => {
+                let resolved =
+                    super::task_pm::resolve_task_async(repo, issue, super::pm::PmRefresh::Force)
+                        .await?;
+                store
+                    .get_task_by_issue(&resolved.item.id)
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| {
+                        task_error("accepted planning did not retain the Task identity")
+                    })?
+            }
         };
         reach_end(&store, &mut task, EndMove::Set, note, end).await?;
-        Ok(Some(task))
+        Ok(task)
     })
 }
 

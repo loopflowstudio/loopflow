@@ -1082,20 +1082,20 @@ lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
 `c91648d63`. Exact receipts can belong to another active turn without expansion.
 Historical expansion proves no new application.
 
-October 8's `--queue-race` proves native `thread/queue/add` against an attached
-writer: dropped enqueue reply, cancelled waiter and successor connection retain
-one submission; it expands separately after the competing turn completes.
-Native draft, sibling and prior history survive, with no resubmission or successful
-client queue-start. Completed identity survives restart. Seven fake-API requests
-include two titles. This proves provider admission, not LF admission,
-pending-queue crash recovery, idempotency or external effects.
+October 8's `02a073349` proves native `thread/queue/add` against an attached
+writer: dropped reply, cancelled waiter and successor retain one submission;
+it expands after the competing turn. Draft, sibling and prior history survive
+without resubmission or successful client queue-start. Seven fake-API requests
+include two titles. Completed identity survives restart; pending-queue recovery,
+terminal-free consumption, LF admission, idempotency and external effects remain
+unproved.
 
-LF maps its first start per writer to capture/provenance; retries retain distinct
-native IDs, and cross-capture reuse is rejected. Missing/duplicate receipts remain
-uncertain. Controlled handoff preserves text/capture/siblings/ancestry. The driver uses one
-capture and exits on first completion: queue
-integration must change both with admission, preserving the active capture.
-Held-owner delivery, LF lost-ack/draft recovery, catalog/resources, Claude parity
-and cost acceptance remain; resume clears structured invocation. Prior detail:
+LF maps only its first start per writer to capture/provenance. Retries retain
+distinct native IDs; cross-capture reuse is rejected and missing/duplicate receipts
+stay uncertain. Controlled handoff preserves text/capture/siblings/ancestry.
+Admission, per-input attribution and matching-turn completion must change together:
+the driver records one capture and exits on first completion. Resume clears
+structured invocation. Held-owner delivery, LF lost-ack/draft recovery,
+catalog/resources, Claude parity and cost acceptance remain. Prior detail:
 `94006060f`, `302fbd7cf`, this heading.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

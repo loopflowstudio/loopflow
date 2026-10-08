@@ -390,7 +390,8 @@ codex app-server generate-json-schema --experimental --out /tmp/codex-schema
 The fetched official App Server reference does not document the queue methods.
 The fixture changes neither the protocol nor global skill roots and uses no real
 credentials, live model or replacement terminal. It does not prove pending queue
-survival across engine death, repeated-ID idempotency, LF active-capture preservation,
+survival across engine death, consumption without an attached terminal,
+repeated-ID idempotency, LF active-capture preservation,
 full controls/resources or Claude parity. Loopflow's driver still attributes all
 events to one capture and returns on its first completion; integrating queue
 consumption must associate each input with its capture and own terminal outcome.

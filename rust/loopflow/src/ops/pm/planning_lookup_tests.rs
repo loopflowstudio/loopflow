@@ -1365,7 +1365,7 @@ async fn project_binding_rejects_delayed_backlog_after_accepted_completion() {
                 .unwrap()
                 .unwrap();
             assert_eq!(retained.plan.status, crate::pm::ProjectStatus::Completed);
-            assert_eq!(retained.plan.pm_snapshot_synced_at, 17);
+            assert_eq!(retained.plan.pm_snapshot_synced_at, Some(17));
         })
         .await;
 }

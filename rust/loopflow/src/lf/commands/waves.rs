@@ -436,7 +436,12 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 current: current.as_deref() == Some(project.id.as_str()),
                 work_id: registered
                     .iter()
-                    .find(|work| work.plan.id.as_str() == project.id)
+                    .find(|work| {
+                        work.plan
+                            .linear_id
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == project.id)
+                    })
                     .map(|work| work.id.to_string()),
                 id: project.id,
                 slug: project.slug,
@@ -1009,7 +1014,7 @@ fn snapshot_task_runtime(
     planning_conflict: Option<String>,
     started: bool,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::engine::config::load_config_or_default(Some(&task.worktree));
+    let config = crate::engine::config::load_config_or_default(task.worktree.as_deref());
     let (provider, _) = crate::engine::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
@@ -1067,7 +1072,11 @@ async fn snapshot_tasks(
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
         let task = tasks.iter().find(|task| {
-            task.plan.id.as_str() == item.id || task.plan.identifier == item.identifier
+            task.plan
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == item.id)
+                || task.plan.identifier == item.identifier
         });
         let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
         requests.push(TaskDetailRequest {
@@ -1079,7 +1088,10 @@ async fn snapshot_tasks(
 
     for task in &tasks {
         if requests.iter().any(|request| {
-            request.item.id == task.plan.id.as_str()
+            task.plan
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == request.item.id)
                 || request.item.identifier == task.plan.identifier
         }) {
             continue;
@@ -1089,10 +1101,13 @@ async fn snapshot_tasks(
             .iter()
             .find(|project| project.id == task.project_id);
         let current_plan = parent.and_then(|parent| {
-            planning
-                .projects
-                .iter()
-                .find(|plan| plan.id == parent.plan.id.as_str())
+            planning.projects.iter().find(|plan| {
+                parent
+                    .plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == plan.id)
+            })
         });
         if current_plan.is_none() {
             if include_retained || !status.is_terminal() {
@@ -1107,7 +1122,7 @@ async fn snapshot_tasks(
         let item = PmItem {
             branch_name: None,
             revision: None,
-            id: task.plan.id.as_str().to_string(),
+            id: task.plan.linear_id()?.as_str().to_string(),
             identifier: task.plan.identifier.clone(),
             url: None,
             name: task.plan.title.clone(),
@@ -1117,7 +1132,7 @@ async fn snapshot_tasks(
             completed: false,
             completed_at: None,
             state: None,
-            project_id: Some(parent.plan.id.as_str().to_string()),
+            project_id: Some(parent.plan.linear_id()?.as_str().to_string()),
             project: Some(parent.plan.slug.clone()),
             team_id: String::new(),
             assignee: None,
@@ -1216,7 +1231,7 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
     const REASON: &str = "Task's owning Project is absent from the current PM snapshot";
     UnavailableTaskEvidence {
         work_id: task.id.to_string(),
-        task_id: task.plan.id.as_str().to_string(),
+        task_id: task.id.to_string(),
         task_identifier: task.plan.identifier.clone(),
         status,
         owner: NextMoveOwner::Wave,
@@ -1447,7 +1462,7 @@ fn task_local_progress(
     active_pr: Option<&TaskPr>,
     worktree_blocker: Option<&crate::ops::task::TaskWorktreeBlocker>,
 ) -> LocalProgressEvidence {
-    let Some(task) = task else {
+    let Some(worktree) = task.and_then(|task| task.worktree.as_deref()) else {
         return LocalProgressEvidence {
             state: LocalProgressEvidenceState::NotApplicable,
             unsettled: Some(false),
@@ -1461,7 +1476,7 @@ fn task_local_progress(
         &runtime
             .map(|runtime| runtime.status.work_status())
             .expect("Task runtime exists when the durable Task exists"),
-        &task.worktree,
+        worktree,
         active_pr.map(|pr| pr.base_commit.as_str()),
         worktree_blocker,
     )
@@ -1645,27 +1660,28 @@ fn task_reference(
     machine_id: Option<crate::durable::MachineId>,
     local_machine: &crate::durable::MachineId,
 ) -> TaskReferenceSnapshot {
-    let workspace = task.map(|task| {
+    let workspace = task.and_then(|task| {
+        let task_worktree = task.worktree.as_ref()?;
         let branch = active_pr
             .or_else(|| prs.iter().max_by_key(|pr| pr.sequence))
             .map(|pr| pr.branch.clone());
         let local = machine_id.as_ref() == Some(local_machine);
         // A removed checkout has no root to resolve.
-        let worktree = if local && task.worktree.is_dir() {
-            crate::engine::git::worktree_root(&task.worktree)
+        let worktree = if local && task_worktree.is_dir() {
+            crate::engine::git::worktree_root(task_worktree)
                 .ok()
                 .and_then(|root| root.canonicalize().ok())
-                .unwrap_or_else(|| task.worktree.clone())
+                .unwrap_or_else(|| task_worktree.clone())
         } else {
-            task.worktree.clone()
+            task_worktree.clone()
         };
-        TaskWorktreeSnapshot {
+        Some(TaskWorktreeSnapshot {
             machine_id,
             slug: task.workspace_slug.clone(),
             branch,
             worktree: worktree.display().to_string(),
             local_exists: local.then(|| worktree.try_exists().ok()).flatten(),
-        }
+        })
     });
     TaskReferenceSnapshot {
         issue_url: item.url.clone(),
@@ -1674,14 +1690,14 @@ fn task_reference(
 }
 
 fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
-    if !task.worktree.exists() {
+    if !task.worktree.as_ref()?.exists() {
         return None;
     }
-    let clean = crate::engine::git::is_clean(&task.worktree).ok()?;
+    let clean = crate::engine::git::is_clean(task.worktree.as_ref()?).ok()?;
     if !clean {
         return Some(false);
     }
-    let head = crate::engine::git::rev_parse(&task.worktree, "HEAD").ok()?;
+    let head = crate::engine::git::rev_parse(task.worktree.as_ref()?, "HEAD").ok()?;
     Some(head == pr.base_commit)
 }
 

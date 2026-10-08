@@ -51,8 +51,8 @@ pub(crate) async fn publish_task_steer(
     task: &Task,
     text: &str,
 ) -> OpsResult<String> {
-    let client = super::pm::issue_client(&task.worktree).await?;
-    let comment_id = publish_direction(&client, task.plan.id.as_str(), text).await?;
+    let client = super::pm::issue_client(task.worktree()?).await?;
+    let comment_id = publish_direction(&client, task.plan.linear_id()?.as_str(), text).await?;
     refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
         "Posted Linear comment {comment_id}, but local delivery is pending: {error}. The worker will reconcile it from Linear."
     )))?;
@@ -123,9 +123,9 @@ pub(crate) async fn publish_comment(
 }
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let client = super::pm::issue_client(&task.worktree).await?;
+    let client = super::pm::issue_client(task.worktree()?).await?;
     let observation = client
-        .observe_issue(task.plan.id.as_str())
+        .observe_issue(task.plan.linear_id()?.as_str())
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     reconcile_linear_observation(store, task, observation, "", OffsetDateTime::now_utc())
@@ -326,7 +326,7 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             let mut task = task();
-            task.worktree = home.path().to_path_buf();
+            task.worktree = Some(home.path().to_path_buf());
             std::fs::create_dir_all(home.path().join(".lf")).unwrap();
             std::fs::write(
                 home.path().join(".lf/config.yaml"),
@@ -469,16 +469,17 @@ pub(crate) mod tests {
         Task {
             id: TaskId::from_raw("ts_plan"),
             plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
                 identifier: "INF-123".to_string(),
                 title: "Old title".to_string(),
                 description: "Old body".to_string(),
-                pm_snapshot_synced_at: 1,
+                pm_snapshot_synced_at: Some(1),
             },
             pm_writeback: crate::work::task::PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
+            worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
             agent: None,
             abandon_intent: None,

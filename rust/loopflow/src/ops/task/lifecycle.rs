@@ -31,8 +31,8 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     let result = async {
         let wave = owning_wave(store, task).await?;
         let repo = main_repo_root(Path::new(wave.repo()))?;
-        if task.worktree.exists()
-            && std::fs::canonicalize(&task.worktree)? == std::fs::canonicalize(&repo)?
+        if task.worktree.as_ref().is_some_and(|path| path.exists())
+            && std::fs::canonicalize(task.worktree()?)? == std::fs::canonicalize(&repo)?
         {
             eprintln!(
                 "Task {} is complete; retained the primary checkout and branch.",
@@ -42,8 +42,9 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         }
         let _mutation = task
             .worktree
-            .exists()
-            .then(|| super::lock_task_pr_mutation(&task.worktree))
+            .as_ref()
+            .is_some_and(|path| path.exists())
+            .then(|| super::lock_task_pr_mutation(task.worktree()?))
             .transpose()?;
         let mut deletions = Vec::new();
         for pr in store.task_prs(&task.id).await.map_err(task_error)? {
@@ -69,7 +70,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
         for deletion in deletions {
             crate::ops::wt::apply_delete(deletion, &NullProgress)?;
         }
-        if task.worktree.exists() {
+        if task.worktree.as_ref().is_some_and(|path| path.exists()) {
             return Err(task_error(
                 "checkout is on a different branch; retained it for explicit wt delete",
             ));
@@ -193,7 +194,10 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
 async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> {
     let store = task_store().await?;
     let task = resolve_task(&store, selector).await?;
-    let issue = task.as_ref().map_or(selector, |task| task.plan.id.as_str());
+    let issue = task
+        .as_ref()
+        .and_then(|task| task.plan.linear_id.as_ref())
+        .map_or(selector, |id| id.as_str());
     // Fresh ownership and outcome before any effects, even for historical Tasks.
     let resolved = crate::ops::pm::pm_resolve_task_async(repo, issue).await?;
     if resolved.item.state.as_deref() == Some("completed")
@@ -237,7 +241,7 @@ pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
         let store = task_store().await?;
         if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
             let deleted = store
-                .task_deletion(&task.wave_id, task.plan.id.as_str())
+                .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())
                 .await
                 .map_err(task_error)?
                 .is_some();

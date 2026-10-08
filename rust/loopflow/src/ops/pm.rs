@@ -1643,7 +1643,11 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
         .get_task_by_issue(issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let issue = task.as_ref().map_or(issue, |task| task.plan.id.as_str());
+    let issue = task
+        .as_ref()
+        .map(|task| task.plan.linear_id())
+        .transpose()?
+        .map_or(issue, |id| id.as_str());
     let repository = resolve_repository_context(repo).await?;
     // Observed identity survives planning replacement, but only the confirmation
     // relation or Linear's trash proves deletion.
@@ -1751,8 +1755,8 @@ pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
                 eprintln!("Retained PR history: {}", github.url);
             }
         }
-        if task.worktree.exists() {
-            eprintln!("Retained checkout: {}", task.worktree.display());
+        if let Some(path) = task.worktree.as_ref().filter(|path| path.exists()) {
+            eprintln!("Retained checkout: {}", path.display());
         }
     }
     Ok(identifier)
@@ -1976,7 +1980,11 @@ async fn resolve_owned_issue(repo: &Path, issue: &str) -> OpsResult<ResolvedTask
         .get_task_by_issue(issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let issue = task.as_ref().map_or(issue, |task| task.plan.id.as_str());
+    let issue = task
+        .as_ref()
+        .map(|task| task.plan.linear_id())
+        .transpose()?
+        .map_or(issue, |id| id.as_str());
     crate::ops::task_pm::resolve_task_async(repo, issue, PmRefresh::Force).await
 }
 
@@ -3025,14 +3033,17 @@ pub(super) async fn checked_projects_with_store(
                 OpsError::Message(format!("failed to read retained Projects: {error}"))
             })?
         {
-            if !projects
-                .iter()
-                .any(|project| project.id == known.plan.id.as_str())
-            {
+            if !projects.iter().any(|project| {
+                known
+                    .plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| project.id == id.as_str())
+            }) {
                 // An omitted membership cannot erase retained Project/Task history.
                 projects.push(
                     ctx.client
-                        .project_ownership(known.plan.id.as_str())
+                        .project_ownership(known.plan.linear_id()?.as_str())
                         .await
                         .map_err(pm_to_ops)?,
                 );

@@ -40,14 +40,14 @@ pub(crate) fn render_task_context(
         title = task.plan.title,
         description = task.plan.description,
         project = project.name,
-        project_id = project.id.as_str(),
+        project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
         project_context = project.prompt_context,
         direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
-        project_snapshot_synced_at = project.pm_snapshot_synced_at,
+        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
+        project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
         task_id = task.id,
-        worktree = task.worktree.display(),
+        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "unplaced".into()),
         pr_sequence = pr.sequence,
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
@@ -165,7 +165,7 @@ pub async fn resolve_work_selection(
         {
             crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
-            task.worktree.clone()
+            task.worktree()?.clone()
         };
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
@@ -321,11 +321,11 @@ mod tests {
             plan: ProjectPlan {
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new(planning_id).unwrap(),
+                linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
                 slug: slug.to_string(),
                 name: slug.to_string(),
                 prompt_context: "Ship the requested behavior.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             wave_id: wave.id().clone(),
             iteration: 0,
@@ -340,16 +340,17 @@ mod tests {
         let task = Task {
             id: TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new("runtime-research").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
                 identifier: "LOO-267".to_string(),
                 title: "Research the runtime".to_string(),
                 description: "Compare independent findings.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree,
+            worktree: Some(worktree),
             workspace_slug: "runtime-research".to_string(),
             agent: None,
             abandon_intent: None,
@@ -380,7 +381,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.id.as_str(),
+            project.plan.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -649,13 +650,13 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.plan.id.as_str(), task.plan.identifier],
+                rusqlite::params![wave.id().as_str(), task.plan.linear_id.as_ref().unwrap().as_str(), task.plan.identifier],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
             &task.plan.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -819,7 +820,7 @@ mod tests {
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
         ] {
             let rows = store
                 .sqlite

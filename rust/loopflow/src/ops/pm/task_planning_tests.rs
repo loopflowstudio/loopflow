@@ -979,16 +979,17 @@ fi
             let task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {
-                    id: crate::planning::LinearIssueId::new(&item.id).unwrap(),
+            revision: 0,
+                    linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
                     identifier: item.identifier.clone(),
                     title: item.name.clone(),
                     description: item.description.clone(),
-                    pm_snapshot_synced_at: 1,
+                    pm_snapshot_synced_at: Some(1),
                 },
                 pm_writeback: PmWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
-                worktree: repo.clone(),
+                worktree: Some(repo.clone()),
                 workspace_slug: "completion".into(),
                 abandon_intent: None,
                 created_at: timestamp,
@@ -1435,21 +1436,22 @@ esac
                 .block_on(fixture.store.list_projects(Some(wave.id())))
                 .unwrap()
                 .into_iter()
-                .find(|project| project.plan.id.as_str() == "project-1")
+                .find(|project| project.plan.linear_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
                 id: TaskId::new(),
                 plan: crate::planning::TaskPlan {
-                    id: crate::planning::LinearIssueId::new(&item.id).unwrap(),
+                    revision: 0,
+                    linear_id: Some(crate::planning::LinearIssueId::new(&item.id).unwrap()),
                     identifier: item.identifier.clone(),
                     title: item.name,
                     description: item.description,
-                    pm_snapshot_synced_at: 1,
+                    pm_snapshot_synced_at: Some(1),
                 },
                 pm_writeback: PmWritebackState::Current,
                 wave_id: wave.id().clone(),
                 project_id: project.id,
-                worktree: checkout.clone(),
+                worktree: Some(checkout.clone()),
                 workspace_slug: "cancel-me".into(),
                 abandon_intent: None,
                 created_at: timestamp,
@@ -1481,7 +1483,7 @@ esac
                 .unwrap();
             fixture.store.sqlite.test_flow(
                 "review",
-                &task.worktree.to_string_lossy(),
+                &task.worktree.as_ref().unwrap().to_string_lossy(),
                 &[("review", Some("failed"))],
                 Some("failed"),
             );

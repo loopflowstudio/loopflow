@@ -116,11 +116,11 @@ async fn pm_read_linear_oauth_recovers() {
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: crate::pm::ProjectStatus::Started,
-            id: LinearProjectId::new("project-1").unwrap(),
+            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
             slug: "reliability".into(),
             name: "Reliability".into(),
             prompt_context: "Retain this planning history.".into(),
-            pm_snapshot_synced_at: 1,
+            pm_snapshot_synced_at: Some(1),
         },
         wave_id: wave.id().clone(),
         iteration: 3,
@@ -191,7 +191,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.abandon_intent, project.abandon_intent);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
-    assert_eq!(refreshed.plan.id, project.plan.id);
+    assert_eq!(refreshed.plan.linear_id, project.plan.linear_id);
     assert_eq!(refreshed.plan.status, crate::pm::ProjectStatus::Started);
     assert_eq!(refreshed.plan.workflow, "feature");
     assert!(refreshed.plan.prompt_context.contains("Fresh proof"));

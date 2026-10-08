@@ -375,11 +375,11 @@ async fn seed_project(
         id: crate::work::project::ProjectId::new(),
         wave_id: wave.id().clone(),
         plan: crate::planning::ProjectPlan {
-            id: crate::planning::LinearProjectId::new(plan.id.clone()).unwrap(),
+            linear_id: Some(crate::planning::LinearProjectId::new(plan.id.clone()).unwrap()),
             slug: plan.slug.clone(),
             name: plan.name.clone(),
             prompt_context: plan.prompt_context(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
             workflow: plan.workflow.clone(),
             status: plan.status,
         },
@@ -416,16 +416,17 @@ async fn local_task(
     let task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new(issue).unwrap(),
+            revision: 0,
+            linear_id: Some(LinearIssueId::new(issue).unwrap()),
             identifier: format!("FIX-{issue}"),
             title: "Retain execution".into(),
             description: String::new(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: parent.id,
-        worktree: worktree.into(),
+        worktree: Some(worktree.into()),
         workspace_slug: issue.into(),
         agent: None,
         abandon_intent: None,
@@ -709,8 +710,11 @@ async fn archived_predecessor_is_history_even_when_linear_still_says_started() {
             let retained = store.get_task(&task.id).await.unwrap().unwrap();
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, task.project_id);
-            assert_eq!(retained.worktree, task.worktree);
-            assert_eq!(retained.plan.id, task.plan.id);
+            assert_eq!(
+                retained.worktree.as_ref().unwrap(),
+                task.worktree.as_ref().unwrap()
+            );
+            assert_eq!(retained.plan.linear_id, task.plan.linear_id);
             assert_eq!(retained.plan.title, "a-started");
             assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
             assert_eq!(store.sqlite.task_flows(&task.id).unwrap(), flow);

@@ -54,13 +54,13 @@ pub(crate) async fn inject_live_steers(
             .await?
             .ok_or(crate::store::StoreError::NotFound)?;
         let wave = store.get_wave(&task.wave_id).await?;
-        let config = load_config(Some(&task.worktree))?.unwrap_or_default();
+        let config = load_config(Some(task.worktree()?))?.unwrap_or_default();
         let budgets = ContextBudgets::resolve(
             &config,
-            &task.worktree,
+            task.worktree()?,
             wave.as_ref().map(|wave| wave.name()),
         )?;
-        Ok::<_, anyhow::Error>((task.worktree, budgets))
+        Ok::<_, anyhow::Error>((task.worktree()?.clone(), budgets))
     }
     .await;
     let (worktree, budgets) = match context {

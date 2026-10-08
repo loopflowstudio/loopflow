@@ -192,7 +192,7 @@ pub(crate) async fn rotate(
                 .await
                 .map_err(error)?
                 .into_iter()
-                .map(|task| task.worktree)
+                .filter_map(|task| task.worktree)
                 .filter(|path| !path.as_os_str().is_empty()),
         );
     }
@@ -445,15 +445,22 @@ async fn rotation_tasks(store: &Store, entry: &PreparedRotation) -> OpsResult<Ve
                 .await
                 .map_err(error)?
             {
-                if projects
-                    .iter()
-                    .any(|p| p.id == task.project_id && p.plan.id.as_str() == predecessor.id)
-                    && !items.iter().any(|item| item.id == task.plan.id.as_str())
-                {
+                if projects.iter().any(|p| {
+                    p.id == task.project_id
+                        && p.plan
+                            .linear_id
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == predecessor.id)
+                }) && !items.iter().any(|item| {
+                    task.plan
+                        .linear_id
+                        .as_ref()
+                        .is_some_and(|id| id.as_str() == item.id)
+                }) {
                     let (item, _) = entry
                         .ctx
                         .client
-                        .issue_ownership(task.plan.id.as_str())
+                        .issue_ownership(task.plan.linear_id()?.as_str())
                         .await
                         .map_err(error)?
                         .ok_or_else(|| error("Task planning is unavailable"))?;
@@ -924,9 +931,9 @@ async fn disposition(store: &Store, item: PmItem) -> OpsResult<ChapterTask> {
         evidence.published = prs
             .iter()
             .any(|pr| pr.publication.is_some() || pr.merge_commit.is_some());
-        if let Some(pr) = prs.last() {
-            evidence.authored = is_clean(&task.worktree).ok().and_then(|clean| {
-                rev_parse(&task.worktree, "HEAD")
+        if let (Some(pr), Some(worktree)) = (prs.last(), task.worktree.as_ref()) {
+            evidence.authored = is_clean(worktree).ok().and_then(|clean| {
+                rev_parse(worktree, "HEAD")
                     .ok()
                     .map(|head| !clean || head != pr.base_commit)
             });

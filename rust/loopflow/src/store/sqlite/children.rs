@@ -29,11 +29,113 @@ use super::durable::{inherit_project_placement, inherit_task_placement};
 use super::SqliteStore;
 
 impl SqliteStore {
+    pub fn create_local_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let intent: Option<(String, String, String)> = tx
+            .query_row(
+                "SELECT project_id,title,description FROM task_creation_intents WHERE task_id=?1",
+                [input.id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        if let Some((project, title, description)) = intent {
+            if project != input.project_id.as_str()
+                || title != input.title
+                || description != input.description
+            {
+                return Err(StoreError::InvalidData(
+                    "creation identity already belongs to a different request".into(),
+                ));
+            }
+            return task_on(&tx, &input.id)?.ok_or(StoreError::NotFound);
+        }
+        if input.title.trim().is_empty() {
+            return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+        }
+        let (wave_id, external): (WaveId, Option<String>) = tx.query_row(
+            "SELECT wave_id,external_project_id FROM projects WHERE id=?1",
+            [input.project_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if external.is_some() {
+            return Err(StoreError::InvalidAuthority(
+                "this Project's planning is owned by Linear".into(),
+            ));
+        }
+        let now = OffsetDateTime::now_utc();
+        let task = Task {
+            id: input.id.clone(),
+            plan: TaskPlan {
+                revision: 0,
+                linear_id: None,
+                identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
+                title: input.title.clone(),
+                description: input.description.clone(),
+                pm_snapshot_synced_at: None,
+            },
+            pm_writeback: PmWritebackState::Current,
+            wave_id,
+            project_id: input.project_id.clone(),
+            worktree: None,
+            workspace_slug: String::new(),
+            agent: None,
+            abandon_intent: None,
+            created_at: now,
+            updated_at: now,
+            observation: crate::work::task::Observation::NotRequired,
+        };
+        validate_task(&task)?;
+        insert_task_row(&tx, &task)?;
+        tx.execute(
+            "INSERT INTO task_creation_intents(task_id,project_id,title,description) VALUES(?1,?2,?3,?4)",
+            params![input.id.as_str(),input.project_id.as_str(),input.title,input.description],
+        )?;
+        let task = task_on(&tx, &input.id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(task)
+    }
+
+    pub fn edit_local_task(
+        &self,
+        id: &TaskId,
+        expected_revision: u64,
+        patch: &crate::planning::TaskPatch,
+    ) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        if task.plan.linear_id.is_some() {
+            return Err(StoreError::InvalidAuthority(
+                "this Task's planning is owned by Linear".into(),
+            ));
+        }
+        if task.plan.revision != expected_revision {
+            return Err(StoreError::InvalidAuthority(
+                "Task changed; read its current revision before editing".into(),
+            ));
+        }
+        if patch
+            .title
+            .as_ref()
+            .is_some_and(|title| title.trim().is_empty())
+        {
+            return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+        }
+        tx.execute(
+            "UPDATE tasks SET issue_title=COALESCE(?2,issue_title),issue_description=COALESCE(?3,issue_description),planning_revision=planning_revision+1,updated_at=?4 WHERE id=?1",
+            params![id.as_str(),patch.title,patch.description,now_unix()],
+        )?;
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(task)
+    }
+
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<super::TaskCheckout>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(
             "SELECT t.id, t.external_issue_id, t.issue_identifier, t.worktree, p.machine_id
-             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id",
+             FROM tasks t LEFT JOIN work_placements p ON p.task_id=t.id WHERE t.worktree IS NOT NULL",
         )?;
         let rows = statement.query_map([], |row| {
             let home: Option<String> = row.get(4)?;
@@ -60,7 +162,7 @@ impl SqliteStore {
         pr: &TaskPr,
         initialize_worktree: bool,
     ) -> StoreResult<Task> {
-        let _admission = self.lock_checkout(&task.worktree)?;
+        let _admission = self.lock_checkout(task.worktree()?)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         accept_registration_planning(&transaction, &mut task)?;
@@ -73,7 +175,7 @@ impl SqliteStore {
                     pr_id: pr.id.clone(),
                     sequence: pr.sequence,
                     branch: pr.branch.clone(),
-                    path: task.worktree.display().to_string(),
+                    path: task.worktree()?.display().to_string(),
                     base_commit: pr.base_commit.clone(),
                 },
             )?;
@@ -178,7 +280,7 @@ impl SqliteStore {
     pub fn task_by_issue(&self, issue: &str) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let query = format!(
-            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1"
+            "{TASK_COLUMNS} WHERE t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1 OR (substr(?1,1,3)='lf-' AND length(?1)>=15 AND substr(t.id,6,length(?1)-3)=substr(?1,4))"
         );
         let mut statement = conn.prepare(&query)?;
         let rows = statement.query_map(params![issue], map_task_row)?;
@@ -715,7 +817,7 @@ impl SqliteStore {
             params![
                 project.id.as_str(),
                 project.wave_id,
-                project.plan.id.as_str(),
+                project.plan.linear_id.as_ref().map(LinearProjectId::as_str),
                 project.plan.slug,
                 project.plan.name,
                 project.plan.prompt_context,
@@ -930,7 +1032,7 @@ fn validate_initial_task_pr(task: &Task, pr: &TaskPr) -> StoreResult<()> {
 fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreResult<()> {
     let deleted: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM task_deletions WHERE wave_id=?1 AND issue_id=?2)",
-        params![task.wave_id.as_str(), task.plan.id.as_str()],
+        params![task.wave_id.as_str(), task.plan.linear_id()?.as_str()],
         |row| row.get(0),
     )?;
     if deleted {
@@ -948,8 +1050,12 @@ fn accept_registration_planning(conn: &Connection, task: &mut Task) -> StoreResu
         [&task.wave_id],
         |row| row.get(0),
     )?;
-    let observation =
-        super::planning::pm_task_observation_in(conn, &repo, "linear", task.plan.id.as_str())?;
+    let observation = super::planning::pm_task_observation_in(
+        conn,
+        &repo,
+        "linear",
+        task.plan.linear_id()?.as_str(),
+    )?;
     if matches!(
         observation.state,
         crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
@@ -988,11 +1094,12 @@ fn accept_registration_planning(conn: &Connection, task: &mut Task) -> StoreResu
         return Err(StoreError::InvalidData(reason.into()));
     }
     task.plan = TaskPlan {
-        id: task.plan.id.clone(),
+        revision: 0,
+        linear_id: task.plan.linear_id.clone(),
         identifier: record.item.identifier,
         title: record.item.name,
         description: record.item.description,
-        pm_snapshot_synced_at: record.observed_at,
+        pm_snapshot_synced_at: Some(record.observed_at),
     };
     Ok(())
 }
@@ -1008,18 +1115,27 @@ fn insert_initial_task(
     require_task_not_deleted(conn, task)?;
     super::durable::require_selected_project(conn, &task.project_id)?;
 
+    insert_task_row(conn, task)?;
+    inherit_task_placement(conn, task)?;
+    insert_task_pr(conn, pr)?;
+    seed_task_linear_observation(conn, task)
+}
+
+fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         TASK_INSERT,
         params![
             task.id.as_str(),
             task.project_id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().map(LinearIssueId::as_str),
             task.plan.identifier,
             task.plan.title,
             task.plan.description,
             task.plan.pm_snapshot_synced_at,
             serde_json::to_string(&task.pm_writeback)?,
-            task.worktree.display().to_string(),
+            task.worktree
+                .as_ref()
+                .map(|path| path.display().to_string()),
             task.workspace_slug,
             task.abandon_intent
                 .as_ref()
@@ -1032,9 +1148,7 @@ fn insert_initial_task(
             task.agent,
         ],
     )?;
-    inherit_task_placement(conn, task)?;
-    insert_task_pr(conn, pr)?;
-    seed_task_linear_observation(conn, task)
+    Ok(())
 }
 
 /// Seed the Linear observation cursor from the planning directive, in the Task's
@@ -1097,7 +1211,7 @@ const TASK_COLUMNS: &str = "SELECT
     t.id, t.external_issue_id, t.issue_identifier, t.issue_title, t.issue_description,
     p.wave_id, t.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at, t.pm_writeback_json,
-    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent
+    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision
     FROM tasks t JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1506,7 +1620,10 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     Ok(Task {
         id: TaskId::from_raw(row.get::<_, String>(0)?),
         plan: TaskPlan {
-            id: LinearIssueId::from_raw(row.get::<_, String>(1)?),
+            revision: row.get::<_, i64>(16)? as u64,
+            linear_id: row
+                .get::<_, Option<String>>(1)?
+                .map(LinearIssueId::from_raw),
             identifier: row.get(2)?,
             title: row.get(3)?,
             description: row.get(4)?,
@@ -1516,7 +1633,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
             .map_err(|error| invalid_column(11, error))?,
         wave_id: row.get(5)?,
         project_id: ProjectId::from_raw(row.get::<_, String>(12)?),
-        worktree: PathBuf::from(row.get::<_, String>(6)?),
+        worktree: row.get::<_, Option<String>>(6)?.map(PathBuf::from),
         workspace_slug: row.get(7)?,
         agent: row.get(15)?,
         abandon_intent,
@@ -1722,7 +1839,9 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
         plan: ProjectPlan {
-            id: LinearProjectId::from_raw(row.get::<_, String>(1)?),
+            linear_id: row
+                .get::<_, Option<String>>(1)?
+                .map(LinearProjectId::from_raw),
             slug: row.get(2)?,
             name: row.get(3)?,
             prompt_context: row.get(4)?,
@@ -1808,4 +1927,269 @@ fn task_follow_up_in(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<
         .optional()?;
     json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
         .transpose()
+}
+
+#[cfg(test)]
+mod local_planning_tests {
+    use rusqlite::params;
+
+    use crate::durable::{ProjectId, TaskId};
+    use crate::id::WaveId;
+    use crate::planning::{NewTask, TaskPatch};
+    use crate::store::sqlite::SqliteStore;
+
+    fn local_project(store: &SqliteStore) -> ProjectId {
+        let wave = WaveId::new();
+        let project = ProjectId::new();
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'inbox','/local',1)",
+            [&wave],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,NULL,1,'inbox','Inbox','',NULL,1)", params![project.as_str(),wave]).unwrap();
+        project
+    }
+
+    #[test]
+    fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("loopflow.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let input = NewTask {
+            id: TaskId::new(),
+            project_id: local_project(&store),
+            title: "Fix parser".into(),
+            description: "Keep the original input".into(),
+        };
+        let task = store.create_local_task(&input).unwrap();
+        assert!(task.worktree.is_none());
+        assert!(task.plan.linear_id.is_none());
+        assert!(store.task_prs(&task.id).unwrap().is_empty());
+        assert!(store.task_checkouts().unwrap().is_empty());
+        let edited = store
+            .edit_local_task(
+                &task.id,
+                task.plan.revision,
+                &TaskPatch {
+                    title: Some("Fix quoted input".into()),
+                    description: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(edited.plan.revision, 1);
+        assert_eq!(edited.plan.description, input.description);
+        assert!(store
+            .edit_local_task(
+                &task.id,
+                0,
+                &TaskPatch {
+                    title: Some("Stale".into()),
+                    description: None
+                }
+            )
+            .is_err());
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        let retried = store.create_local_task(&input).unwrap();
+        assert_eq!(retried, edited);
+        let second = store
+            .create_local_task(&NewTask {
+                id: TaskId::new(),
+                ..input.clone()
+            })
+            .unwrap();
+        assert_ne!(second.id, task.id);
+        assert_eq!(store.list_tasks(None).unwrap().len(), 2);
+        assert!(store
+            .create_local_task(&NewTask {
+                title: "Different request".into(),
+                ..input
+            })
+            .is_err());
+        assert_eq!(store.task(&task.id).unwrap().unwrap(), edited);
+        let conn = store.conn.lock().unwrap();
+        for table in ["agent_sessions", "processes", "task_workflows", "task_prs"] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "creation must not allocate {table}");
+        }
+    }
+
+    #[test]
+    fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+        let input = NewTask {
+            id: TaskId::new(),
+            project_id: local_project(&store),
+            title: "Keep identity".into(),
+            description: String::new(),
+        };
+        let local = store.create_local_task(&input).unwrap();
+        assert_eq!(local.plan.pm_snapshot_synced_at, None);
+        // Export is a separate slice; this proves the schema accepts a different
+        // provider UUID without changing local identity or creation history.
+        store.conn.lock().unwrap().execute(
+            "UPDATE tasks SET external_issue_id='different-provider-uuid',issue_identifier='TEAM-9' WHERE id=?1",
+            [local.id.as_str()],
+        ).unwrap();
+        let mapped = store.task_by_issue("TEAM-9").unwrap().unwrap();
+        assert_eq!(mapped.id, local.id);
+        assert_eq!(
+            store
+                .task_by_issue(&local.plan.identifier)
+                .unwrap()
+                .unwrap()
+                .id,
+            local.id
+        );
+        assert_eq!(store.create_local_task(&input).unwrap(), mapped);
+        assert!(store
+            .edit_local_task(
+                &local.id,
+                0,
+                &TaskPatch {
+                    title: Some("Bypass provider".into()),
+                    description: None,
+                }
+            )
+            .is_err());
+        assert_eq!(
+            store.task(&local.id).unwrap().unwrap().plan.title,
+            input.title
+        );
+    }
+
+    #[test]
+    fn local_planning_prefix_collision_is_explicit() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+        let input = NewTask {
+            id: TaskId::parse("task_0123456789ab40008000000000000001").unwrap(),
+            project_id: local_project(&store),
+            title: "One".into(),
+            description: String::new(),
+        };
+        let first = store.create_local_task(&input).unwrap();
+        assert_eq!(
+            store.task_by_issue("lf-0123456789ab").unwrap().unwrap().id,
+            first.id
+        );
+        let second = store
+            .create_local_task(&NewTask {
+                id: TaskId::parse("task_0123456789ab40008000000000000002").unwrap(),
+                ..input
+            })
+            .unwrap();
+        assert!(store.task_by_issue("lf-0123456789ab").is_err());
+        for task in [first, second] {
+            assert_eq!(
+                store.task_by_issue(task.id.as_str()).unwrap().unwrap().id,
+                task.id
+            );
+            assert_eq!(
+                store
+                    .task_by_issue(&task.plan.identifier)
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                task.id
+            );
+        }
+    }
+    #[test]
+    fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
+        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use std::sync::{Arc, Mutex};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "local_planning");
+        let renamed: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='processes')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let (processes, lfid, reference) = if renamed {
+            ("processes", "lfid", "process_lfid")
+        } else {
+            ("execs", "id", "exec_id")
+        };
+        let wave = WaveId::new();
+        let orphan_wave = WaveId::new();
+        let project = ProjectId::new();
+        let task = TaskId::new();
+        conn.execute("INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'shared','/repo',1),(?2,'recovery','/repo',1)", params![wave,orphan_wave]).unwrap();
+        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at,project_slug,project_name,project_prompt_context,pm_snapshot_synced_at,updated_at) VALUES(?1,?2,'linear-project',1,'shared','Shared','Retain KRs',7,7)",params![project.as_str(),wave]).unwrap();
+        conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,created_at,issue_title,issue_description,pm_snapshot_synced_at,pm_writeback_json,worktree,workspace_slug,updated_at) VALUES(?1,?2,'linear-task','LOO-1',1,'Retain title','Retain brief',7,'{\"state\":\"current\"}','/repo/task','task',7)",params![task.as_str(),project.as_str()]).unwrap();
+        conn.execute("INSERT INTO task_issue_identities(wave_id,issue_id,identifier) VALUES(?1,'orphan-issue','LOO-2')",[&orphan_wave]).unwrap();
+        conn.execute("INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at) VALUES('pr-retained',?1,1,'task','retain/branch','retained-base',1,7)",[task.as_str()]).unwrap();
+        conn.execute_batch(&format!("INSERT INTO {processes}({lfid},trace_id,command,cwd,started_at) VALUES('process-retained','trace','lf run code','/repo/task',2);")).unwrap();
+        conn.execute(&format!("INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,task_id,wave_id,driver_{reference},provider_thread,input_published) VALUES('session-retained','Conversation','human',2,'/repo/task',?1,?2,'process-retained','native-retained',1)"),params![task.as_str(),wave]).unwrap();
+        conn.execute(&format!("INSERT INTO task_workflows(task_id,graph,node,edge,{reference},updated_at) VALUES(?1,'{{}}','review',0,'process-retained',3)"),[task.as_str()]).unwrap();
+        conn.execute(&format!("INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,{reference},note,at) VALUES(?1,'code','chose','start','review',0,'process-retained','Original choice',3)"),[task.as_str()]).unwrap();
+        // The released frontier can precede another Task's required vocabulary migration.
+        if !renamed {
+            conn.execute_batch(&current_draft_sql("process_names"))
+                .unwrap();
+        }
+        let tables = [
+            "task_prs",
+            "agent_sessions",
+            "task_workflows",
+            "task_workflow_moves",
+            "task_issue_identities",
+        ];
+        let rows = |conn: &rusqlite::Connection, table: &str| {
+            let mut query = conn.prepare(&format!("SELECT * FROM {table}")).unwrap();
+            let columns = query.column_count();
+            query
+                .query_map([], |row| {
+                    (0..columns)
+                        .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let before: Vec<_> = tables.iter().map(|table| rows(&conn, table)).collect();
+        conn.execute_batch("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;")
+            .unwrap();
+        conn.execute_batch(&current_draft_sql("local_planning"))
+            .unwrap();
+        let violations: i64 = conn
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
+        conn.execute_batch("COMMIT; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        for (table, expected) in tables.iter().zip(before) {
+            assert_eq!(rows(&conn, table), expected, "{table}");
+        }
+        let store = SqliteStore {
+            conn: Arc::new(Mutex::new(conn)),
+        };
+        let retained = store.task(&task).unwrap().unwrap();
+        assert_eq!(retained.id, task);
+        assert_eq!(retained.project_id, project);
+        assert_eq!(retained.plan.linear_id.unwrap().as_str(), "linear-task");
+        assert_eq!(retained.plan.identifier, "LOO-1");
+        assert_eq!(retained.worktree.unwrap().to_str(), Some("/repo/task"));
+        let project = store.project(&project).unwrap().unwrap();
+        assert_eq!(project.plan.linear_id.unwrap().as_str(), "linear-project");
+        assert_eq!(project.plan.prompt_context, "Retain KRs");
+        assert_eq!(
+            store.task_issue_identity(&orphan_wave, "LOO-2").unwrap(),
+            Some(("orphan-issue".into(), "LOO-2".into()))
+        );
+        assert!(store.task_by_issue("LOO-2").unwrap().is_none());
+    }
 }

@@ -15,14 +15,15 @@ retains execution on X and routes Linear through the online host; disconnect/dir
 fallback remain open. No resident or automatic work retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-Rechecked at `bc6d11661`: retain `task_issue_identities` solely for deletion recovery,
-never ordinary resolution or mutation authority. It survives without a Task,
-Project or cached issue; the earlier released-schema orphan/FK proof remains valid,
-and the recovery fixture is unchanged, not rerun. Retention is an engineering
-correction within Jack's preservation constraint. The claimed deterministic import
-mapper is absent: reuse mappings, otherwise persist UUID v4 once. Local lifecycle
-remains unimplemented. Release's entry-point lesson applies: strict stubs and
-public CLI recovery readback; headless view behavior needs more than an app build.
+The storage foundation now permits optional provider mapping and placement in
+existing Task/Project rows, with transactional create/edit and retained creation
+identity across edits/restarts. One draft preserves linked history and orphan
+`task_issue_identities`; that table remains deletion recovery only. Disposable
+migration/readback and the existing lost-response recovery fixture pass. Public
+CLI, personal definitions, comments, workflow/delivery and Desktop cutover remain
+unfinished. Store tests prove no public lifecycle or installation. Reuse import
+mappings or persist UUID v4 once; no deterministic mapper exists. Release's strict
+entry-point/CLI recovery and headless view lessons still apply.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

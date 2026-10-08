@@ -97,13 +97,13 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             id: ProjectId::new(),
             wave_id: wave.id().clone(),
             plan: ProjectPlan {
-                id: LinearProjectId::new("project-1").unwrap(),
+                linear_id: Some(LinearProjectId::new("project-1").unwrap()),
                 slug: "chapter".into(),
                 name: "Chapter".into(),
                 workflow: "adoption".into(),
                 status: loopflow::pm::ProjectStatus::Started,
                 prompt_context: "Adopt existing work".into(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             iteration: 0,
             abandon_intent: None,
@@ -212,9 +212,9 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             .unwrap()
             .unwrap();
         if !remote_only {
-            assert_eq!(task.worktree, checkout);
+            assert_eq!(task.worktree.as_ref(), Some(&checkout));
         }
-        checkout = task.worktree.clone();
+        checkout = task.worktree.as_ref().unwrap().clone();
         assert!(loopflow::engine::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
         if operation == "checkout" {
             assert_eq!(

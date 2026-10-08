@@ -432,7 +432,11 @@ pub async fn workflow(
     let projects = store.list_projects(None).await.map_err(project_error)?;
     let mut matches = projects.iter().filter(|project| {
         project.id.as_str() == selector
-            || project.plan.id.as_str() == selector
+            || project
+                .plan
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == selector)
             || project.plan.slug == selector
             || project.plan.name == selector
     });
@@ -454,7 +458,7 @@ pub async fn workflow(
         super::pm::require_planning_home(&store, &wave).await?;
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
         let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
-        let provider = require_project(&ctx, project.plan.id.as_str()).await?;
+        let provider = require_project(&ctx, project.plan.linear_id()?.as_str()).await?;
         let content = ProjectContent {
             workflow: name.to_string(),
             metric_targets: provider.metric_targets.clone(),
@@ -471,6 +475,12 @@ pub async fn workflow(
         .accepted_projects(wave.id())
         .map_err(project_error)?
         .into_iter()
-        .find(|p| p.id == project.plan.id.as_str())
+        .find(|p| {
+            project
+                .plan
+                .linear_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == p.id)
+        })
         .ok_or_else(|| project_error("Project planning is unavailable; sync its Wave"))
 }

@@ -103,7 +103,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         if condition == "invalid" || condition == "removed" {
             runtime
                 .block_on(registered.store.observe_pm_issue_change(
-                    registered.task.plan.id.as_str(),
+                    registered.task.plan.linear_id.as_ref().unwrap().as_str(),
                     None,
                     condition == "removed",
                 ))
@@ -187,7 +187,10 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .block_on(registered.store.get_task(&registered.task.id))
             .unwrap()
             .unwrap();
-        assert_eq!(task.worktree, registered.task.worktree);
+        assert_eq!(
+            task.worktree.as_ref().unwrap(),
+            registered.task.worktree.as_ref().unwrap()
+        );
         assert_eq!(
             runtime
                 .block_on(registered.store.active_task_pr(&registered.task.id))

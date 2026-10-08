@@ -863,11 +863,13 @@ mod durable_store_tests {
             plan: ProjectPlan {
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
+                linear_id: Some(
+                    LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap(),
+                ),
                 slug: "probe".to_string(),
                 name: "Probe".to_string(),
                 prompt_context: "Probe Task execution".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             wave_id: wave_id.clone(),
             iteration: 0,
@@ -880,23 +882,24 @@ mod durable_store_tests {
             &store,
             &wave_id,
             None,
-            project.plan.id.as_str(),
+            project.plan.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
         let task = Task {
             id: task_id.clone(),
             plan: TaskPlan {
-                id: LinearIssueId::new("task-uuid").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
                 identifier: "PROBE-1".to_string(),
                 title: "Probe Task execution".to_string(),
                 description: "Exercise the Task Flow store".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id,
             project_id,
-            worktree: PathBuf::from("/repo.probe"),
+            worktree: Some(PathBuf::from("/repo.probe")),
             workspace_slug: "probe".to_string(),
             agent: None,
             abandon_intent: None,
@@ -933,7 +936,8 @@ mod durable_store_tests {
         let task = store.task(&task_id).unwrap().unwrap();
         let mut other = store.project(&task.project_id).unwrap().unwrap();
         other.id = ProjectId::new();
-        other.plan.id = LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap();
+        other.plan.linear_id =
+            Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
         other.plan.name = "An unrelated ordinary plan".into();
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
@@ -942,7 +946,7 @@ mod durable_store_tests {
         store.require_task_launch(&task_id).unwrap();
         assert!(!store.task_started(&task_id).unwrap());
         let mut input = unpublished_conversation(Some(new_task.id.clone()), None, 1);
-        input.cwd = new_task.worktree.clone();
+        input.cwd = new_task.worktree.as_ref().unwrap().clone();
         store.create_session(input, None).unwrap();
         assert!(store.task_started(&new_task.id).unwrap());
         let guard = crate::store::PlanningLocks::new(tempfile::tempfile().unwrap());
@@ -950,13 +954,13 @@ mod durable_store_tests {
             &store,
             &task.wave_id,
             Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-            other.plan.id.as_str(),
+            other.plan.linear_id.as_ref().unwrap().as_str(),
             &guard,
         )
         .unwrap();
         let (mut rejected, mut rejected_pr) =
             unregistered_task(&store, &task_id, dir.path().join("rejected"));
-        rejected.plan.id = LinearIssueId::new("third-issue").unwrap();
+        rejected.plan.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
         rejected.plan.identifier = "PROBE-3".into();
         rejected.workspace_slug = "rejected".into();
         rejected_pr.slug = "rejected".into();
@@ -1237,7 +1241,7 @@ mod durable_store_tests {
         // A Flow run from the checkout names no Task; its step is still work there.
         store.test_flow(
             "sync",
-            &task.worktree.to_string_lossy(),
+            &task.worktree.as_ref().unwrap().to_string_lossy(),
             &[("sync --plan", None)],
             None,
         );
@@ -1253,9 +1257,9 @@ mod durable_store_tests {
         let mut task = store.task(existing).unwrap().unwrap();
         let mut pr = store.task_prs(existing).unwrap().remove(0);
         task.id = TaskId::new();
-        task.plan.id = LinearIssueId::new("later-issue").unwrap();
+        task.plan.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
         task.plan.identifier = "PROBE-2".into();
-        task.worktree = checkout;
+        task.worktree = Some(checkout);
         task.workspace_slug = "later-checkout".into();
         pr.id = TaskPrId::new();
         pr.task_id = task.id.clone();
@@ -1269,7 +1273,7 @@ mod durable_store_tests {
         for initializing in [false, true] {
             let (dir, store, existing) = store_with_task();
             let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
-            let cwd = task.worktree.join("src/nested");
+            let cwd = task.worktree.as_ref().unwrap().join("src/nested");
             let admission = store.lock_checkout(&cwd).unwrap();
             let mut earlier = unpublished_conversation(None, None, 1);
             earlier.cwd = cwd;
@@ -1295,9 +1299,11 @@ mod durable_store_tests {
         let (dir, store, existing) = store_with_task();
         let (task, pr) = unregistered_task(&store, &existing, dir.path().join("missing-root"));
         let mut conversation = unpublished_conversation(None, None, 1);
-        conversation.cwd = task.worktree.join("src/nested");
+        conversation.cwd = task.worktree.as_ref().unwrap().join("src/nested");
         conversation.work_source = None;
-        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let exclusion = store
+            .lock_checkout(task.worktree.as_ref().unwrap())
+            .unwrap();
         assert!(store.create_session(conversation.clone(), None).is_err());
         assert!(store.session(&conversation.id).unwrap().is_none());
         drop(exclusion);
@@ -1336,10 +1342,12 @@ mod durable_store_tests {
                 unregistered_task(&store, &existing, dir.path().join("missing-checkout"));
 
             let mut conversation = unpublished_conversation(None, None, 1);
-            conversation.cwd = task.worktree.join("src");
+            conversation.cwd = task.worktree.as_ref().unwrap().join("src");
             conversation.work_source = None;
             let session = store.create_session(conversation, None).unwrap();
-            let exclusion = store.lock_checkout(&task.worktree).unwrap();
+            let exclusion = store
+                .lock_checkout(task.worktree.as_ref().unwrap())
+                .unwrap();
             let register = || store.insert_task(task.clone(), &pr, initializing);
             assert!(register().is_err());
             assert!(store.task(&task.id).unwrap().is_none());
@@ -1366,7 +1374,7 @@ mod durable_store_tests {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
-        conversation.cwd = task.worktree.join("src");
+        conversation.cwd = task.worktree.as_ref().unwrap().join("src");
         conversation.work_source = None;
         let session = store.create_session(conversation, None).unwrap();
         let before = store.task_work(&task_id).unwrap();
@@ -1393,7 +1401,10 @@ mod durable_store_tests {
 
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, successor);
-        assert_eq!(retained.worktree, task.worktree);
+        assert_eq!(
+            retained.worktree.as_ref().unwrap(),
+            task.worktree.as_ref().unwrap()
+        );
         let after = store.task_work(&task_id).unwrap();
         assert_eq!(after.sessions, before.sessions);
         assert_eq!(store.session(&session.id).unwrap().unwrap(), session);
@@ -1406,7 +1417,9 @@ mod durable_store_tests {
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
         let session = store.create_session(conversation, None).unwrap();
-        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let exclusion = store
+            .lock_checkout(task.worktree.as_ref().unwrap())
+            .unwrap();
         assert!(store
             .bind_session(&session.id, session.captured, &task_id)
             .is_err());
@@ -1429,7 +1442,9 @@ mod durable_store_tests {
         let session = store.create_session(input, None).unwrap();
         let mut next = session.clone();
         next.artifact_key = crate::session_record::new_artifact_key();
-        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let exclusion = store
+            .lock_checkout(task.worktree.as_ref().unwrap())
+            .unwrap();
         let result = store.replace_session_input(session.captured, next.clone());
         assert!(
             result.is_err(),
@@ -1447,9 +1462,11 @@ mod durable_store_tests {
     fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        let exclusion = store.lock_checkout(&task.worktree).unwrap();
+        let exclusion = store
+            .lock_checkout(task.worktree.as_ref().unwrap())
+            .unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
-        conversation.cwd = task.worktree.join("missing/subdirectory");
+        conversation.cwd = task.worktree.as_ref().unwrap().join("missing/subdirectory");
         assert!(store.create_session(conversation.clone(), None).is_err());
         assert!(store.session(&conversation.id).unwrap().is_none());
         conversation.cwd = dir.path().join("elsewhere");
@@ -1488,7 +1505,10 @@ mod durable_store_tests {
         assert!(store.task_started(&task_id).unwrap());
         let retained = store.task(&task_id).unwrap().unwrap();
         assert_eq!(retained.project_id, task.project_id);
-        assert_eq!(retained.worktree, task.worktree);
+        assert_eq!(
+            retained.worktree.as_ref().unwrap(),
+            task.worktree.as_ref().unwrap()
+        );
         assert_eq!(
             store
                 .bind_session(&session.id, session.captured, &task_id)

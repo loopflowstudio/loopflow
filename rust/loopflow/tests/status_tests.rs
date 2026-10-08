@@ -47,11 +47,13 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
+            linear_id: Some(
+                LinearProjectId::new(uuid::Uuid::new_v4().to_string()).expect("Linear Project id"),
+            ),
             slug: slug.to_string(),
             name: slug.replace('-', " "),
             prompt_context: "Keep status truthful.".to_string(),
-            pm_snapshot_synced_at: updated_at.unix_timestamp(),
+            pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -76,7 +78,7 @@ fn select_project(home: &Path, wave: &Wave, project_id: &str) {
 fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     let payload = serde_json::json!({
         "projects": [{
-            "id": project.plan.id.as_str(),
+            "id": project.plan.linear_id.as_ref().unwrap().as_str(),
             "slug": project.plan.slug,
             "name": project.plan.name,
             "summary": "Keep status truthful.",
@@ -89,7 +91,11 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
         "items": []
     });
     let store = SqliteStore::new(&home.join("loopflow.db")).expect("open status store");
-    select_project(home, wave, project.plan.id.as_str());
+    select_project(
+        home,
+        wave,
+        project.plan.linear_id.as_ref().unwrap().as_str(),
+    );
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: wave.id().clone(),
@@ -210,11 +216,13 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
+            linear_id: Some(
+                LinearProjectId::new(STALE_PROJECT_ID).expect("recorded PM Project id"),
+            ),
             slug: "technical-architecture".to_string(),
             name: "Technical Architecture".to_string(),
             prompt_context: "Keep the system legible and minimally simple.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+            pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -223,20 +231,21 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         updated_at: now,
     };
     store.insert_project(&stale).expect("seed stale Project");
-    select_project(home, &wave, stale.plan.id.as_str());
+    select_project(home, &wave, stale.plan.linear_id.as_ref().unwrap().as_str());
     let stale_task = Task {
         id: TaskId::parse(STALE_TASK_WORK_ID).expect("recorded Task Work id"),
         plan: TaskPlan {
-            id: LinearIssueId::new("linear-task-w2-127").expect("recorded PM Task id"),
+            revision: 0,
+            linear_id: Some(LinearIssueId::new("linear-task-w2-127").expect("recorded PM Task id")),
             identifier: "W2-127".to_string(),
             title: "Preserve historical architecture evidence".to_string(),
             description: "This Task outlived its retired Linear Project.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp() - 1,
+            pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: stale.id.clone(),
-        worktree: home.join("repo.w2-127"),
+        worktree: Some(home.join("repo.w2-127")),
         workspace_slug: "w2-127".to_string(),
         agent: None,
         abandon_intent: None,
@@ -283,12 +292,14 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
-                .expect("current PM Project id"),
+            linear_id: Some(
+                LinearProjectId::new("95159066-9098-4d0b-8903-01459dc7ec14")
+                    .expect("current PM Project id"),
+            ),
             slug: "auditability".to_string(),
             name: "Auditability".to_string(),
             prompt_context: "Every claim points to its receipt.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -299,7 +310,11 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool) {
     store
         .insert_project(&current)
         .expect("seed current Project");
-    select_project(home, &wave, current.plan.id.as_str());
+    select_project(
+        home,
+        &wave,
+        current.plan.linear_id.as_ref().unwrap().as_str(),
+    );
 
     let bin = home.join("bin");
     std::fs::create_dir_all(&bin).expect("test bin");
@@ -448,7 +463,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
     let expected_projects = serde_json::json!({
         "state": "ok",
         "items": [{
-            "id": project.plan.id.as_str(),
+            "id": project.plan.linear_id.as_ref().unwrap().as_str(),
             "work_id": project.id.as_str(),
             "slug": project.plan.slug,
             "name": project.plan.name,

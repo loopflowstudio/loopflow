@@ -295,7 +295,7 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
         .task_by_issue(task_id.as_str())?
         .ok_or_else(|| anyhow!("Task {task_id} is not registered"))?;
     if store
-        .task_deletion(&task.wave_id, task.plan.id.as_str())?
+        .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())?
         .is_some()
     {
         bail!(

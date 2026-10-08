@@ -282,7 +282,7 @@ fn build_prompt_at(
     let task_input = prepare_task_input(cli)?;
     let task_checkout = match &task_input {
         Some((_, seed)) => {
-            std::fs::canonicalize(&seed.task.worktree)? == std::fs::canonicalize(&repo_root)?
+            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
         }
         None => false,
     };

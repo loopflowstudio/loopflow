@@ -1,4 +1,4 @@
-//! Durable tracking for one Linear Project's KRs.
+//! Durable tracking for one Project's KRs.
 //!
 //! Linear status selects the current plan; Project planning facts include its
 //! workflow. A Project owns no worktree, shipping branch, PR, permanent
@@ -15,7 +15,7 @@ use crate::work::task::{TaskEventKind, TaskId};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
     pub id: ProjectId,
-    /// Current planning facts from the PM system.
+    /// Authored local planning or accepted Linear facts.
     pub plan: ProjectPlan,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,

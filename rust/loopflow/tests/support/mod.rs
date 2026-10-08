@@ -314,11 +314,13 @@ fn register_task_fixture(
         plan: ProjectPlan {
             workflow: "feature".into(),
             status: loopflow::pm::ProjectStatus::Started,
-            id: LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            linear_id: Some(
+                LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
+            ),
             slug: "task-pr-tests".to_string(),
             name: "Task PR tests".to_string(),
             prompt_context: "Keep Task PR transitions durable.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         wave_id: wave.id().clone(),
         iteration: 0,
@@ -329,16 +331,19 @@ fn register_task_fixture(
     let task = Task {
         id: TaskId::new(),
         plan: TaskPlan {
-            id: LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            revision: 0,
+            linear_id: Some(
+                LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"),
+            ),
             identifier: "INF-123".to_string(),
             title: "Prove Task PR transitions".to_string(),
             description: "Exercise the persisted lifecycle.".to_string(),
-            pm_snapshot_synced_at: now.unix_timestamp(),
+            pm_snapshot_synced_at: Some(now.unix_timestamp()),
         },
         pm_writeback: PmWritebackState::Current,
         wave_id: wave.id().clone(),
         project_id: project.id.clone(),
-        worktree: worktree.to_path_buf(),
+        worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
         agent: None,
         abandon_intent: None,
@@ -380,7 +385,7 @@ fn register_task_fixture(
             .expect("select fixture Project");
         let pm_payload = serde_json::json!({
             "projects": [{
-                "id": project.plan.id.as_str(),
+                "id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "slug": project.plan.slug.as_str(),
                 "name": project.plan.name.as_str(),
                 "summary": "",
@@ -392,14 +397,14 @@ fn register_task_fixture(
                 "team_ids": ["team-task-pr-tests"]
             }],
             "items": [{
-                "id": task.plan.id.as_str(),
+                "id": task.plan.linear_id.as_ref().unwrap().as_str(),
                 "identifier": task.plan.identifier.as_str(),
                 "url": "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions",
                 "name": task.plan.title.as_str(),
                 "description": task.plan.description.as_str(),
                 "rank": 1,
                 "completed": false,
-                "project_id": project.plan.id.as_str(),
+                "project_id": project.plan.linear_id.as_ref().unwrap().as_str(),
                 "project": project.plan.slug.as_str(),
                 "team_id": "team-task-pr-tests",
                 "assignee": null
@@ -441,11 +446,12 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.plan.id = LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id");
+    task.plan.linear_id =
+        Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
-    task.worktree = worktree.to_path_buf();
+    task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
     let pr = TaskPr {

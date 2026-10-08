@@ -133,7 +133,10 @@ async fn rotation_recovers_every_mutation_and_partial_repository_settlement() {
                         .is_some());
                 }
                 let retained = context.store.get_task(&task.id).await.unwrap().unwrap();
-                assert_eq!(retained.worktree, task.worktree);
+                assert_eq!(
+                    retained.worktree.as_ref().unwrap(),
+                    task.worktree.as_ref().unwrap()
+                );
                 assert_eq!(context.store.task_prs(&task.id).await.unwrap(), vec![pr]);
                 assert_eq!(context.store.sqlite.task_flows(&task.id).unwrap(), flow);
                 assert_eq!(task_started_at(&context.path, &task.id), started);
@@ -493,7 +496,7 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
             .unwrap();
         let retained = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.id, task.id);
-        assert_eq!(retained.worktree, checkout);
+        assert_eq!(retained.worktree.as_ref(), Some(&checkout));
         assert_eq!(
             store
                 .get_project(&retained.project_id)
@@ -501,7 +504,9 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
                 .unwrap()
                 .unwrap()
                 .plan
-                .id
+                .linear_id
+                .as_ref()
+                .unwrap()
                 .as_str(),
             successor
         );

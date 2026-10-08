@@ -210,6 +210,11 @@ Browser layout and CLI help were checked; this does not establish a fresh-machin
 install journey or an observed cmux Flow run. LOO-425's directive ends at PR
 publication, despite the broader outcome mentioning production deployment.
 
+Implementation review on October 7 found that Pico's inherited heading margins
+and inline-code boxes changed the approved layout. Homepage resets are scoped
+under `.home-page` because docs and download pages share the stylesheet;
+`docs/architecture.html` embeds it and needs regeneration when it changes.
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

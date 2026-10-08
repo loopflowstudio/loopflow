@@ -1,12 +1,14 @@
 # Agent startup — LOO-436
 
-Jack Heart requested autonomous profiling and optimization through publication
-for review, without landing or completing the Task (2026-10-08).
+Jack Heart requested autonomous profiling and optimization. October 8 memory
+records later landing approval for PR #1505; the latest supplied iteration
+direction requires publication through delivery while keeping the PR unmerged
+and the Task open. This reconciliation follows that narrower boundary.
 
 ## Reconciled design and evidence
 
 The [durable report](../scripts/benchmarks/agent-startup/README.md) owns the
-scripts, sanitized numbers, eight flamegraphs, spread and proof limits.
+scripts, sanitized numbers, twelve flamegraphs, spread and proof limits.
 Native readiness requires an unsubmitted marker in the provider's raw-mode editor.
 Codex reconnect preparation needs one minimal persisted turn outside timing.
 Warm comparisons alternate 16 pairs; first-use comparisons use five fresh dense
@@ -18,42 +20,55 @@ before any launch. Only benchmark-created Sessions are connected. Earlier exclud
 probes reached copied managed-provider homes; their filesystem effects were not
 audited. The fixture repair cannot retroactively prove their isolation.
 
-The complete change improves paired warm bare readiness by 41 ms for Claude and
+The first two deletions improve paired warm bare readiness by 41 ms for Claude and
 24 ms for Codex; Codex reconnect improves 16 ms. Claude reconnect's final median
 is worse, with an interval spanning zero. The report retains that contrary evidence.
 The credential-free smoke bounds both public entry points and preserves native
 identity, default skill context and 30,000 events. Installed gains remain unproved.
 
-## Delete — do not maintain
+## Implemented reductions
 
-- Remove the interactive pre-launch provider `--version` process; the actual
+- Removed the interactive pre-launch provider `--version` process; the actual
   spawn owns success/failure and non-start evidence.
 - Return NoContext before absent-Wave Git/store/runtime work. Explicit and
   inherited Wave resolution keeps its existing owner.
 - The attempted capture-store handle reuse was removed after 30 matched pairs
   failed to separate its 3 ms estimate from noise (interval −4 to 9 ms).
+- Removed the repeated prompt-construction Git lookup; dispatch passes its directory.
+- Deferred ancestor-probe optimization was measured and removed without a gain.
+- Benchmark drivers share read-only Session lookup, native readiness recording
+  and sampler setup. Symbol demangling uses a temporary input file after a reproduced pipe stall; transcript cleanup writes
+  once. These reductions change no production code or retained measurements.
 
-## Evidence and remaining work
+## Git-discovery follow-up and stopping point
 
-Native warm and first-use comparisons, per-deletion symbolized wall-stack SVGs,
-raw numbers and reproduction scripts live under `scripts/benchmarks/agent-startup`.
-The report preserves contrary Claude reconnect evidence and failed exploratory
-account isolation. Fresh fixtures are not cold OS caches; managed accounts,
-installed gains and cold login remain unproved. There is no persistent cache.
+Dispatch now passes its resolved directory into prompt construction. Thirty
+alternating symbolized-release pairs gave bare handoff 402 → 390 ms, paired
+improvement 7.5 ms (95% interval 3.5–14.2 ms), and 16 → 15 Git children.
+Reconnect control spans zero. These handoff numbers cannot be added to the
+older native readiness gains. Four new wall-stack SVGs cover both paths.
 
-The credential-free CI smoke exercises bare lf and connect through a stand-in
-with bounded work, preserved context, Session/native identity and 30,000 events.
-Fixture preparation removes copied external account routes; the surviving Python
-regression verifies history and source preservation. Release child memory was
-read during reconciliation; its operation-entry and distinct-proof lessons apply.
+The subsequent deferred-ancestor-probe experiment had no measurable gain:
+bare paired −3.1 ms (−9.0 to 4.8), reconnect 6.5 ms (−2.8 to 12.8), 30 pairs each.
+Its code was removed; the durable report retains its patch, hashes and all rows.
+This establishes the attempted-gains stopping condition after the new directory
+win, not an exhaustive or irreducible-cost claim. Remaining Git calls serve
+separate placement, attribution, Session, provider-root and account owners.
+The nested-directory smoke checks preserved context and captured root.
 
-Published [PR #1505](https://github.com/loopflowstudio/loopflow/pull/1505) for
-Jack Heart's review. Auto-merge is off; the Task remains open. Review and hosted
-CI remain.
-Do not infer hosted CI, installed performance, landing or Task completion from
-local success. Repeated Git discovery is a possible further optimization, not a
-proved gain; this pass stopped after the last attempted deletion lost its signal.
+## Remaining acceptance and review
 
-Check: release build; network-denied startup smoke; focused attribution/reconnect/
-Wave checks; fmt/Clippy/Ruff; fixture pytest; SVG XML and sanitization — PASS.
-SVG visual review remains unproved; broader hosted checks belong to CI.
+Cold-cache readiness remains unmeasured. The report records the concrete shared
+macOS limitation and a per-invocation reset method; LOO-436 gate on a dedicated
+disposable macOS host with exclusive cache control and native login owns that
+verification. Fresh fixture Homes and guest-only reboots cannot substitute.
+Rendered SVG readability belongs to Jack Heart's review; hosted checks to CI.
+Neither gap is waived. Managed accounts, installed gains and cold login remain
+unproved. Release's child memory was read; its distinct-proof lesson still applies.
+
+Delivery still owns publication of the cleanup, third deletion, evidence and
+HTML viewer under the current unmerged-PR boundary. Earlier landing approval is
+retained as history, not exercised here. Claude reconnect's contrary result and
+the excluded probes' unaudited provider-home effects remain in the durable report.
+
+Check: `summarize.py` recomputation matches both follow-up datasets; `git diff --check` and `lf context --skill realign` — PASS; prior build/tests retained without rerun. Cold readiness: isolated macOS gate; rendered SVGs: review; hosted checks: CI.

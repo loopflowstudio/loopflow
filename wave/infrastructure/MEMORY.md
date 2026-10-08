@@ -61,9 +61,8 @@ establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
 selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
 alias or per-call repository override remains.
-Jack Heart later requested landing for LOO-411; its sync repair was limited to
-syncing main, focused verification and publication, then stopping. That request
-does not authorize later slices or LOO-413 landing.
+Jack Heart's October 7 steer records LOO-411 / PR #1489 merged; main `35e759aaf`
+is integrated. Parent landing grants no later-slice or LOO-413 landing authority.
 
 ## Resident machine logins (LOO-413, 2026-10-07)
 
@@ -72,7 +71,7 @@ and landing. Transfer over stdin only to added machines. Preserve received login
 across registration failure; remote preferences cannot relax selected identity.
 Retain the encryption key atomically in a private file. An unreadable Keychain
 permits a new key only without existing encrypted tokens.
-LOO-411's selector and `d3c4dc7bc` CI fixes are integrated. Reuse local argument reordering
+Jack requested sync to main and republication of #1493 for review. Reuse argument reordering
 before remote account selection: flags after a skill otherwise bypass the
 restriction. Preserve `--` prompt literals and target-owned command resolution.
 Broker, lent routes, secret forwarding and route-source metadata are deleted.

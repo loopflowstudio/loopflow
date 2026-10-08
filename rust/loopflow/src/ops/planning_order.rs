@@ -74,7 +74,7 @@ pub(super) async fn sync_order(
         };
         if !store
             .sqlite
-            .attempt_project_order(project, &delivery.change.id, &effect)
+            .attempt_project_order(project, &delivery.id, &effect)
             .map_err(message)?
         {
             return Ok(());

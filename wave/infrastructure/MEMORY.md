@@ -37,15 +37,15 @@ can proceed now; integration consumes a coherent committed writer cut, never dir
 code or duplicated planning. Ownership is independently reviewable. Jack invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
-Foreground connections independently acquire comments/inventory and deliver mapped
-Tasks' comments/state plus Task/Project field receipts. Attempted writes retain
-identity and uncertainty. Matching observations acknowledge only that attempt and
-advance later saves' unchanged baselines, preserving newer edits. Linear conflicts
-retain losing values and retire their delivery. Effect locks block neither saves
-nor acquisition. Project ordering now uses one receipt and captured individual moves.
-Complete-list acquisition recognizes partial progress before reconciling later saves;
-detail reads never set rank. Fixtures prove reconnect, lost-reply recovery, late-save
-preservation and Linear conflict adoption, not composed or installed acceptance.
+Foreground connections independently acquire comments/inventory and deliver
+comments/state/fields. Matching observations settle only captured attempts and
+advance later saves' unchanged baselines; retired receipts retain losing values.
+Effect locks block neither saves nor acquisition. `b1f175bbf` delivers Project
+ordering through one receipt with captured moves. Complete-list acquisition
+recognizes partial progress before reconciling later saves; detail reads never set
+rank. Pending display must include creation/field/order receipts; state writeback
+alone is incomplete. Fixtures prove reconnect, lost replies, late saves
+and observed conflict adoption, not composed or installed acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

@@ -206,7 +206,6 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                 .project_order_delivery(&tasks[0].project_id)
                 .unwrap()
                 .unwrap()
-                .change
                 .id;
             state.lock().await.field_reply_lost = true;
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
@@ -224,7 +223,6 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                     .project_order_delivery(&tasks[0].project_id)
                     .unwrap()
                     .unwrap()
-                    .change
                     .id,
                 receipt
             );
@@ -335,10 +333,9 @@ fn planning_order_observed_conflict_adopts_linear_and_retains_losing_list() {
             let receipt = fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .pending_project_changes(&tasks[0].project_id)
                 .unwrap()
-                .unwrap()
-                .change;
+                .remove(0);
             {
                 let mut provider = state.lock().await;
                 provider.issues[2]["prioritySortOrder"] = json!(-10.0);

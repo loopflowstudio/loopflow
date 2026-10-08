@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::durable::{ProjectId, TaskId};
-use crate::planning::PlanningChange;
 use crate::pm::PmItem;
 use crate::store::StoreResult;
 
@@ -24,7 +23,8 @@ pub(crate) struct OrderEffect {
 
 #[derive(Debug)]
 pub(crate) struct OrderDelivery {
-    pub change: PlanningChange,
+    pub id: String,
+    pub baseline: Option<Vec<String>>,
     pub effects: Vec<OrderEffect>,
     pub desired: Vec<String>,
 }
@@ -51,7 +51,7 @@ impl SqliteStore {
         let Some(mut delivery) = deliveries(&tx, project)?.into_iter().next() else {
             return Ok(false);
         };
-        if delivery.change.id != receipt || delivery.effects.last().is_some_and(|e| !e.settled) {
+        if delivery.id != receipt || delivery.effects.last().is_some_and(|e| !e.settled) {
             return Ok(false);
         }
         let observed = observed_order(&tx, project)?;
@@ -84,10 +84,7 @@ pub(super) fn reorder_in(
     task: &TaskId,
     rank: u32,
 ) -> StoreResult<()> {
-    let mut query = conn.prepare("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id")?;
-    let previous = query
-        .query_map([project.as_str()], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let previous = project_members(conn, project)?;
     let mut desired = previous.clone();
     desired.retain(|id| id != task.as_str());
     desired.insert((rank as usize).min(desired.len()), task.to_string());
@@ -102,7 +99,10 @@ pub(super) fn reorder_in(
     Ok(())
 }
 
-fn observed_order(conn: &Connection, project: &ProjectId) -> StoreResult<Option<Vec<String>>> {
+pub(super) fn observed_order(
+    conn: &Connection,
+    project: &ProjectId,
+) -> StoreResult<Option<Vec<String>>> {
     let body: Option<String> = conn.query_row(
         "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
          JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear' WHERE p.id=?1",
@@ -112,7 +112,8 @@ fn observed_order(conn: &Connection, project: &ProjectId) -> StoreResult<Option<
 }
 
 fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDelivery>> {
-    let mut query = conn.prepare("SELECT id,value_json,base_json,order_effects_json FROM project_changes
+    let members = project_members(conn, project)?;
+    let mut query = conn.prepare("SELECT id,value_json,json_extract(base_json,'$.value'),order_effects_json FROM project_changes
         WHERE project_id=?1 AND field='task_order' AND acknowledged=0 AND conflict_json IS NULL
         AND (attempted=1 OR seq=(SELECT max(seq) FROM project_changes WHERE project_id=?1 AND field='task_order')) ORDER BY seq")?;
     let rows = query.query_and_then([project.as_str()], |row| -> StoreResult<_> {
@@ -120,14 +121,13 @@ fn deliveries(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<OrderDe
         let base: Option<String> = row.get(2)?;
         let effects: String = row.get(3)?;
         Ok(OrderDelivery {
-            change: PlanningChange {
-                id: row.get(0)?,
-                field: "task_order".into(),
-                value: serde_json::from_str(&value)?,
-                base: base.map(|v| serde_json::from_str(&v)).transpose()?,
-            },
+            id: row.get(0)?,
+            baseline: base.map(|v| serde_json::from_str(&v)).transpose()?,
             effects: serde_json::from_str(&effects)?,
-            desired: current_members(conn, project, &serde_json::from_str::<Vec<String>>(&value)?)?,
+            desired: serde_json::from_str::<Vec<String>>(&value)?
+                .into_iter()
+                .filter(|id| members.contains(id))
+                .collect(),
         })
     })?;
     rows.collect()
@@ -205,97 +205,68 @@ pub(super) fn observe_in(
         "UPDATE pm_projects SET task_order_json=?4 WHERE repo=?1 AND provider=?2 AND id=?3",
         params![repo, provider, external, serde_json::to_string(&observed)?],
     )?;
-    for saved in deliveries(conn, &project)? {
-        let Some(mut delivery) = deliveries(conn, &project)?
-            .into_iter()
-            .find(|d| d.change.id == saved.change.id)
-        else {
-            continue;
-        };
-        let desired = &delivery.desired;
-        let baseline: Option<Vec<String>> = delivery
-            .change
-            .base
-            .as_ref()
-            .and_then(|b| b.get("value"))
-            .filter(|v| !v.is_null())
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()?;
-        let mut expected = baseline.clone();
-        let mut uncertain = false;
+    let observation = json!({"value":observed}).to_string();
+    let mut pending = deliveries(conn, &project)?;
+    let mut remaining = pending.as_mut_slice();
+    while let Some((delivery, later)) = remaining.split_first_mut() {
+        remaining = later;
         if let Some(last) = delivery.effects.last_mut() {
             if !last.settled && same_order(&observed, &last.after) {
-                let before = last.before.clone();
                 last.settled = true;
-                conn.execute(
-                    "UPDATE project_changes SET order_effects_json=?2,error=NULL WHERE id=?1",
-                    params![
-                        delivery.change.id,
-                        serde_json::to_string(&delivery.effects)?
-                    ],
-                )?;
                 // A later local move saved during this effect keeps its identity
                 // and value, but now compares against the confirmed progress.
-                for later in deliveries(conn, &project)?
-                    .into_iter()
-                    .skip_while(|d| d.change.id != delivery.change.id)
-                    .skip(1)
-                {
-                    let baseline = later
-                        .change
-                        .base
-                        .as_ref()
-                        .and_then(|b| b.get("value"))
-                        .filter(|v| !v.is_null())
-                        .cloned()
-                        .map(serde_json::from_value::<Vec<String>>)
-                        .transpose()?;
+                for later in remaining.iter_mut() {
                     if later.effects.is_empty()
-                        && baseline
+                        && later
+                            .baseline
                             .as_ref()
-                            .is_none_or(|base| same_order(base, &before))
+                            .is_none_or(|base| same_order(base, &last.before))
                     {
                         conn.execute(
                             "UPDATE project_changes SET base_json=?2 WHERE id=?1",
-                            params![later.change.id, json!({"value":observed}).to_string()],
+                            params![later.id, observation],
                         )?;
+                        later.baseline = Some(observed.clone());
                     }
                 }
-                expected = Some(observed.clone());
-            } else {
-                expected = Some(if last.settled {
-                    last.after.clone()
-                } else {
-                    last.before.clone()
-                });
-                uncertain = !last.settled;
+                conn.execute(
+                    "UPDATE project_changes SET order_effects_json=?2,error=NULL WHERE id=?1",
+                    params![delivery.id, serde_json::to_string(&delivery.effects)?],
+                )?;
             }
         }
-        if expected
-            .as_ref()
-            .is_some_and(|base| !same_order(base, &observed))
-        {
+        let last = delivery.effects.last();
+        let expected = last
+            .map(|effect| {
+                if effect.settled {
+                    &effect.after
+                } else {
+                    &effect.before
+                }
+            })
+            .or(delivery.baseline.as_ref());
+        if expected.is_some_and(|base| !same_order(base, &observed)) {
             conn.execute(
                 "UPDATE project_changes SET conflict_json=?2,error=NULL WHERE id=?1",
-                params![delivery.change.id, json!({"value":observed}).to_string()],
+                params![delivery.id, observation],
             )?;
-        } else if !uncertain
-            && desired.iter().all(|id| observed.contains(id))
-            && same_order(desired, &observed)
+        } else if last.is_none_or(|effect| effect.settled)
+            && delivery.desired.iter().all(|id| observed.contains(id))
+            && same_order(&delivery.desired, &observed)
         {
             conn.execute(
                 "UPDATE project_changes SET acknowledged=1,error=NULL WHERE id=?1",
-                [&delivery.change.id],
+                [&delivery.id],
             )?;
-        } else if baseline.is_none() {
+        } else if delivery.baseline.is_none() {
             conn.execute(
                 "UPDATE project_changes SET base_json=?2 WHERE id=?1",
-                params![delivery.change.id, json!({"value":observed}).to_string()],
+                params![delivery.id, observation],
             )?;
         }
     }
-    // Read again: settling an earlier effect can rebase a later save above.
+    // Only the latest pending intention projects locally; older attempts retain
+    // delivery evidence without reviving a superseded local order.
     let pending = PlanningChanges::Project(&project)
         .pending(conn)?
         .into_iter()
@@ -316,16 +287,21 @@ pub(super) fn observe_in(
     Ok(true)
 }
 
+fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
+    let mut query = conn.prepare(
+        "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
+         ORDER BY planning_rank,created_at,id",
+    )?;
+    let rows = query.query_map([project.as_str()], |row| row.get(0))?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
+}
+
 fn current_members(
     conn: &Connection,
     project: &ProjectId,
     desired: &[String],
 ) -> StoreResult<Vec<String>> {
-    let mut query =
-        conn.prepare("SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL")?;
-    let members = query
-        .query_map([project.as_str()], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let members = project_members(conn, project)?;
     Ok(desired
         .iter()
         .filter(|id| members.contains(id))

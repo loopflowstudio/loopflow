@@ -140,9 +140,8 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Relative-order delivery, complete Desktop
-pending presentation and composed reconnect remain
-unfinished. Ingestion adopts observed Linear conflicts and retains the losing
+CLI edits report pending sync. Complete pending presentation and composed reconnect
+remain unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.

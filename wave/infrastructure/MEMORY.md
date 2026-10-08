@@ -16,15 +16,26 @@ after reconnect. Comment `93690dc2-5526-4ecf-a203-5e248339b0c9` adds immediate l
 comment/completion saves and active CLI/Desktop propagation without another turn,
 manual refresh or unrelated outbound drain. The common writer retains pending
 changes, stable mutation identities, both conflict values and reconnect deduplication.
-Remote completion grants no Workflow movement, Process control or checkout cleanup;
-delayed completion cannot overwrite explicit reopening. Machine clocks prove no order.
+Jack Heart subsequently selected Linear as winner for every planning conflict.
+Without Linear, prefer the host where possible, otherwise last-write-wins with
+try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering. Local saves
+remain immediate/pending. Observed conflicts adopt Linear and retire the losing
+intention without erasing history. Sessions, Processes, Flow/captured Workflow
+position, reservations and checkouts never synchronize. Planning completion grants
+no Workflow movement, Process control or cleanup authority.
+Jack Heart selected user-keyed Git planning by default, with explicit opt-in to
+one shared plan. Sharing a code remote never merges plans implicitly. Selection
+uses the same records/APIs, not personal/shared types. LOO-412 owns stable user
+keys, remote/ref binding and shared ordering. Ref separation is not privacy;
+joining must not silently publish existing local plans. Shared UX needs clear
+plan selection, authorship, assignees and sync status; execution stays local.
 Jack Heart selected LOO-412’s custom Git planning ref prototype on October 8
 (`8b45e82d-6765-490a-a3d6-44b44611cedd`) and accepted the cross-Task boundary
 (`b5402659-b825-4c12-b278-5d56ae1aa518`). LOO-406 owns common storage/writers and
 Linear sync; LOO-412 owns transport, excluding execution. Isolated transport fixtures
 can proceed now; integration consumes a coherent committed writer cut, never dirty
 code or duplicated planning. The ownership/deletion cut is independently reviewable
-from conditional-write research, which remains required. No competing Flow, machine
+from provider protocol research. Jack subsequently invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
 Foreground connections independently acquire comments/inventory and deliver mapped
@@ -39,7 +50,7 @@ fails: between ownership read and unconditional mutation, Linear reopening is
 overwritten; matching readback falsely settles delivery. The published Linear schema
 at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updates.
 Extra reads and matching readback cannot prove preserved concurrent changes.
-Preservation and automatic propagation remain required.
+The race remains a limit; Linear-wins resolves precedence, not atomicity.
 
 `b3cd894f3` shares comment/thread/conflict storage. Resolution retains both values;
 local creates one retry-stable UUID without overwriting the provider comment or
@@ -47,28 +58,10 @@ repeating direction. `783305284` saves abandonment/cancellation identity atomica
 deleting provider-first decision writers. Cleanup checks execution separately;
 safe cancellation delivery remains pending.
 
-`7fb5a5f1b` shares Project/workflow storage; `459331192` supplies saved-plan
-CLI/Desktop reads. Placement/admission preserve invalidation, removal, Project/Team
-conflicts and winning PR/path under Wave/checkout locks. Provider-plan rewrite and
-launch ownership dispatch are deleted. Observations grant no execution authority.
-Pending decisions survive inbound completion and late acknowledgements. Ingestion
-and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project selection;
-`22477da8e` owns Project edits/Workflow selection and per-field receipts.
-`921fc68ba` moves complete-plan edits onto that writer and removes inspection locking.
-
-Common Task creation/edit and Project creation/selection preserve original input,
-foreign-key owners, later edits, pending fields, first conflicts and stable UUIDs.
-Unchanged saves preserve revisions/receipts; exact IDs own selection and import.
-Active Workflow proves started work without inventing Started. Shared identity reads
-retain one row per Task and matching abbreviations. Detailed cuts and proof limits:
-`1815198f5:wave/infrastructure/MEMORY.md`, this heading.
-
-`4be12b5c8`/`fa35cfd88`: rotation/refiling commit membership and receipts together.
-Rotation locks retain started work and backlog; refiling locks both Waves and
-preserves recorded-work ownership.
-Retry retains input, IDs, edits and later mappings. Inbound reads cross pending
-refiles, retaining both conflict values and unrelated edits. Earlier uncertain
-transitions remain unresolved. CLI fixtures prove local saves, not delivery, installation or composed reconnect.
+Common comment, content, admission, Task/Project creation/edit, selection,
+rotation and refiling cuts are committed. Exact evidence and remaining limits:
+`fa35cfd88:wave/infrastructure/MEMORY.md`, this heading. They prove local behavior,
+not provider delivery, installation or composed reconnect.
 
 Wave schema/provisioning/definitions and deletion still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
 pending presentation and composed reconnect remain unfinished. Project updates

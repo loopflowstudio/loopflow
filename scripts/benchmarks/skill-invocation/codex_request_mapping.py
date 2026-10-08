@@ -13,7 +13,7 @@ import signal
 import tempfile
 import threading
 import uuid
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack, asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -37,23 +37,15 @@ async def _turn(process: asyncio.subprocess.Process, workspace: Path, inputs: li
     await _until(process, lambda event: event.get("method") == "turn/completed")
 
 
-async def _native(
-    codex: str,
-    workspace: Path,
-    env: dict[str, str],
-    snapshot: Path,
-    context: str,
-    additive: str | None,
-    source: Path,
-    delivery: tuple[threading.Event, threading.Event] | None = None,
-    boundary: bool = False,
-) -> dict:
-    endpoint = workspace.parent / "engine.sock"
+@asynccontextmanager
+async def _app_server(
+    codex: str, workspace: Path, env: dict[str, str], endpoint: Path | None = None
+):
     process = await asyncio.create_subprocess_exec(
         codex,
         "app-server",
         "--listen",
-        f"unix://{endpoint}" if boundary else "stdio://",
+        f"unix://{endpoint}" if endpoint else "stdio://",
         cwd=workspace,
         env=env,
         stdin=asyncio.subprocess.PIPE,
@@ -62,151 +54,147 @@ async def _native(
         start_new_session=True,
     )
     try:
-        if boundary:
+        if endpoint:
             async with asyncio.timeout(15):
                 while not endpoint.exists():
                     if process.returncode is not None:
                         raise RuntimeError("fixture engine exited before opening its socket")
                     await asyncio.sleep(0.02)
-            checks = {}
-            retained = []
-            for interrupt in [False, True]:
-                case, thread_id, capture = await _boundary_delivery(
-                    endpoint, workspace, source, context, delivery, interrupt, codex, env
-                )
-                prefix = "interrupted" if interrupt else "completed"
-                checks.update({f"{prefix}_{key}": value for key, value in case.items()})
-                retained.append((prefix, thread_id, capture))
-            os.killpg(process.pid, signal.SIGTERM)
-            await asyncio.wait_for(process.wait(), 5)
-            process = await asyncio.create_subprocess_exec(
-                codex,
-                "app-server",
-                "--listen",
-                "stdio://",
-                cwd=workspace,
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        else:
             await _request(
                 process,
                 "initialize",
                 {
-                    "clientInfo": {"name": "lf_boundary_recovery", "version": "1"},
+                    "clientInfo": {"name": "lf_skill_fixture", "version": "1"},
                     "capabilities": {"experimentalApi": True},
                 },
             )
             await _send(process, {"method": "initialized"})
-            for status, thread_id, capture in retained:
-                history = await _request(
-                    process,
-                    "thread/read",
-                    {
-                        "threadId": thread_id,
-                        "includeTurns": True,
-                    },
-                )
-                receipts = _invocation_receipts(history["thread"], capture)
-                checks[f"{status}_identity_survives_engine_restart"] = len(receipts) == 1
-                checks[f"{status}_outcome_survives_engine_restart"] = (
-                    len(receipts) == 1 and receipts[0][0]["status"] == status
-                )
-            return checks
-        await _request(
-            process,
-            "initialize",
-            {
-                "clientInfo": {"name": "lf_skill_fixture", "version": "1"},
-                "capabilities": {"experimentalApi": True},
-            },
-        )
-        await _send(process, {"method": "initialized"})
-        if delivery:
-            return await _steer_redelivery(process, workspace, source, context, delivery)
-        roots = snapshot.parent.parent
-        listed = await _request(
-            process,
-            "skills/list",
-            {
-                "cwds": [str(workspace)],
-                "forceReload": True,
-                "perCwdExtraUserRoots": [{"cwd": str(workspace), "extraUserRoots": [str(roots)]}],
-            },
-        )
-        ignored = str(snapshot) not in json.dumps(listed)
-        for register in [False, True]:
-            if register:
-                await _request(process, "skills/extraRoots/set", {"extraRoots": [str(roots)]})
-            await _turn(
-                process,
-                workspace,
-                [
-                    {"type": "text", "text": context},
-                    {"type": "skill", "name": "audit", "path": str(snapshot)},
-                    {"type": "text", "text": "$audit alpha"},
-                ],
-            )
-        await _request(process, "skills/extraRoots/set", {"extraRoots": []})
-        cleared = await _request(
-            process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
-        )
-        checks = {
-            "documented_roots_ignored": ignored,
-            "replacement_clears_root": str(snapshot) not in json.dumps(cleared),
-        }
-        if additive:
-            sibling = snapshot.parents[3] / "sibling-skills/sibling/SKILL.md"
-            sibling.parent.mkdir(parents=True)
-            sibling.write_text(
-                "---\nname: sibling\ndescription: Retained sibling skill.\n---\nKeep this skill.\n"
-            )
-            await _request(
-                process, "skills/extraRoots/set", {"extraRoots": [str(sibling.parent.parent)]}
-            )
-            await _turn(process, workspace, [{"type": "text", "text": "$audit baseline"}])
-            alias = f"lf-{uuid.uuid4().hex}"
-            if additive == "alias":
-                snapshot.write_text(
-                    snapshot.read_text().replace("name: audit\n", f"name: {alias}\n", 1)
-                )
-            mount = workspace / ".agents/skills" / alias
-            mount.parent.mkdir(parents=True, exist_ok=True)
-            mount.symlink_to(snapshot.parent, target_is_directory=True)
-            listed = await _request(
-                process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
-            )
-            skills = [skill for group in listed["data"] for skill in group["skills"]]
-            selected = next(
-                (skill for skill in skills if Path(skill["path"]).resolve() == snapshot), None
-            )
-            checks["additive_catalog_membership"] = selected is not None
-            checks["sibling_root_preserved"] = any(
-                Path(skill["path"]).resolve() == sibling for skill in skills
-            )
-            checks["original_skill_preserved"] = any(
-                Path(skill["path"]) == source for skill in skills
-            )
-            if selected:
-                await _turn(
-                    process,
-                    workspace,
-                    [
-                        {"type": "skill", "name": selected["name"], "path": selected["path"]},
-                        {"type": "text", "text": f"${selected['name']} additive"},
-                    ],
-                )
-            await _turn(process, workspace, [{"type": "text", "text": "$audit after"}])
-        return checks
+        yield process
     finally:
         process.stdin.close()
+        if endpoint and process.returncode is None:
+            os.killpg(process.pid, signal.SIGTERM)
         try:
             await asyncio.wait_for(process.wait(), 5)
         except TimeoutError:
             os.killpg(process.pid, signal.SIGKILL)
             await process.wait()
+
+
+async def _boundary_recovery(
+    codex: str,
+    workspace: Path,
+    env: dict[str, str],
+    source: Path,
+    context: str,
+    delivery: tuple[threading.Event, threading.Event],
+) -> dict:
+    endpoint = workspace.parent / "engine.sock"
+    checks = {}
+    retained = []
+    async with _app_server(codex, workspace, env, endpoint):
+        for interrupt in [False, True]:
+            case, thread_id, capture = await _boundary_delivery(
+                endpoint, workspace, source, context, delivery, interrupt, codex, env
+            )
+            status = "interrupted" if interrupt else "completed"
+            checks.update({f"{status}_{key}": value for key, value in case.items()})
+            retained.append((status, thread_id, capture))
+    # A fresh engine must recover the same identities and outcomes from disk.
+    async with _app_server(codex, workspace, env) as process:
+        for status, thread_id, capture in retained:
+            history = await _request(
+                process, "thread/read", {"threadId": thread_id, "includeTurns": True}
+            )
+            receipts = _invocation_receipts(history["thread"], capture)
+            checks[f"{status}_identity_survives_engine_restart"] = len(receipts) == 1
+            checks[f"{status}_outcome_survives_engine_restart"] = (
+                len(receipts) == 1 and receipts[0][0]["status"] == status
+            )
+    return checks
+
+
+async def _catalog_probe(
+    process: asyncio.subprocess.Process,
+    workspace: Path,
+    snapshot: Path,
+    context: str,
+    additive: str | None,
+    source: Path,
+) -> dict:
+    roots = snapshot.parent.parent
+    listed = await _request(
+        process,
+        "skills/list",
+        {
+            "cwds": [str(workspace)],
+            "forceReload": True,
+            "perCwdExtraUserRoots": [{"cwd": str(workspace), "extraUserRoots": [str(roots)]}],
+        },
+    )
+    ignored = str(snapshot) not in json.dumps(listed)
+    for register in [False, True]:
+        if register:
+            await _request(process, "skills/extraRoots/set", {"extraRoots": [str(roots)]})
+        await _turn(
+            process,
+            workspace,
+            [
+                {"type": "text", "text": context},
+                {"type": "skill", "name": "audit", "path": str(snapshot)},
+                {"type": "text", "text": "$audit alpha"},
+            ],
+        )
+    await _request(process, "skills/extraRoots/set", {"extraRoots": []})
+    cleared = await _request(
+        process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
+    )
+    checks = {
+        "documented_roots_ignored": ignored,
+        "replacement_clears_root": str(snapshot) not in json.dumps(cleared),
+    }
+    if additive:
+        sibling = snapshot.parents[3] / "sibling-skills/sibling/SKILL.md"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text(
+            "---\nname: sibling\ndescription: Retained sibling skill.\n---\nKeep this skill.\n"
+        )
+        await _request(
+            process, "skills/extraRoots/set", {"extraRoots": [str(sibling.parent.parent)]}
+        )
+        await _turn(process, workspace, [{"type": "text", "text": "$audit baseline"}])
+        alias = f"lf-{uuid.uuid4().hex}"
+        if additive == "alias":
+            snapshot.write_text(
+                snapshot.read_text().replace("name: audit\n", f"name: {alias}\n", 1)
+            )
+        mount = workspace / ".agents/skills" / alias
+        mount.parent.mkdir(parents=True, exist_ok=True)
+        mount.symlink_to(snapshot.parent, target_is_directory=True)
+        listed = await _request(
+            process, "skills/list", {"cwds": [str(workspace)], "forceReload": True}
+        )
+        skills = [skill for group in listed["data"] for skill in group["skills"]]
+        selected = next(
+            (skill for skill in skills if Path(skill["path"]).resolve() == snapshot), None
+        )
+        checks["additive_catalog_membership"] = selected is not None
+        checks["sibling_root_preserved"] = any(
+            Path(skill["path"]).resolve() == sibling for skill in skills
+        )
+        checks["original_skill_preserved"] = any(Path(skill["path"]) == source for skill in skills)
+        if selected:
+            await _turn(
+                process,
+                workspace,
+                [
+                    {"type": "skill", "name": selected["name"], "path": selected["path"]},
+                    {"type": "text", "text": f"${selected['name']} additive"},
+                ],
+            )
+        await _turn(process, workspace, [{"type": "text", "text": "$audit after"}])
+    return checks
 
 
 async def _ws_until(socket, matches) -> dict:
@@ -227,6 +215,13 @@ async def _ws_request(socket, method: str, params: dict, ident: str | None = Non
     if "error" in reply:
         raise RuntimeError(f"{method}: {reply['error'].get('message')}")
     return reply["result"]
+
+
+async def _read_thread(socket, thread_id: str) -> dict:
+    history = await _ws_request(
+        socket, "thread/read", {"threadId": thread_id, "includeTurns": True}
+    )
+    return history["thread"]
 
 
 async def _initialize_socket(socket) -> None:
@@ -334,14 +329,7 @@ async def _boundary_delivery(
                 },
             )
             await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
-            before = await _ws_request(
-                owner,
-                "thread/read",
-                {
-                    "threadId": thread_id,
-                    "includeTurns": True,
-                },
-            )
+            before = await _read_thread(owner, thread_id)
             if not interrupt:
                 terminal = _Terminal(
                     [
@@ -382,9 +370,6 @@ async def _boundary_delivery(
                 await asyncio.wait_for(dropped.wait(), 15)
                 if not await asyncio.to_thread(received.wait, 15):
                     raise RuntimeError("fake API did not receive the skill turn")
-                pending.cancel()
-                with suppress(asyncio.CancelledError):
-                    await pending
             finally:
                 pending.cancel()
                 await asyncio.gather(pending, return_exceptions=True)
@@ -392,21 +377,14 @@ async def _boundary_delivery(
         # The engine is still running; the lost reply's turn id is unavailable.
         async with unix_connect(str(endpoint), uri="ws://localhost") as successor:
             await _initialize_socket(successor)
-            history = await _ws_request(
-                successor,
-                "thread/read",
-                {
-                    "threadId": thread_id,
-                    "includeTurns": True,
-                },
-            )
-            matches = _invocation_receipts(history["thread"], capture)
+            history = await _read_thread(successor, thread_id)
+            matches = _invocation_receipts(history, capture)
             content = matches[0][1]["content"] if len(matches) == 1 else []
             checks.update(
                 {
                     "reply_dropped": dropped_count == 1,
                     "caller_cancelled": pending.cancelled(),
-                    "same_thread": history["thread"]["id"] == thread_id,
+                    "same_thread": history["id"] == thread_id,
                     "one_native_invocation": len(matches) == 1,
                     "skill_receipt": any(
                         item.get("type") == "skill" and item.get("path") == str(source)
@@ -414,8 +392,7 @@ async def _boundary_delivery(
                     ),
                     "exact_arguments": any(item.get("text") == "$audit alpha" for item in content),
                     "separate_context": any(item.get("text") == context for item in content),
-                    "prior_turn_unchanged": history["thread"]["turns"][0]
-                    == before["thread"]["turns"][0],
+                    "prior_turn_unchanged": history["turns"][0] == before["turns"][0],
                 }
             )
             print(json.dumps({"boundary_recovery": checks}), flush=True)
@@ -432,20 +409,13 @@ async def _boundary_delivery(
             expected_status = "interrupted" if interrupt else "completed"
             async with asyncio.timeout(15):
                 while True:
-                    history = await _ws_request(
-                        successor,
-                        "thread/read",
-                        {
-                            "threadId": thread_id,
-                            "includeTurns": True,
-                        },
-                    )
-                    matches = _invocation_receipts(history["thread"], capture)
+                    history = await _read_thread(successor, thread_id)
+                    matches = _invocation_receipts(history, capture)
                     if len(matches) == 1 and matches[0][0]["status"] == expected_status:
                         break
                     await asyncio.sleep(0.02)
             checks["outcome_without_resubmission"] = True
-            checks["exactly_two_turns"] = len(history["thread"]["turns"]) == 2
+            checks["exactly_two_turns"] = len(history["turns"]) == 2
             if terminal:
                 try:
                     await asyncio.to_thread(terminal.pump, 0.5)
@@ -453,15 +423,8 @@ async def _boundary_delivery(
                     async with asyncio.timeout(15):
                         while True:
                             await asyncio.to_thread(terminal.pump, 0.1)
-                            history = await _ws_request(
-                                successor,
-                                "thread/read",
-                                {
-                                    "threadId": thread_id,
-                                    "includeTurns": True,
-                                },
-                            )
-                            turns = history["thread"]["turns"]
+                            history = await _read_thread(successor, thread_id)
+                            turns = history["turns"]
                             if len(turns) == 3 and turns[-1]["status"] == "completed":
                                 break
                     checks["terminal_draft_preserved"] = any(
@@ -664,19 +627,22 @@ def _probe(
                 snapshot = root / "captured/skills/audit/SKILL.md"
                 snapshot.parent.mkdir(parents=True)
                 snapshot.write_text(source)
-                checks = asyncio.run(
-                    _native(
-                        codex,
-                        workspace,
-                        env,
-                        snapshot,
-                        context,
-                        additive,
-                        skill,
-                        (received, release) if redelivery or boundary else None,
-                        boundary,
-                    )
-                )
+
+                async def _native() -> dict:
+                    if boundary:
+                        return await _boundary_recovery(
+                            codex, workspace, env, skill, context, (received, release)
+                        )
+                    async with _app_server(codex, workspace, env) as process:
+                        if redelivery:
+                            return await _steer_redelivery(
+                                process, workspace, skill, context, (received, release)
+                            )
+                        return await _catalog_probe(
+                            process, workspace, snapshot, context, additive, skill
+                        )
+
+                checks = asyncio.run(_native())
                 if boundary:
                     native_requests = [
                         request
@@ -861,23 +827,24 @@ def _probe(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--lf",
         type=Path,
         help="Check the pending native LF implementation instead of the provider counterexample",
     )
     parser.add_argument("--codex", default=shutil.which("codex"))
-    parser.add_argument(
+    mode.add_argument(
         "--additive",
         choices=["original", "alias"],
         help="Probe a skill link while preserving sibling roots and plain invocation",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--redelivery",
         action="store_true",
         help="Check duplicate structured steering with an identical RPC id",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--boundary",
         action="store_true",
         help="Lose a native turn reply, cancel its waiter and recover on a new connection",
@@ -885,8 +852,6 @@ def main() -> int:
     args = parser.parse_args()
     if not args.codex:
         parser.error("codex is required")
-    if sum([bool(args.lf), bool(args.additive), args.redelivery, args.boundary]) > 1:
-        parser.error("--lf, --additive, --redelivery and --boundary are separate probes")
     return (
         0
         if _probe(

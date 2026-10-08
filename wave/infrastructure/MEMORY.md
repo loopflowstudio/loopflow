@@ -1060,11 +1060,10 @@ checkpointing, common invocation loading and Claude's file-backed stdin. Rejecte
 Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
 
 LOO-420 (2026-10-07): Jack Heart selected native same-harness invocation,
-translated ports otherwise, and inlined builtins. Codex 0.160.1 app-server
-receipts prove selected-file expansion, separate user context and same-thread
-resume; resupplied context does not prove recall. Claude 2.1.293 retains arguments
-and hook context after hook-file deletion. Its system rendering metadata does not
-prove model authority; the earlier conflict claim is withdrawn. Require actual
-request-role/source evidence; exclude answer leakage and resupply in recall proofs.
-Resume links prove no settings handoff. App delivery, existing-driver dispatch,
-third-party fidelity and implementation remain open. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).
+translated ports, inlined builtins and `--agent`/`-a`. Codex receipts prove source,
+separate context and same-thread resume, not recall without resupply. Claude hook
+context survives deletion; rendering metadata cannot establish model authority. Exclude
+answer leakage. Installed 0.13.9 IDE launches succeed but record no native thread,
+endpoint or provider PID; both `session connect` attempts fail. Launcher exit
+proves no engine exit. Native identity, settings handoff, app execution, ports
+and fidelity remain unproved. [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

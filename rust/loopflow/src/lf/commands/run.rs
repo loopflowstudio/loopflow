@@ -29,8 +29,8 @@ pub fn run(skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> 
     if let Some(binding) = implicit_binding(cli)? {
         let mut bound = cli.process_options();
         bound.wave = Some(binding.wave_name.clone());
-        if bound.model.is_none() {
-            bound.model = binding.agent.clone();
+        if bound.agent.is_none() {
+            bound.agent = binding.agent.clone();
         }
         return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
     }
@@ -58,8 +58,8 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
     let mut turn = cli.process_options();
-    if turn.model.is_none() {
-        turn.model = match (&session.provider, &session.model) {
+    if turn.agent.is_none() {
+        turn.agent = match (&session.provider, &session.model) {
             (Some(provider), Some(model)) => Some(format!("{provider}:{model}")),
             (provider, _) => provider.clone(),
         };
@@ -119,7 +119,7 @@ fn run_bound_prompt(
     let mut launch = cli.process_options();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
-        launch.model = binding.agent.clone().or(launch.model);
+        launch.agent = binding.agent.clone().or(launch.agent);
         message.unwrap_or_default().to_owned()
     } else {
         bound_message(binding, message)
@@ -352,7 +352,7 @@ fn build_prompt_at(
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
-                .or_else(|| cli.model.clone()),
+                .or_else(|| cli.agent.clone()),
             cwd: Some(repo_root.clone()),
             max_turns: cli.max_turns,
             yolo_mode: cli.yolo || config.yolo,
@@ -563,7 +563,7 @@ fn skill_invocation_seed(
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
-    let cli_model = if cli.model.is_some() {
+    let cli_agent = if cli.agent.is_some() {
         built.agent_config.agent.as_deref()
     } else {
         None
@@ -574,7 +574,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         &cli.docs,
         cli.clipboard,
         cli.no_loopflow,
-        cli_model,
+        cli_agent,
     );
     eprintln!(
         "{dim}{header}\n\n  {command}{reset}",

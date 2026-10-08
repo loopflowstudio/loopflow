@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
+pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
     match cmd {
         None => pr_status(),
@@ -51,16 +51,16 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
             Ok(())
         }
         Some(PrCommand::Checks { watch, logs }) => pr_checks(*watch, *logs),
-        Some(PrCommand::Publish { model, title, body }) => publish_pr(
+        Some(PrCommand::Publish { agent, title, body }) => publish_pr(
             title.clone(),
             body.clone(),
-            model.as_deref().or(cli_model),
+            agent.as_deref().or(cli_agent),
             &progress,
         ),
-        Some(PrCommand::Open { model, title, body }) => open_pr(
+        Some(PrCommand::Open { agent, title, body }) => open_pr(
             title.clone(),
             body.clone(),
-            model.as_deref().or(cli_model),
+            agent.as_deref().or(cli_agent),
             &progress,
         ),
         Some(PrCommand::Submit {
@@ -83,7 +83,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
+                agent: cli_agent.map(str::to_string),
             },
             &progress,
         ),
@@ -117,7 +117,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_model: Option<&str>) -> Result<()> {
                 commit_message: message.clone(),
                 pr_title: title.clone(),
                 pr_body: body.clone(),
-                agent: cli_model.map(str::to_string),
+                agent: cli_agent.map(str::to_string),
             },
             &progress,
         ),

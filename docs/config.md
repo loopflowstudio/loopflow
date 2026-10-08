@@ -45,7 +45,7 @@ Start with a one-run override; keep it in repo config only when the choice
 should apply to everyone:
 
 ```bash
-lf gate -m codex --docs docs/api.md
+lf gate -a codex --docs docs/api.md
 ```
 
 ```yaml
@@ -351,7 +351,7 @@ Set the default harness, with an optional model.
 
 | | |
 |---|---|
-| **CLI** | `lf gate -m codex:o3` |
+| **CLI** | `lf gate -a codex:o3` |
 | **Config** | `agent: claude:opus` (optional) |
 | **Default** | unset (resolution falls back to skill defaults, then the first of `codex`, `claude`, `opencode` installed on this machine) |
 

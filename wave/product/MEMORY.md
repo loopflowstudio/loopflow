@@ -15,7 +15,7 @@ accounts: refusal is not adoption. Original lf
 Owners: LOO-422 status/titles, LOO-428 launch/Flow noise, LOO-423 account/polish,
 LOO-406 no-Linear planning; LOO-429 prompt placement overlaps 428's transport.
 
-Jack prioritizes native interaction. His trial exposed forced batch Flow steps
+Jack prioritizes native interaction. The trial exposed forced batch steps
 (introduced #1283); this branch forwards mode through skills and Task launches.
 28 Flow tests pass. Jack saw native step two in cmux and confirmed herdr's Flow,
 background question/clearing and resize/input trials. Successful provider exit

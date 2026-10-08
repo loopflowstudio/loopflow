@@ -98,10 +98,10 @@ pub struct TaskControlResult {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskSnapshot {
     pub machine_id: Option<crate::durable::MachineId>,
-    pub issue_id: String,
+    pub issue_id: Option<String>,
     pub issue_identifier: String,
     pub task_id: String,
-    pub external_project_id: String,
+    pub external_project_id: Option<String>,
     pub project: String,
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: crate::work::task::PmWritebackState,
@@ -113,7 +113,7 @@ pub struct TaskSnapshot {
     pub planning_conflict: Option<String>,
     pub execution: crate::ops::task_execution::TaskExecutionSnapshot,
     pub work: crate::task_work::TaskWork,
-    pub worktree: String,
+    pub worktree: Option<String>,
     pub workspace_slug: String,
     pub agent: Option<String>,
     pub provider: String,
@@ -262,7 +262,9 @@ fn file_context(issue: &str) -> OpsResult<crate::store::sqlite::TaskCheckout> {
         .map_err(|error| task_error(format!("cannot read Task checkouts: {error}")))?
         .into_iter()
         .filter(|row| {
-            row.task_id.as_str() == issue || row.issue_id == issue || row.issue_identifier == issue
+            row.task_id.as_str() == issue
+                || row.issue_id.as_deref() == Some(issue)
+                || row.issue_identifier == issue
         });
     let checkout = checkouts
         .next()
@@ -473,10 +475,16 @@ pub fn task_place(
             .filter(|reason| !reason.is_empty());
         // Linear ending a Task that never left `start` withdraws it before
         // any move is written.
-        if !matches!(
-            store.task_state(&task.id).await.map_err(task_error)?,
-            TaskState::Active
-        ) {
+        if store
+            .sqlite
+            .project_planning_authority(&task.project_id)
+            .map_err(task_error)?
+            == crate::planning::PlanningAuthority::Linear
+            && !matches!(
+                store.task_state(&task.id).await.map_err(task_error)?,
+                TaskState::Active
+            )
+        {
             let wave = owning_wave(&store, &task).await?;
             if let Ok(record) = crate::ops::pm::read_task_planning_async(
                 Path::new(wave.repo()),
@@ -820,7 +828,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             if let Some(requested) = name.as_deref() {
                 let requested = parse_workspace_slug(requested)?;
-                if requested.as_str() != task.workspace_slug {
+                if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
                     return Err(task_error(format!(
                         "Task {} already uses workspace name {:?}",
                         task.plan.identifier, task.workspace_slug
@@ -836,7 +844,15 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         }
         Ok(existing)
     })?;
-    if let Some(existing) = existing {
+    if let Some(mut existing) = existing {
+        if existing.worktree.is_none() {
+            existing = block_on_task(place_unplaced_task(
+                repo,
+                &existing,
+                name.as_deref(),
+                stack_on.as_deref(),
+            ))?;
+        }
         if let Some(parent) = stack_on.as_deref() {
             block_on_task(async {
                 stack_existing_task(&task_store().await?, &existing, parent).await
@@ -886,6 +902,83 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
 }
 
 /// Recover checkout files from retained Task placement without replacing history.
+async fn place_unplaced_task(
+    repo: &Path,
+    task: &Task,
+    name: Option<&str>,
+    stack_on: Option<&str>,
+) -> OpsResult<Task> {
+    let store = task_store().await?;
+    let wave = owning_wave(&store, task).await?;
+    let _acquisition = super::pm::lock_wave_planning(&wave).await?;
+    let main = crate::engine::worktrees::main_repo_root(repo)?;
+    if crate::repository::CanonicalRepo::discover(&main)
+        .map_err(task_error)?
+        .to_string()
+        != wave.repo()
+    {
+        return Err(task_error("Task belongs to another repository"));
+    }
+    let uuid = task.id.as_str().trim_start_matches("task_");
+    let title = derive_workspace_slug(&task.plan.title)?;
+    let slug = name.map(str::to_string).unwrap_or_else(|| {
+        format!(
+            "{}-{}",
+            title.as_str(),
+            uuid.chars().take(12).collect::<String>()
+        )
+    });
+    let branch = format!("lf/{uuid}/{}", title.as_str());
+    let mut plan = plan_branch_placement(&main, parse_workspace_slug(&slug)?, Some(&branch))?;
+    let parent = if let Some(selector) = stack_on {
+        let parent = store
+            .get_task_by_issue(selector)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("stack parent has no Task"))?;
+        if parent.id == task.id {
+            return Err(task_error("a Task cannot stack on itself"));
+        }
+        Some(
+            store
+                .active_task_pr(&parent.id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("stack parent has no active PR"))?,
+        )
+    } else {
+        None
+    };
+    plan.base_ref = match &parent {
+        Some(pr) => rev_parse(&main, &pr.branch)?,
+        None => resolve_upstream_base(&main, &plan.base_ref)?.1,
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: task.id.clone(),
+        sequence: 1,
+        slug: slug.clone(),
+        branch: plan.branch,
+        base_commit: plan.base_ref,
+        parent_pr_id: parent.map(|pr| pr.id),
+        publication: None,
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store
+        .sqlite
+        .place_task(&task.id, &plan.worktree_path, &slug, &pr)
+        .map_err(task_error)
+}
+
 async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let pr = store
         .active_task_pr(&task.id)
@@ -1347,20 +1440,77 @@ pub fn task_create(
     title: Option<String>,
     report: Option<String>,
 ) -> OpsResult<crate::pm::PmItem> {
+    task_create_with_id(repo, wave, title, report, crate::durable::TaskId::new())
+}
+
+pub fn task_create_with_id(
+    repo: &Path,
+    wave: Option<&str>,
+    title: Option<String>,
+    report: Option<String>,
+    identity: crate::durable::TaskId,
+) -> OpsResult<crate::pm::PmItem> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
+    let personal = match wave {
+        Some(wave) => wave.strip_prefix("personal:").map(str::to_string),
+        None => match crate::work::wave::context::resolve_managed_wave_sync(Some(&main), None) {
+            Ok(wave) => wave.slug().strip_prefix("personal:").map(str::to_string),
+            Err(crate::work::wave::context::WaveResolveError::NoContext) => Some("inbox".into()),
+            Err(error) => return Err(task_error(error)),
+        },
+    };
+    if let Some(name) = personal {
+        return block_on_task(async {
+            let store = super::pm::pm_store().await?;
+            let canonical =
+                crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
+            let project = store
+                .sqlite
+                .ensure_personal_project(&canonical.to_string(), &name)
+                .map_err(task_error)?;
+            let wave = store
+                .get_wave(&project.wave_id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("personal Wave is missing"))?;
+            let acquisition = super::pm::lock_wave_planning(&wave).await?;
+            let creation_project = match store
+                .sqlite
+                .local_task_creation_project(&identity)
+                .map_err(task_error)?
+            {
+                Some(id) => {
+                    let original = store
+                        .get_project(&id)
+                        .await
+                        .map_err(task_error)?
+                        .ok_or_else(|| task_error("creation Project is missing"))?;
+                    if original.wave_id != project.wave_id {
+                        return Err(task_error("creation identity belongs to a different Wave"));
+                    }
+                    id
+                }
+                None => project.id,
+            };
+            let task = store
+                .create_local_task(
+                    &crate::planning::NewTask {
+                        id: identity,
+                        project_id: creation_project,
+                        title: input.title,
+                        description: input.report,
+                    },
+                    acquisition,
+                )
+                .await
+                .map_err(task_error)?;
+            local_task_item(&store, &task)
+        });
+    }
     let project =
         crate::ops::task_pm::resolve_current_project(&main, wave, crate::ops::pm::PmRefresh::Auto)?;
-    let marker = format!(
-        "<!-- loopflow-task-start:{} -->",
-        hex::encode(Sha256::digest(
-            format!(
-                "{}\0{}\0{}",
-                project.snapshot.wave, input.title, input.report
-            )
-            .as_bytes()
-        ))
-    );
+    let marker = format!("<!-- loopflow-task-start:{identity} -->");
     let (created, ()) = block_on_task(crate::ops::task_pm::create_and_load_task(
         &main,
         &project.snapshot.wave,
@@ -1368,8 +1518,142 @@ pub fn task_create(
         &input.report,
         &marker,
         |_, _| async { Ok(()) },
-    ))?;
+    ))
+    .map_err(|error| {
+        task_error(format!(
+            "{error} Retain --creation-id {identity} when retrying."
+        ))
+    })?;
     Ok(created.item)
+}
+
+pub(crate) fn local_task_item(store: &Store, task: &Task) -> OpsResult<crate::pm::PmItem> {
+    let state = store.sqlite.task_state(&task.id).map_err(task_error)?;
+    let (rank, completed_at) = store
+        .sqlite
+        .local_task_order_and_completion(&task.id)
+        .map_err(task_error)?;
+    let completed_at = completed_at
+        .filter(|_| state == TaskState::Done)
+        .map(|at| crate::store::rows::unix_to_datetime(at).format(&Rfc3339))
+        .transpose()
+        .map_err(task_error)?;
+    let project = store
+        .sqlite
+        .project(&task.project_id)
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task Project is missing"))?;
+    Ok(crate::pm::PmItem {
+        revision: None,
+        id: task.id.to_string(),
+        identifier: task.plan.identifier.clone(),
+        branch_name: store
+            .sqlite
+            .task_prs(&task.id)
+            .map_err(task_error)?
+            .last()
+            .map(|pr| pr.branch.clone()),
+        url: None,
+        name: task.plan.title.clone(),
+        description: task.plan.description.clone(),
+        rank,
+        completed: state == TaskState::Done,
+        completed_at,
+        state: Some(
+            match state {
+                TaskState::NotReady | TaskState::Ready => "unstarted",
+                TaskState::Active => "started",
+                TaskState::Done => "completed",
+                TaskState::Abandoned => "canceled",
+            }
+            .into(),
+        ),
+        project_id: Some(project.id.to_string()),
+        project: Some(project.plan.slug),
+        team_id: None,
+        assignee: None,
+    })
+}
+
+pub(crate) fn local_project_item(
+    project: crate::work::project::Project,
+) -> OpsResult<crate::pm::PmProject> {
+    let content =
+        crate::pm::parse_project_content(&project.plan.prompt_context).map_err(task_error)?;
+    Ok(crate::pm::PmProject {
+        id: project.id.to_string(),
+        revision: None,
+        slug: project.plan.slug,
+        name: project.plan.name,
+        summary: String::new(),
+        metric_targets: content.metric_targets,
+        workflow: project.plan.workflow,
+        status: project.plan.status,
+        krs: content.krs,
+        initiative_ids: Vec::new(),
+        team_ids: Vec::new(),
+    })
+}
+
+pub(crate) async fn local_wave_plan(
+    store: &Store,
+    wave: &crate::id::WaveId,
+) -> OpsResult<Option<crate::pm::PmSnapshot>> {
+    if store
+        .sqlite
+        .personal_wave_definition(wave)
+        .map_err(task_error)?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    let projects = store
+        .list_projects(Some(wave))
+        .await
+        .map_err(task_error)?
+        .into_iter()
+        .map(local_project_item)
+        .collect::<OpsResult<Vec<_>>>()?;
+    let items = store
+        .list_tasks(Some(wave))
+        .await
+        .map_err(task_error)?
+        .iter()
+        .map(|task| local_task_item(store, task))
+        .collect::<OpsResult<Vec<_>>>()?;
+    Ok(Some(crate::pm::PmSnapshot { projects, items }))
+}
+
+async fn resolve_local_task(
+    repo: &Path,
+    issue: &str,
+    expected_wave: Option<&str>,
+) -> OpsResult<Option<(SharedStore, Task)>> {
+    let store = Arc::new(super::pm::pm_store().await?);
+    let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? else {
+        return Ok(None);
+    };
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        != crate::planning::PlanningAuthority::Local
+    {
+        return Ok(None);
+    }
+    let wave = owning_wave(&store, &task).await?;
+    let canonical = crate::repository::CanonicalRepo::discover(repo).map_err(task_error)?;
+    if wave.repo() != canonical.to_string()
+        || expected_wave.is_some_and(|expected| expected != wave.slug())
+    {
+        return Err(task_error(format!(
+            "Task {} belongs to {} in {}",
+            task.plan.identifier,
+            wave.slug(),
+            wave.repo()
+        )));
+    }
+    Ok(Some((store, task)))
 }
 
 pub fn resolve_task_create_input(
@@ -1510,6 +1794,17 @@ pub(crate) async fn require_task_flow_launch(
             task.plan.identifier
         )));
     }
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return store
+            .sqlite
+            .require_task_launch(&task.id)
+            .map_err(task_error);
+    }
     let resolved = crate::ops::task_pm::resolve_task_async(
         task.worktree()?,
         task.plan.linear_id()?.as_str(),
@@ -1559,6 +1854,9 @@ pub(crate) async fn task_worktree_blocker(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Option<TaskWorktreeBlocker>> {
+    if task.worktree.is_none() {
+        return Ok(None);
+    }
     let event = store
         .latest_task_event(&task.id)
         .await
@@ -1835,7 +2133,7 @@ pub(crate) fn request_task_pr_publication(repo: &Path, title: &str, body: &str) 
 pub(crate) struct TaskPrContext {
     pub(crate) title: String,
     pub(crate) identifier: String,
-    pub(crate) url: String,
+    pub(crate) url: Option<String>,
     pub(crate) sequence: u32,
     pub(crate) merge_request: Option<PrMergeRequest>,
     pub(crate) follow_up: Option<crate::work::task::TaskFollowUp>,
@@ -1843,12 +2141,15 @@ pub(crate) struct TaskPrContext {
 
 impl TaskPrContext {
     pub(crate) fn task_link(&self) -> String {
-        format!(
-            "[{} · {}]({})",
+        let label = format!(
+            "{} · {}",
             _markdown_link_text(self.title.trim()),
-            _markdown_link_text(self.identifier.trim()),
-            self.url
-        )
+            _markdown_link_text(self.identifier.trim())
+        );
+        match &self.url {
+            Some(url) => format!("[{label}]({url})"),
+            None => label,
+        }
     }
 }
 
@@ -1870,27 +2171,38 @@ pub(crate) fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
 
 async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
     let wave = owning_wave(store, task).await?;
-    let snapshot = store
-        .pm_snapshot(&task.wave_id)
-        .await
-        .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
-        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
-    let snapshot = snapshot.snapshot;
-    let item = snapshot
-        .items
-        .iter()
-        .find(|item| {
-            task.plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| item.id == id.as_str())
-        })
-        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
-    let url = item
-        .url
-        .as_deref()
-        .filter(|url| _valid_task_url(url))
-        .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
+    let url = if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        None
+    } else {
+        let snapshot = store
+            .pm_snapshot(&task.wave_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read cached PM snapshot: {error}")))?
+            .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
+        let snapshot = snapshot.snapshot;
+        let item = snapshot
+            .items
+            .iter()
+            .find(|item| {
+                task.plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| item.id == id.as_str())
+            })
+            .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?;
+        Some(
+            item.url
+                .as_deref()
+                .filter(|url| _valid_task_url(url))
+                .ok_or_else(|| _missing_task_pr_url(task, wave.slug()))?
+                .to_string(),
+        )
+    };
     let prs = store
         .task_prs(&task.id)
         .await
@@ -1906,7 +2218,7 @@ async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsRes
     Ok(TaskPrContext {
         title: task.plan.title.clone(),
         identifier: task.plan.identifier.clone(),
-        url: url.to_string(),
+        url,
         sequence: pr.sequence,
         follow_up: store.sqlite.task_follow_up(&task.id).map_err(task_error)?,
         merge_request: pr
@@ -1944,7 +2256,7 @@ fn _validate_task_pr_copy(context: &TaskPrContext, body: &str) -> OpsResult<()> 
             .is_some_and(|line| line == anchor)
     }) {
         return Err(task_error(format!(
-            "Task PR body must include the owning Linear Task link: {anchor}"
+            "Task PR body must include its owning Task: {anchor}"
         )));
     }
     Ok(())
@@ -2856,7 +3168,11 @@ async fn reconcile_task_pr_observation(
     // Reconciliation updates the same projection as publication/finalization.
     // Refuse overlap so a remote read begun before a push cannot overwrite the
     // request or head recorded by the command that completed after it.
-    let _mutation = lock_task_pr_mutation(task.worktree()?)?;
+    let _mutation = task
+        .worktree
+        .as_deref()
+        .map(lock_task_pr_mutation)
+        .transpose()?;
     let Some(mut pr) = reconcile_subject(store, task).await? else {
         return Ok(None);
     };
@@ -3574,6 +3890,38 @@ pub struct TaskStatus {
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     let task = task_execution_status(repo, issue)?;
+    if let Some(task) = &task {
+        let local = block_on_task(async {
+            let store = task_store().await?;
+            if store
+                .sqlite
+                .project_planning_authority(&task.project_id)
+                .map_err(task_error)?
+                != crate::planning::PlanningAuthority::Local
+            {
+                return Ok(None);
+            }
+            let project = store
+                .get_project(&task.project_id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Task Project is missing"))?;
+            Ok(Some(crate::store::PmTaskRecord {
+                item: local_task_item(&store, task)?,
+                project: Some(local_project_item(project)?),
+                observed_at: task.updated_at.unix_timestamp(),
+            }))
+        })?;
+        if let Some(planning) = local {
+            return Ok(TaskStatus {
+                planning: Some(planning),
+                planning_error: None,
+                planning_stale: false,
+                planning_state: crate::store::PlanningState::Available,
+                execution: Some(task_snapshot(task)?),
+            });
+        }
+    }
     let selector = task
         .as_ref()
         .and_then(|task| task.plan.linear_id.as_ref().map(|id| id.as_str()))
@@ -3608,6 +3956,17 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     })
 }
 
+async fn task_was_deleted(store: &Store, task: &Task) -> OpsResult<bool> {
+    match &task.plan.linear_id {
+        Some(id) => Ok(store
+            .task_deletion(&task.wave_id, id.as_str())
+            .await
+            .map_err(task_error)?
+            .is_some()),
+        None => Ok(false),
+    }
+}
+
 fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<Task>> {
     block_on_task(async move {
         let store = task_store().await?;
@@ -3621,16 +3980,14 @@ fn task_execution_status(repo: &Path, issue: Option<&str>) -> OpsResult<Option<T
         let Some(mut task) = task else {
             return Ok(None);
         };
-        if store
-            .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())
-            .await
-            .map_err(task_error)?
-            .is_some()
-        {
+        if task_was_deleted(&store, &task).await? {
             return match issue {
                 Some(_) => Ok(Some(task)),
                 None => Err(task_error("this checkout's Task was deleted; use an explicit Task identifier to read its history")),
             };
+        }
+        if task.worktree.is_none() {
+            return Ok(Some(task));
         }
         let launch_refusal = task_process_refusal(&store, &task)
             .await
@@ -3687,6 +4044,14 @@ pub(crate) async fn planning_conflict(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<Option<String>> {
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return Ok(None);
+    }
     let state = store.task_state(&task.id).await.map_err(task_error)?;
     if state != TaskState::Active {
         return Ok(None);
@@ -3811,6 +4176,7 @@ async fn reach_end(
     // keeps its checkout, so what is uncommitted there is not at risk.
     let keeps_checkout = matches!(how, EndMove::Choose { .. });
     if !keeps_checkout
+        && task.worktree.is_some()
         && !is_clean(task.worktree()?)
             .map_err(|error| task_error(format!("failed to inspect Task worktree: {error}")))?
     {
@@ -3890,6 +4256,14 @@ fn pr_link_state_label(pr: &TaskPr) -> String {
 /// `linear_link_error` and leaves the GitHub result intact; the next publication
 /// command retries. Does nothing for a PR with no GitHub URL yet.
 async fn link_pr_to_linear(store: &SharedStore, task: &Task, pr: &mut TaskPr) {
+    match store.sqlite.project_planning_authority(&task.project_id) {
+        Ok(crate::planning::PlanningAuthority::Local) => return,
+        Ok(crate::planning::PlanningAuthority::Linear) => {}
+        Err(error) => {
+            pr.linear_link_error = Some(error.to_string());
+            return;
+        }
+    }
     let Some(issue_id) = task.plan.linear_id.as_ref() else {
         return;
     };
@@ -3949,6 +4323,15 @@ async fn reconcile_pm_writeback(
     task: &mut Task,
     pr_url: Option<&str>,
 ) -> OpsResult<()> {
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(task_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        task.pm_writeback = PmWritebackState::Current;
+        return Ok(());
+    }
     let result = async {
         let wave = owning_wave(store, task).await?;
         crate::ops::task_pm::complete_task(
@@ -4041,7 +4424,7 @@ pub(crate) async fn task_completion_gate(
         discardable_successor: None,
     };
     let work_done = task_work_status(store, task).await? == WorkStatus::Done;
-    if work_done && !task.worktree()?.exists() {
+    if work_done && task.worktree.as_ref().is_none_or(|path| !path.exists()) {
         return Ok(gate);
     }
     if let Some(blocker) = task_worktree_blocker(store, task).await? {
@@ -4284,12 +4667,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .await
             .map_err(task_error)?;
         let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
-        let actions = if store
-            .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())
-            .await
-            .map_err(task_error)?
-            .is_some()
-        {
+        let actions = if task_was_deleted(&store, &task).await? {
             TaskActionModel {
                 recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
                 reason: "Task was deleted; retained history is read-only".into(),
@@ -4337,7 +4715,13 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             };
             derive_task_actions(&action_evidence)
         };
-        let agent = resolve_task_agent(task.worktree()?, task.agent.as_deref(), None);
+        let agent = resolve_task_agent(
+            task.worktree
+                .as_deref()
+                .unwrap_or_else(|| Path::new(wave.repo())),
+            task.agent.as_deref(),
+            None,
+        );
         let (provider, _) = parse_agent(&agent);
         let machine_id = store
             .task_checkouts()
@@ -4347,22 +4731,31 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .find(|row| row.task_id == task.id)
             .and_then(|row| row.machine_id);
         let local_machine = store.local_machine().await.map_err(task_error)?;
-        let task_worktree = task.worktree()?;
-        let worktree = if machine_id.as_ref() == Some(&local_machine.id) {
-            crate::engine::git::worktree_root(task_worktree)
-                .ok()
-                .and_then(|root| root.canonicalize().ok())
-                .unwrap_or_else(|| task_worktree.clone())
-        } else {
-            task_worktree.clone()
-        };
+        let worktree = task.worktree.as_ref().map(|task_worktree| {
+            if machine_id.as_ref() == Some(&local_machine.id) {
+                crate::engine::git::worktree_root(task_worktree)
+                    .ok()
+                    .and_then(|root| root.canonicalize().ok())
+                    .unwrap_or_else(|| task_worktree.clone())
+            } else {
+                task_worktree.clone()
+            }
+        });
         let planning_conflict = planning_conflict(&store, &task).await?;
         Ok(TaskSnapshot {
             machine_id,
-            issue_id: task.plan.linear_id()?.as_str().to_string(),
+            issue_id: task
+                .plan
+                .linear_id
+                .as_ref()
+                .map(|id| id.as_str().to_string()),
             issue_identifier: task.plan.identifier,
             task_id: task.id.to_string(),
-            external_project_id: project.plan.linear_id()?.as_str().to_string(),
+            external_project_id: project
+                .plan
+                .linear_id
+                .as_ref()
+                .map(|id| id.as_str().to_string()),
             project: project.plan.slug,
             pm_snapshot_synced_at: task.plan.pm_snapshot_synced_at,
             pm_writeback: task.pm_writeback,
@@ -4372,7 +4765,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             planning_conflict,
             execution,
             work: work_set,
-            worktree: worktree.display().to_string(),
+            worktree: worktree.map(|path| path.display().to_string()),
             workspace_slug: task.workspace_slug,
             agent: task.agent,
             provider,
@@ -4916,6 +5309,26 @@ pub fn task_edit(
     {
         return Err(task_error("Task title cannot be empty"));
     }
+    if let Some((store, task)) = block_on_task(resolve_local_task(repo, issue, wave))? {
+        return block_on_task(async {
+            let edited = store
+                .edit_local_task(
+                    &task.id,
+                    task.plan.revision,
+                    &crate::planning::TaskPatch {
+                        title,
+                        description: notes,
+                    },
+                )
+                .await
+                .map_err(task_error)?;
+            let wave = owning_wave(&store, &edited).await?;
+            Ok(super::pm::PmUpdateResult {
+                wave: wave.slug().into(),
+                id: edited.id.to_string(),
+            })
+        });
+    }
     super::pm::pm_update(
         repo,
         &super::pm::PmUpdateOptions {
@@ -4941,9 +5354,68 @@ pub fn task_comment(
     message: Option<&str>,
     steer: bool,
 ) -> OpsResult<super::pm::TaskComments> {
+    if let Some((store, task)) = block_on_task(resolve_local_task(repo, issue, wave))? {
+        if let Some(message) = message {
+            append_local_comment(&store, &task, message, steer)?;
+        }
+        return Ok(super::pm::TaskComments {
+            identifier: task.plan.identifier,
+            comments: store
+                .sqlite
+                .local_task_comments(&task.id)
+                .map_err(task_error)?,
+        });
+    }
     block_on_task(super::pm::task_comment_async(
         repo, wave, issue, message, steer,
     ))
+}
+
+pub(crate) fn append_local_comment(
+    store: &Store,
+    task: &Task,
+    message: &str,
+    steer: bool,
+) -> OpsResult<String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
+    let provenance =
+        capture.or_else(|| crate::journal::agent_caller().map(|caller| caller.session_id));
+    let (body, author) = if let Some(provenance) = provenance.filter(|_| !steer) {
+        (
+            format!(
+                "{}\n\n<!-- loopflow-progress:{provenance}:{id} -->",
+                message.trim()
+            ),
+            super::pm::TaskCommentAuthor::Integration,
+        )
+    } else {
+        let name = crate::engine::config::participant_name().map_err(task_error)?;
+        (
+            format!("{}\n\n<!-- loopflow-steer:{id} -->", message.trim()),
+            super::pm::TaskCommentAuthor::Person { name },
+        )
+    };
+    if message.trim().is_empty() {
+        return Err(task_error("Task comment cannot be empty"));
+    }
+    store
+        .sqlite
+        .append_local_task_comment(
+            &task.id,
+            &super::pm::TaskComment {
+                id: id.clone(),
+                body,
+                author,
+                created_at: Some(
+                    time::OffsetDateTime::now_utc()
+                        .format(&Rfc3339)
+                        .map_err(task_error)?,
+                ),
+            },
+        )
+        .map_err(task_error)?;
+    Ok(id)
 }
 
 /// Request that the Task end its current turn so the next re-reads its
@@ -6201,7 +6673,7 @@ mod tests {
                         status
                     );
                     assert_eq!(
-                        super::task_status(&repo, Some(&snapshot.issue_id)).unwrap(),
+                        super::task_status(&repo, Some(&snapshot.task_id)).unwrap(),
                         status
                     );
                     assert_eq!(snapshot.status, TaskState::Done);

@@ -25,6 +25,7 @@ mod children;
 mod ci_incidents;
 mod durable;
 mod flow_inventory;
+mod local_planning;
 mod metrics;
 mod planning;
 mod pr_landings;
@@ -94,7 +95,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
-    pub issue_id: String,
+    pub issue_id: Option<String>,
     pub issue_identifier: String,
     pub worktree: PathBuf,
     pub machine_id: Option<crate::durable::MachineId>,

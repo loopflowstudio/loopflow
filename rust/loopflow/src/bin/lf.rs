@@ -653,7 +653,7 @@ fn print_task_snapshot(
             snapshot.status,
             snapshot.task_id,
             body,
-            snapshot.worktree,
+            snapshot.worktree.as_deref().unwrap_or("unplaced"),
             branch,
             pm_writeback,
         );
@@ -808,6 +808,19 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         }
         WaveCommand::Place { .. } | WaveCommand::Rename { .. } => {
             loopflow::lf::commands::placement::wave(repo, command)
+        }
+        WaveCommand::Edit { wave, goal, memory } => {
+            for (document, path) in [("GOAL.md", goal), ("MEMORY.md", memory)] {
+                if let Some(path) = path {
+                    loopflow::work::wave::config::write_wave_document(
+                        repo,
+                        wave,
+                        document,
+                        &std::fs::read_to_string(path)?,
+                    )?;
+                }
+            }
+            Ok(())
         }
         WaveCommand::UpdatePlan { wave, plan } => {
             update_plan(
@@ -966,14 +979,22 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             wave,
             title,
             notes,
+            creation_id,
             json,
         } => {
             let report = match notes {
                 Some(notes) => Some(notes.clone()),
                 None => piped_task_report()?,
             };
-            let issue =
-                loopflow::ops::task::task_create(repo, wave.as_deref(), title.clone(), report)?;
+            let identity = creation_id.clone().unwrap_or_default();
+            eprintln!("Creation identity: {identity}; retain --creation-id {identity} when retrying this request");
+            let issue = loopflow::ops::task::task_create_with_id(
+                repo,
+                wave.as_deref(),
+                title.clone(),
+                report,
+                identity,
+            )?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {

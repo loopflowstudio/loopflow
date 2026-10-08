@@ -538,6 +538,16 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
+    if wave.starts_with("personal:") {
+        for document in ["GOAL.md", "MEMORY.md"] {
+            docs.push(Document {
+                path: format!("{wave}/{document}"),
+                content: crate::work::wave::config::read_wave_document(repo_root, wave, document)?,
+                source: DocumentSource::Wave,
+            });
+        }
+        return Ok(docs);
+    }
     let mut directory = PathBuf::from("wave");
     for segment in Path::new(wave).components() {
         directory.push(segment);
@@ -1536,9 +1546,14 @@ pub fn loopflow_section() -> String {
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
+        let memory = if wave.starts_with("personal:") {
+            format!("Curate the stored Wave memory with `lf wave edit {wave} --memory <file>`. Personal definitions stay out of tracked files.")
+        } else {
+            format!("Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.")
+        };
         parts.push(format!(
             "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
-             Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.\n\
+             {memory}\n\
              Use realign to reconcile the plan, code and Wave memory.\n</lf:wave>"
         ));
     }

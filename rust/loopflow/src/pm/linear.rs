@@ -2004,7 +2004,7 @@ impl IssueFields {
             state: self.state.map(|state| state.r#type),
             project_id,
             project,
-            team_id: team.id,
+            team_id: Some(team.id),
             assignee: self.assignee.map(|assignee| assignee.id),
         })
     }
@@ -3558,7 +3558,7 @@ mod tests {
         let (item, project) = client.issue_ownership("LOO-42").await.unwrap().unwrap();
         let project = project.unwrap();
         assert_eq!(item.project_id.as_deref(), Some("project-api"));
-        assert_eq!(item.team_id, "team-loo");
+        assert_eq!(item.team_id.as_deref(), Some("team-loo"));
         assert_eq!(project.initiative_ids, ["initiative-product"]);
         assert_eq!(project.team_ids, ["team-loo"]);
     }

@@ -6,6 +6,86 @@ use tracing::warn;
 
 use crate::engine::context_budget::BudgetKey;
 
+/// Resolve personal documents from their store owner; shared definitions stay in Git.
+pub(crate) fn read_wave_document(
+    repo: &Path,
+    name: &str,
+    document: &str,
+) -> std::io::Result<String> {
+    if !name.starts_with("personal:") {
+        return std::fs::read_to_string(
+            repo.join("wave")
+                .join(name.strip_prefix("shared:").unwrap_or(name))
+                .join(document),
+        );
+    }
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
+            .map_err(std::io::Error::other)?;
+    let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
+    let wave = store
+        .get_wave_at(&locator)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "personal Wave not found")
+        })?;
+    let definition = store
+        .personal_wave_definition(wave.id())
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "personal definition not found",
+            )
+        })?;
+    match document {
+        "GOAL.md" => Ok(definition.goal),
+        "MEMORY.md" => Ok(definition.memory),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "unknown personal Wave document",
+        )),
+    }
+}
+
+pub fn write_wave_document(
+    repo: &Path,
+    name: &str,
+    document: &str,
+    content: &str,
+) -> std::io::Result<()> {
+    super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
+    if !matches!(document, "GOAL.md" | "MEMORY.md") {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "expected GOAL.md or MEMORY.md",
+        ));
+    }
+    if !name.starts_with("personal:") {
+        let path = repo
+            .join("wave")
+            .join(name.strip_prefix("shared:").unwrap_or(name))
+            .join(document);
+        std::fs::create_dir_all(path.parent().expect("Wave document has a parent"))?;
+        return std::fs::write(path, content);
+    }
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)
+        .map_err(std::io::Error::other)?;
+    let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
+    let wave = store
+        .get_wave_at(&locator)
+        .map_err(std::io::Error::other)?
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "personal Wave not found; use lf wave ensure first",
+            )
+        })?;
+    store
+        .update_personal_wave_document(wave.id(), document, content)
+        .map_err(std::io::Error::other)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {
     #[error("failed to read {path}: {source}")]
@@ -88,7 +168,7 @@ pub(crate) fn try_read_wave_config(
     name: &str,
 ) -> Result<Option<WaveConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
-    let content = match std::fs::read_to_string(&path) {
+    let content = match read_wave_document(repo, name, "GOAL.md") {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
@@ -107,7 +187,7 @@ pub(crate) fn try_read_wave_chat_config(
     name: &str,
 ) -> Result<Option<WaveChatConfig>, WaveConfigError> {
     let path = goal_path(repo, name);
-    let content = match std::fs::read_to_string(&path) {
+    let content = match read_wave_document(repo, name, "GOAL.md") {
         Ok(content) => content,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => return Err(WaveConfigError::Read { path, source }),
@@ -138,7 +218,7 @@ pub(crate) fn try_read_wave_chat_config(
 /// `## Objective`, falling back to the first prose paragraph when that section
 /// is absent.
 pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
-    let content = std::fs::read_to_string(goal_path(repo, name))?;
+    let content = read_wave_document(repo, name, "GOAL.md")?;
     let body = split_frontmatter(&content)
         .map(|(_, body)| body)
         .unwrap_or(content);
@@ -209,13 +289,15 @@ fn empty_goal_body(name: &str) -> String {
     format!("Run one loop iteration for the {name} wave.\n")
 }
 
-fn goal_value_from_content(path: &Path, name: &str) -> Result<(Value, String), String> {
-    if !path.exists() {
-        return Ok((Value::Mapping(Mapping::new()), empty_goal_body(name)));
-    }
-
-    let content = std::fs::read_to_string(path)
-        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+fn goal_value_from_content(repo: &Path, name: &str) -> Result<(Value, String), String> {
+    let path = goal_path(repo, name);
+    let content = match read_wave_document(repo, name, "GOAL.md") {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Value::Mapping(Mapping::new()), empty_goal_body(name)))
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     let Some((frontmatter, body)) = split_frontmatter(&content) else {
         return Ok((Value::Mapping(Mapping::new()), content));
     };
@@ -281,17 +363,12 @@ pub fn update_wave_goal_config(
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
     let path = goal_path(repo, name);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|err| format!("failed to create {}: {err}", parent.display()))?;
-    }
-
-    let (mut value, body) = goal_value_from_content(&path, name)?;
+    let (mut value, body) = goal_value_from_content(repo, name)?;
     let map = wave_config_map(&mut value, &path)?;
     update(map)?;
 
     let rendered = render_goal_md(&value, &body)?;
-    std::fs::write(&path, rendered)
+    write_wave_document(repo, name, "GOAL.md", &rendered)
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(())
 }

@@ -1,6 +1,39 @@
 -- depends_on: process_names
 PRAGMA legacy_alter_table = ON;
 
+CREATE TABLE personal_plans (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL UNIQUE
+);
+ALTER TABLE waves ADD COLUMN personal_plan_id TEXT REFERENCES personal_plans(id) ON DELETE RESTRICT;
+ALTER TABLE project_transitions ADD COLUMN local_plan_json TEXT;
+CREATE TABLE personal_wave_definitions (
+    wave_id TEXT PRIMARY KEY REFERENCES waves(id) ON DELETE RESTRICT,
+    goal TEXT NOT NULL,
+    memory TEXT NOT NULL
+);
+CREATE TRIGGER store_revision_personal_wave_definition AFTER UPDATE ON personal_wave_definitions
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='planning';
+END;
+DROP INDEX idx_waves_active_locator;
+CREATE UNIQUE INDEX idx_waves_active_locator
+    ON waves(repo,ifnull(personal_plan_id,''),ifnull(parent_wave_id,''),name)
+    WHERE retired_at IS NULL;
+DROP VIEW wave_addresses;
+CREATE VIEW wave_addresses AS
+WITH RECURSIVE addresses(id,slug) AS (
+    SELECT id,CASE
+        WHEN personal_plan_id IS NOT NULL THEN 'personal:' || name
+        WHEN name LIKE 'personal:%' OR name LIKE 'shared:%' THEN 'shared:' || name
+        ELSE name END
+    FROM waves WHERE parent_wave_id IS NULL
+    UNION ALL
+    SELECT w.id,a.slug || '/' || w.name FROM waves w
+    JOIN addresses a ON w.parent_wave_id=a.id
+)
+SELECT w.*,a.slug FROM waves w JOIN addresses a ON a.id=w.id;
+
 -- Local planning keeps durable Work identity independent of provider mapping.
 -- Foreign-key actions are disabled by the migration runner during table rebuilds.
 
@@ -93,7 +126,8 @@ CREATE TABLE tasks_migration (
     automation_enabled INTEGER CHECK (automation_enabled IN (0,1)),
     abandoned_at INTEGER,
     primary_session_id TEXT REFERENCES agent_sessions(id) ON DELETE SET NULL,
-    planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0)
+    planning_revision INTEGER NOT NULL DEFAULT 0 CHECK (planning_revision >= 0),
+    planning_rank INTEGER NOT NULL DEFAULT 0 CHECK (planning_rank >= 0)
 );
 
 INSERT INTO tasks_migration (
@@ -166,5 +200,16 @@ CREATE TABLE task_creation_intents (
     title TEXT NOT NULL,
     description TEXT NOT NULL
 );
+
+CREATE TABLE task_comments (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
+    body TEXT NOT NULL,
+    author TEXT NOT NULL CHECK(json_valid(author)),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX idx_task_comments_task ON task_comments(task_id,created_at,id);
+CREATE TRIGGER store_revision_task_comments_insert AFTER INSERT ON task_comments
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 PRAGMA legacy_alter_table = OFF;

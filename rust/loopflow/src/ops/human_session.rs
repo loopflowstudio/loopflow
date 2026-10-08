@@ -344,7 +344,7 @@ pub(crate) async fn list(
                 .into_iter()
                 .find(|task| {
                     task.task_id.as_str() == selector
-                        || task.issue_id == *selector
+                        || task.issue_id.as_deref() == Some(selector.as_str())
                         || task.issue_identifier == *selector
                 })
                 .map(|task| task.task_id)

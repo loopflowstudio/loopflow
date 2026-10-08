@@ -7,7 +7,7 @@ use crate::store::{PlanningLocks, StoreError, StoreResult};
 
 pub(super) fn read_in(conn: &Connection, wave: &WaveId) -> StoreResult<Option<String>> {
     Ok(conn.query_row(
-        "SELECT p.external_project_id FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
+        "SELECT CASE WHEN w.personal_plan_id IS NOT NULL THEN p.id ELSE p.external_project_id END FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id WHERE w.id=?1",
         [wave], |row| row.get(0),
     )?)
 }
@@ -192,8 +192,11 @@ impl SqliteStore {
     pub(crate) fn project_readiness(&self, wave: &WaveId) -> StoreResult<ProjectReadiness> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT p.external_project_id, f.observed_at,
+            "SELECT CASE WHEN w.personal_plan_id IS NOT NULL THEN p.id ELSE p.external_project_id END, f.observed_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
+                  WHEN w.personal_plan_id IS NOT NULL THEN
+                    CASE WHEN p.status IN ('completed','canceled') THEN 'terminal'
+                         WHEN p.status='started' THEN 'ready' ELSE 'inactive' END
                   WHEN NOT json_valid(f.body) THEN 'unavailable'
                   WHEN f.id IS NULL OR f.archived OR f.membership_unresolved OR p.pm_snapshot_synced_at!=f.observed_at
                     OR NOT EXISTS(SELECT 1 FROM pm_wave_projects m WHERE m.wave_id=w.id AND m.project_id=f.id)

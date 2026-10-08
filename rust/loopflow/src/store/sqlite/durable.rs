@@ -650,13 +650,12 @@ pub(super) fn require_current_task_project(conn: &Connection, work: &WorkRef) ->
 }
 
 pub(super) fn require_selected_project(conn: &Connection, project: &ProjectId) -> StoreResult<()> {
-    let (wave, provider_id, status): (WaveId, String, String) = conn.query_row(
-        "SELECT wave_id, external_project_id, status FROM projects WHERE id=?1",
+    let (selected, status): (Option<String>, String) = conn.query_row(
+        "SELECT w.current_project_id,p.status FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
         [project.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     )?;
-    let selected = super::project_selection::read_in(conn, &wave).map_err(invalid_durable)?;
-    if selected.as_deref() != Some(provider_id.as_str()) {
+    if selected.as_deref() != Some(project.as_str()) {
         return Err(StoreError::InvalidAuthority(
             "Task Project is not the Wave's configured Project; ensure the Wave before starting new work".into(),
         ));

@@ -1897,10 +1897,12 @@ async fn inspect_task_planning_async(
             }
             return Ok(false);
         };
-        if item.team_id != repository.team_id {
+        if item.team_id.as_deref() != Some(repository.team_id.as_str()) {
             return Err(OpsError::Message(format!(
                 "Linear task {} belongs to Team {}, expected repository Team {}",
-                item.identifier, item.team_id, repository.team_id
+                item.identifier,
+                item.team_id.as_deref().unwrap_or("unmapped"),
+                repository.team_id
             )));
         }
         store
@@ -2154,7 +2156,7 @@ async fn accept_reteam_task(
         .ok_or_else(|| OpsError::Message(format!("Task {issue} lost its Project during reteam")))?;
     let initiative = read_initiative(repo, wave.slug(), resolved.repository.provider)
         .ok_or_else(|| OpsError::Message(format!("Wave {} lost its Initiative", wave.slug())))?;
-    if item.team_id != resolved.repository.team_id
+    if item.team_id.as_deref() != Some(resolved.repository.team_id.as_str())
         || project.initiative_ids.as_slice() != [initiative.as_str()]
     {
         return Err(OpsError::Message(format!(
@@ -2299,16 +2301,20 @@ async fn apply_or_plan_repository_reteam(
                         item.identifier, item.project_id, project.id
                     )));
                 }
-                if !project.team_ids.iter().any(|team| team == &item.team_id) {
+                if !project
+                    .team_ids
+                    .iter()
+                    .any(|team| Some(team) == item.team_id.as_ref())
+                {
                     return Err(OpsError::Message(format!(
                         "Linear task {} belongs to Team {}, but Project {} carries teams [{}]",
                         item.identifier,
-                        item.team_id,
+                        item.team_id.as_deref().unwrap_or("unmapped"),
                         project.id,
                         project.team_ids.join(", ")
                     )));
                 }
-                if item.team_id == *team_id {
+                if item.team_id.as_deref() == Some(team_id.as_str()) {
                     already += 1;
                     let registered_identifier = store
                         .task_issue_identifier(&item.id)
@@ -2694,10 +2700,10 @@ async fn pm_sync_async(
                     blocking.push(message);
                 }
                 if let Some(team_id) = &team_id {
-                    if item.team_id != *team_id {
+                    if item.team_id.as_deref() != Some(team_id.as_str()) {
                         let message = format!(
                             "Linear task {} belongs to Team {}, expected repository Team {team_id}. Run `lf repo reteam`.",
-                            item.identifier, item.team_id
+                            item.identifier, item.team_id.as_deref().unwrap_or("unmapped")
                         );
                         diagnostics.push(message.clone());
                         blocking.push(message);
@@ -3232,7 +3238,7 @@ pub(crate) async fn chapter_sweep_candidates(repo: &Path) -> OpsResult<ChapterSw
                 {
                     continue;
                 }
-                if item.state.is_none() || item.team_id != ctx.team_id {
+                if item.state.is_none() || item.team_id.as_deref() != Some(ctx.team_id.as_str()) {
                     return Err(OpsError::Message(format!(
                         "{} has unresolved state or ownership; sweep was not applied",
                         item.identifier

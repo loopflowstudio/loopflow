@@ -59,6 +59,7 @@ pub enum DurableDataError {
 }
 
 durable_id!(ProjectId, "proj_");
+durable_id!(PlanId, "plan_");
 durable_id!(TaskId, "task_");
 // Opaque IDs retain their released spelling, including references in scheduled jobs.
 durable_id!(MachineId, "home_");

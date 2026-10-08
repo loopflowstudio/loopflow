@@ -123,6 +123,32 @@ Known invalidation, removal, terminal state or ownership changes still block.
 `--reason` requires successful Linear publication before the launch. Status
 retains the planning observation's original age.
 
+## Plan locally
+
+```bash
+lf task create --title "Fix the parser" --json
+lf task edit <id> --notes "Preserve quoted input"
+lf task comment <id> "Keep escaped quotes intact"
+lf task checkout <id>
+lf task run <id> research
+```
+
+Without a selected Wave, explicit creation uses `personal:inbox`. A Task gets its
+identity before placement; creation starts no agent and requires no Linear login.
+Personal goals, memory, Projects and comments stay in SQLite. Reads create nothing.
+
+```bash
+lf wave ensure personal:parser
+lf wave edit personal:parser --goal /tmp/goal.md --memory /tmp/memory.md
+lf task create --wave personal:parser --title "Retain escaped quotes"
+```
+
+Creation prints its retry identity before attempting the write. Repeat the original
+options with `--creation-id <task-id>` to recover an interrupted creation. A new
+creation without that identity creates a distinct Task, even with the same title.
+Full Task IDs and unambiguous `lf-` UUID prefixes select local Tasks. Existing
+Linear ticket aliases continue to select connected Tasks.
+
 ## Connect planning and create work
 
 ```bash
@@ -143,7 +169,8 @@ before connection. Planning setup is separate from direct local execution.
 After Linear accepts a Task creation or update, Loopflow confirms that issue
 directly without another Wave-wide snapshot. If Linear commits but issue
 confirmation fails, the error names the retained issue. Retry the same command
-with the original creation options to reuse it without filing a duplicate.
+with the original creation options and printed `--creation-id` to reuse it without
+filing a duplicate.
 
 ## Inspect and continue
 

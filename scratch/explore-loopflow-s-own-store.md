@@ -5,11 +5,12 @@ Jack Heart selected the complete local lifecycle, echoing Linear APIs and fields
 for compatibility with particular attention to ID generation, then requested
 “move towards pursuit”. Deliver one coherent PR through publication for review.
 Landing, installation, callbacks, Git synchronization and Linear export are outside
-this slice. Reconciled on 2026-10-07: the storage foundation is implemented; the
-complete local lifecycle remains unfinished and is not ready for publication.
+this slice. Reconciled on 2026-10-08: the local CLI core is implemented and
+exercised in disposable stores; the complete accepted lifecycle remains unfinished
+and is not ready for publication.
 The older feedback describing mandatory provider IDs and placement is superseded
-by the storage checkpoint at `3615ac424` and the retained compression edits atop
-`510977d11`. Retaining deletion-recovery evidence is an engineering correction
+by storage checkpoint `3615ac424`, compression checkpoint `444d16b00`, and the
+local lifecycle changes described below. Retaining deletion-recovery evidence is an engineering correction
 within Jack's preservation constraint, not an additional product approval boundary.
 
 ## Direction
@@ -49,7 +50,8 @@ plan material to the code remote.
 
 ## First showable slice
 
-Accepted target behavior; the public lifecycle below remains unimplemented.
+Accepted target behavior. Local CLI creation through execution and rotation now
+has source proofs; hosted delivery and headless Desktop acceptance remain open.
 
 In a repository with no Linear configuration or credentials, run
 `lf task create --title "Fix the parser"`. It creates a durable Task immediately. With no
@@ -85,11 +87,13 @@ headless Desktop readers, without restoring that launcher.
 - `store/sqlite/planning.rs` accepts normalized provider facts and projects them
   into durable rows. The `local_planning` draft makes external mappings nullable
   while retaining uniqueness. Local create/edit/read use the existing Task rows;
-  provider operations and public projections still need the authority cutover. `store/sqlite.rs::task_issue_identity` separately reads
+  local operations and public projections now select explicit personal authority;
+  owned Linear issue import and the remaining consumers still need the cutover. `store/sqlite.rs::task_issue_identity` separately reads
   deletion-recovery evidence; its only operation caller is `ops/pm.rs::delete_task`.
 - `ops/task_pm.rs` resolves Team/Initiative ownership and delegates creation and
-  completion to `ops/pm.rs`. `pm_create_task_idempotent` searches description
-  markers around a provider create. Comments also require a Linear observation.
+  completion to `ops/pm.rs`. `pm_create_task_idempotent` searches UUID operation
+  markers around a provider create. Connected comments require a Linear observation;
+  personal comments now have a transactional local writer.
 - `ops/task.rs::create_prepared_task` first reuses an external-issue mapping under
   the Wave lock, then calls `TaskId::new()` when absent. Project ingestion likewise
   reuses a mapping or calls `ProjectId::new()`. Both mint UUID v4; the earlier
@@ -434,7 +438,8 @@ revisions transactionally. The caller supplies one `TaskId` across retries; a
 `task_creation_intents` receipt preserves the original input even after later edits.
 Conflicting reuse fails; separate same-title creation has a distinct ID. Creation
 allocates no PR, Session, Process, workflow or checkout. SQLite row readers accept
-optional provider mapping/observation and placement; public projections do not yet.
+optional provider mapping/observation and placement; Task status and Wave projections
+now expose those absences without requiring a provider.
 The store resolver accepts
 full IDs and `lf-` UUID prefixes and rejects ambiguity. Stored local display labels
 currently use the full UUID; automatic shortest-unique display remains to build.
@@ -445,52 +450,68 @@ current table/column names. No second draft was added. Review found that origina
 creation input must survive edits for retry comparison, and that an absent provider
 observation must remain NULL rather than epoch zero; both are fixed.
 
-Inspection at `510977d11` with the retained compression edits identifies the
-remaining public boundaries:
+Implemented local boundaries (2026-10-08):
 
-- `ops/task.rs::task_create` still selects a provider Project and hashes Wave,
-  title and report into its creation marker. The new store writer has no operation
-  caller. Local CLI recovery needs an explicit retained creation identity; copying
-  this content-derived marker would conflate independent identical requests.
-- `task_execution_status` requires `linear_id()` before reading deletion evidence.
-  `task_status` still inspects provider planning, and `task_snapshot` requires
-  provider IDs and `worktree()`. `TaskSnapshot` still exposes mandatory string
-  fields for issue ID, external Project ID and checkout. Optional storage alone
-  therefore supplies neither local status nor an unplaced Desktop Task.
-- `task_edit` and `task_comment` still call provider operations. Checkout restores
-  an existing Task's placement/PR; allocating the first placement for an unplaced
-  Task remains unfinished. Explicit scope/authority must precede these operations;
-  absence of a mapping is only the current store-level distinction, not the
-  completed authority model.
-- The populated migration fixture reads Task/Project rows through Rust and
-  compares PR, Session, workflow, move and orphan recovery rows. It does not yet
-  exercise historical serialized Task/Project payload readers or all supported
-  Linear fields. Those remain part of migration and paired-field acceptance.
+- A personal plan binds one canonical repository. Wave membership selects Local
+  authority explicitly; adding a provider alias does not transfer it. `personal:`
+  qualifies stored Waves, including `personal:inbox`; a shared same-name Wave stays
+  separate. Reserved-prefix shared names receive a `shared:` address. Root personal
+  provisioning is transactional and leaves tracked definitions unchanged.
+- Public create/edit/comment/status use the existing Task rows. `--creation-id`
+  retains one UUID, emitted before creation; separate creates remain distinct.
+  The content-hash provider marker is replaced too. Local retry reads its original
+  Project receipt across later edits and rotation. Comments retain UUID, named or
+  unresolved author, progress provenance and directional steering.
+- First checkout records placement and PR atomically before creating files. New
+  local branches include the full UUID. Unplaced status and completion work; local
+  workflow admission and completion bypass Linear. Wave and checkout locks protect
+  placement; queued creation retains the Wave guard through commit.
+- `wave ensure`, `wave edit`, Project workflow selection and plan editing operate
+  on personal definitions. Goals/memory feed prompt assembly from SQLite; generated
+  curation instructions write back there. Project content reuses Linear's Markdown
+  encoding with workflow updated in the same transaction. Local rank is allocated
+  within its Project; completed time comes from the retained completion event.
+- Local rotation commits destination, selection, started Task membership and its
+  receipt together, preserving backlog. Original input survives for retry checking.
+  Public fixtures exercise rotation twice, retained workflow/checkout and creation
+  retry across that switch. Mixed Local/Linear rotation and cancellation races need
+  further proof; a local transaction does not make provider effects atomic.
+- The same migration also retains `pm_items.body` and `pm_projects.body` byte-for-byte
+  and parses their historical fixture shapes through current observation readers.
+  PR, Session, workflow, move and orphan deletion-recovery preservation still pass.
+  No historical Task/Project JSON payload owner was found beyond those provider
+  observation records; complete supported-field coverage remains below.
 
-Remaining work is still the complete accepted lifecycle, in this same PR:
+Remaining work is the complete accepted lifecycle, in this same PR:
 
-- Finish supported planning fields, explicit scope/authority and personal Wave and
-  Project definitions/provisioning; preserve same-name shared definitions.
-- Import owned planning-only Linear issues transactionally without losing provider
-  revision/removal evidence; retain unresolved facts and deletion-only identities.
-- Connect create/edit/comment/status to these operations; retain creation identity
-  through CLI interruption. Store API tests do not establish public recovery.
-- Place existing unplaced Tasks without changing identity, then route workflow,
-  admission, completion, delivery and rotation through the selected authority.
-- Complete shared CLI/Desktop projections, fixtures and user documentation, including
-  unplaced comments and paired local/Linear field semantics. Remove the single-variant
-  provider routing only with its consumers. Run the proposed gate after that cutover.
+- Import owned planning-only Linear issues into durable Tasks transactionally;
+  reuse mappings and preserve revisions/removal evidence. Cut provider registration
+  over to optional placement without losing existing branches. Retain orphan
+  deletion evidence; do not infer ownership from it.
+- Finish paired supported-field semantics (including rank edits, assignee and
+  Project summary), personal workflow customization, nested personal definitions,
+  scope resolution across every operation, and shortest-unique display selectors.
+  Personal rename/move/delete and mixed-authority operations still need inspection.
+- Prove public GitHub publication and verified `land -c`/reconciliation with strict
+  stubs, plus refusal of hosted success without a code remote. Local link/copy and
+  completion paths select authority, but no hosted-delivery acceptance is claimed.
+- Add shared Rust/Swift fixtures and headless Desktop reading/view proofs for
+  unplaced Tasks and comments. CLI Wave projection success proves no mounted or
+  headless app behavior. Finish user/architecture documentation and remove
+  single-variant provider routing with all its consumers.
+- Extend preservation/concurrency proofs: first-placement filesystem failure,
+  creation/rotation races, multiple personal Waves committing together, conflicting
+  rotation retry input and late completion. Continue the same draft; run the full
+  proposed gate only after the cutover.
 
-Compression review: retain the original creation receipt and deletion-recovery
-owner; neither duplicates current planning. Task reads now collect through the
-same typed row mapper without a dynamic parameter wrapper. Checkout operations
-resolve optional placement once, and preservation assertions compare the stored
-optional value directly. Expanded migration columns retain their order and
-constraints. No provider path is deleted before its local consumers are cut over.
-
-The foundation is an internal implementation checkpoint, not a smaller shipping
-outcome. No public local lifecycle, Desktop acceptance, publication or installation
-is claimed. No product decision is needed to continue this work.
+Review corrections: provider mapping never selects authority; creation and rotation
+receipts retain original input; a public retry follows its creation Project even
+when the Task has moved. Optional checkout is resolved once before Git operations.
+Public fixtures use subprocesses with inherited Loopflow/Linear authority removed.
+Release's inspected child memory reinforces operation-entry tests and rejecting
+unknown stub commands. No hosted effect, installation or complete Desktop outcome
+is established by these local fixtures. No product decision blocks the remaining
+implementation; the full outcome has not been reduced to this checkpoint.
 
 Select concrete authority at the planning operation boundary. Local lookups must
 not enter `resolve_owned_issue` or acquire a provider token. Linear ingestion keeps
@@ -537,4 +558,4 @@ nullable Linear IDs without planning-only Tasks; namespace separation mistaken f
 privacy; a write-once mapping mistaken for duplicate-safe export; remote completion
 mistaken for local workflow arrival. Remaining choices are in `questions.md`.
 
-Check: prior unchanged-code results retained—`cargo test -p loopflow --lib local_planning` (4 passed), `cargo test -p loopflow --test task_initialization_tests` (4 passed), Clippy, formatting and migration checks passed with isolated test stores; prose-only reconciliation: `git diff --check` and `lf context --skill realign --json` pass, both authored sources within budget; gate owns complete CLI/Desktop lifecycle verification after implementation.
+Check: `cargo test -p loopflow --lib local_planning` (5 passed), public `local_planning` plus `task_initialization_tests` (6 passed), connected creation/deletion lost-response tests (2 passed); `cargo fmt`, Clippy, migration immutability, `git diff --check` and context budgets pass. Gate owns complete CLI/Desktop and hosted-delivery verification.

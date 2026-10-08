@@ -51,6 +51,14 @@ pub(crate) async fn publish_task_steer(
     task: &Task,
     text: &str,
 ) -> OpsResult<String> {
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return super::task::append_local_comment(store, task, text, true);
+    }
     let client = super::pm::issue_client(task.worktree()?).await?;
     let comment_id = publish_direction(&client, task.plan.linear_id()?.as_str(), text).await?;
     refresh_task_comments(store, task).await.map_err(|error| OpsError::Message(format!(
@@ -123,6 +131,14 @@ pub(crate) async fn publish_comment(
 }
 
 pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    if store
+        .sqlite
+        .project_planning_authority(&task.project_id)
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        == crate::planning::PlanningAuthority::Local
+    {
+        return Ok(());
+    }
     let client = super::pm::issue_client(task.worktree()?).await?;
     let observation = client
         .observe_issue(task.plan.linear_id()?.as_str())

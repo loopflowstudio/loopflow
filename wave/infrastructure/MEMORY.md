@@ -15,18 +15,17 @@ retains execution on X and routes Linear through the online host; disconnect/dir
 fallback remain open. No resident or automatic work retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-Storage checkpoint `3615ac424` permits optional provider mapping and placement,
-transactional create/edit and creation identity retained across edits/restarts.
-One draft preserves linked rows and orphan `task_issue_identities` for deletion
-recovery only. Disposable migration/readback and lost-response fixtures pass;
-historical serialized payloads and the public lifecycle remain unproved. Reuse
-import mappings or persist UUID v4 once; no deterministic mapper exists.
-Public creation still hashes content for retry identity; copying that into local
-creation would conflate independent identical requests. Status still requires
-provider IDs and placement. Personal definitions, comments, execution/delivery
-and CLI/Desktop cutover remain unfinished. Release's inspected child memory
-reinforces public-entry recovery, strict CLI stubs and headless view proofs;
-storage success establishes none of those or installation.
+October 8 source extends `3615ac424`/`444d16b00` with explicit personal authority,
+CLI create/edit/comment/status, unplaced completion, first placement, workflow and
+local rotation. `--creation-id` replaces content hashing; receipts retain original
+input/Project across edits and rotation. Provider aliases grant no authority.
+Personal goal/memory stay in SQLite, including prompt curation. Local subprocess
+proofs and retained serialized provider-payload readback pass against one draft;
+these establish no installation, hosted delivery or Desktop outcome. Owned Linear
+issue import, paired fields, remaining private-definition operations, complete
+CLI/Desktop/hosted acceptance and provider-routing deletion remain unfinished.
+Release's inspected child memory reinforces public-entry recovery and strict stubs.
+The full one-PR scope remains; no product decision blocks its implementation.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

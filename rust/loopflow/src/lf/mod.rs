@@ -697,6 +697,14 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
+    /// Replace authored Wave documents in their personal store or shared files
+    Edit {
+        wave: String,
+        #[arg(long, required_unless_present = "memory")]
+        goal: Option<PathBuf>,
+        #[arg(long)]
+        memory: Option<PathBuf>,
+    },
     /// Rotate this Wave using its exact destination in a retained chapter plan
     NewChapter {
         wave: String,
@@ -886,7 +894,7 @@ pub enum TaskCommand {
         #[arg(long)]
         force: bool,
     },
-    /// File a Task in the current chapter
+    /// Create a planning Task without allocating a checkout or starting work
     Create {
         /// Wave name; defaults to the bound Wave
         #[arg(long)]
@@ -897,6 +905,9 @@ pub enum TaskCommand {
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
+        /// Retain this identity when retrying an interrupted creation
+        #[arg(long)]
+        creation_id: Option<crate::durable::TaskId>,
         #[arg(long)]
         json: bool,
     },

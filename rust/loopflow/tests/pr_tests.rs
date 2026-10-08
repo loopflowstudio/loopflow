@@ -527,7 +527,7 @@ fn task_snapshot_reads_its_current_parent_project() {
     let snapshot = task_snapshot(&task.task).expect("snapshot Task");
 
     assert_eq!(snapshot.project, "current-project");
-    assert_eq!(snapshot.external_project_id, project_id);
+    assert_eq!(snapshot.external_project_id, Some(project_id));
     assert_eq!(
         snapshot.pm_snapshot_synced_at,
         task.task.plan.pm_snapshot_synced_at

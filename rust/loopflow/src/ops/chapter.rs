@@ -140,7 +140,13 @@ pub(crate) async fn rotate(
         {
             return Err(error("chapter plan repeats a Wave or destination"));
         }
-        let successor = uuid::Uuid::parse_str(&input.successor_id).map_err(error)?;
+        let successor = uuid::Uuid::parse_str(
+            input
+                .successor_id
+                .strip_prefix("proj_")
+                .unwrap_or(&input.successor_id),
+        )
+        .map_err(error)?;
         if input.create && successor.get_version() != Some(uuid::Version::Random) {
             return Err(error(
                 "new Project destinations require a UUID v4 allocated with the plan",
@@ -181,7 +187,16 @@ pub(crate) async fn rotate(
         super::metrics::validate_chapter_targets(&wave, &input.content.metric_targets)
             .map_err(error)?;
         let acquisition = lock_wave_planning(&wave).await?;
-        let ctx = resolve_context(repo, wave.slug()).await?;
+        let ctx = if store
+            .sqlite
+            .personal_wave_definition(wave.id())
+            .map_err(error)?
+            .is_some()
+        {
+            None
+        } else {
+            Some(resolve_context(repo, wave.slug()).await?)
+        };
         contexts.push((input, wave, ctx, acquisition));
     }
     let mut roots = Vec::new();
@@ -198,8 +213,15 @@ pub(crate) async fn rotate(
     }
     let checkouts = store.lock_checkout_roots(roots).await.map_err(error)?;
     let mut prepared = Vec::new();
+    let mut personal = Vec::new();
+    let mut personal_guards = Vec::new();
     for (input, wave, ctx, acquisition) in contexts {
         let acquisition = Arc::new(acquisition.with_checkouts(&checkouts));
+        let Some(ctx) = ctx else {
+            personal.push(prepare_local_rotation(&store, input, &wave, &plan.name).await?);
+            personal_guards.push(acquisition);
+            continue;
+        };
         if !dry_run {
             super::project::import_binding(&store, &wave, &ctx, &acquisition).await?;
         }
@@ -373,7 +395,11 @@ pub(crate) async fn rotate(
     if dry_run {
         return Ok(ChapterRotation {
             name: plan.name.clone(),
-            waves: prepared.into_iter().map(|entry| entry.result).collect(),
+            waves: personal
+                .into_iter()
+                .map(|(_, result)| result)
+                .chain(prepared.into_iter().map(|entry| entry.result))
+                .collect(),
         });
     }
     for entry in &prepared {
@@ -389,6 +415,42 @@ pub(crate) async fn rotate(
             )));
         }
     }
+    store
+        .sqlite
+        .rotate_local_projects(&plan.name, &personal)
+        .map_err(error)?;
+    for (input, result) in &mut personal {
+        let id = crate::durable::ProjectId::parse(&input.successor_id).map_err(error)?;
+        result.successor = Some(super::task::local_project_item(
+            store
+                .sqlite
+                .project(&id)
+                .map_err(error)?
+                .ok_or_else(|| error("rotation destination disappeared"))?,
+        )?);
+        if let Some(predecessor) = &mut result.predecessor {
+            let id = crate::durable::ProjectId::parse(&predecessor.id).map_err(error)?;
+            *predecessor = super::task::local_project_item(
+                store
+                    .sqlite
+                    .project(&id)
+                    .map_err(error)?
+                    .ok_or_else(|| error("rotation predecessor disappeared"))?,
+            )?;
+        }
+        for task in &mut result.tasks {
+            let id = crate::durable::TaskId::parse(&task.task.id).map_err(error)?;
+            task.task = super::task::local_task_item(
+                &store,
+                &store
+                    .sqlite
+                    .task(&id)
+                    .map_err(error)?
+                    .ok_or_else(|| error("rotation Task disappeared"))?,
+            )?;
+        }
+    }
+    drop(personal_guards);
     // Every pair is reserved before the first provider mutation.
     for entry in &prepared {
         if !entry.reserved {
@@ -408,8 +470,113 @@ pub(crate) async fn rotate(
     }
     Ok(ChapterRotation {
         name: plan.name.clone(),
-        waves: prepared.into_iter().map(|entry| entry.result).collect(),
+        waves: personal
+            .into_iter()
+            .map(|(_, result)| result)
+            .chain(prepared.into_iter().map(|entry| entry.result))
+            .collect(),
     })
+}
+
+async fn prepare_local_rotation(
+    store: &Store,
+    input: &WaveChapterPlan,
+    wave: &Wave,
+    name: &str,
+) -> OpsResult<(WaveChapterPlan, WaveRotation)> {
+    let uuid = uuid::Uuid::parse_str(
+        input
+            .successor_id
+            .strip_prefix("proj_")
+            .unwrap_or(&input.successor_id),
+    )
+    .map_err(error)?;
+    let mut input = input.clone();
+    input.successor_id = format!("proj_{}", uuid.simple());
+    let binding = read_project_binding(&store.sqlite, wave.id()).map_err(error)?;
+    let receipt = store
+        .project_transition(wave.id(), &input.successor_id)
+        .await
+        .map_err(error)?;
+    if let Some(receipt) = &receipt {
+        if receipt.reset_name.as_deref() != Some(name)
+            || receipt.create_successor != Some(input.create)
+            || receipt.settled_at.is_none()
+            || binding.as_deref() != Some(&input.successor_id)
+        {
+            return Err(error(
+                "retained local rotation conflicts with this request or the selected Project",
+            ));
+        }
+    }
+    let predecessor_id = receipt
+        .as_ref()
+        .map(|r| r.predecessor_id.clone())
+        .unwrap_or(binding);
+    let projects = store
+        .list_projects(Some(wave.id()))
+        .await
+        .map_err(error)?
+        .into_iter()
+        .map(super::task::local_project_item)
+        .collect::<OpsResult<Vec<_>>>()?;
+    let predecessor = predecessor_id
+        .as_ref()
+        .and_then(|id| projects.iter().find(|p| &p.id == id))
+        .cloned();
+    let successor = projects
+        .iter()
+        .find(|p| p.id == input.successor_id)
+        .cloned();
+    if receipt.is_none()
+        && (input.create == successor.is_some()
+            || predecessor_id.as_deref() == Some(&input.successor_id))
+    {
+        return Err(error("local destination must be new for creation or an existing different Project for selection"));
+    }
+    if successor
+        .as_ref()
+        .is_some_and(|p| matches!(p.status, ProjectStatus::Completed | ProjectStatus::Canceled))
+    {
+        return Err(error("terminal Project cannot be a rotation destination"));
+    }
+    let retained = store
+        .project_transition_items(wave.id(), &input.successor_id)
+        .await
+        .map_err(error)?;
+    let mut tasks = Vec::new();
+    for task in store.list_tasks(Some(wave.id())).await.map_err(error)? {
+        if task.project_id.as_str() != predecessor_id.as_deref().unwrap_or("")
+            && !retained.iter().any(|id| id == task.id.as_str())
+        {
+            continue;
+        }
+        let item = super::task::local_task_item(store, &task)?;
+        let mut decision = disposition(store, item).await?;
+        if task.worktree.is_none() && decision.disposition == TaskDisposition::Unresolved {
+            decision.disposition = TaskDisposition::Historical;
+            decision.reason = "unplaced backlog stays with its Project".into();
+        }
+        if retained.iter().any(|id| id == task.id.as_str()) {
+            decision.disposition = TaskDisposition::Move;
+            decision.reason = "retained rotation membership".into();
+        }
+        if decision.disposition == TaskDisposition::Unresolved {
+            return Err(error(format!(
+                "{}: {}",
+                task.plan.identifier, decision.reason
+            )));
+        }
+        tasks.push(decision);
+    }
+    let result = WaveRotation {
+        wave: wave.slug().into(),
+        successor_id: input.successor_id.clone(),
+        predecessor,
+        successor,
+        tasks,
+    };
+    Ok((input, result))
 }
 
 fn require_owned(ctx: &PmContext, project: &PmProject, unattached: bool) -> OpsResult<()> {
@@ -485,7 +652,7 @@ async fn rotation_tasks(store: &Store, entry: &PreparedRotation) -> OpsResult<Ve
     }
     let mut decisions = Vec::new();
     for item in items {
-        if item.team_id != entry.ctx.team_id
+        if item.team_id.as_deref() != Some(entry.ctx.team_id.as_str())
             || (item.project_id.as_deref() != entry.transition.predecessor_id.as_deref()
                 && item.project_id.as_deref() != Some(&entry.input.successor_id))
         {
@@ -668,7 +835,7 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
             .await
             .map_err(error)?
             .ok_or_else(|| error("Task planning is unavailable"))?;
-        if item.team_id != entry.ctx.team_id {
+        if item.team_id.as_deref() != Some(entry.ctx.team_id.as_str()) {
             return Err(error("Task Team changed during rotation"));
         }
         if item.project_id.as_deref() != Some(&id) {
@@ -691,7 +858,9 @@ async fn apply_rotation(store: &Store, entry: &mut PreparedRotation) -> OpsResul
                 .await
                 .map_err(error)?
                 .ok_or_else(|| error("Task transfer is unavailable"))?;
-            if item.project_id.as_deref() != Some(&id) || item.team_id != entry.ctx.team_id {
+            if item.project_id.as_deref() != Some(&id)
+                || item.team_id.as_deref() != Some(entry.ctx.team_id.as_str())
+            {
                 return Err(error("Task transfer is not confirmed"));
             }
         }

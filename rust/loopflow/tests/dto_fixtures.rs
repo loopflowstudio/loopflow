@@ -77,7 +77,7 @@ fn pm_show_preserves_repository_team_and_project_ownership() {
         snapshot.items[0].project_id.as_deref(),
         Some("project-gmail")
     );
-    assert_eq!(snapshot.items[0].team_id, "team-loo");
+    assert_eq!(snapshot.items[0].team_id.as_deref(), Some("team-loo"));
 
     let round_trip = serde_json::to_string(&snapshot).unwrap();
     assert_eq!(
@@ -436,7 +436,10 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.machine_id.as_ref().unwrap().as_str(),
         "home_00000000000000000000000000000001"
     );
-    assert_eq!(snapshot.worktree, "/src/loopflow.workspace");
+    assert_eq!(
+        snapshot.worktree.as_deref(),
+        Some("/src/loopflow.workspace")
+    );
     assert_eq!(
         snapshot.execution.state,
         loopflow::ops::task_execution::TaskExecutionState::Idle

@@ -42,6 +42,21 @@ pub(crate) fn select_project<'a>(
 }
 
 pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject> {
+    if store
+        .sqlite
+        .personal_wave_definition(wave.id())
+        .map_err(project_error)?
+        .is_some()
+    {
+        let projects = store
+            .sqlite
+            .list_projects(Some(wave.id()))
+            .map_err(project_error)?
+            .into_iter()
+            .map(super::task::local_project_item)
+            .collect::<OpsResult<Vec<_>>>()?;
+        return select_project(store, wave, &projects).cloned();
+    }
     let projects = store
         .sqlite
         .accepted_projects(wave.id())
@@ -128,6 +143,15 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 /// Explicit activation; ordinary planning reads never call this operation.
 pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     let store = super::pm::pm_store().await?;
+    if let Some(name) = name.strip_prefix("personal:") {
+        let repo = crate::repository::CanonicalRepo::discover(repo).map_err(project_error)?;
+        return super::task::local_project_item(
+            store
+                .sqlite
+                .ensure_personal_project(&repo.to_string(), name)
+                .map_err(project_error)?,
+        );
+    }
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(&store),
         Some(repo),
@@ -343,6 +367,21 @@ pub fn update_plan(repo: &Path, wave: Option<&str>, content: ProjectContent) -> 
 pub(crate) async fn write_plan(repo: &Path, wave: &Wave, content: ProjectContent) -> OpsResult<()> {
     let store = super::pm::pm_store().await?;
     let acquisition = super::pm::lock_wave_planning(wave).await?;
+    if store
+        .sqlite
+        .personal_wave_definition(wave.id())
+        .map_err(project_error)?
+        .is_some()
+    {
+        let project = current_project(&store, wave)?;
+        return store
+            .sqlite
+            .update_local_project_content(
+                &crate::durable::ProjectId::parse(&project.id).map_err(project_error)?,
+                &content,
+            )
+            .map_err(project_error);
+    }
     let ctx = super::pm::resolve_context(repo, wave.slug()).await?;
     let projects = super::pm::checked_projects_with_store(repo, &ctx, wave.slug(), &store).await?;
     let project = select_project(&store, wave, &projects)?;
@@ -451,6 +490,39 @@ pub async fn workflow(
         .await
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project Wave is unavailable"))?;
+    if store
+        .sqlite
+        .project_planning_authority(&project.id)
+        .map_err(project_error)?
+        == crate::planning::PlanningAuthority::Local
+    {
+        let _guard = super::pm::lock_wave_planning(&wave).await?;
+        let mut current = super::task::local_project_item(
+            store
+                .sqlite
+                .project(&project.id)
+                .map_err(project_error)?
+                .ok_or_else(|| project_error("Project disappeared"))?,
+        )?;
+        if let Some(name) = selection {
+            crate::engine::workflow::load_workflow(name, repo)
+                .map_err(project_error)?
+                .ok_or_else(|| project_error(format!("Workflow {name:?} not found")))?;
+            store
+                .sqlite
+                .update_local_project_content(
+                    &project.id,
+                    &ProjectContent {
+                        workflow: name.into(),
+                        krs: current.krs.clone(),
+                        metric_targets: current.metric_targets.clone(),
+                    },
+                )
+                .map_err(project_error)?;
+            current.workflow = name.into();
+        }
+        return Ok(current);
+    }
     if let Some(name) = selection {
         crate::engine::workflow::load_workflow(name, repo)
             .map_err(project_error)?

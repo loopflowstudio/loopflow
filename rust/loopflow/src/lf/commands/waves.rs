@@ -414,9 +414,10 @@ pub struct ProjectSummary {
 
 async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectSummary> {
     let result = async {
+        let personal = crate::ops::task::local_wave_plan(store, wave.id()).await?;
         let row = store.pm_snapshot(wave.id()).await?;
-        let (observed, partial) = match row {
-            Some(row) => (row.snapshot.projects, false),
+        let (observed, partial) = match personal.or_else(|| row.map(|row| row.snapshot)) {
+            Some(plan) => (plan.projects, false),
             None => {
                 let projects = store.sqlite.accepted_projects(wave.id())?;
                 if projects.is_empty() {
@@ -437,10 +438,12 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                 work_id: registered
                     .iter()
                     .find(|work| {
-                        work.plan
-                            .linear_id
-                            .as_ref()
-                            .is_some_and(|id| id.as_str() == project.id)
+                        work.id.as_str() == project.id
+                            || work
+                                .plan
+                                .linear_id
+                                .as_ref()
+                                .is_some_and(|id| id.as_str() == project.id)
                     })
                     .map(|work| work.id.to_string()),
                 id: project.id,
@@ -818,10 +821,13 @@ async fn wave_tasks(
     let projects = store.list_projects(Some(wave.id())).await?;
     let mut tasks = store.list_tasks(Some(wave.id())).await?;
     // Selection does not discard other Projects' backlog or ongoing work.
-    let planning_read = store
-        .pm_snapshot(wave.id())
-        .await
-        .map(|row| row.map(|row| row.snapshot));
+    let planning_read = match crate::ops::task::local_wave_plan(store, wave.id()).await? {
+        Some(plan) => Ok(Some(plan)),
+        None => store
+            .pm_snapshot(wave.id())
+            .await
+            .map(|row| row.map(|row| row.snapshot)),
+    };
     let (mut planning, unavailable) = match planning_read {
         Ok(Some(planning)) => (planning, None),
         result => (
@@ -839,8 +845,18 @@ async fn wave_tasks(
         ),
     };
     if let Some(identifier) = identifier {
-        tasks.retain(|task| task.plan.identifier == identifier);
-        planning.items.retain(|item| item.identifier == identifier);
+        tasks.retain(|task| {
+            task.plan.identifier == identifier
+                || task.id.as_str() == identifier
+                || task
+                    .plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == identifier)
+        });
+        planning
+            .items
+            .retain(|item| item.identifier == identifier || item.id == identifier);
         // A failed read cannot establish that an unregistered planning Task is absent.
         if let Some(reason) = unavailable.as_ref().filter(|_| tasks.is_empty()) {
             return Ok(WaveTasks {
@@ -990,7 +1006,9 @@ pub(crate) async fn snapshot_wave(
         id: wave.id().to_string(),
         name: wave.slug().to_string(),
         status,
-        goal: if wave.is_retired() {
+        goal: if let Some(definition) = store.sqlite.personal_wave_definition(wave.id())? {
+            definition.goal
+        } else if wave.is_retired() {
             wave.slug().to_string()
         } else {
             crate::work::wave::config::read_wave_summary(&goal_repo, wave.slug())
@@ -1072,10 +1090,12 @@ async fn snapshot_tasks(
     let mut unavailable_tasks = Vec::new();
     for item in planning.items {
         let task = tasks.iter().find(|task| {
-            task.plan
-                .linear_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == item.id)
+            task.id.as_str() == item.id
+                || task
+                    .plan
+                    .linear_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == item.id)
                 || task.plan.identifier == item.identifier
         });
         let recommended = recommended_flow(&planning.projects, item.project_id.as_deref());
@@ -1134,7 +1154,7 @@ async fn snapshot_tasks(
             state: None,
             project_id: Some(parent.plan.linear_id()?.as_str().to_string()),
             project: Some(parent.plan.slug.clone()),
-            team_id: String::new(),
+            team_id: None,
             assignee: None,
         };
         let recommended = current_plan
@@ -2586,7 +2606,7 @@ mod tests {
             state: Some("unstarted".into()),
             project_id: Some("current".into()),
             project: Some("current".into()),
-            team_id: "team".into(),
+            team_id: Some("team".into()),
             assignee: None,
         };
         let mut items = vec![item.clone()];
@@ -2777,7 +2797,7 @@ mod tests {
             state: Some("unstarted".into()),
             project_id: Some(predecessor.into()),
             project: Some("Old ordinary plan".into()),
-            team_id: "team".into(),
+            team_id: Some("team".into()),
             assignee: None,
             branch_name: None,
             revision: None,

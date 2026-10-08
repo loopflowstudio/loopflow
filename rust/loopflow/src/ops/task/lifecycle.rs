@@ -192,6 +192,37 @@ pub fn task_abandon(repo: &Path, selector: Option<&str>, force: bool) -> OpsResu
 async fn abandon(repo: &Path, selector: &str, force: bool) -> OpsResult<String> {
     let store = task_store().await?;
     let task = resolve_task(&store, selector).await?;
+    if let Some(task) = &task {
+        if store
+            .sqlite
+            .project_planning_authority(&task.project_id)
+            .map_err(task_error)?
+            == crate::planning::PlanningAuthority::Local
+        {
+            if super::task_work_status(&store, task).await? != WorkStatus::Abandoned {
+                store
+                    .abandon(&WorkRef::Task(task.id.clone()), "explicit Task abandonment")
+                    .await
+                    .map_err(task_error)?;
+            }
+            let cleanup = async {
+                for deletion in
+                    prepare_abandon(repo, &store, Some(task), selector, force, false).await?
+                {
+                    crate::ops::abandon::abandon_prepared(deletion, &NullProgress).await?;
+                }
+                Ok::<(), crate::ops::OpsError>(())
+            }
+            .await;
+            if let Err(error) = cleanup {
+                eprintln!(
+                    "{} is canceled; retained checkout/PR: {error}",
+                    task.plan.identifier
+                );
+            }
+            return Ok(task.plan.identifier.clone());
+        }
+    }
     let issue = task
         .as_ref()
         .and_then(|task| task.plan.linear_id.as_ref())
@@ -274,7 +305,14 @@ async fn prepare_abandon(
         Some(task) => store.task_prs(&task.id).await.map_err(task_error)?,
         None => Vec::new(),
     };
-    require_known_prs(repo, &prs, issue).await?;
+    let local = task
+        .map(|task| store.sqlite.project_planning_authority(&task.project_id))
+        .transpose()
+        .map_err(task_error)?
+        == Some(crate::planning::PlanningAuthority::Local);
+    if !local {
+        require_known_prs(repo, &prs, issue).await?;
+    }
     let mut deletions = Vec::new();
     if let Some(task) = task {
         if store

@@ -46,7 +46,7 @@ fn task(state: &str) -> PmItem {
         state: Some(state.into()),
         project_id: Some("old".into()),
         project: Some("old".into()),
-        team_id: "team-1".into(),
+        team_id: Some("team-1".into()),
         assignee: None,
     }
 }

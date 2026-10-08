@@ -531,12 +531,14 @@ fn task_creation_confirmation_failure_retries_without_starting_backlog() {
     }));
     let (url, server) = runtime.block_on(serve(state.clone()));
     PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
+        let identity = crate::durable::TaskId::new();
         let create = || {
-            crate::ops::task::task_create(
+            crate::ops::task::task_create_with_id(
                 &repo,
                 Some("product"),
                 Some("Future work".into()),
                 Some("Full directive".into()),
+                identity.clone(),
             )
         };
         {

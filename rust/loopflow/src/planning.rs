@@ -2,6 +2,27 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningAuthority {
+    Local,
+    Linear,
+}
+
+/// A personal plan has its own identity even when it uses a shared code repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanBinding {
+    pub id: crate::durable::PlanId,
+    pub repo: String,
+    pub authority: PlanningAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersonalWaveDefinition {
+    pub goal: String,
+    pub memory: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlanningError {
     #[error("invalid Linear id: {0}")]

@@ -1162,7 +1162,7 @@ async fn cold_detail_rechecks_team_after_acquiring_wave() {
         )
         .await
         .unwrap();
-    assert_eq!(record.item.team_id, "team-1");
+    assert_eq!(record.item.team_id.as_deref(), Some("team-1"));
     assert_eq!(record.project.unwrap().team_ids, ["team-1"]);
 }
 

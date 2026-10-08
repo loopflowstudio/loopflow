@@ -16,12 +16,15 @@ do not block the single-machine lifecycle.
 - **Storage cut (2026-10-07):** keep durable identity on the existing Task/Project
   owner; nested plans carry optional `linear_id`, without duplicating durable IDs.
   Creation retries compare the retained original input, not edited current fields.
-- **Public creation identity (2026-10-07 engineering finding):** the existing CLI
-  hashes Wave/title/report as its provider marker. Local creation must retain a
-  separate operation identity so an interrupted retry reuses its Task while an
-  independent identical request creates another. The store receipt implements
-  the latter distinction; the public recovery path remains to build, without a
-  new product decision.
+- **Public creation identity (2026-10-08):** `--creation-id` and its pre-write
+  output replace content-derived identity. Local receipts retain original input
+  and Project across edits/rotation; public subprocess retries pass. Automatic
+  replay and cross-machine idempotency remain excluded.
+- **Personal scope (2026-10-08 engineering choice):** `personal:<name>` selects
+  store-owned definitions; no selected Wave creates `personal:inbox` only on an
+  explicit mutation. Shared names remain distinct. A provider alias does not
+  change authority. Root provisioning and goal/memory editing are implemented;
+  nested definitions and private workflow customization remain implementation work.
 - **Local selector:** the resolver accepts `lf-<12 UUID hex digits>` and longer
   prefixes, rejecting ambiguity. Stored display labels currently use the full UUID;
   shortest-unique display remains part of the CLI/reader cutover. Full IDs remain

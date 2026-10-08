@@ -169,7 +169,7 @@ pub struct PmItem {
     /// Canonical Project slug for display only.
     pub project: Option<String>,
     /// Stable owning repository Team id.
-    pub team_id: String,
+    pub team_id: Option<String>,
     /// Provider user ID of the assignee, if any.
     pub assignee: Option<String>,
 }
@@ -299,11 +299,11 @@ fn validate_snapshot_ownership(
                 item.identifier, item.project, project.id, project.slug
             )));
         }
-        if project.team_ids.as_slice() != [item.team_id.as_str()] {
+        if project.team_ids.len() != 1 || item.team_id.as_ref() != project.team_ids.first() {
             return Err(PmError::Message(format!(
                 "Linear task {} in wave/{wave} belongs to Team {}, but Project {} belongs to Teams [{}]",
                 item.identifier,
-                item.team_id,
+                item.team_id.as_deref().unwrap_or("unmapped"),
                 project.id,
                 project.team_ids.join(", ")
             )));

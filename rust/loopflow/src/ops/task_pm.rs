@@ -53,10 +53,12 @@ pub(crate) async fn resolve_task_async(
     let team_id = crate::ops::pm::repository_team_id(repo)?;
     crate::pm::validate_project_ownership(&wave, &initiative, Some(&team_id), &project)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    if item.team_id != team_id {
+    if item.team_id.as_deref() != Some(team_id.as_str()) {
         return Err(OpsError::Message(format!(
             "task {} belongs to Team {}, expected repository Team {}",
-            item.identifier, item.team_id, team_id
+            item.identifier,
+            item.team_id.as_deref().unwrap_or("unmapped"),
+            team_id
         )));
     }
     Ok(ResolvedTask {
@@ -104,7 +106,7 @@ where
     let resolved = resolve_task_async(repo, &issue, PmRefresh::Force)
         .await
         .map_err(|error| OpsError::Message(format!(
-            "Linear task {issue} is committed, but its planning record could not refresh: {error}. No new Task or worktree was created. Retry the same `lf task create` command, retaining its original options, to confirm the issue and reuse its creation marker."
+            "Linear task {issue} is committed, but its planning record could not refresh: {error}. No worktree was created. Retry the same `lf task create` command, retaining its original options and --creation-id, to confirm the issue and reuse its creation marker."
         )))?;
     if resolved.wave != wave {
         return Err(OpsError::Message(format!(

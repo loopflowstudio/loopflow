@@ -13,9 +13,16 @@ use time::OffsetDateTime;
 use super::{run_planning_write, run_sqlite, Store, StoreResult};
 
 impl Store {
-    pub async fn create_local_task(&self, input: &crate::planning::NewTask) -> StoreResult<Task> {
+    pub(crate) async fn create_local_task(
+        &self,
+        input: &crate::planning::NewTask,
+        acquisition: Arc<super::PlanningLocks>,
+    ) -> StoreResult<Task> {
         let input = input.clone();
-        run_sqlite(&self.sqlite, move |store| store.create_local_task(&input)).await
+        run_planning_write(&self.sqlite, Some(acquisition), move |store| {
+            store.create_local_task(&input)
+        })
+        .await
     }
 
     pub async fn edit_local_task(

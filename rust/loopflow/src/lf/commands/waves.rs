@@ -1347,8 +1347,7 @@ async fn snapshot_task_detail(
     );
     let completion_refusal = match (task, runtime.as_ref()) {
         (Some(task), Some(runtime)) if runtime.status != TaskState::Abandoned => {
-            crate::ops::task::task_completion_gate(store, task)
-                .await?
+            crate::ops::task::CompletionGate::from_delivery(pr.as_ref(), &follow_through)
                 .refusal(&task.plan.identifier)
         }
         _ => None,

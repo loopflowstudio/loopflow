@@ -40,6 +40,7 @@ use crate::store::{
     open_existing_store, open_registry_for_authority, RegistryUnavailable, SharedStore, Store,
     StoreError,
 };
+use crate::work::task::follow_through::FollowThrough;
 use crate::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
     Observation, PmWritebackOperation, PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase,
@@ -3287,11 +3288,8 @@ async fn retry_pm_writeback(store: &SharedStore, task: &mut Task) -> OpsResult<(
 }
 
 // ---------------------------------------------------------------------------
-// Completion gate: the single source of truth for "may this Task be completed
-// in the PM yet?" A published Task needs merge and confirmed follow-through.
-// Every path that sets a Task to `Completed` and
-// fires the `CompleteTask` PM writeback consults this gate, so the PM row, the
-// durable Task, PR state, and Work flow converge monotonically.
+// Loopflow-requested completion needs merge and confirmed follow-through.
+// Reads use their loaded delivery evidence; settlement checks it again in storage.
 // ---------------------------------------------------------------------------
 
 /// The outcome of evaluating the completion gate.
@@ -3301,6 +3299,26 @@ pub(crate) struct CompletionGate {
 }
 
 impl CompletionGate {
+    pub(crate) fn from_delivery(pr: Option<&TaskPr>, follow_through: &FollowThrough) -> Self {
+        let mut blockers = Vec::new();
+        if (follow_through.needs_conversion || !follow_through.intents.is_empty())
+            && !follow_through.resolved()
+        {
+            blockers.push(
+                "Follow-through scope needs resolution; confirm filing or record none needed"
+                    .into(),
+            );
+        }
+        if let Some(pr) = pr {
+            if pr.phase() != PrPhase::Merged {
+                blockers.push("Pull request has not merged; merge it or abandon the Task".into());
+            } else if !follow_through.resolved() {
+                blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`".into());
+            }
+        }
+        Self { blockers }
+    }
+
     fn satisfied(&self) -> bool {
         self.blockers.is_empty()
     }
@@ -3327,29 +3345,12 @@ pub(crate) async fn task_completion_gate(
     store: &SharedStore,
     task: &Task,
 ) -> OpsResult<CompletionGate> {
-    let mut gate = CompletionGate {
-        blockers: Vec::new(),
-    };
     let follow_through = store
         .sqlite
         .task_follow_through(&task.id)
         .map_err(task_error)?;
-    if (follow_through.needs_conversion || !follow_through.intents.is_empty())
-        && !follow_through.resolved()
-    {
-        gate.blockers.push(
-            "Follow-through scope needs resolution; confirm filing or record none needed".into(),
-        );
-    }
-    if let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? {
-        if pr.phase() != PrPhase::Merged {
-            gate.blockers
-                .push("Pull request has not merged; merge it or abandon the Task".into());
-        } else if !follow_through.resolved() {
-            gate.blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`".into());
-        }
-    }
-    Ok(gate)
+    let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
+    Ok(CompletionGate::from_delivery(pr.as_ref(), &follow_through))
 }
 
 /// Reconcile retained delivery on the repository's existing periodic check.
@@ -3423,14 +3424,13 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .work_for_child(&ChildRef::Task(task.id.clone()))
             .await
             .map_err(|error| task_error(format!("failed to resolve Task Work: {error}")))?;
-        let latest_event = store
+        let mut events = store
             .task_events_after(&task.id, 0)
             .await
-            .map_err(|error| task_error(format!("failed to read task events: {error}")))?
-            .into_iter()
-            .last();
+            .map_err(|error| task_error(format!("failed to read task events: {error}")))?;
+        let follow_through = FollowThrough::from_events(&events);
+        let latest_event = events.pop();
         let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
-        let latest = pr.as_ref();
         let active = pr.as_ref().filter(|pr| pr.is_active());
         let work_status = store
             .work_status(&work)
@@ -3459,7 +3459,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
                     .map(|pr| pr.phase()),
                 None => None,
             };
-            let completion_gate = task_completion_gate(&store, &task).await?;
+            let completion_gate = CompletionGate::from_delivery(pr.as_ref(), &follow_through);
             let completion_refusal = completion_gate.refusal(&task.plan.identifier);
             let worktree_blocker = task_worktree_blocker(&store, &task).await?;
             let resume_refusal = worktree_blocker
@@ -3475,9 +3475,10 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             let action_evidence = TaskActionEvidence {
                 status: work_status.clone(),
                 execution: Some(&execution),
-                latest_pr_phase: latest.map(|pr| pr.phase()),
-                latest_pr_merge_request: latest.and_then(TaskPr::merge_request),
-                latest_pr_presentation_current: latest
+                latest_pr_phase: pr.as_ref().map(TaskPr::phase),
+                latest_pr_merge_request: pr.as_ref().and_then(TaskPr::merge_request),
+                latest_pr_presentation_current: pr
+                    .as_ref()
                     .filter(|pr| pr.phase() == PrPhase::Open)
                     .map(|pr| pr.presentation().is_some()),
                 completion_refusal: completion_refusal.as_deref(),
@@ -3530,10 +3531,7 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             agent: task.agent,
             provider,
             pr,
-            follow_through: store
-                .sqlite
-                .task_follow_through(&task.id)
-                .map_err(task_error)?,
+            follow_through,
             latest_event,
             created_at: task.created_at,
             updated_at: task.updated_at,

@@ -112,7 +112,7 @@ lf interrupt INF-123                             # end this turn so fresh direct
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf task complete INF-123                             # move to end with the existing completion checks
+lf task complete INF-123                             # complete without moving the Workflow
 lf task/operate "INF-123"                           # advance through follow-through to completion, or a blocker
 lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
 lf arm                                             # request exact-head auto-merge and return

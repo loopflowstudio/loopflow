@@ -1504,38 +1504,48 @@ async fn wait_for_landing(
     store: &SharedStore,
     id: &crate::pr_landing::PrLandingId,
 ) -> OpsResult<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30 * 60);
-    loop {
-        let landing = store
-            .get_pr_landing(id)
-            .await
-            .map_err(repair_error)?
-            .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
-        let observed = tokio::select! {
-            result = reconcile_pr_landing(store.clone(), landing, Arc::new(GithubLandingDriver { repairs: true, release: None })) => result?,
-            _ = tokio::time::sleep_until(deadline) => return Err(OpsError::DeliveryHeld("Landing wait timed out; merge intent retained. Run lf pr reconcile or wait again.".into())),
-        };
-        match observed.state {
-            PrLandingState::Merged => return Ok(()),
-            PrLandingState::Closed => {
-                return Err(OpsError::DeliveryHeld(
-                    "Pull request closed without merging; follow-through has not run".into(),
-                ))
+    tokio::time::timeout(Duration::from_secs(30 * 60), async {
+        loop {
+            let landing = store
+                .get_pr_landing(id)
+                .await
+                .map_err(repair_error)?
+                .ok_or_else(|| repair_error("landing disappeared while waiting"))?;
+            let observed = reconcile_pr_landing(
+                store.clone(),
+                landing,
+                Arc::new(GithubLandingDriver {
+                    repairs: true,
+                    release: None,
+                }),
+            )
+            .await?;
+            match observed.state {
+                PrLandingState::Merged => return Ok(()),
+                PrLandingState::Closed => {
+                    return Err(OpsError::DeliveryHeld(
+                        "Pull request closed without merging; follow-through has not run".into(),
+                    ))
+                }
+                PrLandingState::Blocked => {
+                    return Err(OpsError::DeliveryHeld(
+                        observed
+                            .blocked_reason
+                            .unwrap_or_else(|| "Landing is blocked".into()),
+                    ))
+                }
+                PrLandingState::Watching | PrLandingState::Repairing => {}
             }
-            PrLandingState::Blocked => {
-                return Err(OpsError::DeliveryHeld(
-                    observed
-                        .blocked_reason
-                        .unwrap_or_else(|| "Landing is blocked".into()),
-                ))
-            }
-            PrLandingState::Watching | PrLandingState::Repairing => {}
+            tokio::time::sleep(Duration::from_secs(15)).await;
         }
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(15)) => {},
-            _ = tokio::time::sleep_until(deadline) => return Err(OpsError::DeliveryHeld("Landing wait timed out; merge intent retained.".into())),
-        }
-    }
+    })
+    .await
+    .map_err(|_| {
+        OpsError::DeliveryHeld(
+            "Landing wait timed out; merge intent retained. Run lf pr reconcile or wait again."
+                .into(),
+        )
+    })?
 }
 
 pub fn reconcile_repository(repo: &Path) -> OpsResult<DeliveryCheck> {

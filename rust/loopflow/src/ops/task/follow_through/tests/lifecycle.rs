@@ -15,18 +15,6 @@ use crate::lf::commands::work_watch::{WorkContent, WorkFrame};
 use crate::ops::pm::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
 use crate::ops::task::follow_through::{task_follow_up, FollowUpOptions};
 
-struct Environment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>);
-impl Drop for Environment {
-    fn drop(&mut self) {
-        for (key, value) in &self.0 {
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-        }
-    }
-}
-
 struct Running {
     child: Child,
     release: Option<PathBuf>,
@@ -211,19 +199,17 @@ fn contract(population: &Value) -> Value {
 #[test]
 fn merged_follow_up_completion_and_arrival_share_cli_monitor_and_desktop_evidence() {
     let _lock = crate::journal::test_env_lock();
-    let mut saved = vec![("PATH".into(), std::env::var_os("PATH"))];
-    for (key, value) in
-        std::env::vars_os().filter(|(key, _)| key.to_string_lossy().starts_with("LF_"))
-    {
-        std::env::remove_var(&key);
-        saved.push((key, Some(value)));
-    }
-    for key in ["LF_HOME", "LF_BIN"] {
-        if !saved.iter().any(|(name, _)| name == key) {
-            saved.push((key.into(), None));
-        }
-    }
-    let _environment = Environment(saved);
+    let path = std::env::var_os("PATH").unwrap();
+    let mut keys: Vec<_> = std::env::vars_os()
+        .filter_map(|(key, _)| key.into_string().ok())
+        .filter(|key| key.starts_with("LF_"))
+        .collect();
+    keys.extend(["PATH", "LF_HOME", "LF_BIN"].map(str::to_owned));
+    keys.sort();
+    keys.dedup();
+    let _environment =
+        crate::test_ambient::EnvGuard::clear(&keys.iter().map(String::as_str).collect::<Vec<_>>());
+    std::env::set_var("PATH", &path);
     let binary = build_cli();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let (home, store, repo, mut source, wave) = fixture(&runtime);
@@ -244,7 +230,7 @@ fi
 "#).unwrap();
     fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
     let mut paths = vec![bin];
-    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
     for (path, contents) in [
         (

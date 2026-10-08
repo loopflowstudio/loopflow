@@ -357,6 +357,43 @@ contract before pending-input consumption can rely on it. This probe uses two
 protocol clients, not a terminal, LF admission or live models. The earlier
 lost-reply/draft probe still establishes its separate sequential case.
 
+## Native queued admission against an attached writer
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --queue-race
+```
+
+October 8, Codex 0.160.1: `thread/queue/add` preserves an invocation while an
+already-attached client owns the active turn. A proxy drops the enqueue reply;
+the caller cancels its waiter and disconnects. A successor recovers the exact
+submission using `thread/queue/list`, without resubmission. An explicit
+`thread/queue/start` while busy returns an active/pending-turn error and preserves
+both the submission and active turn. After that turn completes, the skill expands
+on a separate turn with one matching native message identity.
+
+The same case keeps a real native terminal attached with an unfinished draft.
+The draft stays out of the skill request and later submits intact. The competing
+turn, earlier history and another thread's work survive. Completed invocation
+identity and outcome survive an engine restart. Seven fake-API requests include
+two title requests; only one fresh skill expansion counts. Exit zero establishes
+these provider boundaries, not LF admission or Task acceptance.
+
+These methods come from the installed binary's experimental generated schema:
+
+```sh
+codex app-server generate-json-schema --experimental --out /tmp/codex-schema
+```
+
+The fetched official App Server reference does not document the queue methods.
+The fixture changes neither the protocol nor global skill roots and uses no real
+credentials, live model or replacement terminal. It does not prove pending queue
+survival across engine death, repeated-ID idempotency, LF active-capture preservation,
+full controls/resources or Claude parity. Loopflow's driver still attributes all
+events to one capture and returns on its first completion; integrating queue
+consumption must associate each input with its capture and own terminal outcome.
+Queue and receipt observations alone grant no LF dispatch authority.
+
 ## LF dispatch receipts and reconnect
 
 ```sh

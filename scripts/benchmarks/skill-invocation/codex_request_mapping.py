@@ -89,14 +89,15 @@ async def _boundary_recovery(
     source: Path,
     context: str,
     delivery: tuple[threading.Event, threading.Event],
+    queued: bool = False,
 ) -> dict:
     endpoint = workspace.parent / "engine.sock"
     checks = {}
     retained = []
     async with _app_server(codex, workspace, env, endpoint):
-        for interrupt in [False, True]:
+        for interrupt in [False] if queued else [False, True]:
             case, thread_id, capture = await _boundary_delivery(
-                endpoint, workspace, source, context, delivery, interrupt, codex, env
+                endpoint, workspace, source, context, delivery, interrupt, codex, env, queued
             )
             status = "interrupted" if interrupt else "completed"
             checks.update({f"{status}_{key}": value for key, value in case.items()})
@@ -254,6 +255,7 @@ async def _boundary_delivery(
     interrupt: bool,
     codex: str,
     env: dict[str, str],
+    queued: bool = False,
 ) -> tuple[dict, str, str]:
     received, release = delivery
     received.clear()
@@ -263,6 +265,7 @@ async def _boundary_delivery(
     lost_id = uuid.uuid4().hex
     capture = f"run_{uuid.uuid4().hex}"
     dropped_count = 0
+    queue_starts = 0
 
     async def relay(client) -> None:
         nonlocal dropped_count
@@ -270,11 +273,13 @@ async def _boundary_delivery(
             resume_id = None
 
             async def forward_inputs() -> None:
-                nonlocal resume_id
+                nonlocal resume_id, queue_starts
                 async for message in client:
                     rpc = json.loads(message)
                     if rpc.get("method") == "thread/resume":
                         resume_id = rpc["id"]
+                    if rpc.get("method") == "thread/queue/start":
+                        queue_starts += 1
                     await upstream.send(message)
 
             async def forward_outputs() -> None:
@@ -350,10 +355,47 @@ async def _boundary_delivery(
                 await asyncio.to_thread(terminal.pump, 0.5)
                 terminal.write(draft.encode())
                 await asyncio.to_thread(terminal.pump, 0.5)
+            if queued:
+                competitor = await cleanup.enter_async_context(
+                    unix_connect(str(endpoint), uri="ws://localhost")
+                )
+                await _initialize_socket(competitor)
+                sibling = await _ws_request(
+                    competitor,
+                    "thread/start",
+                    {
+                        "cwd": str(workspace),
+                        "approvalPolicy": "never",
+                        "sandbox": "read-only",
+                    },
+                )
+                sibling_id = sibling["thread"]["id"]
+                await _ws_request(
+                    competitor,
+                    "turn/start",
+                    {
+                        "threadId": sibling_id,
+                        "input": [{"type": "text", "text": "Preserve this sibling's work."}],
+                    },
+                )
+                await _ws_until(competitor, lambda event: event.get("method") == "turn/completed")
+                sibling_before = await _read_thread(competitor, sibling_id)
+                await _ws_request(competitor, "thread/resume", {"threadId": thread_id})
+                await _ws_request(
+                    competitor,
+                    "turn/start",
+                    {
+                        "threadId": thread_id,
+                        "input": [{"type": "text", "text": "Start competing turn."}],
+                    },
+                )
+                if not await asyncio.to_thread(received.wait, 15):
+                    raise RuntimeError("fake API did not receive the competing turn")
+                active_before = await _read_thread(competitor, thread_id)
             pending = asyncio.create_task(
                 _ws_request(
                     owner,
-                    "turn/start",
+                    "thread/queue/add" if queued else "turn/start",
                     {
                         "threadId": thread_id,
                         "clientUserMessageId": capture,
@@ -368,7 +410,7 @@ async def _boundary_delivery(
             )
             try:
                 await asyncio.wait_for(dropped.wait(), 15)
-                if not await asyncio.to_thread(received.wait, 15):
+                if not queued and not await asyncio.to_thread(received.wait, 15):
                     raise RuntimeError("fake API did not receive the skill turn")
             finally:
                 pending.cancel()
@@ -379,6 +421,68 @@ async def _boundary_delivery(
             await _initialize_socket(successor)
             history = await _read_thread(successor, thread_id)
             matches = _invocation_receipts(history, capture)
+            if queued:
+                queue = await _ws_request(successor, "thread/queue/list", {"threadId": thread_id})
+                submissions = [
+                    item for item in queue["data"] if item["clientUserMessageId"] == capture
+                ]
+                checks.update(
+                    queued_once=len(submissions) == 1,
+                    not_in_active_turn=matches == [],
+                    active_turn_unchanged=history == active_before,
+                    sibling_unchanged=await _read_thread(successor, sibling_id) == sibling_before,
+                )
+                if len(submissions) != 1:
+                    raise RuntimeError("lost queue acknowledgement did not retain one submission")
+                submission = submissions[0]
+                # Ask the native owner while the already-attached writer is active.
+                # Its refusal must retain both the queue and current turn unchanged.
+                ident = uuid.uuid4().hex
+                await successor.send(
+                    json.dumps(
+                        {
+                            "id": ident,
+                            "method": "thread/queue/start",
+                            "params": {
+                                "threadId": thread_id,
+                                "queuedSubmissionId": submission["id"],
+                            },
+                        }
+                    )
+                )
+                reply = await _ws_until(successor, lambda event: event.get("id") == ident)
+                checks["busy_start_rejected"] = (
+                    reply.get("error", {}).get("message")
+                    == "thread already has an active or pending turn"
+                )
+                checks["busy_start_preserves_active_turn"] = (
+                    await _read_thread(successor, thread_id) == active_before
+                )
+                retained = await _ws_request(
+                    successor, "thread/queue/list", {"threadId": thread_id}
+                )
+                checks["busy_start_preserves_queue"] = retained["data"] == queue["data"]
+                release.set()
+                async with asyncio.timeout(30):
+                    while True:
+                        await asyncio.to_thread(terminal.pump, 0.1)
+                        history = await _read_thread(successor, thread_id)
+                        matches = _invocation_receipts(history, capture)
+                        if len(matches) == 1 and matches[0][0]["status"] == "completed":
+                            break
+                retained = await _ws_request(
+                    successor, "thread/queue/list", {"threadId": thread_id}
+                )
+                checks.update(
+                    queue_consumed=retained["data"] == [],
+                    queued_input_unchanged=matches[0][1]["content"] == submission["input"],
+                    competing_turn_preserved=history["turns"][1]["id"]
+                    == active_before["turns"][1]["id"]
+                    and history["turns"][1]["status"] == "completed"
+                    and history["turns"][1]["items"][: len(active_before["turns"][1]["items"])]
+                    == active_before["turns"][1]["items"],
+                    skill_on_separate_turn=matches[0][0]["id"] != active_before["turns"][1]["id"],
+                )
             content = matches[0][1]["content"] if len(matches) == 1 else []
             checks.update(
                 {
@@ -415,7 +519,7 @@ async def _boundary_delivery(
                         break
                     await asyncio.sleep(0.02)
             checks["outcome_without_resubmission"] = True
-            checks["exactly_two_turns"] = len(history["turns"]) == 2
+            checks["expected_turns"] = len(history["turns"]) == (3 if queued else 2)
             if terminal:
                 try:
                     await asyncio.to_thread(terminal.pump, 0.5)
@@ -425,13 +529,21 @@ async def _boundary_delivery(
                             await asyncio.to_thread(terminal.pump, 0.1)
                             history = await _read_thread(successor, thread_id)
                             turns = history["turns"]
-                            if len(turns) == 3 and turns[-1]["status"] == "completed":
+                            if (
+                                len(turns) == (4 if queued else 3)
+                                and turns[-1]["status"] == "completed"
+                            ):
                                 break
                     checks["terminal_draft_preserved"] = any(
                         item["type"] == "userMessage"
                         and any(block.get("text") == draft for block in item["content"])
                         for item in turns[-1]["items"]
                     )
+                    if queued:
+                        checks["queue_consumed_without_client_start"] = queue_starts == 0
+                        checks["sibling_unchanged_after_delivery"] = (
+                            await _read_thread(successor, sibling_id) == sibling_before
+                        )
                 finally:
                     await cleanup.aclose()
             print(
@@ -631,6 +743,10 @@ def _probe(codex: str, mode: str) -> bool:
             if (
                 (mode == "redelivery" and len(requests) in (1, 3))
                 or (mode == "boundary" and native_turn)
+                or (
+                    mode == "queue-race"
+                    and _last_user_texts(requests[-1]) == ["Start competing turn."]
+                )
                 or (mode == "boundary-race" and len(requests) == 2)
             ):
                 received.set()
@@ -709,9 +825,15 @@ def _probe(codex: str, mode: str) -> bool:
                     return await _boundary_race(
                         codex, workspace, env, skill, context, (received, release)
                     )
-                if mode == "boundary":
+                if mode in ("boundary", "queue-race"):
                     return await _boundary_recovery(
-                        codex, workspace, env, skill, context, (received, release)
+                        codex,
+                        workspace,
+                        env,
+                        skill,
+                        context,
+                        (received, release),
+                        queued=mode == "queue-race",
                     )
                 async with _app_server(codex, workspace, env) as process:
                     if mode == "redelivery":
@@ -737,7 +859,8 @@ def _probe(codex: str, mode: str) -> bool:
                     flush=True,
                 )
                 return all(checks.values())
-            if mode == "boundary":
+            if mode in ("boundary", "queue-race"):
+                expected_expansions = 1 if mode == "queue-race" else 2
                 native_requests = [
                     request
                     for request in requests
@@ -753,13 +876,17 @@ def _probe(codex: str, mode: str) -> bool:
                 ]
                 checks.update(
                     expected_conversation_requests=len(requests) - len(title_requests) == 5,
-                    native_expansion=len(native_requests) == 2
+                    native_expansion=len(native_requests) == expected_expansions
                     and all(
                         _skill_paths(request) == [str(skill)]
-                        and any(marker in text for text in _last_user_texts(request))
+                        and any(
+                            f"<path>{skill}</path>" in text and marker in text
+                            for text in _last_user_texts(request)
+                            if text.startswith("<skill>\n")
+                        )
                         for request in native_requests
                     ),
-                    draft_not_submitted_with_skill=len(native_requests) == 2
+                    draft_not_submitted_with_skill=len(native_requests) == expected_expansions
                     and all(
                         "UNSUBMITTED_DRAFT_" not in json.dumps(request)
                         for request in native_requests
@@ -768,7 +895,7 @@ def _probe(codex: str, mode: str) -> bool:
                 print(
                     json.dumps(
                         {
-                            "mode": "boundary",
+                            "mode": mode,
                             "requests": len(requests),
                             "title_requests": len(title_requests),
                             "checks": checks,
@@ -890,6 +1017,13 @@ def main() -> int:
         action="store_const",
         const="boundary-race",
         help="Start another client's turn between idle observation and native skill delivery",
+    )
+    mode.add_argument(
+        "--queue-race",
+        dest="mode",
+        action="store_const",
+        const="queue-race",
+        help="Probe native queued submission against a competing client",
     )
     mode.add_argument(
         "--boundary",

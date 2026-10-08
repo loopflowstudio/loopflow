@@ -1077,26 +1077,25 @@ it proves no current-owner delivery or installed continuity. `cbb402869` preserv
 native identity/history and uses Session cwd for context/provider/replay, caller cwd
 for Process provenance.
 
-Codex 0.160.1 steers omit native expansion; repeated RPC ids duplicate input.
-`54b309ab6` proves socket recovery after a dropped start reply, waiter cancellation
-and reconnection without resubmission. Native identity survives restart; the terminal retains and later submits its draft.
-Completion/interruption stay distinct. Seven requests include two titles;
-historical expansion is not new application. This proves correlation, not idempotency,
-external effects or LF admission.
+Codex 0.160.1 steers omit expansion; duplicate RPC ids repeat input. Sequential
+lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
+`c91648d63`. Exact receipts can belong to another active turn without expansion.
+Historical expansion proves no new application.
 
-October 8's two-client race (`c91648d63`) starts a competing turn after reading
-idle. Codex joins it, retaining one exact skill/path/arguments/context receipt
-without expansion; a fresh turn expands. Four fake-API requests prove this
-counterexample, not admission. Retained bytes cannot prove writer exclusion.
-The LF fence excludes stale drivers;
-boundary arbitration must cover attached native clients too. No mechanism or
-scope reduction is selected.
+October 8's `--queue-race` proves native `thread/queue/add` against an attached
+writer: dropped enqueue reply, cancelled waiter and successor connection retain
+one submission; it expands separately after the competing turn completes.
+Native draft, sibling and prior history survive, with no resubmission or successful
+client queue-start. Completed identity survives restart. Seven fake-API requests
+include two titles. This proves provider admission, not LF admission,
+pending-queue crash recovery, idempotency or external effects.
 
-LF maps only its first start per writer to capture/input/provenance. Retry
-continuations get distinct native IDs; cross-capture reuse is rejected. Receipt
-comparison leaves missing/duplicates uncertain, granting no settlement.
-Controlled-client handoff preserves text/capture/siblings/ancestry without resending.
-Held-owner admission, LF dropped-ack/draft recovery,
-catalog/resources and Claude parity remain unfinished; resume clears structured
-invocation. Prior detail: `94006060f` under this heading.
+LF maps its first start per writer to capture/provenance; retries retain distinct
+native IDs, and cross-capture reuse is rejected. Missing/duplicate receipts remain
+uncertain. Controlled handoff preserves text/capture/siblings/ancestry. The driver uses one
+capture and exits on first completion: queue
+integration must change both with admission, preserving the active capture.
+Held-owner delivery, LF lost-ack/draft recovery, catalog/resources, Claude parity
+and cost acceptance remain; resume clears structured invocation. Prior detail:
+`94006060f`, `302fbd7cf`, this heading.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

@@ -7,8 +7,9 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against receipt retention `efd635728` and compression
-`d5b943701`, retaining provider probe `54b309ab6` and its `b5f26fee8` cleanup.
+Reconciled October 8 against receipt retention `efd635728`, content comparison
+and competing-start evidence `c91648d63`, and compression `920ada7b6`.
+Provider recovery `54b309ab6` and its `b5f26fee8` cleanup retain their narrower proof.
 `cbb402869` retains the resume-workspace repair and steering counterexample.
 The probe supersedes the earlier feedback's unproved lost-reply boundary: it proves
 provider-level recovery and terminal draft preservation. LF now retains native
@@ -16,8 +17,12 @@ message correlation and recovers receipt evidence across driver handoffs; pendin
 skill admission and native-boundary consumption remain unimplemented.
 October 8's competing-start probe invalidates idle-read plus `turn/start` as an
 atomic admission mechanism: exact native receipts can survive without expansion.
-Dependent queue implementation is stopped at this design conflict; receipt
-validation is implemented as observation only. Full scope remains required.
+The October 8 `--queue-race` proof now uses Codex 0.160.1's existing
+`thread/queue/add`: an already-attached competing writer finishes before the
+queued skill expands on a separate native turn. Lost acknowledgement, caller
+cancellation, connection handoff, sibling history and a native terminal draft
+are covered together. LF admission/capture ownership is still unimplemented;
+provider evidence alone cannot close that boundary. Full scope remains required.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
 assembles context in the saved Session workspace. Codex native delivery, terminal transport and
@@ -143,24 +148,29 @@ The probe and its limitations live in the benchmark README.
 
 ## Remaining implementation
 
-1. **Current-owner delivery; native boundary arbitration unresolved:**
-   The two-client `--boundary-race` probe reads idle, then starts another client's
-   turn before sending the skill. Codex joins that active turn and retains exactly
-   one matching receipt including skill/path, arguments and context, but sends no
-   skill expansion to the model. A fresh turn expands it. Four fake-API requests
-   prove the race on 0.160.1. This supersedes the assumption that boundary
-   observation plus matching receipt content suffices. The earlier lost-reply/draft
-   proof remains valid for its sequential case only.
-   The Session fence excludes stale driver writes, not competing native starts.
-   Before consumption, design one boundary reservation through the existing driver
-   covering LF input and native client starts, preserving native controls and
-   drafts across handoff. Identify every writer, including clients already attached
-   to the engine; read/check/send or retry cannot provide exclusion. This is required
-   implementation, not authority to disconnect native clients, replace terminals,
-   change the provider protocol or reject shared engines. No reservation mechanism
-   is yet proved. This contract needs design review before dependent queue work.
-   admit retained `SkillInvocation` plus context into the Session's own history without replacing its active capture.
-   Its existing driver must consume pending input at a native turn boundary.
+1. **Current-owner delivery through native queue admission:**
+   `--boundary-race` retains the four-request counterexample: idle-read plus
+   `turn/start` joins a competing turn without expansion despite exact receipts.
+   The new `--queue-race` uses the existing generated protocol's
+   `thread/queue/add`, retaining exact skill/path, arguments, context and native
+   message identity. While another attached writer is active, `thread/queue/start`
+   returns an active/pending-turn error without changing that turn or submission.
+   After completion, the queued skill expands separately; no input is resubmitted.
+   One proxy drops the enqueue reply, then its waiter is cancelled and a successor
+   recovers the submission through `thread/queue/list`. Native history retains
+   one receipt and completion after engine restart. The native terminal retains
+   and later submits its draft; sibling work and prior turns remain unchanged.
+   Seven fake-API requests include two title requests. This proves provider
+   admission on 0.160.1, not LF admission, capture attribution, queue persistence
+   across engine death before consumption, live-model effects or Claude parity.
+   The generated schema is the evidence for these methods; the fetched official
+   App Server reference does not document them. No protocol extension, terminal
+   replacement, sibling-root mutation or LF-only exclusion is needed by this probe.
+   Admission must retain `SkillInvocation` plus context in the Session's own
+   history without replacing its active capture.
+   Its existing driver must dispatch each retained input through native queue
+   admission and observe that input's own turn. This is the implementation
+   candidate, not a new product decision attributed to Jack Heart.
    The caller must not start another driver or steal an in-progress draft.
    Current `run::resume` explicitly clears `skill_input` and `resolved_invocation`;
    `continue_with_context` replaces input and claims a driver atomically through
@@ -171,30 +181,27 @@ The probe and its limitations live in the benchmark README.
    a capture-to-message mapping. Pending consumption therefore needs each admitted
    input's retained capture, invocation, context and native message identity at
    dispatch; extending `send_input` alone cannot supply that association.
-   The next integration proof must traverse LF admission and that owner, not just
-   repeat the socket experiment.
-   Capture identity must correlate dispatch with native history before retry;
-   RPC ids and turn-id acknowledgements alone cannot do that. A lost reply stays
-   uncertain until native evidence resolves it. The Codex probe establishes native
-   receipt recovery, caller cancellation, connection handoff and draft preservation.
-   The capture-key-as-message-ID candidate is superseded: LF's existing retry
-   can send a different continuation within the same capture. The writer retains
-   a distinct native message ID with its capture, exact outgoing parameters,
-   Process and provider generation before dispatch under the Session fence.
+   `_run_harness_once` still records every event against its single capture and
+   exits on the first `TurnCompleted`. Native queue dispatch alone would therefore
+   misattribute queued output or return on the competing turn. Per-input capture
+   association and exact-turn completion must change together with admission;
+   the queue cannot be bolted onto the current writer alone.
+   The next integration proof must traverse LF admission and that owner.
+   Existing dispatch retention and receipt comparison are described below.
+   A capture can contain different retry continuations, so each outgoing input
+   needs its own native message identity; RPC ids and turn-id acknowledgements
+   alone cannot correlate it. A lost reply stays uncertain until native evidence
+   resolves it.
    A queued input must retain that same message ID through handoff; a new
    continuation gets its own ID. Receipt observations retain every matching
    user message, including empty/duplicate sets, without granting origin or
-   completion authority. Pending-input settlement must still validate exactly
-   one receipt against retained skill/path, arguments and context. Native
+   completion authority. Pending-input settlement must use the existing exact
+   content comparison and also establish native expansion. Native
    completion/interruption and external effects remain separate facts.
-   Source now records `content_matches` (true/false for one receipt, null for
-   missing/duplicates), normalizing only empty native text annotations. It rejects
-   reusing a native message ID across captures. Neither change establishes fresh-turn
-   admission or expansion; matched content grants no settlement.
    Acceptance combines held-owner admission without active-capture replacement,
-   boundary consumption, an LF start reply dropped after provider acceptance,
+   native queued consumption, an LF enqueue reply dropped after provider acceptance,
    caller cancellation and driver handoff, and native terminal draft preservation.
-   Recovery reads the retained dispatch and native history without resubmission;
+   Recovery reads the retained dispatch, native queue and turn history without resubmission;
    missing or duplicate receipts remain uncertain. The provider-only probe and
    store fixture do not compose into this LF proof.
    No migration, new queue owner, extra Session or provider protocol
@@ -205,8 +212,8 @@ The probe and its limitations live in the benchmark README.
    unresolved; a replacement terminal and fidelity losses remain unapproved.
    October 8's Codex steering probe rules out `send_current` as this transport:
    both single and duplicate steers omit native expansion, and identical RPC ids
-   repeat input. The new lost-reply proof uses `turn/start` at a boundary, not
-   steering. Existing Task steers retain their separate best-effort text behavior.
+   repeat input. The queued proof uses native queue admission instead.
+   Existing Task steers retain their separate best-effort text behavior.
 2. Native Codex selection and terminal transport. The additive alias remains a
    provider-only candidate with unresolved placement, lifetime and name semantics.
    Terminal delivery must preserve native controls and unfinished drafts. Neither
@@ -215,6 +222,12 @@ The probe and its limitations live in the benchmark README.
    parent-relative resources and plugin variables remain uncovered. Available
    declaration equivalents need translation; only declarations with no equivalent
    qualify for a loss notice. Unfamiliar shapes must still run as instructions.
+
+Catalog placement, resource fidelity and declaration translation remain independent
+work. The Codex native queue resolves the demonstrated provider race; LF admission,
+per-input capture ownership and Claude consumption still need implementation.
+Same-Session invocation syntax and the alias's native-name semantics remain open
+implementation choices. No narrower acceptance has been selected.
 
 These are substantial implementation work. The admission repair below establishes
 preservation on refusal, not successful delivery through a held owner. Full
@@ -233,8 +246,11 @@ A fresh continuation can share a capture while retaining a different native ID.
 
 Public `session connect` reads full native turn items when the Session has retained
 dispatches, then records complete receipt sets across all pages. Older Sessions
-keep the smaller history read. These are observations, not settled delivery:
-content validation, turn-boundary admission and pending consumption remain above.
+keep the smaller history read. `content_matches` compares the ordered input
+blocks, normalizing only empty native text annotations: true/false for one match,
+null for missing or duplicate receipts. This comparison is implemented;
+turn-boundary admission, native expansion and pending consumption remain above.
+The competing-start proof demonstrates that matching bytes cannot settle delivery.
 The controlled-client real Codex/fake-API LF proof preserves exact text, the active
 capture, sibling work and native generation across handoffs. It retains stale-client
 rejection and nested Process ancestry. Its fixture now uses `exec_command`; external
@@ -294,8 +310,19 @@ existing dispatch fence; no delivery or completion authority changes.
 
 ## Delete — do not maintain
 
+- Removed `lf/discovery.rs`: the engine owns resolution and builtin metadata;
+  navigation owns the surviving help/list formatting. Resolution tests now live
+  beside `engine/target.rs`; callers no longer cross a discovery re-export layer.
+- Removed the Codex probe's `--lf` branch, which required the deleted prototype's
+  private snapshot layout. `c91648d63` retains that fixture. The surviving provider
+  probes select one mode instead of four booleans; native LF entry-point acceptance
+  remains required after placement is implemented. No receipt assertion on a
+  surviving path was removed.
+- Replace `seed_capture.take()` and `_run_harness_once`'s single-capture/first-
+  completion assumptions in the structured admission cut. Preserve original
+  capture ownership, plain-input completion, retry identity and stale-driver fencing.
 - `Harness::send_input(&str)` and its next-turn consumers remain until structured
-  native-boundary delivery has a proven recovery contract, then are replaced.
+  admission uses the proved native queue with per-input LF ownership, then are replaced.
   Plain text input, builtins, account routing, native history and custody fences remain.
 - `send_current`/`inject_live_steers` retain text steering; the native counterexample
   rules them out as the transport for a general Session skill queue.
@@ -336,4 +363,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, fmt/Ruff/diff checks, isolated `cargo test -p loopflow --lib codex_` (64), probe pytest (14), `codex_request_mapping.py --boundary-race` (four requests) and rebuilt `codex_connect.py --launch --public-connect` pass; `lf context --skill implement --json` fits; boundary arbitration/admission, fidelity and gate/review acceptance remain.
+Check (2026-10-08): probe pytest (14), Ruff, native `--queue-race` (7 requests, 2 titles), retained `--boundary` and `--boundary-race`, `git diff --check` and `lf context --skill implement --json` pass. Rust unchanged; prior build/Clippy remain applicable. LF admission/capture ownership, fidelity and gate/review acceptance remain.

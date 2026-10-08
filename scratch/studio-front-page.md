@@ -169,3 +169,8 @@ assembled from the three earlier prototypes' own sections: B's install-in-hero
 and numbered claims, C's two-pane surface and where-it-sits stack, and A's FAQ,
 plain list or name-as-headline opening. They differ in what opens the page and
 where the stack sits.
+
+## Topline candidate (2026-10-08)
+
+Jack Heart proposed a topline: "Build software by conducting agents in harmony"? Asked as a question, not settled.
+Tried in `scratch/prototypes/blend-c.html` under the name; blends A and B keep "A software engineering CLI for your agents." for comparison.

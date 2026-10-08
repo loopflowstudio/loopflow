@@ -14,21 +14,22 @@ keeps execution on X and routes Linear through the online host; disconnect/direc
 fallback remain open. No resident or automatic retry. Callbacks provide no
 laptop-loss recovery; write-once mappings provide no concurrent-export uniqueness.
 
-October 8 checkpoints `b094fc2d4`/`149f47c0e` add personal planning, unplaced Tasks
-and rotation. Creation receipts retain original input/Project across edits and
-rotation. Aliases grant no authority. One draft preserves IDs, serialized provider
-payloads and deletion recovery; redundant routing is removed.
-Native launch/resume, skill Flows and connected deletion refusal pass contained
-public fixtures. Owned Linear issues import once, unplaced. Nested personal Waves,
-private workflow editing/catalogs and tombstones stay in SQLite; deletion preserves
-history. Paired fields and shared CLI/headless Desktop views pass. Strict GitHub
-fixtures reach publication and confirmed-merge completion; no-remote landing refuses.
-These prove source boundaries, not installed/live-provider continuity. Creation
-selected its Project before the Wave lock: a failing rotation race exposed it;
-selection now follows the lock, while retries retain their receipt. Concurrent
-creation, first-placement recovery and multi-Wave rollback pass. Gate owns the
-broader matrix and mixed-authority recovery before publication. No scope reduction,
-installation or landing authority; no product decision blocks the complete PR.
+October 8 source `817ec2634`/`2d4115339` adds native launch/resume, skill Flows,
+owned-issue import and complete local planning; `b8abd3c9a` removes duplicate
+deletion/source readers. Wave ownership selects authority; aliases do not.
+One draft preserves IDs, serialized observations and orphan deletion recovery.
+Creation receipts retain original input/Project across edits and rotation. A failing
+race exposed selection before the Wave lock; selection now follows it.
+Status and launch share deletion judgment,
+including personal tombstones and connected refusal; history survives deletion.
+Personal definitions/workflows stay in SQLite. Contained public fixtures cover
+concurrency, placement recovery, rotation, paired fields and confirmed GitHub merge;
+no-remote landing refuses. CLI fixtures and headless Swift views prove separate
+source boundaries, not installed/live-provider continuity. Release's entry-point lesson applies:
+personal rotation commits before connected effects, so pure-authority proofs do
+not establish mixed failure/retry recovery. That composition and the broader matrix
+remain gate-owned before publication. No scope reduction, installation or landing
+authority; no product decision blocks the complete PR.
 
 ## Program Status direction (LOO-398, 2026-10-07)
 

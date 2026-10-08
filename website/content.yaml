@@ -50,12 +50,6 @@ homepage:
       a build, a check, another pass. A Flow is a file that runs those sessions in order: each
       step is its own session, with a commit between them. lf runs the Flow in whatever terminal
       you are in.'
-    capture:
-      image: /static/cmux-flow.png
-      image_alt: A Flow running in cmux.
-      width: 1600
-      height: 1000
-      caption: A Flow running in cmux.
     example:
       label: 'Example loopflow:'
       steps:

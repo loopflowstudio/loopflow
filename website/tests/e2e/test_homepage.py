@@ -1,6 +1,5 @@
 """Homepage sections, examples, destinations, and capture layout."""
 
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -46,9 +45,7 @@ def test_guide_links_resolve(homepage: Page, base_url: str) -> None:
             expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
-def test_captures_reserve_space_and_keep_the_missing_cmux_reference(
-    homepage: Page, base_url: str
-) -> None:
+def test_captures_reserve_space_and_load(homepage: Page, base_url: str) -> None:
     for image in homepage.locator("main img").all():
         source = image.get_attribute("src")
         assert int(image.get_attribute("width")) > 0
@@ -56,12 +53,6 @@ def test_captures_reserve_space_and_keep_the_missing_cmux_reference(
         image.scroll_into_view_if_needed()
         box = image.bounding_box()
         assert box["height"] == pytest.approx(box["width"] / 1.6, abs=1)
-        if source == "/static/cmux-flow.png":
-            expect(homepage.locator("#flows > .capture-label")).to_have_text(
-                "A Flow running in cmux."
-            )
-            if not (Path(__file__).parents[2] / "static/cmux-flow.png").is_file():
-                continue  # LOO-425 explicitly permits the reserved reference until supplied.
         assert homepage.request.get(f"{base_url}{source}").ok
 
 

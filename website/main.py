@@ -833,7 +833,6 @@ def _flows_section() -> FT:
     example = FLOWS_CONTENT["example"]
     return Section(
         *_section_heading(FLOWS_CONTENT),
-        *_capture(FLOWS_CONTENT["capture"]),
         Div(
             Div(
                 P(example["label"], cls="eyebrow"),

@@ -3,8 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use loopflow::engine::{
-    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents,
-    PromptFormatMode, Surface,
+    format_prompt, gather_context, DocumentSource, GatherContextOpts, PromptComponents, Surface,
 };
 use loopflow::id::WaveId;
 use loopflow::ops::resolve_work_binding;
@@ -50,7 +49,7 @@ fn write_skill(repo: &Path, name: &str, content: &str) {
 }
 
 fn render_prompt(components: PromptComponents) -> String {
-    format_prompt(PromptFormatMode::Full, &components)
+    format_prompt(&components)
 }
 
 // =============================================================================

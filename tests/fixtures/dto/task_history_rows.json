@@ -39,20 +39,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -94,20 +88,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -149,20 +137,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -204,20 +186,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -259,20 +235,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -314,20 +284,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -369,20 +333,14 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   },
   {
     "task": {
@@ -424,20 +382,14 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "available"
+    "section": "available",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": null
+    }
   },
   {
     "task": {
@@ -479,20 +431,14 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "available"
+    "section": "available",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": null
+    }
   },
   {
     "task": {
@@ -534,20 +480,14 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "available"
+    "section": "available",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": null
+    }
   },
   {
     "task": {
@@ -589,20 +529,14 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "available"
+    "section": "available",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": null
+    }
   },
   {
     "task": {
@@ -644,20 +578,14 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is complete"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is complete"
+    }
   },
   {
     "task": {
@@ -699,20 +627,14 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is complete"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is complete"
+    }
   },
   {
     "task": {
@@ -754,20 +676,14 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is complete"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is complete"
+    }
   },
   {
     "task": {
@@ -809,20 +725,14 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": null
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "available"
+    "section": "available",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": null
+    }
   },
   {
     "task": {
@@ -864,19 +774,13 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "flow": {
-      "recommended": "feature",
-      "record": {
-        "kind": "none"
-      },
-      "controls": [
-        {
-          "kind": "start",
-          "unavailable": "Linear Task is canceled"
-        }
-      ]
-    },
     "active_pr": null,
-    "section": "later"
+    "section": "later",
+    "workflow_name": "feature",
+    "latest_flow_process": null,
+    "execution": null,
+    "run_control": {
+      "unavailable": "Linear Task is canceled"
+    }
   }
 ]

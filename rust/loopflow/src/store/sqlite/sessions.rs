@@ -60,7 +60,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSe
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_id: row.get(12)?,
+            flow_process_lfid: row.get(12)?,
             work_source: row
                 .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
@@ -241,10 +241,10 @@ fn read_summary(
             Some(driver) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
-                Some(crate::session::FlowSummary {
+                Some(crate::session::FlowProcessSummary {
                     id: driver,
                     name,
-                    state: crate::session::FlowSummaryState::of_driver(
+                    state: crate::session::FlowProcessSummaryState::of_driver(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -276,7 +276,7 @@ fn read_summary(
             interactive: row.get(6)?,
             task_id,
             wave_id,
-            flow_id: row.get(9)?,
+            flow_process_lfid: row.get(9)?,
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
@@ -1343,7 +1343,7 @@ impl SqliteStore {
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -1368,7 +1368,7 @@ mod metadata_tests {
 
     use super::SqliteStore;
 
-    use crate::session::{FlowSummaryState, SessionFilter};
+    use crate::session::{FlowProcessSummaryState, SessionFilter};
 
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {
@@ -1582,11 +1582,11 @@ mod metadata_tests {
             .session_summaries(&SessionFilter::default(), 0)
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].flow_id.as_deref(), Some(driver.as_str()));
+        assert_eq!(rows[0].flow_process_lfid.as_deref(), Some(driver.as_str()));
         let flow = rows[0].flow.as_ref().unwrap();
         assert_eq!(
             (flow.name.as_str(), flow.state),
-            ("retained", FlowSummaryState::Current)
+            ("retained", FlowProcessSummaryState::Current)
         );
         assert!(rows[0].flow_step_latest);
         assert_eq!(
@@ -1594,7 +1594,7 @@ mod metadata_tests {
                 .session("session")
                 .unwrap()
                 .unwrap()
-                .flow_id
+                .flow_process_lfid
                 .as_deref(),
             Some(driver.as_str())
         );
@@ -1617,7 +1617,7 @@ mod metadata_tests {
             .unwrap()
             .flow
             .unwrap();
-        assert_eq!(flow.state, FlowSummaryState::Completed);
+        assert_eq!(flow.state, FlowProcessSummaryState::Completed);
     }
 
     #[test]

@@ -86,9 +86,13 @@ you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
-lf flow list                   # Flows and workflows, with source and validity
-lf flow customize feature      # write the builtin to .lf/ and print its path
-lf update-plan --wave exports --workflow code   # change only the Project's workflow
+lf project workflow list                 # Workflow definitions and validity
+lf project workflow set PROJECT code     # selection for future Tasks
+lf project workflow customize feature    # print its local source path
+lf task workflow show EXP-12             # captured graph, position and history
+lf task workflow restart EXP-12          # move to start; retain graph and history
+lf flow list                             # autonomous Flow definitions
+lf flow customize pursue                 # print its local source path
 ```
 
 A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
@@ -96,7 +100,7 @@ A Flow whose driver died leaves its Processes as history. No command resumes it.
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --sessions --json    # one Flow's steps, by its Flow process ID
+lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -325,8 +329,8 @@ lf roadmap --task LOO-303 --all --json
 
 Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
-Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
-Task destinations open details; selecting a Flow opens its folded template.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
+Task destinations open details; selecting a Flow opens its folded graph.
 
 ### Inspect all work in a Task
 

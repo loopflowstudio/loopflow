@@ -157,10 +157,10 @@ impl Store {
 impl Store {
     pub async fn flow_inventory(
         &self,
-        filter: &crate::durable::FlowFilter,
+        filter: &crate::durable::FlowProcessFilter,
         after: Option<&str>,
         limit: std::num::NonZeroU32,
-    ) -> StoreResult<crate::durable::FlowPage> {
+    ) -> StoreResult<crate::durable::FlowProcessPage> {
         let filter = filter.clone();
         let after = after.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
@@ -173,7 +173,7 @@ impl Store {
     pub async fn flow_detail(
         &self,
         selector: &str,
-    ) -> StoreResult<Option<crate::durable::FlowDetail>> {
+    ) -> StoreResult<Option<crate::durable::FlowProcessDetail>> {
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
             Ok(store

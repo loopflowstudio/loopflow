@@ -285,34 +285,34 @@ pub struct AbandonReceipt {
 
 /// Query values for Flow discovery; none carries driver authority.
 #[derive(Debug, Clone, Default)]
-pub struct FlowFilter {
+pub struct FlowProcessFilter {
     pub repo: Option<String>,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<crate::id::WaveId>,
     pub taskless: bool,
-    pub state: Option<crate::session::FlowSummaryState>,
+    pub state: Option<crate::session::FlowProcessSummaryState>,
     pub search: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowInventoryEntry {
+pub struct FlowProcessInventoryEntry {
     #[serde(flatten)]
-    pub summary: crate::session::FlowSummary,
+    pub summary: crate::session::FlowProcessSummary,
     pub repo: Option<String>,
     pub ended_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowPage {
-    pub entries: Vec<FlowInventoryEntry>,
+pub struct FlowProcessPage {
+    pub entries: Vec<FlowProcessInventoryEntry>,
     pub next: Option<String>,
 }
 
 /// One Flow drawn from its Processes: the authored graph while its steps still fit
 /// it, else the sequence the steps recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowDetail {
-    pub entry: FlowInventoryEntry,
+pub struct FlowProcessDetail {
+    pub entry: FlowProcessInventoryEntry,
     pub graph: crate::engine::flow_graph::FlowGraph,
     pub current: Option<u32>,
     pub completed: Vec<u32>,

@@ -472,7 +472,7 @@ async fn local_task(
 async fn local_started_task(
     context: &PmTestContext,
     repo: &std::path::Path,
-) -> (Task, TaskPr, Vec<crate::ops::flow_run::FlowProcess>) {
+) -> (Task, TaskPr, Vec<crate::ops::flow_process::FlowProcess>) {
     let (task, _) = local_task(
         context,
         repo,

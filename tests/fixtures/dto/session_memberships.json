@@ -41,13 +41,13 @@
     "flow_membership": {
       "kind": "step",
       "flow": "task-design",
-      "invocation_id": "00000000-0000-0000-0000-00000000f10w",
       "step": "review-design",
       "occurrence": "current",
       "node": 1,
       "iterations": [
         []
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -96,7 +96,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "implement",
       "occurrence": "earlier",
       "node": 6,
@@ -108,7 +107,8 @@
         [
           1
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -258,7 +258,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f1",
       "step": "implement",
       "occurrence": "past",
       "node": 2,
@@ -267,7 +266,8 @@
           2,
           1
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f1"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -316,11 +316,11 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f0",
       "step": "implement",
       "occurrence": "past",
       "node": null,
-      "iterations": null
+      "iterations": null,
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f0"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",
@@ -371,7 +371,6 @@
     "flow_membership": {
       "kind": "step",
       "flow": "feature",
-      "invocation_id": "00000000-0000-0000-0000-0000000000f2",
       "step": "demo",
       "occurrence": "current",
       "node": 9,
@@ -380,7 +379,8 @@
           0,
           0
         ]
-      ]
+      ],
+      "flow_process_lfid": "00000000-0000-0000-0000-0000000000f2"
     },
     "workspace": {
       "machine_id": "home_00000000000000000000000000000001",

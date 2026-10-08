@@ -243,7 +243,8 @@ generates the Task ID; later edits, Project rotation and synchronization preserv
 Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
 with their provider baselines; observed conflicts adopt Linear and retire the losing
 intention. An active Task connection delivers mapped titles, notes, assignment,
-membership, deletion and Project fields after recovery. Deletion retains execution
+membership, deletion, Project fields and Task ordering after recovery. Reordering
+saves one Project-wide intention; partial delivery and lost replies retain that identity. Deletion retains execution
 and checkout history. Missing provider evidence keeps deletion pending; newer
 observed Linear edits retire removal and restore planning visibility. The active
 connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies

@@ -24,6 +24,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::chat::types::{ConversationEvent, ConversationItem, ItemDelta, Lifecycle, TurnUsage};
+use crate::engine::naming::generated_session_title;
 use crate::engine::stream::{ResultSubtype, StreamEvent};
 use crate::store::{StoreError, StoreResult};
 
@@ -1661,26 +1662,6 @@ pub enum SessionTitleSource {
     Unavailable,
 }
 
-const SESSION_TITLE_MAX_CHARS: usize = 80;
-
-/// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.
-pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
-    let title = title.trim();
-    if title.is_empty() || title.contains(['\n', '\r']) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "Session name must be one non-empty line",
-        ));
-    }
-    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
-        ));
-    }
-    Ok(title)
-}
-
 fn validate_manifest_path(dir: &Path, manifest: &SessionCaptureManifest) -> std::io::Result<()> {
     parse_artifact_key(manifest.artifact_key.as_str()).map_err(std::io::Error::other)?;
     if dir.file_name().and_then(|name| name.to_str()) != Some(manifest.artifact_key.as_str())
@@ -2291,7 +2272,7 @@ impl CaptureHandle {
             prepare_manifest(spec, artifact_key, caller_artifact_key, process, context)
                 .map_err(record_error)?;
         let dir = record_dir(lf_home, &manifest.artifact_key).expect("artifact key is a UUID");
-        let reserved = SessionCapture::record_row(&manifest, &dir, work)?;
+        let reserved = SessionCapture::record_row(&manifest, &dir, work, context)?;
         publish_manifest(lf_home, &manifest, context_bytes.as_deref()).map_err(record_error)?;
         if let Some(session) = reserved {
             row_store(&dir)?.publish_capture(&session.id, session.captured)?;
@@ -2556,6 +2537,7 @@ impl SessionCapture {
         manifest: &SessionCaptureManifest,
         dir: &Path,
         work: Option<crate::session::SessionWork>,
+        context: Option<&crate::trace::PreparedTurnContext>,
     ) -> StoreResult<Option<crate::session::AgentSession>> {
         let step = match &manifest.flow {
             Some(SessionFlowMembership::Step(step)) => Some(step),
@@ -2567,6 +2549,18 @@ impl SessionCapture {
             return Ok(None);
         }
         let store = row_store(dir)?;
+        let task = work
+            .as_ref()
+            .and_then(|work| work.task_id.as_ref())
+            .map(|id| store.task(id))
+            .transpose()?
+            .flatten();
+        let title = generated_session_title(
+            context,
+            manifest.skill.as_deref(),
+            task.as_ref().map(|task| task.plan.title.as_str()),
+            &manifest.cwd,
+        );
         let session = store.create_session(
             crate::session::AgentSession {
                 captured: None,
@@ -2587,9 +2581,7 @@ impl SessionCapture {
                 bound_at: None,
                 interactive: manifest.surface != "headless",
                 repo: None,
-                title: manifest.skill.clone().unwrap_or_else(|| {
-                    crate::engine::naming::word_pair(manifest.artifact_key.as_str())
-                }),
+                title,
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
                 ready_summary: None,
@@ -3565,7 +3557,7 @@ mod tests {
             .unwrap();
         let run = session.clone();
         assert!(!session.interactive);
-        assert_eq!(session.title, "implement");
+        assert_eq!(session.title, "repair failed operation");
         assert_eq!(run.provider.as_deref(), Some("proof"));
         assert_eq!(
             super::read_manifest(&capture.artifact_dir())

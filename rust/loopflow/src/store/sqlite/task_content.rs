@@ -147,33 +147,7 @@ impl SqliteStore {
             )?;
         }
         if let Some(rank) = patch.rank {
-            let mut query = tx.prepare(
-                "SELECT id,planning_rank FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
-                 ORDER BY planning_rank,created_at,id",
-            )?;
-            let mut ordered = query
-                .query_map([task.project_id.as_str()], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            ordered.retain(|(other, _)| other != id.as_str());
-            ordered.insert(
-                (rank as usize).min(ordered.len()),
-                (id.to_string(), current.rank),
-            );
-            for (rank, (other, previous)) in ordered.iter().enumerate() {
-                if PlanningChanges::Task(&TaskId::from_raw(other)).record(
-                    &tx,
-                    "rank",
-                    serde_json::json!(previous),
-                    serde_json::json!(rank),
-                )? {
-                    tx.execute(
-                        "UPDATE tasks SET planning_rank=?2,planning_revision=planning_revision+1,updated_at=?3 WHERE id=?1",
-                        params![other,rank as u32,now_unix()],
-                    )?;
-                }
-            }
+            super::planning_order::reorder_in(&tx, &task.project_id, id, rank)?;
         }
         let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;

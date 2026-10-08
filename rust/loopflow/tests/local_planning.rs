@@ -1636,8 +1636,18 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             connected
         );
         let pending = store.pending_task_changes(&second).unwrap();
-        assert_eq!(pending.len(), 4);
-        assert_eq!(store.pending_task_changes(&first).unwrap().len(), 1);
+        assert_eq!(pending.len(), 3);
+        assert!(store.pending_task_changes(&first).unwrap().is_empty());
+        let ordering = store
+            .pending_project_changes(&store.task(&second).unwrap().unwrap().project_id)
+            .unwrap();
+        assert_eq!(
+            ordering
+                .iter()
+                .filter(|change| change.field == "task_order")
+                .count(),
+            1
+        );
         let edited = store.task(&second).unwrap().unwrap();
         let revision = || {
             conn.query_row(

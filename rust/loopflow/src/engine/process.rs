@@ -1,11 +1,32 @@
 use std::path::{Path, PathBuf};
+use std::process::{Child, ExitStatus};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, Result};
 
 pub(crate) const DISCORD_TOKEN_ENV: &str = "LF_DISCORD_TOKEN";
+
+/// Wait for an owned child, returning its exit status and whether it timed out.
+pub(crate) fn wait_for_exit(
+    child: &mut Child,
+    timeout: Option<Duration>,
+    mut on_tick: impl FnMut(),
+) -> std::io::Result<(ExitStatus, bool)> {
+    let timeout_at = timeout.map(|value| Instant::now() + value);
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok((status, false));
+        }
+        if timeout_at.is_some_and(|value| Instant::now() >= value) {
+            let _ = child.kill();
+            return Ok((child.wait()?, true));
+        }
+        on_tick();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
 
 /// Owns a child process group until its work is known to be complete.
 ///

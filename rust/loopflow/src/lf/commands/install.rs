@@ -2579,10 +2579,20 @@ pub fn promote(
     if let crate::installation::InstallationState::Switching(receipt) =
         crate::installation::read_state(&crate::installation::root()?)?
     {
-        return delegate_switch_recovery(&receipt);
+        delegate_switch_recovery(&receipt)?;
+    } else {
+        let current = fs::canonicalize(std::env::current_exe()?)?;
+        promote_published_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
-    let current = fs::canonicalize(std::env::current_exe()?)?;
-    promote_published_from_installation(artifacts, &current, sync_skills, preview_only)
+    // A settled retry must repair a failed hook write even when no binary changes.
+    if sync_skills && !preview_only {
+        if let Err(error) = crate::installation::account_home()
+            .and_then(|home| crate::harness::native_titles::install_native_hooks(&home))
+        {
+            eprintln!("warning: native title hook installation failed ({error:#})");
+        }
+    }
+    Ok(())
 }
 
 /// Activate retained immutable bytes only when that binary's own preflight

@@ -1,5 +1,4 @@
-//! Name primitives: author slug, branch-safe sanitization, and the
-//! `magical-musical` word pair that names raw Sessions.
+//! Session names, author slugs, and branch-safe sanitization.
 //!
 //! Branch/worktree identity itself lives in [`crate::engine::identity`]. This
 //! module only supplies the raw pieces it composes.
@@ -8,29 +7,93 @@ use crate::engine::error::GitError;
 use std::path::Path;
 use std::process::Command;
 
-const MAGICAL: &[&str] = &[
-    "aurora", "cascade", "crystal", "drift", "echo", "ember", "fern", "flume", "frost", "glade",
-    "grove", "haze", "ivy", "jade", "luna", "mist", "nova", "opal", "petal", "prism", "rain",
-    "ripple", "sage", "shade", "spark", "star", "stone", "storm", "tide", "vale", "wave", "wisp",
-    "wren", "zephyr",
-];
+const SESSION_TITLE_MAX_CHARS: usize = 80;
 
-const MUSICAL: &[&str] = &[
-    "allegro", "aria", "ballad", "cadence", "canon", "chord", "coda", "duet", "forte", "fugue",
-    "harmony", "hymn", "lilt", "lyric", "melody", "motif", "opus", "prelude", "refrain", "rondo",
-    "sonata", "tempo", "trill", "tune", "verse", "waltz",
-];
+pub(crate) fn generated_session_title(
+    context: Option<&crate::trace::PreparedTurnContext>,
+    skill: Option<&str>,
+    task: Option<&str>,
+    cwd: &Path,
+) -> String {
+    let purpose = skill
+        .and_then(|skill| skill.rsplit('/').next())
+        .filter(|skill| !matches!(*skill, "session" | "operate"));
+    [
+        context.and_then(session_request),
+        purpose,
+        task,
+        cwd.file_name().and_then(|name| name.to_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(request_title)
+    .unwrap_or_else(|| "Session".to_string())
+}
 
-/// A stable `magical-musical` pair, e.g. `aurora-fugue`, derived from `seed`.
-/// The same seed always yields the same pair, so readers need not persist it.
-pub fn word_pair(seed: &str) -> String {
-    // FNV-1a: stable across Rust releases, unlike the std hasher.
-    let hash = seed.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    });
-    let magical = MAGICAL[(hash % MAGICAL.len() as u64) as usize];
-    let musical = MUSICAL[((hash >> 32) % MUSICAL.len() as u64) as usize];
-    format!("{magical}-{musical}")
+pub(crate) fn request_title(source: &str) -> Option<String> {
+    let title = source
+        .split_whitespace()
+        .map(|word| word.trim_matches(|ch: char| !ch.is_alphanumeric()))
+        .filter(|word| {
+            !word.is_empty()
+                && !matches!(
+                    word.to_ascii_lowercase().as_str(),
+                    "please" | "the" | "a" | "an"
+                )
+        })
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .take(SESSION_TITLE_MAX_CHARS)
+        .collect::<String>();
+    (!title.is_empty()).then_some(title)
+}
+
+fn session_request(context: &crate::trace::PreparedTurnContext) -> Option<&str> {
+    use crate::trace::ContextAssetKind;
+
+    for channel in context.system.iter().chain(std::iter::once(&context.task)) {
+        for asset in channel
+            .assets
+            .iter()
+            .filter(|asset| asset.kind == ContextAssetKind::UserMessage)
+        {
+            if let Some(request) = channel
+                .text
+                .get(asset.byte_start as usize..asset.byte_end as usize)
+            {
+                return Some(request);
+            }
+        }
+    }
+    // Library callers have unassembled, separate system/task prompts.
+    let task = &context.task;
+    (task.text != crate::engine::prompt::INITIAL_TURN_PROMPT
+        && task
+            .assets
+            .iter()
+            .all(|asset| asset.kind == ContextAssetKind::Assembly))
+    .then_some(task.text.as_str())
+}
+
+/// One trimmed, non-empty line of at most `SESSION_TITLE_MAX_CHARS` characters.
+pub(crate) fn validate_session_title(title: &str) -> std::io::Result<&str> {
+    let title = title.trim();
+    if title.is_empty() || title.contains(['\n', '\r']) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Session name must be one non-empty line",
+        ));
+    }
+    if title.chars().count() > SESSION_TITLE_MAX_CHARS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Session name must be at most {SESSION_TITLE_MAX_CHARS} characters"),
+        ));
+    }
+    Ok(title)
 }
 
 /// Reduce an arbitrary string to a branch-safe slug: lowercase alphanumerics,
@@ -91,7 +154,45 @@ pub fn git_user(repo: &Path) -> Result<String, GitError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::sanitize_for_branch;
+
+    #[test]
+    fn generated_titles_use_work_and_never_the_system_trigger() {
+        let cwd = std::path::Path::new("/repo/terminal-titles");
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            "# Loopflow operating guide",
+            crate::engine::prompt::INITIAL_TURN_PROMPT,
+        );
+        assert_eq!(
+            super::generated_session_title(
+                Some(&context),
+                Some("demo"),
+                Some("Terminal titles"),
+                cwd
+            ),
+            "demo"
+        );
+        assert_eq!(
+            super::generated_session_title(
+                Some(&context),
+                Some("task/session"),
+                Some("Repair cmux titles"),
+                cwd
+            ),
+            "Repair cmux titles"
+        );
+        assert_eq!(
+            super::generated_session_title(Some(&context), Some("wave/operate"), None, cwd),
+            "terminal-titles"
+        );
+        let context = crate::trace::PreparedTurnContext::from_prompts(
+            "# Loopflow operating guide",
+            &format!("{} other words", "λ".repeat(100)),
+        );
+        let title = super::generated_session_title(Some(&context), None, None, cwd);
+        assert_eq!(title.chars().count(), super::SESSION_TITLE_MAX_CHARS);
+        assert!(super::validate_session_title(&title).is_ok());
+    }
 
     #[test]
     fn sanitize_for_branch_cleans_input() {
@@ -106,18 +207,6 @@ mod tests {
     #[test]
     fn sanitize_collapses_hyphens() {
         assert_eq!(sanitize_for_branch("a---b"), "a-b");
-    }
-
-    #[test]
-    fn word_pairs_are_stable_and_vary_by_seed() {
-        let pair = word_pair("run_1");
-        assert_eq!(pair, word_pair("run_1"));
-        let (magical, musical) = pair.split_once('-').expect("two words");
-        assert!(MAGICAL.contains(&magical) && MUSICAL.contains(&musical));
-        let distinct = (0..20)
-            .map(|index| word_pair(&format!("run_{index}")))
-            .collect::<std::collections::HashSet<_>>();
-        assert!(distinct.len() > 10);
     }
 
     #[test]

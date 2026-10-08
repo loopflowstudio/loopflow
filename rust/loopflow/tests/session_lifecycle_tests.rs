@@ -473,8 +473,7 @@ fn conversation_keeps_its_name_and_identity_until_completed() {
         "conversation identity differs from its captured input"
     );
     assert_eq!((source.as_str(), completed), ("generated", false));
-    let (magical, musical) = title.split_once('-').expect("magical-musical pair");
-    assert!(!magical.is_empty() && !musical.is_empty() && !musical.contains('-'));
+    assert_eq!(title, "Review parser");
     assert_eq!(fixture.run_parents(&first_run), (None, None, None));
 
     let listed = fixture.sessions();
@@ -1054,6 +1053,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert!(members("INF-125").is_empty());
     assert_eq!(fixture.count("agent_sessions"), before);
     let created = primary(&["INF-125"]);
+    assert_eq!(created["title"], "Sibling INF-125");
     assert_eq!(fixture.count("agent_sessions"), before + 1);
     let (skill, cwd): (String, String) = fixture
         .db()

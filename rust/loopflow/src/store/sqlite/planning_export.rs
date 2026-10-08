@@ -8,7 +8,7 @@ use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId, WorkRef};
 use crate::store::{StoreError, StoreResult};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct PlanningExport {
     pub id: String,
     pub model: Value,
@@ -51,10 +51,10 @@ impl SqliteStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    pub(crate) fn planning_export(
+    pub(crate) fn planning_export_attempts(
         &self,
         owner: PlanningChanges<'_>,
-    ) -> StoreResult<Option<(PlanningExport, bool, bool)>> {
+    ) -> StoreResult<(bool, bool)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (table, key) = owner.receipt();
         let link = if matches!(owner, PlanningChanges::Project(_)) {
@@ -62,12 +62,10 @@ impl SqliteStore {
         } else {
             "0"
         };
-        let row: Option<(String, bool, bool)> = conn.query_row(
-            &format!("SELECT export_json,export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
-            [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-        ).optional()?;
-        row.map(|(value, attempted, link)| Ok((serde_json::from_str(&value)?, attempted, link)))
-            .transpose()
+        conn.query_row(
+            &format!("SELECT export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
+            [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?)),
+        ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
     }
 
     // Capture before provider discovery; a concurrent local save cannot alter this effect.
@@ -97,8 +95,10 @@ impl SqliteStore {
                 let record = super::plan_read::task_in(&tx, id)?
                     .record
                     .ok_or(StoreError::NotFound)?;
-                let project = record.project.ok_or(StoreError::NotFound)?;
-                let external: Option<String> = tx.query_row("SELECT external_project_id FROM projects WHERE id=?1 OR external_project_id=?1", [&project.id], |row| row.get(0))?;
+                let external: Option<String> = tx.query_row(
+                    "SELECT p.external_project_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
+                    [id.as_str()], |row| row.get(0),
+                )?;
                 let external = external.ok_or_else(|| {
                     StoreError::InvalidData("Task export awaits its Project mapping".into())
                 })?;

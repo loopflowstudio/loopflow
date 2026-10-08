@@ -314,8 +314,41 @@ impl SqliteStore {
             &snapshot.snapshot.items,
             None,
         )?;
+        for project in &snapshot.snapshot.projects {
+            super::planning_order::observe_in(
+                &tx,
+                &repo,
+                &snapshot.provider,
+                &project.id,
+                &snapshot
+                    .snapshot
+                    .items
+                    .iter()
+                    .filter(|i| i.project_id.as_deref() == Some(&project.id))
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )?;
+        }
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn put_pm_project_order(
+        &self,
+        repo: &str,
+        project: &str,
+        items: &[PmItem],
+    ) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let now = super::super::rows::now_unix();
+        for item in items {
+            put_item(&tx, repo, "linear", now, item)?;
+        }
+        project_accepted_planning(&tx, repo, "linear", &[], items, None)?;
+        let accepted = super::planning_order::observe_in(&tx, repo, "linear", project, items)?;
+        tx.commit()?;
+        Ok(accepted)
     }
 
     pub fn pm_snapshot(&self, wave_id: &WaveId) -> StoreResult<Option<PmSnapshotRow>> {
@@ -613,13 +646,13 @@ fn project_accepted_planning(
                  planning_completed=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed ELSE ?6 END,
                  planning_completed_at=CASE WHEN id IN (SELECT task_id FROM pending) THEN planning_completed_at ELSE ?7 END,
                  planning_provider_revision=?8,planning_url=?9,planning_branch_name=?10,
-                 planning_team_id=?11,planning_assignee=?12,planning_rank=?13,
-                 pm_snapshot_synced_at=?14,project_id=?15,
+                 planning_team_id=?11,planning_assignee=?12,
+                 pm_snapshot_synced_at=?13,project_id=?14,
                  planning_revision=planning_revision+CASE WHEN issue_title IS NOT ?3 OR issue_description IS NOT ?4
-                     OR planning_assignee IS NOT ?12 OR planning_rank IS NOT ?13 OR project_id IS NOT ?15 THEN 1 ELSE 0 END
+                     OR planning_assignee IS NOT ?12 OR project_id IS NOT ?14 THEN 1 ELSE 0 END
              WHERE id=?1",
             params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
-                item.revision,item.url,item.branch_name,item.team_id,item.assignee,item.rank,observed_at,project],
+                item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project],
         )?;
     }
     let mut query = tx.prepare(&format!(

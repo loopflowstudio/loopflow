@@ -55,14 +55,7 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         WorkRef::Project(id) => PlanningChanges::Project(id),
         _ => return Err(message("field delivery requires a Task or Project")),
     };
-    let (kind, id) = owner.owner();
-    let path = store
-        .sqlite
-        .home_dir()
-        .map_err(message)?
-        .join("locks/planning-fields")
-        .join(format!("{kind}-{id}.lock"));
-    let Some(_lock) = lock_delivery(&path)? else {
+    let Some(_lock) = lock_fields(store, owner)? else {
         return Ok(());
     };
     let changes = pending(store, owner)?;
@@ -73,12 +66,22 @@ pub(crate) async fn sync_fields(store: &Store, repo: &Path, work: &WorkRef) -> O
         }
         // Also reconcile an older attempted receipt whose successor is no longer pending.
         observe(store, repo, owner, &client).await?;
-        for change in &changes {
+        for change in changes.iter().filter(|c| c.field != "task_order") {
             if let Err(error) = sync_field(store, repo, owner, &client, change).await {
                 store
                     .sqlite
                     .planning_field_error(owner, change, &error.to_string())
                     .map_err(message)?;
+            }
+        }
+        if let PlanningChanges::Project(id) = owner {
+            if store
+                .sqlite
+                .project_order_delivery(id)
+                .map_err(message)?
+                .is_some()
+            {
+                super::planning_order::sync_order(store, repo, id, &client).await?;
             }
         }
         Ok(())
@@ -170,6 +173,18 @@ async fn sync_deletion(
         .acknowledge_task_deletion(id, change, None)
         .map_err(message)?;
     Ok(())
+}
+
+// Creation and field delivery share one effect lock per planning object.
+pub(super) fn lock_fields(store: &Store, owner: PlanningChanges<'_>) -> OpsResult<Option<File>> {
+    let (kind, id) = owner.owner();
+    let path = store
+        .sqlite
+        .home_dir()
+        .map_err(message)?
+        .join("locks/planning-fields")
+        .join(format!("{kind}-{id}.lock"));
+    Ok(lock_delivery(&path)?)
 }
 
 // Serialize provider effects only; saves and acquisition never take this lock.
@@ -342,7 +357,7 @@ fn task_input(store: &Store, change: &PlanningChange) -> OpsResult<Value> {
             Ok(json!({"projectId":project.plan.linear_id()?.as_str()}))
         }
         _ => Err(message(format!(
-            "{} remains pending: relative order requires a Project-wide delivery",
+            "unsupported Task planning field: {}",
             change.field
         ))),
     }

@@ -361,12 +361,28 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_task_state_deliveries_delete AFTER DELETE ON task_state_deliveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
+ALTER TABLE pm_projects ADD COLUMN task_order_json TEXT CHECK(task_order_json IS NULL OR json_valid(task_order_json));
+-- Retain the last observed relative order at the released frontier. The next
+-- complete acquisition adds new members and keeps omission unresolved.
+UPDATE pm_projects AS observed SET task_order_json=(
+    SELECT json_group_array(id) FROM (
+        SELECT t.id FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
+        JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+        WHERE i.repo=observed.repo AND i.provider=observed.provider
+          AND i.project_id=observed.id AND p.external_project_id=observed.id
+          AND w.repo=observed.repo
+        ORDER BY json_extract(i.body,'$.rank'),i.id
+    )
+);
+
+
 -- Project edits and their delivery evidence commit together, including before mapping.
 CREATE TABLE project_changes (
+    order_effects_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(order_effects_json)),
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','summary','workflow','krs','metric_targets','status')),
+    field TEXT NOT NULL CHECK(field IN ('name','summary','workflow','krs','metric_targets','status','task_order')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),
@@ -388,7 +404,7 @@ CREATE TABLE task_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','rank','project_id','deleted')),
+    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','project_id','deleted')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),

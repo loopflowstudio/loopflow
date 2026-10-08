@@ -142,6 +142,8 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: Prove managed Tasks in a disposable installation
         run: uv run python scripts/test_task_installation.py
+      - name: Prove native title hooks through published promotion
+        run: uv run python scripts/test_task_installation.py --native-titles
 
   # Needs the full history: the check compares every migration against the last
   # release tag, which is how an edited shipped migration is caught before publish.

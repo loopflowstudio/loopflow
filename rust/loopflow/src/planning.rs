@@ -12,19 +12,6 @@ pub struct PlanningChange {
     pub conflict: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PlanningAuthority {
-    Local,
-    Linear,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PersonalWaveDefinition {
-    pub goal: String,
-    pub memory: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlanningError {
     #[error("invalid Linear id: {0}")]

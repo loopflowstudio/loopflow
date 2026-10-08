@@ -119,7 +119,7 @@ pub fn workflow_path(name: &str, repo: &Path) -> Option<PathBuf> {
 }
 
 /// The builtin Workflow; Flow definitions occupy a separate namespace.
-fn builtin_workflow(name: &str) -> Option<&'static str> {
+pub(crate) fn builtin_workflow(name: &str) -> Option<&'static str> {
     BUILTIN_WORKFLOWS
         .iter()
         .find(|(builtin, _)| *builtin == name)

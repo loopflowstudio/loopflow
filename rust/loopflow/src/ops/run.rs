@@ -392,10 +392,25 @@ mod tests {
 
     #[test]
     fn context_delivery_supplies_one_goal_for_direct_and_wave_launches() {
-        let tmp = tempfile::tempdir().unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "release",
+            )
+            .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
             let prepared = crate::engine::process_prompt::prepare_process_prompt(
@@ -450,8 +465,12 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Prompt assembly reads the selected fixture Machine.
     async fn release_task_prompt_follows_parent_rename_and_reparenting() {
-        let (_home, store) = test_store().await;
+        let _lock = crate::journal::test_env_lock();
+        let (home, store) = test_store().await;
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         for (name, memory) in [
             ("infrastructure", "Parent memory"),
@@ -485,21 +504,30 @@ mod tests {
         let child_row = serde_json::to_value(&release).unwrap();
         for address in ["infrastructure/release", "infra/release", "product/release"] {
             if address == "infra/release" {
-                std::fs::rename(
-                    repo.path().join("wave/infrastructure"),
-                    repo.path().join("wave/infra"),
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    parent.id(),
+                    repo.path(),
+                    None,
+                    Some("infra"),
                 )
-                .unwrap();
-            } else if address == "product/release" {
-                std::fs::rename(
-                    repo.path().join("wave/infra/release"),
-                    repo.path().join("wave/product/release"),
-                )
-                .unwrap();
-            }
-            let discovered = crate::work::wave::ensure_wave_row(&store, repo.path(), address)
                 .await
                 .unwrap();
+            } else if address == "product/release" {
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
+                    .await
+                    .unwrap();
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    release.id(),
+                    repo.path(),
+                    None,
+                    Some(address),
+                )
+                .await
+                .unwrap();
+            }
+            let discovered = store.get_wave(release.id()).await.unwrap().unwrap();
             assert_eq!(discovered.id(), release.id());
             if address == "infra/release" {
                 assert_eq!(
@@ -544,13 +572,11 @@ mod tests {
                 "Parent memory"
             }));
         }
-        // A new Machine reconstructs the same identity from the authored files.
-        let (_fresh_home, fresh) = test_store().await;
-        let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
-            .await
-            .unwrap();
-        assert_eq!(recovered.id(), release.id());
-        assert_eq!(recovered.slug(), "product/release");
+        assert!(repo
+            .path()
+            .join("wave/infrastructure/release/GOAL.md")
+            .exists());
+        assert!(!repo.path().join("wave/infra").exists());
     }
 
     #[tokio::test]
@@ -643,6 +669,7 @@ mod tests {
 
         // Context and attribution survive retirement and provider deletion.
         store.abandon(&work, "fixture retirement").await.unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await
             .unwrap()

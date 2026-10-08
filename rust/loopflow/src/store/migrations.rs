@@ -729,6 +729,9 @@ fn apply_set(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> 
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration)?;
         conn.execute_batch(migration.sql)?;
+        if migration.sql.contains("CREATE TABLE wave_documents (") {
+            super::sqlite::wave_documents::import_registered_documents(conn)?;
+        }
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }

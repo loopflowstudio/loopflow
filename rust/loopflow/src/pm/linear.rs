@@ -6,9 +6,6 @@ use tokio::time::sleep;
 use tracing::warn;
 
 #[cfg(test)]
-mod deletion_tests;
-
-#[cfg(test)]
 use crate::pm::PmKr;
 use crate::pm::{
     parse_project_content, project_slug, render_project_content, IssueComment, IssueObservation,
@@ -269,18 +266,6 @@ const LIST_COMPLETED_WORKFLOW_STATES_QUERY: &str = r#"query CompletedWorkflowSta
     nodes {
       id
     }
-  }
-}"#;
-
-const ISSUE_DELETION_QUERY: &str = r#"query IssueDeletion($id: String!) {
-  issue(id: $id) {
-    trashed
-  }
-}"#;
-
-const DELETE_ITEM_MUTATION: &str = r#"mutation DeleteIssue($id: String!) {
-  issueDelete(id: $id) {
-    success
   }
 }"#;
 
@@ -1186,48 +1171,6 @@ impl LinearClient {
             .ok_or_else(|| PmError::Message(format!("no Linear Project with id {project_id}")))
     }
 
-    /// Only an explicit trash flag confirms deletion. Inaccessible or missing
-    /// issues are unresolved, including after a lost mutation response.
-    pub async fn item_is_deleted(&self, item_id: &str) -> PmResult<bool> {
-        let response: IssueDeletionData = self
-            .graphql(ISSUE_DELETION_QUERY, json!({ "id": item_id }))
-            .await
-            .map_err(|cause| {
-                PmError::Message(format!(
-                    "cannot read deletion state for Linear issue {item_id}: {cause}"
-                ))
-            })?;
-        let issue = response.issue.ok_or_else(|| {
-            PmError::Message(format!(
-                "Linear issue {item_id} is unavailable; absence does not confirm deletion"
-            ))
-        })?;
-        Ok(issue.trashed == Some(true))
-    }
-
-    /// Trash with Linear's ordinary retention, preserving workflow outcome.
-    pub async fn delete_item(&self, item_id: &str) -> PmResult<()> {
-        if matches!(self.item_is_deleted(item_id).await, Ok(true)) {
-            return Ok(());
-        }
-        let result: PmResult<DeleteItemData> = self
-            .graphql(DELETE_ITEM_MUTATION, json!({ "id": item_id }))
-            .await;
-        let cause = match result {
-            Ok(response) if response.issue_delete.success => return Ok(()),
-            Ok(_) => "Linear returned issueDelete.success=false".to_string(),
-            Err(cause) => cause.to_string(),
-        };
-        let confirmation = match self.item_is_deleted(item_id).await {
-            Ok(true) => return Ok(()),
-            Ok(false) => "the issue is not confirmed in trash".to_string(),
-            Err(cause) => cause.to_string(),
-        };
-        Err(PmError::Message(format!(
-            "Linear deletion of {item_id} is unconfirmed: {cause}; readback: {confirmation}"
-        )))
-    }
-
     pub async fn complete_item(&self, item_id: &str) -> PmResult<()> {
         let team_id = self.item_team_id(item_id).await?;
         let state_id = self.completed_state_id(&team_id).await?;
@@ -1613,22 +1556,6 @@ struct IdNode {
 #[derive(Deserialize)]
 struct ViewerData {
     viewer: IdNode,
-}
-
-#[derive(Deserialize)]
-struct IssueDeletionData {
-    issue: Option<IssueDeletionNode>,
-}
-
-#[derive(Deserialize)]
-struct IssueDeletionNode {
-    trashed: Option<bool>,
-}
-
-#[derive(Deserialize)]
-struct DeleteItemData {
-    #[serde(rename = "issueDelete")]
-    issue_delete: SuccessPayload,
 }
 
 #[derive(Deserialize)]

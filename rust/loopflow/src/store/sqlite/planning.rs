@@ -1157,10 +1157,7 @@ mod tests {
             .is_ok());
 
         // A delayed list cannot resurrect a confirmed removal in either reader.
-        store
-            .confirm_task_deletion(&wave, "issue", "FIX-1")
-            .await
-            .unwrap();
+        store.sqlite.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'issue','FIX-1',1)", [&wave]).unwrap();
         store.put_pm_snapshot(list, None).await.unwrap();
         let removed = store
             .pm_task_observation("/repo", "linear", "FIX-1")

@@ -6,19 +6,12 @@ use tracing::warn;
 
 use crate::engine::context_budget::BudgetKey;
 
-/// Resolve personal documents from their store owner; shared definitions stay in Git.
+/// Read only the saved definition; importing repository files is an explicit mutation.
 pub(crate) fn read_wave_document(
     repo: &Path,
     name: &str,
     document: &str,
 ) -> std::io::Result<String> {
-    if !name.starts_with("personal:") {
-        return std::fs::read_to_string(
-            repo.join("wave")
-                .join(name.strip_prefix("shared:").unwrap_or(name))
-                .join(document),
-        );
-    }
     let store =
         crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
             .map_err(std::io::Error::other)?;
@@ -26,26 +19,17 @@ pub(crate) fn read_wave_document(
     let wave = store
         .get_wave_at(&locator)
         .map_err(std::io::Error::other)?
-        .ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, "personal Wave not found")
-        })?;
-    let definition = store
-        .personal_wave_definition(wave.id())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Wave not found"))?;
+    store
+        .wave_documents(wave.id())
         .map_err(std::io::Error::other)?
+        .remove(document)
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "personal definition not found",
+                "Wave document not imported; use lf wave ensure",
             )
-        })?;
-    match document {
-        "GOAL.md" => Ok(definition.goal),
-        "MEMORY.md" => Ok(definition.memory),
-        _ => Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "unknown personal Wave document",
-        )),
-    }
+        })
 }
 
 pub fn write_wave_document(
@@ -55,20 +39,6 @@ pub fn write_wave_document(
     content: &str,
 ) -> std::io::Result<()> {
     let locator = super::WaveLocator::discover(repo, name).map_err(std::io::Error::other)?;
-    if !matches!(document, "GOAL.md" | "MEMORY.md") {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "expected GOAL.md or MEMORY.md",
-        ));
-    }
-    if !name.starts_with("personal:") {
-        let path = repo
-            .join("wave")
-            .join(name.strip_prefix("shared:").unwrap_or(name))
-            .join(document);
-        std::fs::create_dir_all(path.parent().expect("Wave document has a parent"))?;
-        return std::fs::write(path, content);
-    }
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)
         .map_err(std::io::Error::other)?;
     let wave = store
@@ -77,11 +47,11 @@ pub fn write_wave_document(
         .ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "personal Wave not found; use lf wave ensure first",
+                "Wave not found; use lf wave ensure first",
             )
         })?;
     store
-        .update_personal_wave_document(wave.id(), document, content)
+        .update_wave_document(wave.id(), document, content)
         .map_err(std::io::Error::other)
 }
 
@@ -134,7 +104,7 @@ pub enum WaveChatConfig {
     },
 }
 
-/// Machine policy read from `wave/<name>/GOAL.md` frontmatter.
+/// Machine policy read from the saved Wave goal frontmatter.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub id: Option<crate::id::WaveId>,
@@ -149,7 +119,14 @@ pub struct WaveConfig {
     pub chat: Option<WaveChatConfig>,
 }
 
-/// Read wave intent from `wave/<name>/GOAL.md` frontmatter.
+pub(crate) fn parse_wave_config(content: &str) -> Result<WaveConfig, serde_yaml_ng::Error> {
+    match split_frontmatter(content) {
+        Some((frontmatter, _)) => serde_yaml_ng::from_str(&frontmatter),
+        None => Ok(WaveConfig::default()),
+    }
+}
+
+/// Read Wave intent from its saved goal frontmatter.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     match try_read_wave_config(repo, name) {
         Ok(config) => config,
@@ -213,20 +190,24 @@ pub(crate) fn try_read_wave_chat_config(
 
 /// One-line Wave objective for status, PM, and API projections.
 ///
-/// GOAL.md remains the source of truth. The summary is the first paragraph of
+/// The saved goal is the source of truth. The summary is the first paragraph of
 /// `## Objective`, falling back to the first prose paragraph when that section
 /// is absent.
 pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
     let content = read_wave_document(repo, name, "GOAL.md")?;
-    let body = split_frontmatter(&content)
+    Ok(wave_summary(&content))
+}
+
+pub(crate) fn wave_summary(content: &str) -> String {
+    let body = split_frontmatter(content)
         .map(|(_, body)| body)
-        .unwrap_or(content);
+        .unwrap_or_else(|| content.to_string());
     let objective = markdown_section(&body, "Objective");
     let summary = first_paragraph(&objective);
     if summary.is_empty() {
-        Ok(first_prose_paragraph(&body))
+        first_prose_paragraph(&body)
     } else {
-        Ok(summary)
+        summary
     }
 }
 
@@ -355,7 +336,7 @@ fn remove_or_set_skill_agents(
     Ok(())
 }
 
-/// Update `wave/<name>/GOAL.md` frontmatter, preserving existing body text.
+/// Update stored Wave frontmatter, preserving its body and repository files.
 pub fn update_wave_goal_config(
     repo: &Path,
     name: &str,
@@ -372,7 +353,7 @@ pub fn update_wave_goal_config(
     Ok(())
 }
 
-/// Update agent fields in `wave/<name>/GOAL.md`, preserving existing frontmatter.
+/// Update saved agent fields, preserving unrelated frontmatter.
 pub fn update_wave_agent_config(
     repo: &Path,
     name: &str,
@@ -387,17 +368,57 @@ pub fn update_wave_agent_config(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
+    use super::{
+        read_wave_config, read_wave_summary, try_read_wave_chat_config, try_read_wave_config,
+        update_wave_agent_config, write_wave_document, WaveChatConfig, WaveConfigError,
+    };
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    struct ConfigRepo {
+        repo: loopflow_test_support::TestRepo,
+        _home: tempfile::TempDir,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl ConfigRepo {
+        fn new() -> Self {
+            let repo = loopflow_test_support::TestRepo::new();
+            let home = tempfile::tempdir().unwrap();
+            let store =
+                crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                    .unwrap();
+            let canonical = crate::repository::CanonicalRepo::discover(repo.path()).unwrap();
+            store.ensure_wave(&canonical.to_string(), "scan").unwrap();
+            let previous = std::env::var_os("LF_HOME");
+            std::env::set_var("LF_HOME", home.path());
+            Self {
+                repo,
+                _home: home,
+                previous,
+            }
+        }
+        fn path(&self) -> &Path {
+            self.repo.path()
+        }
+        fn write(&self, content: &str) -> std::io::Result<()> {
+            write_wave_document(self.path(), "scan", "GOAL.md", content)
+        }
+    }
+    impl Drop for ConfigRepo {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var("LF_HOME", value),
+                None => std::env::remove_var("LF_HOME"),
+            }
+        }
+    }
 
     #[test]
     fn read_wave_config_parses_machine_frontmatter() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\nowner: jack\nhome: build.example.com\nagent: codex\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -408,11 +429,9 @@ mod tests {
 
     #[test]
     fn read_wave_summary_prefers_the_objective() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\nagent: codex\n---\n\n## Objective\n\nKeep the system\nboring.\n\n## Process\n\nDo the work.\n",
         )
         .expect("write");
@@ -425,11 +444,9 @@ mod tests {
 
     #[test]
     fn read_wave_config_parses_linear_pm_block() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\npm:\n  provider: linear\n  linear_initiative: \"lin-123\"\n  linear_team: \"team-prd\"\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -443,11 +460,9 @@ mod tests {
 
     #[test]
     fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\nchat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -465,8 +480,7 @@ mod tests {
 
         // The binding is local: `machine_id` is no longer a Discord-config field.
         // `deny_unknown_fields` rejects it, so a stale GOAL.md fails closed.
-        fs::write(
-            dir.join("GOAL.md"),
+        temp.write(
             "---\nchat:\n  provider: discord\n  machine_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
         )
         .expect("write stale machine_id");
@@ -476,21 +490,15 @@ mod tests {
         ));
 
         // A missing required field still fails closed.
-        fs::write(
-            dir.join("GOAL.md"),
-            "---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n",
-        )
-        .expect("write missing channel");
+        temp.write("---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n")
+            .expect("write missing channel");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
         ));
 
-        fs::write(
-            dir.join("GOAL.md"),
-            "---\nchat:\n  provider: local\n---\nDrive the work.\n",
-        )
-        .expect("write local chat");
+        temp.write("---\nchat:\n  provider: local\n---\nDrive the work.\n")
+            .expect("write local chat");
         assert!(matches!(
             try_read_wave_config(temp.path(), "scan")
                 .expect("local config")
@@ -498,11 +506,8 @@ mod tests {
             Some(WaveChatConfig::Local)
         ));
 
-        fs::write(
-            dir.join("GOAL.md"),
-            "---\nowner: [not-a-string]\n---\nDrive the work.\n",
-        )
-        .expect("write unrelated invalid policy");
+        temp.write("---\nowner: [not-a-string]\n---\nDrive the work.\n")
+            .expect("write unrelated invalid policy");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Ok(None)
@@ -512,11 +517,9 @@ mod tests {
     /// Crons live in GOAL.md frontmatter, the schedule source. Legacy `triggers:` keys are simply unknown fields now.
     #[test]
     fn read_wave_config_parses_crons_and_ignores_legacy_triggers() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\ncrons:\n  - flow: wave-polish\n    schedule: '0 0 0 * * Mon *'\ntriggers:\n  signal: wave\n  source: infra\n  source_repo: /tmp/source\n---\nDrive the work.\n",
         )
         .expect("write");
@@ -530,20 +533,17 @@ mod tests {
 
     #[test]
     fn read_wave_config_returns_none_for_missing() {
-        let temp = tempdir().expect("temp dir");
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
         assert!(read_wave_config(temp.path(), "nonexistent").is_none());
     }
 
     #[test]
     fn update_wave_agent_config_writes_agent_fields() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
-            "---\narea: ['.']\n---\nDrive the work.\n",
-        )
-        .expect("write");
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write("---\narea: ['.']\n---\nDrive the work.\n")
+            .expect("write");
 
         update_wave_agent_config(
             temp.path(),
@@ -569,11 +569,9 @@ mod tests {
 
     #[test]
     fn update_wave_agent_config_removes_fields_on_empty_values() {
-        let temp = tempdir().expect("temp dir");
-        let dir = temp.path().join("wave").join("scan");
-        fs::create_dir_all(&dir).expect("create dir");
-        fs::write(
-            dir.join("GOAL.md"),
+        let _lock = crate::journal::test_env_lock();
+        let temp = ConfigRepo::new();
+        temp.write(
             "---\narea: ['.']\nagent: codex:o3\nskill_agents:\n  implement: claude:sonnet\n---\nDrive the work.\n",
         )
         .expect("write");

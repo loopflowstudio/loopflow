@@ -374,7 +374,6 @@ esac
     assert_eq!(flows[0].1.len(), 1);
     // Provider deletion remains a refusal at native resume; it grants no provider launch.
     // Change only planning ownership in this disposable fixture, retaining the Session.
-    fixture.db().execute("UPDATE waves SET personal_plan_id=NULL WHERE id=(SELECT p.wave_id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1)", [task_id]).unwrap();
     fixture
         .db()
         .execute(
@@ -394,14 +393,6 @@ esac
         "{refused:?}"
     );
     assert_eq!(fixture.count("agent_sessions"), 2);
-    fixture.db().execute("UPDATE waves SET personal_plan_id=(SELECT id FROM personal_plans LIMIT 1) WHERE id=(SELECT p.wave_id FROM projects p JOIN tasks t ON t.project_id=p.id WHERE t.id=?1)", [task_id]).unwrap();
-    // A retained alias/deletion observation cannot transfer personal authority.
-    let personal = fixture.json(&["task", "status", task_id, "--json"]);
-    assert_eq!(personal["planning_state"], "available");
-    assert_ne!(
-        personal["execution"]["actions"]["reason"],
-        "Task was deleted; retained history is read-only"
-    );
     fixture.json(&["task", "abandon", task_id, "--json"]);
     let terminal = fixture.run(&["-b", "--agent", "codex", "task", "run", task_id]);
     assert!(!terminal.status.success());

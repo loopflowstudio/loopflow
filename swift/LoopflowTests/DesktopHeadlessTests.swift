@@ -44,7 +44,7 @@ struct DesktopHeadlessTests {
             fixtures.appendingPathComponent("roadmap_snapshot.json"))) as? [String: Any])
         var waves = try #require(roadmap["waves"] as? [[String: Any]])
         var waveObject = try #require(waves[0]["wave"] as? [String: Any])
-        waveObject["name"] = "personal:inbox"
+        waveObject["name"] = "inbox"
         waves[0]["wave"] = waveObject
         roadmap["waves"] = waves
         let snapshot = String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
@@ -91,8 +91,8 @@ struct DesktopHeadlessTests {
         #expect(try await model.workflowSource("code", wave: wave) == updated)
     }
 
-    @Test("An unplaced personal Task and its CLI comment thread render without a display")
-    func personalTaskComments() async throws {
+    @Test("An unplaced Task and its CLI comment thread render without a display")
+    func storedTaskComments() async throws {
         struct Proof: Decodable {
             let task: RoadmapTask
             let comments: TaskComments

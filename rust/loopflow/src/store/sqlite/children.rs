@@ -1978,6 +1978,7 @@ impl SqliteStore {
 #[cfg(test)]
 mod local_planning_tests {
     use rusqlite::params;
+    use rusqlite::OptionalExtension;
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::WaveId;
@@ -1986,7 +1987,7 @@ mod local_planning_tests {
     use crate::store::sqlite::SqliteStore;
 
     fn local_project(store: &SqliteStore) -> ProjectId {
-        store.ensure_personal_project("/local", "inbox").unwrap().id
+        store.ensure_wave_project("/local", "inbox").unwrap().id
     }
 
     #[test]
@@ -2102,9 +2103,7 @@ mod local_planning_tests {
             )
             .unwrap();
         assert_eq!(edited.plan.title, "A mapping does not transfer authority");
-        store
-            .confirm_task_deletion(&mapped.wave_id, "different-provider-uuid", "TEAM-9")
-            .unwrap();
+        store.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'different-provider-uuid','TEAM-9',1)", [&mapped.wave_id]).unwrap();
         assert!(store.task_deleted(&mapped).unwrap());
         assert!(store.list_tasks(None).unwrap().is_empty());
         let retained = store.task(&mapped.id).unwrap().unwrap();
@@ -2315,7 +2314,7 @@ mod local_planning_tests {
         assert_eq!(project.plan.linear_id.unwrap().as_str(), "linear-project");
         assert_eq!(project.plan.prompt_context, "Retain KRs");
         assert_eq!(
-            store.task_issue_identity(&orphan_wave, "LOO-2").unwrap(),
+            store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),
             Some(("orphan-issue".into(), "LOO-2".into()))
         );
         assert!(store.task_by_issue("LOO-2").unwrap().is_none());

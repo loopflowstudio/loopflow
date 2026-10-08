@@ -14,6 +14,25 @@ use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 impl SqliteStore {
+    /// The tombstone and pending effect are one save; retries retain the first identity.
+    pub fn delete_task(&self, id: &TaskId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let changed = tx.execute("UPDATE tasks SET planning_deleted_at=?2,planning_revision=planning_revision+1,updated_at=?2
+            WHERE id=?1 AND planning_deleted_at IS NULL", params![id.as_str(), now_unix()])?;
+        if changed == 1 {
+            PlanningChanges::Task(id).record(
+                &tx,
+                "deleted",
+                serde_json::json!(false),
+                serde_json::json!(true),
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn pending_task_changes(&self, task: &TaskId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         PlanningChanges::Task(task).pending(&conn)

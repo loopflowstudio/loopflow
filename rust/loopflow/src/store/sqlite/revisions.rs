@@ -58,7 +58,6 @@ mod tests {
     /// domain; `session_events` is covered except for transcript and usage rows.
     const NEVER_DISPLAYED: &[&str] = &[
         "access_profiles",
-        "personal_plans",
         "task_creation_intents",
         "pm_project_name_cutover",
         "project_binding_imports",

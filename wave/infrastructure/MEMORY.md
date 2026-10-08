@@ -58,15 +58,20 @@ repeating direction. `783305284` saves abandonment/cancellation identity atomica
 deleting provider-first decision writers. Cleanup checks execution separately;
 safe cancellation delivery remains pending.
 
-Common comment, content, admission, Task/Project creation/edit, selection,
-rotation and refiling cuts are committed. Exact evidence and remaining limits:
-`fa35cfd88:wave/infrastructure/MEMORY.md`, this heading. They prove local behavior,
-not provider delivery, installation or composed reconnect.
-
-Wave schema/provisioning/definitions and deletion still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
-pending presentation and composed reconnect remain unfinished. Project updates
-also lack a revision precondition. The one draft starts at v0.13.10 (`fc0bb97f7`);
-installation remains unproved.
+Common Task/Project writers, selection, rotation and refiling are committed;
+prior proofs remain at `fa35cfd88:wave/infrastructure/MEMORY.md`, this heading.
+October 8's ownership cut removes personal schema/types/addresses and authority
+selection. Wave documents, inherited context, edits and relocation share SQLite;
+explicit ingestion preserves authored IDs and file bytes. The one v0.13.10 draft
+imports available registered definitions. Missing sources preserve identity for later
+import. Task deletion saves removal and stable pending identity atomically, retaining
+Workflow, Session, Process, PR, checkout and historical provider evidence. Its old
+provider-first writer is deleted. Local CLI/rollback/migration fixtures pass; this
+proves neither installed conversion nor delivery. Historical uncertain relocation
+and provider transitions remain unresolved. LOO-412 can consume the committed source
+boundary; export, safe field/cancellation/deletion delivery, automatic Linear-wins
+adoption, pending presentation and composed reconnect remain unfinished. An ownership
+cut alone is not independently shippable connected behavior.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

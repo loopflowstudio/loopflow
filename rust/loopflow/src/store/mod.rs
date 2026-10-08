@@ -471,62 +471,6 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn retain_task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        let issue_id = issue_id.to_string();
-        let identifier = identifier.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.retain_task_issue_identity(&wave_id, &issue_id, &identifier)
-        })
-        .await
-    }
-
-    pub(crate) async fn task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let wave_id = wave_id.clone();
-        let issue = issue.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.task_issue_identity(&wave_id, &issue)
-        })
-        .await
-    }
-
-    pub(crate) async fn task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let wave_id = wave_id.clone();
-        let issue = issue.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.task_deletion(&wave_id, &issue)
-        })
-        .await
-    }
-
-    pub(crate) async fn confirm_task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        let issue_id = issue_id.to_string();
-        let identifier = identifier.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.confirm_task_deletion(&wave_id, &issue_id, &identifier)
-        })
-        .await
-    }
-
     pub async fn deleted_task_issues(
         &self,
         wave_id: &WaveId,
@@ -630,21 +574,6 @@ impl Store {
     pub async fn find_waves_by_slug(&self, slug: &str) -> StoreResult<Vec<Wave>> {
         let slug = slug.to_string();
         run_sqlite(&self.sqlite, move |store| store.find_waves_by_slug(&slug)).await
-    }
-
-    pub(crate) async fn reconcile_wave_directory(
-        &self,
-        id: &WaveId,
-        name: &str,
-        parent: Option<&WaveId>,
-    ) -> StoreResult<()> {
-        let id = id.clone();
-        let name = name.to_string();
-        let parent = parent.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.reconcile_wave_directory(&id, &name, parent.as_ref())
-        })
-        .await
     }
 
     pub async fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
@@ -2052,7 +1981,7 @@ mod tests {
             } else {
                 let project = store
                     .sqlite
-                    .ensure_personal_project(wave.repo(), "inbox")
+                    .ensure_wave_project(wave.repo(), "inbox")
                     .unwrap();
                 store
                     .sqlite
@@ -3086,61 +3015,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_deletion_identity_follows_fresh_ownership_without_removing_work() {
-        let directory = tempfile::tempdir().unwrap();
-        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-            directory.path().join("registry.db"),
-        ))
-        .await
-        .unwrap();
-        let original = make_wave("/repo");
-        let current = Wave::new(WaveId::new(), "successor".into(), "/repo".into());
-        store.create_wave(&original).await.unwrap();
-        store.create_wave(&current).await.unwrap();
-        let project = make_project(&current);
-        store.create_project(&project).await.unwrap();
-        select_project(&store, &project);
-        let task = make_task(&current, &project);
-        for wave in [&original, &current] {
-            store
-                .retain_task_issue_identity(
-                    wave.id(),
-                    task.plan.linear_id.as_ref().unwrap().as_str(),
-                    &task.plan.identifier,
-                )
-                .await
-                .unwrap();
-        }
-        assert!(store
-            .task_issue_identity(original.id(), &task.plan.identifier)
-            .await
-            .unwrap()
-            .is_none());
-        for selector in [
-            task.plan.linear_id.as_ref().unwrap().as_str(),
-            &task.plan.identifier,
-        ] {
-            assert_eq!(
-                store
-                    .task_issue_identity(current.id(), selector)
-                    .await
-                    .unwrap(),
-                Some((
-                    task.plan.linear_id.as_ref().unwrap().as_str().to_string(),
-                    task.plan.identifier.clone()
-                ))
-            );
-        }
-        store.seed_task(&task, &make_task_pr(&task)).await.unwrap();
-        assert_eq!(store.list_tasks(None).await.unwrap(), vec![task]);
-        assert!(store
-            .deleted_task_issues(current.id())
-            .await
-            .unwrap()
-            .is_empty());
-    }
-
-    #[tokio::test]
     async fn local_deletion_receipt_hides_mapped_tasks_without_erasing_history() {
         let (directory, store, wave) = planning_store().await;
         let project = make_project(&wave);
@@ -3161,80 +3035,6 @@ mod tests {
         assert!(store.list_tasks(None).await.unwrap().is_empty());
         assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
         assert_eq!(store.active_task_pr(&pr.task_id).await.unwrap(), Some(pr));
-    }
-
-    #[tokio::test]
-    async fn task_deletion_confirmation_serializes_with_placement() {
-        for registration_first in [false, true] {
-            let directory = tempfile::tempdir().unwrap();
-            let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
-                directory.path().join("registry.db"),
-            ))
-            .await
-            .unwrap();
-            let wave = make_wave("/repo");
-            store.create_wave(&wave).await.unwrap();
-            let project = make_project(&wave);
-            store.create_project(&project).await.unwrap();
-            select_project(&store, &project);
-            let task = make_task(&wave, &project);
-            let pr = make_task_pr(&task);
-            store.sqlite.seed_unplaced_task(&task);
-            let place = || {
-                store.place_task(
-                    &task.id,
-                    task.worktree.as_ref().unwrap(),
-                    &task.workspace_slug,
-                    &pr,
-                    None,
-                )
-            };
-            if registration_first {
-                place().await.unwrap();
-                store
-                    .confirm_task_deletion(
-                        wave.id(),
-                        task.plan.linear_id.as_ref().unwrap().as_str(),
-                        &task.plan.identifier,
-                    )
-                    .await
-                    .unwrap();
-                assert!(store
-                    .deleted_task_issues(wave.id())
-                    .await
-                    .unwrap()
-                    .contains(task.plan.linear_id.as_ref().unwrap().as_str()));
-                assert_eq!(store.get_task(&task.id).await.unwrap(), Some(task));
-                assert_eq!(store.active_task_pr(&pr.task_id).await.unwrap(), Some(pr));
-            } else {
-                store
-                    .confirm_task_deletion(
-                        wave.id(),
-                        task.plan.linear_id.as_ref().unwrap().as_str(),
-                        &task.plan.identifier,
-                    )
-                    .await
-                    .unwrap();
-                assert!(place().await.is_err());
-                assert!(store
-                    .get_task(&task.id)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .worktree
-                    .is_none());
-                assert_eq!(
-                    store
-                        .task_deletion(wave.id(), &task.plan.identifier)
-                        .await
-                        .unwrap(),
-                    Some((
-                        task.plan.linear_id.as_ref().unwrap().as_str().to_string(),
-                        task.plan.identifier
-                    ))
-                );
-            }
-        }
     }
 
     #[tokio::test]

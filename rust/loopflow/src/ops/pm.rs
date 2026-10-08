@@ -901,12 +901,10 @@ async fn pm_init_async(
     progress: &impl Progress,
 ) -> OpsResult<PmInitResult> {
     let wave = resolve_wave(options.wave.as_deref())?;
-    let wave_dir = repo.join("wave").join(&wave);
-    if !wave_dir.is_dir() {
-        return Err(OpsError::Message(format!(
-            "wave directory not found: wave/{wave}/"
-        )));
-    }
+    let store = pm_store().await?;
+    crate::work::wave::ensure_wave_row(&store, repo, &wave)
+        .await
+        .map_err(|cause| OpsError::Message(cause.to_string()))?;
 
     require_linear_config(repo)?;
     let repo_id = repository_id(repo)?;
@@ -988,10 +986,6 @@ async fn pm_init_async(
         )?;
     }
 
-    let store = pm_store().await?;
-    crate::work::wave::ensure_wave_row(&store, repo, &wave)
-        .await
-        .map_err(|cause| OpsError::Message(cause.to_string()))?;
     let ctx = resolve_context(repo, &wave).await?;
     refresh_pm_snapshot(repo, &wave, &ctx).await?;
     Ok(PmInitResult {
@@ -1265,131 +1259,6 @@ pub fn list_pm_waves(repo: &Path) -> OpsResult<Vec<String>> {
         .into_iter()
         .filter(|wave| wave_has_pm_initiative(repo, wave))
         .collect())
-}
-
-pub(crate) async fn delete_task(repo: &Path, issue: &str) -> OpsResult<String> {
-    let store = pm_store().await?;
-    let task = store
-        .get_task_by_issue(issue)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let issue = task
-        .as_ref()
-        .map(|task| task.plan.linear_id())
-        .transpose()?
-        .map_or(issue, |id| id.as_str());
-    let repository = resolve_repository_context(repo).await?;
-    // Observed identity survives planning replacement, but only the confirmation
-    // relation or Linear's trash proves deletion.
-    let mut retained = Vec::new();
-    for wave in list_local_waves(repo)? {
-        let locator = crate::work::wave::WaveLocator::discover(repo, &wave)
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        let Some(registered) = store
-            .get_wave_at(&locator)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        else {
-            continue;
-        };
-        if let Some((id, identifier)) = store
-            .task_deletion(registered.id(), issue)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            retained.push((wave, id, identifier, true));
-        } else if let Some((id, identifier)) = store
-            .task_issue_identity(registered.id(), issue)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            retained.push((wave, id, identifier, false));
-        }
-    }
-    if retained.len() > 1 {
-        return Err(OpsError::Message(format!(
-            "Task {issue} has ambiguous retained Wave ownership"
-        )));
-    }
-    let retained = retained.pop();
-    let confirmed = retained
-        .as_ref()
-        .is_some_and(|(_, _, _, confirmed)| *confirmed);
-    let trashed = match retained.as_ref() {
-        Some((_, id, _, false)) => matches!(repository.client.item_is_deleted(id).await, Ok(true)),
-        _ => false,
-    };
-    let (wave, id, identifier) = if confirmed || trashed {
-        let (wave, id, identifier, _) = retained.expect("confirmed identity was retained");
-        (wave, id, identifier)
-    } else {
-        // Retained identity must not authorize deleting an issue that moved to
-        // another repository. Fresh ownership is required before the mutation.
-        let ResolvedTask { wave, item, .. } = resolve_owned_issue(repo, issue).await?;
-        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        store
-            .retain_task_issue_identity(registered.id(), &item.id, &item.identifier)
-            .await
-            .map_err(|error| {
-                OpsError::Message(format!(
-                    "Could not retain Task identity; no provider deletion was attempted: {error}"
-                ))
-            })?;
-        (wave, item.id, item.identifier)
-    };
-    if !confirmed {
-        if !trashed {
-            repository
-                .client
-                .delete_item(&id)
-                .await
-                .map_err(pm_to_ops)?;
-        }
-        let registered = crate::work::wave::ensure_wave_row(&store, repo, &wave)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?;
-        store
-            .confirm_task_deletion(registered.id(), &id, &identifier)
-            .await
-            .map_err(|error| {
-                OpsError::Message(format!(
-                    "Linear deletion is confirmed, but local removal failed: {error}"
-                ))
-            })?;
-    }
-    let ctx = PmContext {
-        initiative: read_initiative(repo, &wave)
-            .ok_or_else(|| OpsError::Message(format!("wave/{wave} has no Linear Initiative")))?,
-        repository,
-    };
-    refresh_pm_snapshot(repo, &wave, &ctx)
-        .await
-        .map_err(|error| {
-            OpsError::Message(format!(
-                "Deletion is confirmed, but planning refresh failed: {error}"
-            ))
-        })?;
-    if let Some(task) = task {
-        for pr in store
-            .task_prs(&task.id)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-        {
-            if let Some(github) = pr
-                .publication
-                .as_ref()
-                .and_then(|publication| publication.github.as_ref())
-            {
-                eprintln!("Retained PR history: {}", github.url);
-            }
-        }
-        if let Some(path) = task.worktree.as_ref().filter(|path| path.exists()) {
-            eprintln!("Retained checkout: {}", path.display());
-        }
-    }
-    Ok(identifier)
 }
 
 /// Read planning under the existing managed freshness policy.
@@ -2408,35 +2277,18 @@ pub(crate) async fn pm_rename(
 }
 
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
-    let wave_dir = repo.join("wave");
-    if !wave_dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut waves = Vec::new();
-    collect_local_waves(&wave_dir, &wave_dir, &mut waves)?;
-    waves.sort();
-    Ok(waves)
-}
-
-fn collect_local_waves(root: &Path, directory: &Path, waves: &mut Vec<String>) -> OpsResult<()> {
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let path = entry.path();
-        if path.join("GOAL.md").is_file() {
-            let relative = path.strip_prefix(root).expect("walk remains below wave/");
-            let name = relative
-                .components()
-                .map(|component| component.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            waves.push(name);
-        }
-        collect_local_waves(root, &path, waves)?;
-    }
-    Ok(())
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(store
+        .list_waves(Some(&canonical.to_string()))
+        .map_err(|error| OpsError::Message(error.to_string()))?
+        .into_iter()
+        .filter(|wave| !wave.is_retired())
+        .map(|wave| wave.slug().to_string())
+        .collect())
 }
 
 // ── helpers ─────────────────────────────────────────────────────────

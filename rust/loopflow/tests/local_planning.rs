@@ -32,7 +32,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 }
 
 #[test]
-fn personal_task_publishes_and_completes_after_verified_merge() {
+fn stored_task_publishes_and_completes_after_verified_merge() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     for args in [
@@ -139,7 +139,7 @@ fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "ensure", "personal:inbox", "--json"],
+        &["wave", "ensure", "inbox", "--json"],
     );
     let id = loopflow::durable::TaskId::new();
     let args = [
@@ -173,7 +173,7 @@ fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
     let git = Command::new("/bin/sh")
@@ -218,13 +218,13 @@ fn concurrent_creation_and_failed_first_checkout_retain_one_task() {
 }
 
 #[test]
-fn personal_rotation_commits_all_waves_and_serializes_new_work() {
+fn stored_rotation_commits_all_waves_and_serializes_new_work() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let mut entries = Vec::new();
     let mut predecessors = Vec::new();
     let successor = uuid::Uuid::new_v4().to_string();
-    for name in ["personal:first", "personal:second"] {
+    for name in ["first", "second"] {
         lf(
             repo.path(),
             home.path(),
@@ -262,7 +262,7 @@ fn personal_rotation_commits_all_waves_and_serializes_new_work() {
     .unwrap();
     let failed = command(repo.path(), home.path(), &args).output().unwrap();
     assert!(!failed.status.success());
-    for (i, name) in ["personal:first", "personal:second"].iter().enumerate() {
+    for (i, name) in ["first", "second"].iter().enumerate() {
         let wave = lf(
             repo.path(),
             home.path(),
@@ -294,7 +294,7 @@ fn personal_rotation_commits_all_waves_and_serializes_new_work() {
                     "task",
                     "create",
                     "--wave",
-                    "personal:first",
+                    "first",
                     "--title",
                     "Concurrent work",
                     "--json",
@@ -310,7 +310,7 @@ fn personal_rotation_commits_all_waves_and_serializes_new_work() {
     let current = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:first", "--json"],
+        &["wave", "status", "first", "--json"],
     );
     let destination = &current["projects"]["items"]
         .as_array()
@@ -405,7 +405,7 @@ fn public_local_plan_matches_desktop() {
 }
 
 #[test]
-fn personal_fields_preserve_order_assignment_and_project_summary() {
+fn stored_fields_preserve_order_assignment_and_project_summary() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let fields: Value = serde_json::from_str(include_str!(
@@ -473,7 +473,7 @@ fn personal_fields_preserve_order_assignment_and_project_summary() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["tasks"]["items"][0]["task"]["id"], id);
@@ -481,7 +481,7 @@ fn personal_fields_preserve_order_assignment_and_project_summary() {
 }
 
 #[test]
-fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
+fn stored_nested_waves_keep_definitions_and_projects_in_the_store() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let created = lf(
@@ -491,7 +491,7 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
             "task",
             "create",
             "--wave",
-            "personal:tools/parser",
+            "tools/parser",
             "--title",
             "Nested work",
             "--json",
@@ -509,7 +509,7 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
             "task",
             "create",
             "--wave",
-            "personal:tools/parser",
+            "tools/parser",
             "--title",
             "Another task",
             "--json",
@@ -527,19 +527,12 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
     lf(
         repo.path(),
         home.path(),
-        &[
-            "wave",
-            "rename",
-            "personal:tools",
-            "--name",
-            "instruments",
-            "--json",
-        ],
+        &["wave", "rename", "tools", "--name", "instruments", "--json"],
     );
     let renamed = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:instruments/parser", "--json"],
+        &["wave", "status", "instruments/parser", "--json"],
     );
     assert_eq!(renamed["tasks"]["items"][0]["task"]["id"], created["id"]);
     lf(
@@ -550,7 +543,7 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
             "refile",
             created["id"].as_str().unwrap(),
             "--wave",
-            "personal:instruments/lexer",
+            "instruments/lexer",
         ],
     );
     let moved = lf(
@@ -565,7 +558,7 @@ fn personal_nested_waves_keep_definitions_and_projects_in_the_store() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:instruments/parser", "--json"],
+        &["wave", "status", "instruments/parser", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
     let wave_id = wave["wave"]["id"].as_str().unwrap();
@@ -728,7 +721,7 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["project_readiness"]["state"], "ready");
@@ -742,7 +735,7 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
         &[
             "wave",
             "edit",
-            "personal:inbox",
+            "inbox",
             "--goal",
             goal.to_str().unwrap(),
             "--memory",
@@ -752,19 +745,19 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
     let context = lf(
         repo.path(),
         home.path(),
-        &["context", "--wave", "personal:inbox", "--json"],
+        &["context", "--wave", "inbox", "--json"],
     );
     let memory_usage = context["context"]["usage"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|entry| entry["source"] == "personal:inbox/MEMORY.md")
+        .find(|entry| entry["source"] == "wave/inbox/MEMORY.md")
         .unwrap();
     assert_eq!(memory_usage["submitted_bytes"], 25);
     let edited_wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     assert!(edited_wave
         .to_string()
@@ -778,7 +771,7 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
             "wave",
             "update-plan",
             "-w",
-            "personal:inbox",
+            "inbox",
             "--plan",
             plan_file.to_str().unwrap(),
         ],
@@ -843,7 +836,7 @@ fn public_local_planning_survives_creation_reply_loss_and_restart() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     assert!(wave["tasks"]["items"]
         .as_array()
@@ -985,7 +978,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "personal:inbox", "--json"],
+        &["wave", "status", "inbox", "--json"],
     );
     let successor = uuid::Uuid::new_v4();
     let plan_file = home.path().join("rotation.json");
@@ -993,7 +986,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     let rotate = [
         "wave",
         "new-chapter",
-        "personal:inbox",
+        "inbox",
         "Next",
         "--plan",
         plan_file.to_str().unwrap(),
@@ -2231,5 +2224,228 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         );
         assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
         assert!(!repo.path().join("wave").exists());
+    }
+}
+
+#[test]
+fn wave_definitions_import_once_and_relocate_without_rewriting_files() {
+    for connected in [false, true] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let wave_id = loopflow::id::WaveId::new();
+        let root = repo.path().join("wave/tools");
+        std::fs::create_dir_all(root.join("parser")).unwrap();
+        std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
+        if connected {
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "pm:\n  provider: linear\n  linear_team: fixture-team\n",
+            )
+            .unwrap();
+        }
+        let goal = format!("---\nid: {wave_id}\n---\n## Objective\n\nKeep parsing.\n");
+        std::fs::write(root.join("GOAL.md"), &goal).unwrap();
+        std::fs::write(root.join("MEMORY.md"), "Inherited decisions.\n").unwrap();
+        std::fs::write(
+            root.join("parser/GOAL.md"),
+            "## Objective\n\nPreserve tokens.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("parser/README.md"),
+            "Additional authored context.\n",
+        )
+        .unwrap();
+        let workflow = "nodes: {}\nedges: [{from: start, to: end}]\n";
+        std::fs::write(repo.path().join(".lf/workflows/finish.yaml"), workflow).unwrap();
+        let project = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "ensure", "tools/parser", "--json"],
+        );
+        let project_id = project["id"].as_str().unwrap();
+        let task = lf(
+            repo.path(),
+            home.path(),
+            &[
+                "task",
+                "create",
+                "--wave",
+                "tools/parser",
+                "--title",
+                "Retain definitions",
+                "--json",
+            ],
+        );
+        let task_id = task["id"].as_str().unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &["project", "workflow", "set", project_id, "finish"],
+        );
+        let memory = home.path().join("memory.md");
+        std::fs::write(&memory, "Saved child memory λ.\n").unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "wave",
+                "edit",
+                "tools/parser",
+                "--memory",
+                memory.to_str().unwrap(),
+            ],
+        );
+        std::fs::write(
+            root.join("parser/MEMORY.md"),
+            "Later file must not replace saved memory.\n",
+        )
+        .unwrap();
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "ensure", "tools/parser", "--json"],
+        );
+        assert_eq!(std::fs::read_to_string(root.join("GOAL.md")).unwrap(), goal);
+        std::fs::rename(repo.path().join("wave"), repo.path().join("authored-wave")).unwrap();
+        std::fs::remove_file(repo.path().join(".lf/workflows/finish.yaml")).unwrap();
+        let context = lf(
+            repo.path(),
+            home.path(),
+            &["context", "--wave", "tools/parser", "--json"],
+        );
+        let text = context.to_string();
+        assert!(text.contains("wave/tools/MEMORY.md"), "{text}");
+        assert!(text.contains("wave/tools/parser/MEMORY.md"), "{text}");
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert_eq!(
+            store.wave_documents(&wave_id).unwrap()["MEMORY.md"],
+            "Inherited decisions.\n"
+        );
+        let saved = store.task_by_issue(task_id).unwrap().unwrap();
+        let docs = store.wave_documents(&saved.wave_id).unwrap();
+        assert_eq!(docs["MEMORY.md"], "Saved child memory λ.\n");
+        assert_eq!(docs["README.md"], "Additional authored context.\n");
+        let source = lf(
+            repo.path(),
+            home.path(),
+            &["project", "workflow", "source", project_id, "finish"],
+        );
+        assert!(source.as_str().unwrap().contains("from: start"));
+        std::fs::write(repo.path().join(".lf/workflows/unimported.yaml"), workflow).unwrap();
+        std::fs::write(
+            repo.path().join(".lf/workflows/finish.yaml"),
+            "invalid: true",
+        )
+        .unwrap();
+        let catalog = lf(
+            repo.path(),
+            home.path(),
+            &[
+                "project",
+                "workflow",
+                "list",
+                "--project",
+                project_id,
+                "--json",
+            ],
+        );
+        let entries = catalog.as_array().unwrap();
+        let saved = entries
+            .iter()
+            .find(|entry| entry["name"] == "finish")
+            .unwrap();
+        assert_eq!(saved["source"], "stored");
+        assert!(saved["unavailable"].is_null());
+        let unimported = entries
+            .iter()
+            .find(|entry| entry["name"] == "unimported")
+            .unwrap();
+        assert!(unimported["workflow"].is_null());
+        assert!(unimported["unavailable"]
+            .as_str()
+            .unwrap()
+            .contains("lf wave ensure"));
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "rename", "tools", "--name", "instruments", "--json"],
+        );
+        let status = lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", "instruments/parser", "--json"],
+        );
+        assert_eq!(status["wave"]["goal"], "Preserve tokens.");
+        assert_eq!(status["tasks"]["items"][0]["task"]["id"], task_id);
+        assert!(!repo.path().join("wave").exists());
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join("authored-wave/tools/GOAL.md")).unwrap(),
+            goal
+        );
+    }
+}
+
+#[test]
+fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
+    for connected in [false, true] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            std::fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "pm:\n  provider: linear\n  linear_team: fixture-team\n",
+            )
+            .unwrap();
+        }
+        let task = lf(
+            repo.path(),
+            home.path(),
+            &["task", "create", "--title", "Remove planning", "--json"],
+        );
+        let id = task["id"].as_str().unwrap();
+        let store =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        let task_id = loopflow::durable::TaskId::parse(id).unwrap();
+        let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        if connected {
+            db.execute("UPDATE tasks SET external_issue_id='retained-issue',issue_identifier='FIX-1' WHERE id=?1", [id]).unwrap();
+        }
+        let before = store.task(&task_id).unwrap().unwrap();
+        let work = loopflow::durable::WorkRef::Task(task_id.clone());
+        let execution = store.work_status(&work).unwrap();
+        db.execute_batch("CREATE TRIGGER fail_removal BEFORE INSERT ON task_changes WHEN NEW.field='deleted' BEGIN SELECT RAISE(ABORT,'receipt failed'); END;").unwrap();
+        assert!(!command(repo.path(), home.path(), &["task", "delete", id])
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert_eq!(store.task(&task_id).unwrap().unwrap(), before);
+        assert!(store.pending_task_changes(&task_id).unwrap().is_empty());
+        db.execute_batch("DROP TRIGGER fail_removal;").unwrap();
+        let output = lf(repo.path(), home.path(), &["task", "delete", id]);
+        if connected {
+            assert!(output.as_str().unwrap().contains("Pending Linear sync"));
+        }
+        let changes = store.pending_task_changes(&task_id).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].field, "deleted");
+        assert_eq!(changes[0].value, true);
+        lf(repo.path(), home.path(), &["task", "delete", id]);
+        assert_eq!(store.pending_task_changes(&task_id).unwrap(), changes);
+        let removed = store.task(&task_id).unwrap().unwrap();
+        assert_eq!(store.work_status(&work).unwrap(), execution);
+        assert_eq!(removed.worktree, before.worktree);
+        assert_eq!(removed.plan.linear_id, before.plan.linear_id);
+        assert_eq!(removed.plan.revision, before.plan.revision + 1);
+        let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+        assert_eq!(status["planning_state"], "removed");
+        assert!(store.list_tasks(None).unwrap().is_empty());
+        drop(store);
+        let reopened =
+            loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+        assert_eq!(reopened.pending_task_changes(&task_id).unwrap(), changes);
     }
 }

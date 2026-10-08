@@ -149,14 +149,14 @@ lf task checkout <id>
 lf task run <id> research
 ```
 
-Without a selected Wave, explicit creation uses `personal:inbox`. A Task gets its
+Without a selected Wave, explicit creation uses `inbox`. A Task gets its
 identity before placement; creation starts no agent and requires no Linear login.
-Personal goals, memory, Projects and comments stay in SQLite. Reads create nothing.
+Goals, memory, Projects and comments stay in SQLite. Reads create nothing.
 
 ```bash
-lf wave ensure personal:parser
-lf wave edit personal:parser --goal /tmp/goal.md --memory /tmp/memory.md
-lf task create --wave personal:parser --title "Retain escaped quotes"
+lf wave ensure parser
+lf wave edit parser --goal /tmp/goal.md --memory /tmp/memory.md
+lf task create --wave parser --title "Retain escaped quotes"
 ```
 
 Creation prints its retry identity before attempting the write. Repeat the original
@@ -183,19 +183,21 @@ Project names, summaries, Workflow selections and complete plan replacements sav
 locally, including during a Linear outage. Connected repositories report pending sync; `lf project workflow
 show <project-id> --json` includes saved field changes and retained conflicts.
 Inbound refreshes preserve pending fields and accept unrelated changes. Project
-edit delivery remains unfinished while provider concurrency protection is unresolved.
+edit delivery and automatic Linear conflict precedence remain unfinished. Readback
+does not establish protection against unseen concurrent provider writes.
 
 Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
 for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
-definitions override repository and builtin sources with the same name. Nested
-personal Waves use names such as `personal:parser/tokenizer`; renaming retains
-their IDs and descendants. Connected Wave goal and memory definitions use
-repository files.
+definitions are imported by `lf wave ensure`; builtin definitions remain available.
+Nested Waves use names such as `parser/tokenizer`; renaming retains their IDs,
+descendants and saved documents. `lf wave ensure` imports existing Markdown and
+Workflow sources without changing them. Repeating it preserves stored edits.
+`lf wave edit` saves to SQLite in both connection modes.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
 identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
 settles it. A repository without a code remote supports local work and refuses
-hosted landing. Personal planning does not require Linear at any of these boundaries.
+hosted landing. Local planning does not require Linear at any of these boundaries.
 
 ## Connect planning and create work
 

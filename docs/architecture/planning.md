@@ -26,13 +26,20 @@ lf task comment <id> "Keep quoted input"
 lf checkout <id>
 ```
 
-LOO-406 is replacing split planning ownership with one local plan and optional
-repository-wide Linear synchronization. The remaining Wave path still provisions
-`personal:inbox` for creation without a Wave. Personal Wave definitions live in
-SQLite; other Wave definitions remain repository-owned. Deletion still branches
-on stored Wave ownership. Rotation and refiling save through local transactions
-with pending membership receipts. These are unfinished cutover paths; Task and Project creation/editing already share local writers.
-Reads provision nothing, and personal definitions do not write the code checkout.
+Wave, Project and Task planning use one local SQLite owner with optional
+repository-wide Linear synchronization. Creation without a Wave uses `inbox`.
+Wave provisioning imports existing Markdown and repository Workflow definitions,
+preserving stable authored IDs and source bytes. Saved documents, including ancestor
+context, serve both connection modes. Reads never provision or fall back to files.
+Explicit edits and relocation change stored planning without rewriting the checkout.
+The released-frontier migration imports available registered definitions; unavailable
+sources can be imported later with `lf wave ensure`.
+
+Task deletion atomically records local removal and a stable pending field receipt.
+It preserves Workflow, Session, Process, PR and checkout state, including completed
+outcomes. Retry retains the first receipt. Confirmed historical provider removals
+remain independent evidence. Deletion delivery is unfinished; connected commands
+report pending Linear sync and do not claim provider trash succeeded.
 
 Task and Project rows own identity for both paths. Random UUIDs are minted before
 placement; provider UUIDs and ticket aliases remain optional mappings. Accepted
@@ -87,9 +94,9 @@ destination changes neither the revision nor receipt. Pending refiling allows in
 observations from another Wave to preserve both conflicting membership values and
 advance unrelated fields. It never grants execution or provider-write authority.
 
-LOO-406's accepted replacement is one locally owned plan with repository-wide
-optional Linear synchronization. That cutover remains unfinished. Wave definitions/provisioning and deletion retain separate planning authorities;
-the common offline checkout and launch paths do not establish common planning ownership.
+LOO-406's common ownership cut removes the personal namespace and provider/local
+writer selection. Export, field/deletion delivery, accepted conflict precedence and
+composed reconnect remain unfinished synchronization work.
 Task creation and edits use one SQLite writer, regardless of provider mapping.
 Creation receipts retain the original Project and input; field receipts retain
 stable mutation identity, baseline and the first conflicting provider value.

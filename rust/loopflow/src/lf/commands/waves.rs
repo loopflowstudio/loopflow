@@ -531,10 +531,9 @@ pub(crate) async fn wave_snapshots(
         .await
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
     let waves = scope_waves_to_repo(waves, all)?;
-    let mut repositories = HashMap::new();
     let mut snapshots = Vec::with_capacity(waves.len());
     for wave in waves {
-        let snapshot = snapshot_wave(store, &wave, &mut repositories).await?;
+        let snapshot = snapshot_wave(store, &wave).await?;
         if !current || current_wave(&snapshot) {
             snapshots.push(snapshot);
         }
@@ -573,7 +572,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         .map_err(|err| anyhow!("failed to read repository Waves: {err}"))?;
     let mut repositories = HashMap::new();
     validate_pm_portfolio(store, &repository_waves, &mut repositories).await?;
-    let snapshot = snapshot_wave(store, wave, &mut repositories).await?;
+    let snapshot = snapshot_wave(store, wave).await?;
     let shared = SharedTaskReads::read(store).await?;
     let task_snapshots = wave_tasks(store, wave, true, None, &shared).await?;
     let metric_portfolio = crate::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
@@ -701,7 +700,7 @@ async fn roadmap_snapshot(
     let shared = SharedTaskReads::read(store).await?;
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
-        let snapshot = snapshot_wave(store, wave, &mut repositories).await?;
+        let snapshot = snapshot_wave(store, wave).await?;
         if !include_history && !current_wave(&snapshot) {
             continue;
         }
@@ -956,13 +955,8 @@ fn wave_repository(wave: &Wave, repositories: &mut HashMap<String, PathBuf>) -> 
 
 /// Build the registry snapshot for one wave, probing its discovery endpoint
 /// for liveness.
-pub(crate) async fn snapshot_wave(
-    store: &SharedStore,
-    wave: &Wave,
-    repositories: &mut HashMap<String, PathBuf>,
-) -> Result<WaveSnapshot> {
+pub(crate) async fn snapshot_wave(store: &SharedStore, wave: &Wave) -> Result<WaveSnapshot> {
     let repo = wave.repo().to_string();
-    let goal_repo = wave_repository(wave, repositories);
     let tasks = store
         .list_tasks(Some(wave.id()))
         .await
@@ -989,14 +983,12 @@ pub(crate) async fn snapshot_wave(
         id: wave.id().to_string(),
         name: wave.slug().to_string(),
         status,
-        goal: if let Some(definition) = store.sqlite.personal_wave_definition(wave.id())? {
-            definition.goal
-        } else if wave.is_retired() {
-            wave.slug().to_string()
-        } else {
-            crate::work::wave::config::read_wave_summary(&goal_repo, wave.slug())
-                .unwrap_or_else(|_| wave.slug().to_string())
-        },
+        goal: store
+            .sqlite
+            .wave_documents(wave.id())?
+            .get("GOAL.md")
+            .map(|content| crate::work::wave::config::wave_summary(content))
+            .unwrap_or_else(|| wave.slug().to_string()),
         repo,
         active_tasks,
         created_at: wave.created_at().and_then(format_time),
@@ -2610,10 +2602,8 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(before.tasks, super::Evidence::Ok { items, .. } if items.len() == 2));
-        store
-            .confirm_task_deletion(wave.id(), "removed", "FIX-1")
-            .await
-            .unwrap();
+        let removed = store.get_task_by_issue("FIX-1").await.unwrap().unwrap();
+        store.sqlite.delete_task(&removed.id).unwrap();
         for project_id in ["current", "next"] {
             let mut stale = snapshot.clone();
             if project_id == "next" {

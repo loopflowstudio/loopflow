@@ -1,16 +1,12 @@
 -- depends_on: process_names
 PRAGMA legacy_alter_table = ON;
 
-CREATE TABLE personal_plans (
-    id TEXT PRIMARY KEY,
-    repo TEXT NOT NULL UNIQUE
-);
-ALTER TABLE waves ADD COLUMN personal_plan_id TEXT REFERENCES personal_plans(id) ON DELETE RESTRICT;
 ALTER TABLE project_transitions ADD COLUMN local_plan_json TEXT;
-CREATE TABLE personal_wave_definitions (
-    wave_id TEXT PRIMARY KEY REFERENCES waves(id) ON DELETE RESTRICT,
-    goal TEXT NOT NULL,
-    memory TEXT NOT NULL
+CREATE TABLE wave_documents (
+    wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    PRIMARY KEY(wave_id,name)
 );
 CREATE TABLE wave_workflows (
     wave_id TEXT NOT NULL REFERENCES waves(id) ON DELETE RESTRICT,
@@ -18,23 +14,6 @@ CREATE TABLE wave_workflows (
     content TEXT NOT NULL,
     PRIMARY KEY(wave_id,name)
 );
-DROP INDEX idx_waves_active_locator;
-CREATE UNIQUE INDEX idx_waves_active_locator
-    ON waves(repo,ifnull(personal_plan_id,''),ifnull(parent_wave_id,''),name)
-    WHERE retired_at IS NULL;
-DROP VIEW wave_addresses;
-CREATE VIEW wave_addresses AS
-WITH RECURSIVE addresses(id,slug) AS (
-    SELECT id,CASE
-        WHEN personal_plan_id IS NOT NULL THEN 'personal:' || name
-        WHEN name LIKE 'personal:%' OR name LIKE 'shared:%' THEN 'shared:' || name
-        ELSE name END
-    FROM waves WHERE parent_wave_id IS NULL
-    UNION ALL
-    SELECT w.id,a.slug || '/' || w.name FROM waves w
-    JOIN addresses a ON w.parent_wave_id=a.id
-)
-SELECT w.*,a.slug FROM waves w JOIN addresses a ON a.id=w.id;
 
 -- Local planning keeps durable Work identity independent of provider mapping.
 -- Foreign-key actions are disabled by the migration runner during table rebuilds.
@@ -338,13 +317,13 @@ WHERE EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=tasks.external_is
 
 PRAGMA legacy_alter_table = OFF;
 
-CREATE TRIGGER store_revision_personal_wave_definitions_insert AFTER INSERT ON personal_wave_definitions
+CREATE TRIGGER store_revision_wave_documents_insert AFTER INSERT ON wave_documents
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
-CREATE TRIGGER store_revision_personal_wave_definitions_update AFTER UPDATE ON personal_wave_definitions
+CREATE TRIGGER store_revision_wave_documents_update AFTER UPDATE ON wave_documents
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
-CREATE TRIGGER store_revision_personal_wave_definitions_delete AFTER DELETE ON personal_wave_definitions
+CREATE TRIGGER store_revision_wave_documents_delete AFTER DELETE ON wave_documents
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_wave_workflows_insert AFTER INSERT ON wave_workflows
@@ -401,7 +380,7 @@ CREATE TABLE task_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','rank','project_id')),
+    field TEXT NOT NULL CHECK(field IN ('name','description','assignee','rank','project_id','deleted')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),

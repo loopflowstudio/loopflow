@@ -227,48 +227,22 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-/// Trash the issue after its placed work has been canceled or completed.
+/// Remove planning immediately, retaining execution and pending provider delivery.
 pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<String> {
     let repo = task_repository(repo, Some(issue))?;
     block_on_task(async {
         let store = task_store().await?;
-        if let Some(task) = store.get_task_by_issue(issue).await.map_err(task_error)? {
-            if store
-                .sqlite
-                .project_planning_authority(&task.project_id)
-                .map_err(task_error)?
-                == crate::planning::PlanningAuthority::Local
-            {
-                if !store.sqlite.task_deleted(&task).map_err(task_error)? {
-                    if super::task_work_status(&store, &task).await? != WorkStatus::Done {
-                        abandon(&repo, issue, false).await?;
-                    }
-                    store
-                        .sqlite
-                        .delete_local_task(&task.id)
-                        .map_err(task_error)?;
-                }
-                return Ok(task.plan.identifier);
+        let task = match resolve_task(&store, issue).await? {
+            Some(task) => task,
+            None => {
+                let resolved = crate::ops::pm::pm_resolve_task_async(&repo, issue).await?;
+                resolve_task(&store, &resolved.item.id)
+                    .await?
+                    .ok_or_else(|| task_error("Task was not retained after acquisition"))?
             }
-            let deleted = store
-                .task_deletion(&task.wave_id, task.plan.linear_id()?.as_str())
-                .await
-                .map_err(task_error)?
-                .is_some();
-            if !deleted && task.worktree.is_some() {
-                if super::task_work_status(&store, &task).await? == WorkStatus::Done {
-                    cleanup_completed_task(&store, &task).await?;
-                } else {
-                    abandon(&repo, issue, false).await?;
-                }
-            }
-        }
-        crate::ops::pm::delete_task(&repo, issue).await
-    })
-    .map_err(|error| {
-        task_error(format!(
-            "{error}. Removal is incomplete; retry `lf task delete {issue}`."
-        ))
+        };
+        store.sqlite.delete_task(&task.id).map_err(task_error)?;
+        Ok(task.plan.identifier)
     })
 }
 

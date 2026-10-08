@@ -542,40 +542,30 @@ fn gather_wave_docs(repo_root: &Path, wave: Option<&str>) -> Result<Vec<Document
     let Some(wave) = wave else {
         return Ok(docs);
     };
-    if wave.starts_with("personal:") {
-        for document in ["GOAL.md", "MEMORY.md"] {
-            docs.push(Document {
-                path: format!("{wave}/{document}"),
-                content: crate::work::wave::config::read_wave_document(repo_root, wave, document)?,
-                source: DocumentSource::Wave,
-            });
+    let store =
+        crate::store::sqlite::SqliteStore::open_read_only(&crate::store::database_path_from_env()?)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+    let mut prefix = String::new();
+    for segment in wave.split('/') {
+        if !prefix.is_empty() {
+            prefix.push('/');
         }
-        return Ok(docs);
-    }
-    let mut directory = PathBuf::from("wave");
-    for segment in Path::new(wave).components() {
-        directory.push(segment);
-        let absolute = repo_root.join(&directory);
-        if !absolute.is_dir() {
+        prefix.push_str(segment);
+        let locator = crate::work::wave::WaveLocator::discover(repo_root, &prefix)
+            .map_err(|error| CoreError::IoError(error.to_string()))?;
+        let Some(saved) = store
+            .get_wave_at(&locator)
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        else {
             continue;
-        }
-        let mut paths = fs::read_dir(&absolute)?
-            .map(|entry| entry.map(|entry| entry.path()))
-            .collect::<Result<Vec<_>, _>>()?;
-        paths.retain(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "md"));
-        paths.sort_by_key(|path| {
-            (
-                path.file_name().is_none_or(|name| name != "README.md"),
-                path.clone(),
-            )
-        });
-        for path in paths {
+        };
+        for (name, content) in store
+            .wave_documents(saved.id())
+            .map_err(|error| CoreError::IoError(error.to_string()))?
+        {
             docs.push(Document {
-                path: directory
-                    .join(path.file_name().expect("directory entry has a name"))
-                    .to_string_lossy()
-                    .into_owned(),
-                content: fs::read_to_string(&path)?,
+                path: format!("wave/{prefix}/{name}"),
+                content,
                 source: DocumentSource::Wave,
             });
         }
@@ -1550,11 +1540,7 @@ pub fn loopflow_section() -> String {
 pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(wave) = &components.wave {
-        let memory = if wave.starts_with("personal:") {
-            format!("Curate the stored Wave memory with `lf wave edit {wave} --memory <file>`. Personal definitions stay out of tracked files.")
-        } else {
-            format!("Curate wave/{wave}/MEMORY.md in this checkout. Ancestor files provide inherited context.")
-        };
+        let memory = format!("Curate stored Wave memory with `lf wave edit {wave} --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.");
         parts.push(format!(
             "<lf:wave name=\"{wave}\">\nYou are building toward the {wave} program of work.\n\
              {memory}\n\
@@ -2800,7 +2786,13 @@ mod tests {
 
     #[test]
     fn gather_context_wave_preserved() {
-        let temp = tempfile::tempdir().expect("create temp dir");
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+            .unwrap();
+        let temp = loopflow_test_support::TestRepo::new();
         let repo = temp.path();
 
         let opts = GatherContextOpts {

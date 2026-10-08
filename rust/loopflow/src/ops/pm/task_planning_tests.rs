@@ -5,14 +5,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use clap::Parser;
 use serde_json::json;
 
 use super::test_fixture::{now, Fixture};
-use super::{PmRefresh, PmTestContext, PM_TEST_CONTEXT};
+use super::{PmRefresh, PM_TEST_CONTEXT};
 use crate::durable::WorkStatus;
 use crate::ops::NullProgress;
-use crate::store::{open_ephemeral_store, StorageConfig};
 use crate::work::task::{
     AfterMerge, GithubObservation, GithubObservationResult, GithubPr, Observation,
     PmWritebackState, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -332,290 +330,6 @@ async fn project_workflow_uses_stored_definition_offline() {
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
         .await;
-}
-
-#[test]
-#[ignore = "entry point for the deletion fixture's isolated subprocess"]
-fn deletion_process_entry() {
-    let input: serde_json::Value =
-        serde_json::from_str(&std::env::var("LOOPFLOW_DELETION_FIXTURE").unwrap()).unwrap();
-    let database = PathBuf::from(input["database"].as_str().unwrap());
-    std::env::set_var("LF_HOME", database.parent().unwrap());
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let store = Arc::new(
-        runtime
-            .block_on(open_ephemeral_store(&StorageConfig::sqlite(
-                database.clone(),
-            )))
-            .unwrap(),
-    );
-    let cli = crate::lf::Cli::try_parse_from(["lf", "task", "delete", "FIX-1"]).unwrap();
-    let Some(crate::lf::Commands::Task {
-        cmd: crate::lf::TaskCommand::Delete { issue },
-    }) = cli.command
-    else {
-        panic!("expected public deletion command");
-    };
-    PM_TEST_CONTEXT.sync_scope(
-        PmTestContext {
-            path: database,
-            store,
-            graphql_url: input["url"].as_str().unwrap().into(),
-        },
-        || {
-            assert_eq!(
-                crate::ops::task::task_delete(Path::new(input["repo"].as_str().unwrap()), &issue,)
-                    .unwrap(),
-                "FIX-1"
-            );
-        },
-    );
-}
-
-#[test]
-fn task_deletion_planning_preserves_completed_outcome_and_retries_confirmation() {
-    assert_planning_deletion(false, false, false);
-}
-
-#[test]
-fn task_deletion_planning_recovers_lost_response_without_ordinary_ownership() {
-    assert_planning_deletion(true, false, false);
-}
-
-#[test]
-fn task_deletion_planning_recovers_after_local_confirmation_failure() {
-    assert_planning_deletion(false, true, false);
-}
-
-#[test]
-fn task_deletion_planning_retries_snapshot_failure_without_repeating_deletion() {
-    assert_planning_deletion(false, false, true);
-}
-
-fn assert_planning_deletion(lost: bool, fail_local: bool, fail_snapshot: bool) {
-    let _lock = crate::journal::test_env_lock();
-    let _restore = PlanningEnvironment::isolate();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let fixture = runtime.block_on(Fixture::new());
-    std::env::set_var("LF_HOME", fixture.directory.path());
-    let (repo, wave) = runtime.block_on(planning_repo(&fixture));
-    runtime.block_on(fixture.seed(now() + 86_400));
-    std::fs::write(repo.join("authored.txt"), "keep authored work").unwrap();
-    let state = Arc::new(tokio::sync::Mutex::new(PlanningState::default()));
-    let (url, server) = runtime.block_on(serve(state.clone()));
-    PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-        seed_provider_task(
-            &runtime,
-            &state,
-            &repo,
-            "Future work",
-            "Preserve this issue's outcome",
-        )
-        .unwrap();
-    });
-    runtime.block_on(async {
-        let mut state = state.lock().await;
-        state.issues[0]["state"] = json!({"type":"completed"});
-        mark_issue_updated(&mut state.issues[0]);
-        state.lose_deletion = lost;
-        state.unreadable_trash = lost;
-        state.fail_deleted_snapshot = fail_snapshot;
-        state.refuse_deletion = true;
-    });
-    let delete = || {
-        PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-            crate::ops::task::task_delete(&repo, "FIX-1")
-        })
-    };
-    // A refused effect leaves the issue in ordinary discovery.
-    let error = delete().unwrap_err().to_string();
-    assert!(error.contains("lf task delete FIX-1"), "{error}");
-    assert!(runtime
-        .block_on(fixture.store.deleted_task_issues(wave.id()))
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        runtime.block_on(async { state.lock().await.deletion_writes }),
-        0
-    );
-    let connection = rusqlite::Connection::open(&fixture.database).unwrap();
-    if !lost && !fail_local && !fail_snapshot {
-        // Retained observation must not authorize a mutation after ownership moves.
-        runtime.block_on(async {
-            let mut state = state.lock().await;
-            state.refuse_deletion = false;
-            state.issues[0]["team"]["id"] = json!("other-team");
-        });
-        let error = delete().unwrap_err().to_string();
-        assert!(error.contains("belongs to Team other-team"), "{error}");
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.deletion_writes }),
-            0
-        );
-        runtime.block_on(async { state.lock().await.issues[0]["team"]["id"] = json!("team-1") });
-
-        connection
-            .execute_batch(
-                "CREATE TRIGGER fail_identity BEFORE INSERT ON task_issue_identities
-             BEGIN SELECT RAISE(FAIL, 'fixture identity unavailable'); END;",
-            )
-            .unwrap();
-        let error = delete().unwrap_err().to_string();
-        assert!(
-            error.contains("no provider deletion was attempted"),
-            "{error}"
-        );
-        assert_eq!(
-            runtime.block_on(async { state.lock().await.deletion_writes }),
-            0
-        );
-        connection
-            .execute_batch("DROP TRIGGER fail_identity")
-            .unwrap();
-    }
-    runtime.block_on(async { state.lock().await.refuse_deletion = false });
-    if fail_local {
-        connection
-            .execute_batch(
-                "CREATE TRIGGER fail_confirmation BEFORE INSERT ON task_deletions
-            BEGIN SELECT RAISE(FAIL, 'fixture confirmation unavailable'); END;",
-            )
-            .unwrap();
-    }
-    if lost || fail_local || fail_snapshot {
-        let error = delete().unwrap_err().to_string();
-        assert!(error.contains("lf task delete FIX-1"), "{error}");
-        let confirmed = runtime
-            .block_on(fixture.store.deleted_task_issues(wave.id()))
-            .unwrap();
-        assert_eq!(confirmed.contains("issue-1"), fail_snapshot, "{error}");
-        let row = runtime
-            .block_on(fixture.store.pm_snapshot(wave.id()))
-            .unwrap()
-            .unwrap();
-        let snapshot = row.snapshot;
-        assert_eq!(snapshot.items.is_empty(), fail_snapshot);
-        if fail_local {
-            connection
-                .execute_batch("DROP TRIGGER fail_confirmation")
-                .unwrap();
-        }
-        if lost || fail_local {
-            // Reproduce retained pre-import recovery evidence: no Task ever owned
-            // execution, and only the deletion intent survives the response loss.
-            connection
-                .execute(
-                    "DELETE FROM tasks WHERE external_issue_id='issue-1' AND worktree IS NULL",
-                    [],
-                )
-                .unwrap();
-            // Ordinary refresh and replacement of the chapter both lose membership,
-            // while the provider still retains the original issue in trash.
-            runtime.block_on(async { state.lock().await.omit_trashed_issues = true });
-            PM_TEST_CONTEXT.sync_scope(fixture.context(&url), || {
-                runtime.block_on(async {
-                    let ctx = super::resolve_context(&repo, "product").await.unwrap();
-                    super::refresh_pm_snapshot(&repo, "product", &ctx)
-                        .await
-                        .unwrap();
-
-                    state.lock().await.current_project_id = Some("project-2".into());
-                    let snapshot = super::refresh_pm_snapshot(&repo, "product", &ctx)
-                        .await
-                        .unwrap();
-                    assert!(snapshot.items.is_empty());
-                    assert_eq!(snapshot.projects[0].id, "project-2");
-                    assert!(fixture
-                        .store
-                        .deleted_task_issues(wave.id())
-                        .await
-                        .unwrap()
-                        .is_empty());
-                });
-            });
-        }
-        if lost {
-            // A second operation still cannot turn ordinary absence into success.
-            assert!(delete().is_err());
-        }
-        runtime.block_on(async { state.lock().await.unreadable_trash = false });
-    }
-    if lost || fail_local {
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "ops::pm::task_planning_tests::deletion_process_entry",
-                "--ignored",
-                "--nocapture",
-            ])
-            .env_clear()
-            .envs(
-                std::env::vars_os().filter(|(name, _)| !name.to_string_lossy().starts_with("LF_")),
-            )
-            .env(
-                "LOOPFLOW_DELETION_FIXTURE",
-                json!({
-                    "database": fixture.database, "repo": repo, "url": url,
-                })
-                .to_string(),
-            )
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    } else {
-        assert_eq!(delete().unwrap(), "FIX-1");
-    }
-    let confirmed_at: i64 = connection
-        .query_row(
-            "SELECT confirmed_at FROM task_deletions WHERE issue_id='issue-1'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    // The retained confirmation works even when all future trash reads fail.
-    runtime.block_on(async { state.lock().await.unreadable_trash = true });
-    assert_eq!(delete().unwrap(), "FIX-1");
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT confirmed_at FROM task_deletions WHERE issue_id='issue-1'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap(),
-        confirmed_at
-    );
-    let row = runtime
-        .block_on(fixture.store.pm_snapshot(wave.id()))
-        .unwrap()
-        .unwrap();
-    assert!(row.snapshot.items.is_empty());
-    runtime.block_on(async {
-        let state = state.lock().await;
-        assert_eq!(state.deletion_writes, 1);
-        assert_eq!(state.completion_writes, 0);
-        assert_eq!(state.issues[0]["state"]["type"], "completed");
-    });
-    assert!(runtime
-        .block_on(fixture.store.list_tasks(None))
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        std::fs::read_to_string(repo.join("authored.txt")).unwrap(),
-        "keep authored work"
-    );
-    assert_eq!(
-        connection
-            .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get::<_, i64>(0))
-            .unwrap(),
-        if lost || fail_local { 0 } else { 1 }
-    );
-    server.abort();
 }
 
 struct PlanningEnvironment(Vec<(std::ffi::OsString, Option<std::ffi::OsString>)>);
@@ -1490,14 +1204,9 @@ impl Drop for PlanningEnvironment {
 }
 
 #[test]
-fn task_abandon_and_delete_compose_cancellation_pr_and_git_from_anywhere() {
+fn task_abandon_composes_cancellation_pr_and_git_from_anywhere() {
     let _lock = crate::journal::test_env_lock();
-    for (selector, delete) in [
-        (Some("FIX-1"), false),
-        (Some("cancel-me"), false),
-        (None, false),
-        (Some("FIX-1"), true),
-    ] {
+    for selector in [Some("FIX-1"), Some("cancel-me"), None] {
         let _restore = PlanningEnvironment::isolate();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let fixture = runtime.block_on(Fixture::new());
@@ -1734,11 +1443,7 @@ esac
                 std::fs::remove_file(repo.join(".git/fail-close")).unwrap();
             }
             assert_eq!(
-                if delete {
-                    crate::ops::task::task_delete(caller, "FIX-1").unwrap()
-                } else {
-                    crate::ops::task::task_abandon(caller, selector, false).unwrap()
-                },
+                crate::ops::task::task_abandon(caller, selector, false).unwrap(),
                 "FIX-1"
             );
             assert!(!checkout.exists());
@@ -1765,16 +1470,9 @@ esac
                 runtime.block_on(fixture.store.task_prs(&task.id)).unwrap()[0].phase(),
                 PrPhase::Abandoned
             );
-            assert_eq!(
-                runtime.block_on(async { state.lock().await.trashed }),
-                delete
-            );
-            // Both retry paths survive deletion of the checkout and refs.
-            if delete {
-                crate::ops::task::task_delete(caller, "FIX-1").unwrap();
-            } else {
-                crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
-            }
+            assert!(!runtime.block_on(async { state.lock().await.trashed }));
+            // Retry survives deletion of the checkout and refs.
+            crate::ops::task::task_abandon(&repo, Some("cancel-me"), false).unwrap();
         });
         server.abort();
         std::env::set_var("PATH", path);

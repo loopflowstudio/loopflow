@@ -558,6 +558,18 @@ mod tests {
             "---\ncontext_budgets:\n  memory_tokens: 6000\n---\nBuild.\n",
         )
         .unwrap();
+        let store = crate::store::sqlite::SqliteStore::new(
+            &crate::store::database_path_from_env().unwrap(),
+        )
+        .unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(repo.path())
+                    .unwrap()
+                    .to_string(),
+                "build",
+            )
+            .unwrap();
         let config = load_config(Some(repo.path())).unwrap().unwrap();
         let budgets = ContextBudgets::resolve(&config, repo.path(), Some("build")).unwrap();
         for (key, value, source) in [

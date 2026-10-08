@@ -1251,34 +1251,39 @@ pub fn task_create(
     let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::pm::pm_store().await?;
-        let selected = match wave {
-            Some(name) if name.starts_with("personal:") => None,
-            _ => match crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
-                Some(&main),
-                wave,
-                None,
-            )
-            .await
+        if let Some(name) = wave {
+            let locator =
+                crate::work::wave::WaveLocator::discover(&main, name).map_err(task_error)?;
+            if store
+                .get_wave_at(&locator)
+                .await
+                .map_err(task_error)?
+                .is_none()
             {
-                Ok(wave) => Some(wave),
-                Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => {
-                    None
-                }
-                Err(error) => return Err(task_error(error)),
-            },
+                super::project::ensure(&main, name).await?;
+            }
+        }
+        let selected = match crate::work::wave::context::resolve_managed_wave(
+            Some(&store),
+            Some(&main),
+            wave,
+            None,
+        )
+        .await
+        {
+            Ok(wave) => Some(wave),
+            Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => None,
+            Err(error) => return Err(task_error(error)),
         };
         let wave = match selected {
             Some(wave) => wave,
             None => {
                 let canonical =
                     crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
-                let name = wave
-                    .and_then(|name| name.strip_prefix("personal:"))
-                    .unwrap_or("inbox");
+                let name = wave.unwrap_or("inbox");
                 let project = store
                     .sqlite
-                    .ensure_personal_project(&canonical.to_string(), name)
+                    .ensure_wave_project(&canonical.to_string(), name)
                     .map_err(task_error)?;
                 store
                     .get_wave(&project.wave_id)
@@ -4883,8 +4888,13 @@ pub fn task_edit(
 pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {
     block_on_task(async {
         let (store, task) = super::pm::resolve_saved_task(repo, None, issue).await?;
-        // Provisioning remains with Project ensure until the Wave definition cutover.
-        if wave.starts_with("personal:") {
+        let locator = crate::work::wave::WaveLocator::discover(repo, wave).map_err(task_error)?;
+        if store
+            .get_wave_at(&locator)
+            .await
+            .map_err(task_error)?
+            .is_none()
+        {
             super::project::ensure(repo, wave).await?;
         }
         let destination = crate::work::wave::context::resolve_managed_wave(

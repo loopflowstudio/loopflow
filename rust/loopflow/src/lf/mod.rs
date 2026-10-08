@@ -720,7 +720,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Replace authored Wave documents in their personal store or shared files
+    /// Replace stored Wave documents without modifying repository files
     Edit {
         wave: String,
         #[arg(long, required_unless_present = "memory")]

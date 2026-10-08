@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ops::{OpsError, OpsResult};
@@ -51,36 +52,9 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
 /// Explicit activation; ordinary planning reads never call this operation.
 pub async fn ensure(repo: &Path, name: &str) -> OpsResult<PmProject> {
     let store = super::pm::pm_store().await?;
-    if let Some(name) = name.strip_prefix("personal:") {
-        let repo = crate::repository::CanonicalRepo::discover(repo).map_err(project_error)?;
-        let project = store
-            .sqlite
-            .ensure_personal_project(&repo.to_string(), name)
-            .map_err(project_error)?;
-        return store
-            .sqlite
-            .planning_project(&project.id)
-            .map_err(project_error);
-    }
-    let wave = crate::work::wave::context::resolve_managed_wave(
-        Some(&store),
-        Some(repo),
-        Some(name),
-        None,
-    )
-    .await
-    .map_err(project_error)?;
-    if let Some(name) = wave.slug().strip_prefix("personal:") {
-        let project = store
-            .sqlite
-            .ensure_personal_project(wave.repo(), name)
-            .map_err(project_error)?;
-        return store
-            .sqlite
-            .planning_project(&project.id)
-            .map_err(project_error);
-    }
-    super::pm::require_planning_home(&store, &wave).await?;
+    let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
+        .await
+        .map_err(project_error)?;
     store
         .sqlite
         .record_project_activation(wave.id(), crate::journal::current_process_lfid().as_ref())
@@ -197,31 +171,46 @@ pub async fn workflow_catalog(
     repo: &Path,
     selector: Option<&str>,
 ) -> OpsResult<Vec<crate::engine::workflow::WorkflowCatalogEntry>> {
-    let mut entries = crate::engine::workflow::workflow_catalog(repo).map_err(project_error)?;
-    if let Some(selector) = selector {
-        let store = super::pm::pm_store().await?;
-        let project = resolve_project(&store, repo, selector).await?;
-        for (name, content) in store
-            .sqlite
-            .wave_workflows(&project.wave_id)
-            .map_err(project_error)?
-        {
-            let (workflow, unavailable) =
-                match crate::engine::workflow::parse_workflow(&name, &content, repo) {
-                    Ok(workflow) => (Some(workflow), None),
-                    Err(error) => (None, Some(error)),
-                };
-            entries.retain(|entry| entry.name != name);
-            entries.push(crate::engine::workflow::WorkflowCatalogEntry {
+    let Some(selector) = selector else {
+        return crate::engine::workflow::workflow_catalog(repo).map_err(project_error);
+    };
+    let store = super::pm::pm_store().await?;
+    let project = resolve_project(&store, repo, selector).await?;
+    let stored: BTreeMap<_, _> = store
+        .sqlite
+        .wave_workflows(&project.wave_id)
+        .map_err(project_error)?
+        .into_iter()
+        .collect();
+    let mut names =
+        crate::engine::workflow::available_workflow_names(repo).map_err(project_error)?;
+    names.extend(stored.keys().cloned());
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| {
+            let content = read_workflow_source(&store, &project.wave_id, &name, repo)?;
+            let (workflow, unavailable) = match content {
+                Some(content) => {
+                    match crate::engine::workflow::parse_workflow(&name, &content, repo) {
+                        Ok(workflow) => (Some(workflow), None),
+                        Err(error) => (None, Some(error)),
+                    }
+                }
+                None => (
+                    None,
+                    Some("Import the repository definition with lf wave ensure".into()),
+                ),
+            };
+            Ok(crate::engine::workflow::WorkflowCatalogEntry {
+                source: stored.contains_key(&name).then(|| "stored".into()),
                 name,
-                source: Some("stored".into()),
                 workflow,
                 unavailable,
-            });
-        }
-    }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(entries)
+            })
+        })
+        .collect()
 }
 
 pub async fn workflow_source(repo: &Path, selector: &str, name: &str) -> OpsResult<String> {
@@ -324,7 +313,7 @@ fn read_workflow_source(
     store: &Store,
     wave: &crate::id::WaveId,
     name: &str,
-    repo: &Path,
+    _repo: &Path,
 ) -> OpsResult<Option<String>> {
     match store
         .sqlite
@@ -332,6 +321,6 @@ fn read_workflow_source(
         .map_err(project_error)?
     {
         Some(content) => Ok(Some(content)),
-        None => crate::engine::workflow::workflow_source(name, repo).map_err(project_error),
+        None => Ok(crate::engine::workflow::builtin_workflow(name).map(str::to_string)),
     }
 }

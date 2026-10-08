@@ -1097,7 +1097,7 @@ Manage Wave identity, placement and planning
 
 ## lf wave edit
 
-Replace authored Wave documents in their personal store or shared files
+Replace stored Wave documents without modifying repository files
 
 | Argument | What it does |
 |---|---|

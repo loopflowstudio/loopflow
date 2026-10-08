@@ -278,7 +278,7 @@ mod tests {
                 "review"
             );
             assert!(store
-                .select_project_workflow(&project, "personal:review", "changed")
+                .select_project_workflow(&project, "review", "changed")
                 .is_err());
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),

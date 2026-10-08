@@ -3,13 +3,10 @@ use std::fs;
 use std::sync::{Mutex, OnceLock};
 
 use loopflow::engine::builtins::{builtin_flow_names, builtin_skill_names};
-use loopflow::engine::{
-    load_flow,
-    skill_catalog::{SkillCatalog, SkillScope},
-};
+use loopflow::engine::{load_flow, skill_catalog::SkillCatalog};
 use loopflow::lf::discovery::{
-    builtin_skill_description, builtin_skills, discover_skill, resolve_definition, Target,
-    BUILTIN_FLOW_CATEGORIES, BUILTIN_SKILL_CATEGORIES,
+    builtin_skill_description, discover_skill, resolve_definition, Target, BUILTIN_FLOW_CATEGORIES,
+    BUILTIN_SKILL_CATEGORIES,
 };
 use tempfile::TempDir;
 
@@ -48,29 +45,12 @@ impl Drop for HomeGuard {
     }
 }
 
-fn list_all_skills(repo: Option<&std::path::Path>) -> (Vec<String>, Vec<String>, Vec<String>) {
-    let catalog = SkillCatalog::discover(repo).unwrap();
-    let names = |scope| {
-        catalog
-            .entries()
-            .filter(|s| s.scope == scope)
-            .map(|s| s.name.clone())
-            .collect()
-    };
-    (
-        names(SkillScope::Repository),
-        names(SkillScope::Personal),
-        names(SkillScope::Embedded),
-    )
-}
-
 #[test]
 fn discover_builtin_skills() {
     let _home = HomeGuard::new();
-    let builtins = builtin_skills();
-    let (_user, _global, builtin_only) = list_all_skills(None);
-    for skill in builtins {
-        assert!(builtin_only.contains(&skill));
+    let catalog = SkillCatalog::discover(None).unwrap();
+    for skill in builtin_skill_names() {
+        assert!(catalog.resolve(skill).unwrap().path.is_none());
     }
 }
 
@@ -99,9 +79,13 @@ fn discover_repo_skills() {
     std::fs::create_dir_all(skills_dir.join("team")).expect("create skill namespace");
     std::fs::write(skills_dir.join("team/review.md"), "# review").expect("write namespaced skill");
 
-    let (user_skills, _global, _builtin_only) = list_all_skills(Some(repo.path()));
-    assert!(user_skills.contains(&"custom".to_string()));
-    assert!(user_skills.contains(&"team/review".to_string()));
+    let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
+    for name in ["custom", "team/review"] {
+        assert_eq!(
+            catalog.resolve(name).unwrap().path,
+            Some(skills_dir.join(format!("{name}.md")))
+        );
+    }
 }
 
 #[test]
@@ -177,9 +161,11 @@ fn repo_skill_shadows_builtin() {
     std::fs::create_dir_all(&skills_dir).expect("create skills dir");
     std::fs::write(skills_dir.join("qa.md"), "# qa").expect("write skill");
 
-    let (user_skills, _global, builtin_only) = list_all_skills(Some(repo.path()));
-    assert!(user_skills.contains(&"qa".to_string()));
-    assert!(!builtin_only.contains(&"qa".to_string()));
+    let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
+    assert_eq!(
+        catalog.resolve("qa").unwrap().path,
+        Some(skills_dir.join("qa.md"))
+    );
 }
 
 #[test]
@@ -209,11 +195,11 @@ fn resolve_target_errors_for_unknown() {
 
 #[test]
 fn categorized_listing_includes_known_skills() {
-    let builtins = builtin_skills();
+    let builtins = builtin_skill_names();
     for (_category, skills) in BUILTIN_SKILL_CATEGORIES {
         for skill in *skills {
             assert!(
-                builtins.contains(*skill),
+                builtins.contains(skill),
                 "category includes unknown skill: {skill}"
             );
         }
@@ -317,9 +303,12 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
         fs::create_dir_all(skills.join(name)).unwrap();
         fs::write(skills.join(name).join("SKILL.md"), body).unwrap();
     }
-    let (local, _, builtin) = list_all_skills(Some(repo.path()));
-    assert!(local.contains(&"explain-code".into()));
-    assert!(builtin.contains(&"design".into()));
+    let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
+    assert_eq!(
+        catalog.resolve("explain-code").unwrap().path,
+        Some(skills.join("explain-code/SKILL.md"))
+    );
+    assert!(catalog.resolve("design").unwrap().path.is_none());
     assert_eq!(
         discover_skill(repo.path(), "explain-code")
             .unwrap()

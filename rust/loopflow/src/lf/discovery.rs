@@ -1,6 +1,6 @@
 use crate::engine::{Skill, Step, XorPath};
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 pub use crate::engine::builtins::{builtin_skill_description, BUILTIN_SKILL_CATEGORIES};
@@ -12,13 +12,6 @@ pub fn resolve_definition(repo: &Path, name: &str, kind: Option<DefinitionKind>)
 
 pub fn discover_skill(repo: &Path, name: &str) -> Result<Skill> {
     crate::engine::load_skill(name, repo).map_err(Into::into)
-}
-
-pub fn builtin_skills() -> HashSet<String> {
-    crate::engine::builtins::builtin_skill_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect()
 }
 
 pub(crate) fn definition_source(repo: &Path, path: Option<&Path>) -> String {

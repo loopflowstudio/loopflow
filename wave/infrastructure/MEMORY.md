@@ -1084,14 +1084,15 @@ survives resume without resupply or answer leakage. PTY injection submits drafts
 inbox slash text stays unexpanded. A replacement terminal remains unapproved.
 Headless resume atomically admits capture and driver. Fixtures prove held-owner
 preservation, losing claims, handoff and failed publication, not current-owner
-delivery or installed continuity. Cross-directory CLI proof now establishes saved
-Session context/provider cwd and unchanged LF Process caller cwd, native identity
-and historical bytes. Prior evidence: `423ff2ec2:wave/infrastructure/MEMORY.md`.
+delivery or installed continuity. `cbb402869`'s cross-directory CLI fixture uses
+saved Session cwd for context, provider and replayable capture; LF Process cwd
+records the caller. Native identity and historical bytes survive. Capture cwd
+cannot substitute for Process provenance.
 
-Codex 0.160.1 single/duplicate structured steers omit native skill expansion;
-identical RPC ids repeat model input. Five fake-API requests include a successful
-fresh-turn expansion control. Both replies were collected: this disproves safe
-redelivery, not recovery from an actual lost reply. Widening `send_current` cannot
-supply native skill delivery; native-boundary admission and receipt correlation
-remain unproved. Admission, acknowledgement and application differ.
+Codex 0.160.1 structured steers omit native expansion; identical RPC ids repeat
+input. Five fake-API requests include a fresh-turn expansion control. Both replies
+were collected: unsafe redelivery is proved, actual lost-reply recovery is not.
+Widening `send_current` cannot supply native skill delivery; native-boundary
+admission and receipt correlation remain unproved. Admission, acknowledgement
+and application differ.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

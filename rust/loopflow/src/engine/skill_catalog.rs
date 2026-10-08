@@ -24,20 +24,11 @@ pub struct SkillOrigin {
     pub frontmatter: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SkillScope {
-    Repository,
-    Personal,
-    Embedded,
-}
-
 #[derive(Debug, Clone)]
 pub struct SkillSource {
     pub name: String,
     pub path: Option<PathBuf>,
     pub dialect: SkillDialect,
-    pub scope: SkillScope,
 }
 
 impl SkillSource {
@@ -74,10 +65,10 @@ impl SkillCatalog {
             sources: BTreeMap::new(),
         };
         if let Some(repo) = repo {
-            catalog.collect_scope(repo, SkillScope::Repository, false)?;
+            catalog.collect_scope(repo, false)?;
         }
         if let Some(home) = home {
-            catalog.collect_scope(home, SkillScope::Personal, provider_overrides)?;
+            catalog.collect_scope(home, provider_overrides)?;
         }
         for name in builtins::builtin_skill_names() {
             catalog
@@ -87,7 +78,6 @@ impl SkillCatalog {
                     name: name.to_string(),
                     path: None,
                     dialect: SkillDialect::Loopflow,
-                    scope: SkillScope::Embedded,
                 });
         }
         Ok(catalog)
@@ -103,12 +93,7 @@ impl SkillCatalog {
             .or_else(|| builtins::resolve_builtin_skill(name).and_then(|key| self.sources.get(key)))
     }
 
-    fn collect_scope(
-        &mut self,
-        base: &Path,
-        scope: SkillScope,
-        overrides: bool,
-    ) -> Result<(), LoadError> {
+    fn collect_scope(&mut self, base: &Path, overrides: bool) -> Result<(), LoadError> {
         let provider_home = |variable: &str, folder: &str| {
             overrides
                 .then(|| std::env::var_os(variable))
@@ -127,7 +112,7 @@ impl SkillCatalog {
             (codex.join("skills"), SkillDialect::Codex, false),
             (codex.join("prompts"), SkillDialect::Codex, true),
         ] {
-            self.collect(&root, &root, scope, dialect, files, &mut HashSet::new())?;
+            self.collect(&root, &root, dialect, files, &mut HashSet::new())?;
         }
         Ok(())
     }
@@ -136,7 +121,6 @@ impl SkillCatalog {
         &mut self,
         root: &Path,
         dir: &Path,
-        scope: SkillScope,
         dialect: SkillDialect,
         files: bool,
         ancestors: &mut HashSet<PathBuf>,
@@ -150,7 +134,7 @@ impl SkillCatalog {
         }
         let bundle = dir.join("SKILL.md");
         if dir != root && bundle.is_file() {
-            self.insert(root, bundle, scope, dialect, true)?;
+            self.insert(root, bundle, dialect, true)?;
         } else {
             let mut paths = fs::read_dir(dir)?
                 .map(|entry| entry.map(|entry| entry.path()))
@@ -158,12 +142,12 @@ impl SkillCatalog {
             paths.sort();
             for path in paths {
                 if path.is_dir() {
-                    self.collect(root, &path, scope, dialect, files, ancestors)?;
+                    self.collect(root, &path, dialect, files, ancestors)?;
                 } else if files
                     && path.extension().is_some_and(|extension| extension == "md")
                     && path.file_name().is_some_and(|name| name != "SKILL.md")
                 {
-                    self.insert(root, path, scope, dialect, false)?;
+                    self.insert(root, path, dialect, false)?;
                 }
             }
         }
@@ -175,7 +159,6 @@ impl SkillCatalog {
         &mut self,
         root: &Path,
         path: PathBuf,
-        scope: SkillScope,
         dialect: SkillDialect,
         bundle: bool,
     ) -> Result<(), LoadError> {
@@ -202,7 +185,6 @@ impl SkillCatalog {
             name,
             path: Some(path),
             dialect,
-            scope,
         });
         Ok(())
     }
@@ -225,7 +207,8 @@ pub(crate) fn is_generated(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{SkillCatalog, SkillDialect, SkillScope};
+    use super::{SkillCatalog, SkillDialect};
+    use crate::engine::skill_invocation::SkillInvocation;
     use std::{fs, path::Path};
     use tempfile::TempDir;
 
@@ -270,12 +253,8 @@ mod tests {
                 Some(repo.path().join(path).as_path())
             );
             assert_eq!(selected.read().unwrap(), path);
-            assert_eq!(selected.scope, SkillScope::Repository);
             assert!(!catalog.entries().any(|entry| entry.name.contains("guide")));
-            assert_eq!(
-                catalog.resolve("implement").unwrap().scope,
-                SkillScope::Embedded
-            );
+            assert!(catalog.resolve("implement").unwrap().path.is_none());
             fs::remove_file(repo.path().join(path)).unwrap();
         }
         assert_eq!(
@@ -283,8 +262,8 @@ mod tests {
                 .unwrap()
                 .resolve("audit")
                 .unwrap()
-                .scope,
-            SkillScope::Personal
+                .path,
+            Some(home.path().join(".lf/skills/audit.md"))
         );
     }
 
@@ -295,13 +274,21 @@ mod tests {
         write(repo.path(), ".claude/skills/audit/SKILL.md", content);
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let skill = catalog.resolve("audit").unwrap().load().unwrap();
-        assert_eq!(skill.content.as_deref(), Some(content));
-        assert!(skill
-            .source
-            .unwrap()
-            .frontmatter
-            .unwrap()
-            .contains("allowed-tools"));
+        assert_eq!(skill.content.as_deref(), Some("Run this unfamiliar skill."));
+        assert_eq!(
+            SkillInvocation {
+                skill,
+                arguments: String::new(),
+            }
+            .source_text(),
+            content
+        );
+        write(repo.path(), ".lf/skills/audit.md", content);
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        assert!(matches!(
+            catalog.resolve("audit").unwrap().load(),
+            Err(crate::engine::LoadError::InvalidSkill(_))
+        ));
     }
 
     #[test]

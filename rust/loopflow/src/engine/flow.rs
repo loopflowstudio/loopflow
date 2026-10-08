@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
 use crate::engine::error::LoadError;
+use crate::engine::skill_catalog::{SkillDialect, SkillOrigin, SkillSource};
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
 use crate::engine::workflow::names_workflow;
 
@@ -519,76 +520,43 @@ pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
     skill_from_source(source)
 }
 
-pub(crate) fn skill_from_source(
-    source: &crate::engine::skill_catalog::SkillSource,
-) -> Result<Skill, LoadError> {
+pub(crate) fn skill_from_source(source: &SkillSource) -> Result<Skill, LoadError> {
     let content = source.read()?;
-    warn_retired_interactive(&source.name, &content);
-    let mut skill = match skill_from_content(&source.name, &content) {
-        Ok(skill) => skill,
-        Err(_) if source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow => {
-            let mut skill = Skill::named(&source.name);
-            skill.content =
-                Some(split_frontmatter(&content).map_or_else(|| content.clone(), |(_, body)| body));
-            skill
-        }
-        Err(error) => return Err(error),
+    let (frontmatter, body) = match split_frontmatter(&content) {
+        Some((frontmatter, body)) => (Some(frontmatter), body),
+        None => (None, content),
     };
-    skill.source = source
-        .path
-        .as_ref()
-        .map(|path| crate::engine::skill_catalog::SkillOrigin {
-            path: path.clone(),
-            dialect: source.dialect,
-            frontmatter: split_frontmatter(&content).map(|(frontmatter, _)| frontmatter),
-        });
-    if source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow {
-        // Claude's `agent: Explore` describes its subagent, not an lf harness.
-        skill.agent = None;
-        skill.default_agent = None;
-    }
-    Ok(skill)
-}
-
-fn warn_retired_interactive(name: &str, content: &str) {
-    let has_interactive = split_frontmatter(content).is_some_and(|(frontmatter, _)| {
-        serde_yaml_ng::from_str::<Value>(&frontmatter)
-            .ok()
-            .and_then(|value| value.as_mapping().cloned())
-            .is_some_and(|map| map.contains_key(key("interactive")))
-    });
-    if has_interactive && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed) {
+    let metadata = frontmatter
+        .as_deref()
+        .map(serde_yaml_ng::from_str::<Value>)
+        .transpose();
+    let loopflow = source.dialect == SkillDialect::Loopflow;
+    let metadata = match metadata {
+        Ok(value) => value,
+        Err(error) if loopflow => return Err(LoadError::InvalidSkill(error.to_string())),
+        Err(_) => None, // Unfamiliar native declarations remain instructions.
+    };
+    let metadata = metadata.as_ref().and_then(Value::as_mapping);
+    let field = |name| metadata.and_then(|map| parse_optional_string(map, name));
+    if metadata.is_some_and(|map| map.contains_key(key("interactive")))
+        && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed)
+    {
         eprintln!(
-            "warning: skill {name:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface"
+            "warning: skill {:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface",
+            source.name
         );
     }
-}
-
-#[derive(Debug, Default)]
-struct SkillFrontmatter {
-    agent: Option<String>,
-    default_agent: Option<String>,
-    action_style: Option<String>,
-}
-
-fn parse_skill_frontmatter(content: &str) -> Result<(SkillFrontmatter, String), LoadError> {
-    let Some((frontmatter, body)) = split_frontmatter(content) else {
-        return Ok((SkillFrontmatter::default(), content.to_string()));
-    };
-
-    let value: Value = serde_yaml_ng::from_str(&frontmatter)
-        .map_err(|err| LoadError::InvalidSkill(err.to_string()))?;
-    Ok((parse_frontmatter_value(&value), body))
-}
-
-fn skill_from_content(name: &str, content: &str) -> Result<Skill, LoadError> {
-    let (frontmatter, body) = parse_skill_frontmatter(content)?;
     Ok(Skill {
-        name: name.to_string(),
-        source: None,
-        agent: frontmatter.agent,
-        default_agent: frontmatter.default_agent,
-        action_style: frontmatter.action_style,
+        name: source.name.clone(),
+        source: source.path.as_ref().map(|path| SkillOrigin {
+            path: path.clone(),
+            dialect: source.dialect,
+            frontmatter,
+        }),
+        // Claude's `agent: Explore` describes its subagent, not an lf harness.
+        agent: loopflow.then(|| field("agent")).flatten(),
+        default_agent: loopflow.then(|| field("default_agent")).flatten(),
+        action_style: field("action_style"),
         content: Some(body),
     })
 }
@@ -603,22 +571,6 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(String, String)> {
     let rest = parts.next()?;
     let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
     Some((frontmatter.to_string(), body))
-}
-
-fn parse_frontmatter_value(value: &Value) -> SkillFrontmatter {
-    let map = match value.as_mapping() {
-        Some(map) => map,
-        None => return SkillFrontmatter::default(),
-    };
-
-    let agent = parse_optional_string(map, "agent");
-    let default_agent = parse_optional_string(map, "default_agent");
-    let action_style = parse_optional_string(map, "action_style");
-    SkillFrontmatter {
-        agent,
-        default_agent,
-        action_style,
-    }
 }
 
 fn collect_flow_names(

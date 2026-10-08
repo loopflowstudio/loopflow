@@ -7,9 +7,10 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against compression checkpoint `423ff2ec2` and the
-resume-workspace repair and structured-steering counterexample. The locally available main ref remains `812d8cc55`; no newer
-upstream state was fetched.
+Reconciled October 8 against `d6848011f` and the pending catalog/parser
+compression. The resume-workspace repair and structured-steering counterexample
+are committed in `cbb402869`; compression after `d6848011f` remains uncommitted.
+The locally available main ref remains `812d8cc55`; no newer upstream state was fetched.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
 assembles context in the saved Session workspace. Codex native delivery, terminal transport and
@@ -22,9 +23,9 @@ LOO-428 keeps uncontrolled Wave/scratch/repository material outside Claude
 system instructions; fixed LF instructions remain separate.
 
 [Probe documentation](../scripts/benchmarks/skill-invocation/README.md) owns
-receipts and limits. The preceding plan and assumptions are preserved at
-`/tmp/loo420-before-realign-WUrPka/`; the pre-admission notes remain at
-`/tmp/loo420-before-admission/`.
+receipts and limits. Earlier plans and assumptions remain in the branch history,
+including `423ff2ec2` before the resume-workspace repair and `d6848011f` before
+the pending compression.
 
 ## Native terminal admission: evidence and remaining choice
 
@@ -115,16 +116,9 @@ declarations and source/resource semantics. No temporary repository mount or
 native-name rewrite was added to production. The original engine-global prototype
 remains deleted; a unique alias is a draft approach, not accepted fidelity loss.
 
-## Remaining implementation, in dependency order
+## Remaining implementation
 
-1. Structured subsequent-turn input through the current owner. October 8's
-   Codex 0.160.1 fake-API counterexample invalidates extending `send_current`
-   into the skill-delivery path: single and duplicate structured steers succeed
-   without native expansion; identical RPC ids do not deduplicate model input.
-   The fresh-turn control expands the same skill. Task steers remain best-effort
-   text and cannot own Session skill admission. The probe preserves both replies;
-   it demonstrates unsafe redelivery, not actual lost-acknowledgement recovery.
-2. **Revised approach, still unproved:** admit retained `SkillInvocation` plus
+1. **Current-owner delivery; revised approach, still unproved:** admit retained `SkillInvocation` plus
    context into the Session's own history without replacing its active capture.
    Its existing driver must consume pending input at a native turn boundary.
    The caller must not start another driver or steal an in-progress draft.
@@ -138,11 +132,15 @@ remains deleted; a unique alias is a draft approach, not accepted fidelity loss.
    only Codex/OpenCode enter `_run_harness_once`. Changing the Harness trait alone
    would miss Claude's canonical launch too. Native terminal consumption remains
    unresolved; a replacement terminal and fidelity losses remain unapproved.
-3. Native Codex selection and terminal transport. The additive alias remains a
+   October 8's Codex steering probe rules out `send_current` as this transport:
+   both single and duplicate steers omit native expansion, and identical RPC ids
+   repeat input. Both replies were collected; actual lost-reply recovery remains
+   untested. Existing Task steers retain their separate best-effort text behavior.
+2. Native Codex selection and terminal transport. The additive alias remains a
    provider-only candidate with unresolved placement, lifetime and name semantics.
    Terminal delivery must preserve native controls and unfinished drafts. Neither
    engine-global catalog replacement nor a replacement terminal is approved.
-4. Resource fidelity and ports. Changed or removed definitions and bundles,
+3. Resource fidelity and ports. Changed or removed definitions and bundles,
    parent-relative resources and plugin variables remain uncovered. Available
    declaration equivalents need translation; only declarations with no equivalent
    qualify for a loss notice. Unfamiliar shapes must still run as instructions.
@@ -164,6 +162,15 @@ removing `SkillSource::display_source`. Driver custody and publication fences
 remain unchanged. String-only next-turn input remains a deletion target; text steering retains
 its separate meaning and cannot acquire skill invocation by changing its type.
 
+The pending compression removes `SkillScope`, which only tests consumed; selected paths
+already prove repository/personal precedence and embedded selection. It deletes
+the retired listing tuple adapter and `builtin_skills` wrapper. Skill loading now
+splits and parses declarations once, removing `SkillFrontmatter` and its three
+conversion helpers. Raw declarations, native fallback, Loopflow validation and
+subagent/harness separation remain. Review found the malformed-native fixture
+expected frontmatter inside the body despite the preceding implementation storing
+it separately; it now proves exact source reconstruction and Loopflow rejection.
+
 Removed `human_session::continue_conversation` and headless resume's prepared-file
 round trip. `claim_session_input` reserves the next capture and claims its driver
 in one transaction, using the existing shared driver writer and custody checks.
@@ -177,8 +184,8 @@ generation through driver handoff, and publication failure without completion.
 The taskless Flow correction fixture still succeeds through the real `session resume`
 entry point. These are source/fixture results, not installed continuity or native
 terminal draft-preservation proofs. Review also fenced publication against driver
-handoff, retained its original failure if release fails, and kept manifest cwd
-truthful to the actual process rather than substituting the Session's saved cwd.
+handoff and retained its original failure if release fails. The later workspace
+repair separates capture/provider cwd from LF Process cwd, as described below.
 
 ## Resume workspace repair
 
@@ -193,41 +200,26 @@ not live-model or installed acceptance. Held-owner and taskless correction proof
 still pass. Review retained the provider cwd in the manifest because replay uses
 it, and corrected nested Wave selection to use the full slug.
 
-## Delete — do not maintain
+## Replacement boundary
 
-- Delete `Harness::send_input(&str)` with its next-turn consumers when structured
-  native-boundary delivery has a proven recovery contract. Preserve plain text
-  input and builtins, account routing, native history and custody fences.
-- Do not convert `send_current`/`inject_live_steers` into skill execution. Their
-  text-steering behavior remains required; the native counterexample disproves
-  them as the predecessor for a general Session skill queue.
+- `Harness::send_input(&str)` and its next-turn consumers remain until structured
+  native-boundary delivery has a proven recovery contract, then are replaced.
+  Plain text input, builtins, account routing, native history and custody fences remain.
+- `send_current`/`inject_live_steers` retain text steering; the native counterexample
+  rules them out as the transport for a general Session skill queue.
 - Removed caller-context continuation: `resume -> run -> implicit_binding`.
   `build_prompt_at` now receives saved Session placement directly. Process cwd
   and replay cwd remain distinct facts; no second workspace owner is introduced.
 
 ## Removed mechanisms
 
-Removed: separate external discovery, rams alias, fuzzy npx lookup/fetch,
-recursive Markdown-only listing, Flow's separate resolver and late `.agents`
-fallback, and exclusive fetch fixtures. Installed npx folders use ordinary names.
-The single catalog serves listing, help, loading, Flow capture and export.
-Removed `resolve_local_definition`, the copied export map,
-pruning cycle state (pruning never follows directory symlinks), and duplicate
-description parsers. Listings and exports share authored-description extraction.
-Prompt accounting uses the retained Skill source instead of rediscovering a
-possibly different file after capture.
-
-Removed `find_skill_source_path` and its exclusive fixture: help reads
-the loaded Skill's provenance without another catalog scan. Flow lookup drops
-its duplicate namespace branch and the two path-list helpers. `prepare_native`
-is folded into its sole caller, `claude_plugin`; snapshots write the destination
-instructions once, retaining native bytes, port declarations and sibling links.
-Review retained the separate context-result count: an acknowledgement still
-cannot finish the skill. Native selection now avoids cloning skills that stay inline.
-
-Flow child source rediscovery and implicit skill re-execution on follow-up are
-also removed. Structured subsequent input remains unfinished; pre-claim capture replacement is
-removed by the admission repair above.
+The catalog replaces external/npx/rams discovery, separate Flow/export resolvers
+and repeated source lookup. Generated-file pruning never follows directory
+symlinks or enters third-party bundles. Captured definitions own dispatch and
+attribution; follow-up does not rerun the original skill. Native context
+acknowledgement cannot finish the command. Admission removes pre-claim capture
+replacement, but current-owner delivery remains unfinished. Earlier deletion
+details: `d6848011f:scratch/run-any-claude-or-codex.md` under this heading.
 
 ## Acceptance still outstanding
 
@@ -255,4 +247,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08): `cargo test -p loopflow --test session_cli_tests --no-run` builds; network-isolated `session_cli_tests headless_resume` and `session_lifecycle_tests taskless_structured_output_correction_is_bounded_and_preserves_the_conversation` pass; `codex_request_mapping.py --redelivery` reproduces both counterexamples; `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, Ruff and `lf context --skill implement --json` pass. Gate/review retain full fidelity, cost and third-party acceptance.
+Check (2026-10-08): pending compression's recorded build, 37 focused tests, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` pass; reused without rerun for prose-only realignment. `git diff --check` and `lf context --skill realign --json` pass within budgets. Prior resume/redelivery results remain at `d6848011f`; gate/review own full fidelity, cost and third-party acceptance.

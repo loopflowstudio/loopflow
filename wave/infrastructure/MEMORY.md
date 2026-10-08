@@ -620,14 +620,15 @@ Registered routes own target identity and repository; no per-call override.
 New Task IDs derive from Linear issue IDs; existing IDs stay. Branch, commit
 and planning facts travel; Workflow, paths and execution authority stay local.
 Fetch before remote placement decisions, including branches without PRs.
-Keep copied observation ages and target removal evidence. Cold adoption seeds
+Keep copied observation ages and target invalidation/removal evidence. Cold adoption seeds
 only an unselected Wave's exact issue Project; existing selection and rotation
 remain authoritative. Source requirements end at dispatch; descendants must not
-inherit them or the origin's Work declaration. Following Release's entry-point
-lesson, public selector dispatch exercises repeated skill execution against pushed
-code and preserves a dirty target behind a later commit. Transport/provider
-fixtures prove no real SSH or installation. Existing Workflow preservation and
-full gate remain unproved. Later slices own credentials and disconnect survival.
+inherit them or the origin's Work declaration. Reuse the store's Task/issue selector
+instead of another parser. Following Release's entry-point lesson, public dispatch
+proves repeated skill execution and dirty-target preservation; simulated transport
+proves no real SSH or installation. Existing Workflow/Session history, two retained
+legacy IDs, selection/rotation and full gate remain unproved. Later slices own
+credentials and disconnect survival.
 
 ## Synced planning integration (LOO-334)
 

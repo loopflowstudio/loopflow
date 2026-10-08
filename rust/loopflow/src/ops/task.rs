@@ -765,20 +765,16 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     )
 }
 
-pub(crate) async fn find_task(store: &SharedStore, selector: &str) -> OpsResult<Option<Task>> {
-    if let Ok(id) = crate::durable::TaskId::parse(selector) {
-        store.get_task(&id).await.map_err(task_error)
-    } else {
-        store.get_task_by_issue(selector).await.map_err(task_error)
-    }
-}
-
 pub(crate) async fn resolve_task(
     store: &SharedStore,
     repo: &Path,
     selector: &str,
 ) -> OpsResult<Task> {
-    if let Some(task) = find_task(store, selector).await? {
+    if let Some(task) = store
+        .get_task_by_issue(selector)
+        .await
+        .map_err(task_error)?
+    {
         if let Some(source) = remote::source_for_issue(&task.plan.identifier)? {
             source.require_pushed(repo)?;
             restore_task_checkout(store, &task).await?;
@@ -823,7 +819,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         .transpose()?;
     let existing = block_on_task(async {
         let store = task_store().await?;
-        let mut existing = find_task(&store, issue).await?;
+        let mut existing = store.get_task_by_issue(issue).await.map_err(task_error)?;
         if let Some(task) = &mut existing {
             if let Some(expected) = &expected_wave {
                 let wave = owning_wave(&store, task).await?;

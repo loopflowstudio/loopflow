@@ -9,7 +9,7 @@ use crate::ops::{OpsError, OpsResult};
 use crate::store::{PlanningState, PmTaskRecord, SharedStore};
 use crate::work::task::Task;
 
-use super::{fetch_task_refs, find_task, task_error};
+use super::{fetch_task_refs, task_error};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct TaskSource {
@@ -20,7 +20,11 @@ pub(crate) struct TaskSource {
 
 impl TaskSource {
     pub async fn resolve(store: &SharedStore, selector: &str) -> OpsResult<Option<Self>> {
-        let Some(task) = find_task(store, selector).await? else {
+        let Some(task) = store
+            .get_task_by_issue(selector)
+            .await
+            .map_err(task_error)?
+        else {
             return Ok(None);
         };
         let pr = store

@@ -13,7 +13,7 @@ use loopflow_test_support::TestRepo;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-fn git(repo: &Path, args: &[&str]) {
+fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .current_dir(repo)
         .args(args)
@@ -24,6 +24,7 @@ fn git(repo: &Path, args: &[&str]) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
 }
 
 fn source(branch: &str, commit: &str) -> String {
@@ -66,16 +67,8 @@ fn machine_selector_runs_a_skill_in_the_adopted_checkout_and_reuses_it() {
     support::bind_task_planning(&repo);
     repo.push();
     let target = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
-    let origin = String::from_utf8(
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["remote", "get-url", "origin"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
-    git(target.path(), &["clone", origin.trim(), "repo"]);
+    let origin = git(repo.path(), &["remote", "get-url", "origin"]);
+    git(target.path(), &["clone", &origin, "repo"]);
     let branch = "test/ssh-pushed-code";
     repo.create_branch(branch);
     repo.create_file("implementation.txt", "already implemented\n");
@@ -276,19 +269,10 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
 fn cold_machines_adopt_pushed_code_once_with_the_same_task_id() {
     let repo = repository();
     let machines = tempfile::tempdir().unwrap();
-    let remote = String::from_utf8(
-        Command::new("git")
-            .current_dir(repo.path())
-            .args(["remote", "get-url", "origin"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
-    let remote = remote.trim();
+    let remote = git(repo.path(), &["remote", "get-url", "origin"]);
     // Clone before the branch exists: neither machine has a remote-tracking ref.
     for name in ["first", "second"] {
-        git(machines.path(), &["clone", remote, name]);
+        git(machines.path(), &["clone", &remote, name]);
         git(
             &machines.path().join(name),
             &["config", "user.name", "Fixture"],

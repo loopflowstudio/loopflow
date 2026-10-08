@@ -281,7 +281,7 @@ pub fn register_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit, true)
+    register_task_fixture(home, worktree, branch, base_commit)
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
@@ -291,7 +291,7 @@ pub fn register_unrun_task(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit, true)
+    register_task_fixture(home, worktree, branch, base_commit)
 }
 
 #[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
@@ -301,7 +301,7 @@ pub fn register_task_without_pr(
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit, false)
+    register_task_fixture(home, worktree, branch, base_commit)
 }
 
 fn register_task_fixture(
@@ -309,7 +309,6 @@ fn register_task_fixture(
     worktree: &Path,
     branch: &str,
     base_commit: &str,
-    with_pr: bool,
 ) -> RegisteredTask {
     let runtime = tokio::runtime::Runtime::new().expect("task test runtime");
     let store = runtime

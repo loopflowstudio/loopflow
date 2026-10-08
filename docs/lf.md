@@ -348,6 +348,13 @@ identical input after an uncertain response. The source completes after filing,
 without waiting for those children to finish. Preserve accepted later checks in
 PR copy before landing clears scratch.
 
+Filing and completion work locally without Linear. In a connected repository,
+foreground planning sync exports saved Tasks and then their related-issue links,
+including links from already completed Tasks. Closing that connection leaves
+unsent or uncertain effects for the next connection; filing starts no watcher.
+Displayed follow-up names and due dates use the current saved Task, while retry
+receipts keep their original identity and input.
+
 `ship` runs gate, waited landing, then follow-through. A bare delivery, manual
 GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
 The next Task/Wave operation checks for live work, then runs `finish-delivery`

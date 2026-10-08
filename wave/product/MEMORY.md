@@ -26,12 +26,13 @@ Linear due dates, including removal; retry intent stays immutable. Failed promot
 retains confirmed copy. Handoffs preserve child edits; Task placement owns the
 validated PR copy. Admission records performed location; Flow/Started commit atomically.
 
-`432f37065` retains earlier Rust/Swift proof. The integrated
-Docker fixture proves local filing → completion during a real Flow → actual
-arrival through CLI/monitor. Its `tests/fixtures/dto/task_lifecycle.json` passes
-Rust decoding. Observed reopening and durable end retry pass; the unseen-write
-race fails. Provider relation sync, combined Swift/full gate and native acceptance
-remain. Reads reuse evidence; settlement rechecks it transactionally.
+Docker's integrated fixture proves
+local filing → completion during a real Flow → actual CLI/monitor arrival.
+Observed reopening and durable end retry pass; the unseen-write race fails.
+Foreground export delivers mapped follow-up relations after source completion;
+lost responses retain the UUID. Reads use current saved link names/dates,
+not immutable filing input. Historical creation conversion, local reopening,
+combined gate and native acceptance remain. Settlement rechecks evidence transactionally.
 
 ## Terminal-host adoption (2026-10-07)
 

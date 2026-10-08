@@ -1,7 +1,7 @@
 use super::{block_on_task, owning_wave, task_error, task_store};
 use crate::ops::OpsResult;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
-use crate::work::task::{PrPhase, Task};
+use crate::work::task::PrPhase;
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -39,7 +39,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
         if let Some(reason) = options.none.as_ref().or(options.finish.as_ref()) {
             if options.finish.is_some() {
                 for intent in &prior.intents {
-                    let link = confirm_intent(repo, &task, intent).await?;
+                    let link = confirm_intent(repo, intent).await?;
                     store
                         .sqlite
                         .link_follow_through(&task.id, &link)
@@ -152,7 +152,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .reserve_follow_through(&task.id, &candidate)
                 .map_err(task_error)?
         };
-        let link = confirm_intent(repo, &task, &intent).await?;
+        let link = confirm_intent(repo, &intent).await?;
         store
             .sqlite
             .link_follow_through(&task.id, &link)
@@ -161,11 +161,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
     })
 }
 
-async fn confirm_intent(
-    repo: &Path,
-    task: &Task,
-    intent: &FollowThroughIntent,
-) -> OpsResult<FollowThroughLink> {
+async fn confirm_intent(repo: &Path, intent: &FollowThroughIntent) -> OpsResult<FollowThroughLink> {
     let store = task_store().await?;
     let saved = if let Some(saved) = store
         .get_task_by_issue(&intent.issue_id)
@@ -213,27 +209,6 @@ async fn confirm_intent(
             .ok_or_else(|| task_error("historical follow-up filing remains unconfirmed"))?
     };
     let item = super::task_planning_item(&store, &saved)?;
-    if let (Some(source), Some(target)) = (&task.plan.linear_id, &saved.plan.linear_id) {
-        let wave = owning_wave(&store, task).await?;
-        if crate::ops::linear_observe::connected(wave.repo()) {
-            // Local linkage is durable even while its optional provider relation is pending.
-            let result = async {
-                crate::ops::pm::issue_client(repo)
-                    .await?
-                    .ensure_follow_up_relation(
-                        source.as_str(),
-                        target.as_str(),
-                        &intent.relation_id,
-                    )
-                    .await
-                    .map_err(task_error)
-            }
-            .await;
-            if let Err(error) = result {
-                tracing::warn!(%error, "follow-up relation synchronization pending");
-            }
-        }
-    }
     Ok(FollowThroughLink {
         key: intent.key.clone(),
         issue_id: intent.issue_id.clone(),

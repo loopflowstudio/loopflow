@@ -1045,7 +1045,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 #[test]
 fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
     let home = tempfile::tempdir().unwrap();
-    seed_stale_project_work(home.path(), false);
+    seed_stale_project_work(home.path(), false, false);
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let source_id = TaskId::parse(PERSISTED_TASK_ID).unwrap();
     let source = store.task(&source_id).unwrap().unwrap();
@@ -1066,7 +1066,7 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
         issue_id: child.id.clone(),
         relation_id: uuid::Uuid::new_v4().to_string(),
         project_id: child.project_id.clone().unwrap(),
-        team_id: child.team_id.clone(),
+        team_id: child.team_id.clone().unwrap(),
         state_id: None,
         wave: "product".into(),
         title: child.name.clone(),
@@ -1102,7 +1102,9 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
         .iter()
         .find(|row| row["task"]["id"] == child.id)
         .unwrap();
-    assert!(row["runtime"].is_null());
+    assert_eq!(row["runtime"]["started"], false);
+    assert!(row["reference"]["workspace"].is_null());
+    assert!(row["pr"].is_null());
     assert_eq!(
         row["task"]["due_date"], "2026-10-08",
         "current planning owns the date, not the original filing"
@@ -1111,7 +1113,7 @@ fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
     assert_eq!(
         row["task"]["follow_up_sources"],
         serde_json::json!([
-            {"issue_id": source.plan.id.as_str(), "identifier": source.plan.identifier}
+            {"issue_id": source.plan.linear_id.as_ref().unwrap().as_str(), "identifier": source.plan.identifier}
         ])
     );
     assert_eq!(row["follow_through"]["reason"], serde_json::Value::Null);

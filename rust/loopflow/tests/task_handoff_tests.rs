@@ -43,7 +43,7 @@ fn assert_success(output: Output) {
 
 fn receipts(child: &Task) -> Vec<Value> {
     fs::read_dir(
-        git_common_dir(&child.worktree)
+        git_common_dir(child.worktree.as_deref().unwrap())
             .unwrap()
             .join("loopflow-design-handoffs")
             .join(child.id.as_str()),
@@ -81,7 +81,7 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
         merge: None,
     });
     runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
+        .block_on(parent.store.insert_task_pr(&parent_pr))
         .unwrap();
     for (identifier, slug, content) in [
         (
@@ -104,10 +104,23 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
             &source,
         ));
         assert_eq!(
-            fs::read_to_string(child.worktree.join("scratch").join(&source)).unwrap(),
+            fs::read_to_string(
+                child
+                    .worktree
+                    .as_ref()
+                    .unwrap()
+                    .join("scratch")
+                    .join(&source)
+            )
+            .unwrap(),
             content
         );
-        assert!(!child.worktree.join("scratch/parent.md").exists());
+        assert!(!child
+            .worktree
+            .as_ref()
+            .unwrap()
+            .join("scratch/parent.md")
+            .exists());
         let receipts = receipts(&child);
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0]["source_task"], parent.task.id.as_str());
@@ -142,7 +155,7 @@ fn repeated_handoff_preserves_edited_and_deleted_child_notes_after_parent_commit
     let child = register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     repo.create_file("design.md", "Original selected design");
     assert_success(checkout(home.path(), repo.path(), &child, "design.md"));
-    let destination = child.worktree.join("scratch/child.md");
+    let destination = child.worktree.as_ref().unwrap().join("scratch/child.md");
     fs::write(&destination, "Child's revised design").unwrap();
     repo.stage_all();
     repo.commit("Advance parent without changing selected input");
@@ -168,7 +181,7 @@ fn conflicting_design_retains_both_versions_and_repeated_conflict_stays_failed()
     let child = register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     repo.create_file("design.md", "Original selected design");
     assert_success(checkout(home.path(), repo.path(), &child, "design.md"));
-    let destination = child.worktree.join("scratch/child.md");
+    let destination = child.worktree.as_ref().unwrap().join("scratch/child.md");
     fs::write(&destination, "Child edits").unwrap();
     repo.create_file("design.md", "Different incoming design");
     for _ in 0..2 {
@@ -200,5 +213,5 @@ fn unreadable_design_does_not_place_child() {
     assert!(!checkout(home.path(), repo.path(), &child, "missing.md")
         .status
         .success());
-    assert!(!child.worktree.exists());
+    assert!(!child.worktree.as_ref().unwrap().exists());
 }

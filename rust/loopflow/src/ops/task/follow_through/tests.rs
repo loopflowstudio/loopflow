@@ -53,13 +53,13 @@ async fn respond(
         json!({"commentCreate": {"comment": {"id": "completion-comment"}}})
     } else if query.contains("workflowStates") {
         json!({"workflowStates": {"nodes": [{"id": "todo", "position": 1.0}]}})
-    } else if query.contains("FollowUpExists") {
+    } else if query.contains("FindExportIssue") {
         let id = vars["id"].as_str().unwrap();
         json!({"issues": {"nodes": if linear.issues.contains_key(id) { vec![json!({"id": id})] } else { vec![] }}})
-    } else if query.contains("FollowUpCreate") || query.contains("mutation FollowUpRelation") {
+    } else if query.contains("DeliverTaskCreation") || query.contains("mutation FollowUpRelation") {
         let input = vars["input"].clone();
         let id = input["id"].as_str().unwrap().to_string();
-        let rows = if query.contains("FollowUpCreate") {
+        let rows = if query.contains("DeliverTaskCreation") {
             &mut linear.issues
         } else {
             &mut linear.relations
@@ -74,7 +74,7 @@ async fn respond(
             linear.unavailable = true;
             return Json(json!({"errors": [{"message": "response lost after commit"}]}));
         }
-        if query.contains("FollowUpCreate") {
+        if query.contains("DeliverTaskCreation") {
             json!({"issueCreate": {"success": true, "issue": {"id": input["id"]}}})
         } else {
             json!({"issueRelationCreate": {"success": true}})
@@ -215,6 +215,182 @@ fn local_follow_up_retries_keep_identity_and_allow_independent_completion() {
                 .contains_key(child.id.as_str()));
         },
     );
+}
+
+#[test]
+fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (directory, store, repo, task, wave) = fixture(&runtime);
+    let _environment = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DATABASE"]);
+    std::env::set_var("LF_HOME", directory.path());
+    let mut pr = runtime
+        .block_on(store.active_task_pr(&task.id))
+        .unwrap()
+        .unwrap();
+    pr.merge_commit = Some(repo.head_sha());
+    runtime.block_on(store.update_task_pr(&pr)).unwrap();
+    let linear = Arc::new(Mutex::new(Linear {
+        lose_responses: true,
+        ..Default::default()
+    }));
+    let (url, server) = runtime.block_on(async {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let app = axum::Router::new()
+            .route("/", axum::routing::post(respond))
+            .with_state(linear.clone());
+        (
+            url,
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
+        )
+    });
+    PM_TEST_CONTEXT.sync_scope(
+        PmTestContext {
+            path: directory.path().join("loopflow.db"),
+            store: store.clone(),
+            graphql_url: url,
+        },
+        || {
+            task_follow_up(
+                repo.path(),
+                "FIX-1",
+                &FollowUpOptions {
+                    title: Some("Check the installed release".into()),
+                    notes: Some("Retain the released command result".into()),
+                    due: Some("2026-10-09".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            task_follow_up(
+                repo.path(),
+                "FIX-1",
+                &FollowUpOptions {
+                    finish: Some("The child owns installed proof".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let request = store
+                .sqlite
+                .request_task_completion(&task.id, None)
+                .unwrap()
+                .unwrap();
+            runtime
+                .block_on(store.complete_task(&task, request))
+                .unwrap();
+            let intent = store.sqlite.task_follow_through(&task.id).unwrap().intents[0].clone();
+            let child = runtime
+                .block_on(store.get_task_by_issue(&intent.issue_id))
+                .unwrap()
+                .unwrap();
+            assert!(linear.lock().unwrap().issues.is_empty());
+            let sync = || {
+                runtime
+                    .block_on(crate::ops::planning_export::sync_repository_exports(
+                        &store, &task,
+                    ))
+                    .unwrap()
+            };
+            // Remote creation commits, but both the reply and readback are lost.
+            let lost_creation = runtime
+                .block_on(crate::ops::planning_export::sync_export(
+                    &store,
+                    repo.path(),
+                    &crate::durable::WorkRef::Task(child.id.clone()),
+                ))
+                .unwrap_err();
+            assert_eq!(linear.lock().unwrap().issues.len(), 1, "{lost_creation}");
+            assert!(runtime
+                .block_on(store.get_task(&child.id))
+                .unwrap()
+                .unwrap()
+                .plan
+                .linear_id
+                .is_none());
+            {
+                let mut provider = linear.lock().unwrap();
+                provider.unavailable = false;
+                provider.lose_responses = false;
+                provider.relations_unavailable = true;
+                let issue = provider.issues.values_mut().next().unwrap();
+                issue["dueDate"] = Value::Null;
+            }
+            // Reconnect adopts the exact issue, including a removed due date. Failed
+            // relation reads neither undo completion nor claim provider linkage.
+            sync();
+            let mapped = runtime
+                .block_on(store.get_task(&child.id))
+                .unwrap()
+                .unwrap();
+            assert!(mapped.plan.linear_id.is_some());
+            let follow = store.sqlite.task_follow_through(&task.id).unwrap();
+            assert!(follow.resolved());
+            assert_eq!(follow.links[0].identifier, "FIX-2");
+            assert!(follow.links[0].url.is_some());
+            assert_eq!(follow.links[0].due, None);
+            assert_eq!(follow.intents[0].due.as_deref(), Some("2026-10-09"));
+            assert_eq!(
+                store
+                    .sqlite
+                    .pending_follow_through_relations(wave.repo())
+                    .unwrap()
+                    .len(),
+                1
+            );
+            {
+                let mut provider = linear.lock().unwrap();
+                provider.relations_unavailable = false;
+                provider.lose_responses = true;
+            }
+            sync();
+            assert_eq!(linear.lock().unwrap().relations.len(), 1);
+            assert_eq!(
+                store
+                    .sqlite
+                    .pending_follow_through_relations(wave.repo())
+                    .unwrap()
+                    .len(),
+                1
+            );
+            {
+                let mut provider = linear.lock().unwrap();
+                provider.unavailable = false;
+                provider.lose_responses = false;
+            }
+            sync();
+            assert!(store
+                .sqlite
+                .pending_follow_through_relations(wave.repo())
+                .unwrap()
+                .is_empty());
+            let events = runtime
+                .block_on(store.task_events_after(&task.id, 0))
+                .unwrap();
+            sync();
+            assert_eq!(
+                runtime
+                    .block_on(store.task_events_after(&task.id, 0))
+                    .unwrap(),
+                events
+            );
+            let provider = linear.lock().unwrap();
+            assert_eq!(provider.issues.len(), 1);
+            assert_eq!(provider.relations.len(), 1);
+            assert_eq!(
+                provider.relations[&intent.relation_id]["issueId"],
+                "source-issue"
+            );
+            assert_eq!(
+                provider.relations[&intent.relation_id]["relatedIssueId"],
+                mapped.plan.linear_id.unwrap().as_str()
+            );
+            assert_eq!(store.sqlite.task_state(&task.id).unwrap(), TaskState::Done);
+            assert_ne!(store.sqlite.task_state(&child.id).unwrap(), TaskState::Done);
+        },
+    );
+    server.abort();
 }
 
 mod lifecycle;

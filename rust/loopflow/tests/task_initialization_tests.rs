@@ -50,7 +50,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         merge: None,
     });
     runtime
-        .block_on(parent.store.update_task_pr(&parent_pr))
+        .block_on(parent.store.insert_task_pr(&parent_pr))
         .unwrap();
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
@@ -69,7 +69,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
         .unwrap()
     };
     checkout();
-    assert!(!child.worktree.join("scratch").exists());
+    assert!(!worktree.join("scratch").exists());
     assert!(runtime
         .block_on(parent.store.active_task_pr(&child.id))
         .unwrap()
@@ -418,21 +418,13 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let parent = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let mut research = parent.task.clone();
-    research.id = loopflow::work::task::TaskId::new();
-    research.plan.id = loopflow::planning::LinearIssueId::new("research-issue").unwrap();
-    research.plan.identifier = "INF-124".into();
-    research.plan.title = "Recommend a storage approach".into();
-    research.workspace_slug = "research".into();
-    research.branch = "research".into();
-    research.worktree = target.path().join("research");
-    runtime
-        .block_on(
-            parent
-                .store
-                .create_task_with_worktree(&research, None, None),
-        )
-        .unwrap();
+    let research = support::register_sibling_task(
+        &parent,
+        "INF-124",
+        "research",
+        &target.path().join("research"),
+    );
+    let worktree = research.worktree.as_ref().unwrap();
 
     let restored = loopflow::ops::task::task_checkout(
         repo.path(),
@@ -441,24 +433,20 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     )
     .unwrap();
     assert_eq!(restored.id, research.id);
-    fs::write(
-        research.worktree.join("findings.md"),
-        "Use the existing store.\n",
-    )
-    .unwrap();
+    fs::write(worktree.join("findings.md"), "Use the existing store.\n").unwrap();
     let result = Command::new("git")
-        .current_dir(&research.worktree)
+        .current_dir(worktree)
         .args(["add", "findings.md"])
         .status()
         .unwrap();
     assert!(result.success());
     let result = Command::new("git")
-        .current_dir(&research.worktree)
+        .current_dir(worktree)
         .args(["commit", "-m", "Record research findings"])
         .status()
         .unwrap();
     assert!(result.success());
-    fs::write(research.worktree.join("draft.md"), "Keep this draft.\n").unwrap();
+    fs::write(worktree.join("draft.md"), "Keep this draft.\n").unwrap();
     let changes = loopflow::ops::task::task_changes("INF-124", "parent").unwrap();
     assert!(changes
         .files
@@ -482,7 +470,7 @@ fn research_checkout_restores_and_reads_files_without_a_pull_request() {
     let binding = runtime
         .block_on(loopflow::ops::resolve_work_binding(
             &std::sync::Arc::new(parent.store),
-            &research.worktree,
+            worktree,
             "task:INF-124",
         ))
         .unwrap();

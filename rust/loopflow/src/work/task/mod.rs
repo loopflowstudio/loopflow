@@ -618,6 +618,11 @@ pub enum TaskEventKind {
     FollowThroughLinked {
         link: follow_through::FollowThroughLink,
     },
+    FollowThroughRelationConfirmed {
+        relation_id: String,
+        source_issue_id: String,
+        target_issue_id: String,
+    },
     FollowThroughDisposition {
         reason: String,
     },

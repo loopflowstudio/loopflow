@@ -3321,7 +3321,10 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
             .task_events_after(&task.id, 0)
             .await
             .map_err(|error| task_error(format!("failed to read task events: {error}")))?;
-        let follow_through = FollowThrough::from_events(&events);
+        let follow_through = store
+            .sqlite
+            .follow_through_from_events(&events)
+            .map_err(task_error)?;
         let latest_event = events.pop();
         let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
         let active = pr.as_ref().filter(|pr| pr.is_active());

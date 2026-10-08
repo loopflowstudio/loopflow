@@ -280,6 +280,10 @@ Browser and accessibility tests for `website/`. The dev helper syncs canonical
 `docs/` into `website/docs/`, installs the Chromium browser, starts the app, and
 runs the test suite.
 
+Homepage touch targets must retain their minimum size with fallback fonts, whose
+metrics differ across macOS and Linux. Run the website suite after the final CSS
+or capture edit, including the fallback-font touch-target case.
+
 ```bash
 cd website && uv run python dev.py test        # All website tests
 cd website && uv run python dev.py test -a     # Accessibility tests only

@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 import ViewInspector
 @testable import Loopflow
@@ -111,13 +112,19 @@ struct ProgramStatusTests {
                                        id: nil, app: nil, title: nil, msg: nil) == .reset)
     }
 
-    @Test @MainActor func staleSurfaceAndClosedCallbacksCannotPublish() async throws {
+    @Test(.timeLimit(.minutes(1))) @MainActor func staleSurfaceAndClosedCallbacksCannotPublish() async throws {
         let surface = ProgramStatusSurface()
         surface.receive(.report(report(.blocked)), incarnation: UUID())
         try await Task.sleep(for: .milliseconds(300))
         #expect(!surface.snapshot.seen)
-        surface.receive(.report(report(.working)), incarnation: surface.incarnation)
-        try await Task.sleep(for: .milliseconds(300))
+        await withCheckedContinuation { (publication: CheckedContinuation<Void, Never>) in
+            withObservationTracking {
+                _ = surface.snapshot
+            } onChange: {
+                publication.resume()
+            }
+            surface.receive(.report(report(.working)), incarnation: surface.incarnation)
+        }
         #expect(surface.snapshot.summary?.state == .working)
         surface.close()
         surface.receive(.report(report(.blocked)), incarnation: surface.incarnation)

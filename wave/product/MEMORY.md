@@ -60,13 +60,14 @@ per request. Current placements copy inheritance once; delegation is unimplement
 Root `lf open` exists; Work targeting, Linux guidance and pane control remain.
 Exact targets alone do not protect unsent drafts; retain LOO-387's boundary.
 
-October 8: LOO-427's local slice separates `tasks.checkout_machine_id` from
-assignment. Files/status and Session association retain recorded location;
-unknown Machines stay unknown. No DTO change. Shared authority still blocks
-slice 2: WorkRef lacks a repository root; LOO-412 (`0cd8e7f14`) keeps independent
-IDs and LOO-406 excludes sync. Jack's Git leaning and Linear plans (`f929c7f5`,
-`25b3eede`) select no write protocol. Cold opens still overwrite one pending URL;
-cover reversed registration and repeat opens. No shared-source or native proof.
+October 8: LOO-427 (`21ce4e495`, `f8d3386da`) separates checkout location from
+assignment, preserving files/status and Session membership. Unknown location
+stays unavailable. Compare through the validated checkout and its PR, without
+hydrating a second Task. Shared authority remains unresolved:
+WorkRef lacks a repository root; LOO-412 keeps independent IDs; LOO-406 excludes
+sync. Jack's Git leaning and Linear plans select no write protocol (sources in
+the comparison/design). Cold-open routing still overwrites one URL; reversed
+registration and repeat opens need proof. No shared-source or native proof.
 
 ## Live Home reconciliation (2026-10-05)
 

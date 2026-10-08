@@ -58,20 +58,21 @@ and the draft preserve editable KRs/targets. `c3e527a93` owns saved Project sele
 `22477da8e` owns Project edits/Workflow selection and per-field receipts.
 `921fc68ba` moves complete-plan edits onto that writer and removes inspection locking.
 
-October 8 Task creation/edit now use common SQLite transactions. Creation
-input/Project survive edits and rotation; names, notes, assignment and ordering save
-field receipts before mapping. Changed neighbors retain rank receipts. Inbound reads
-preserve pending values/conflicts; actual field changes advance local revisions.
-Unchanged retries preserve receipt identity. Task/Project receipts share
-`sqlite/planning_changes.rs`; foreign-key tables stay separate. Creation uses one
-original-input reader in `children.rs`. Provider-first create/marker lookup and
-edit/readback writers are deleted. Paired offline CLI proofs cover connection/mapping
-combinations, rollback and conflicts; they establish no export or field delivery.
-Wave provisioning still uses personal routing. Project creation, membership, rotation,
-deletion/refiling and Wave definitions block LOO-412's coherent boundary. Task/Project
-export, field delivery/resolution, Desktop pending display and composed reconnect
-remain unfinished. Project updates also lack an exposed revision precondition.
-The one draft starts at integrated v0.13.10 (`fc0bb97f7`); installation is unproved.
+`b6e291dd4` saves Task creation/edit, original input/Project and field/rank receipts.
+`71c8e445c` shares receipt/creation readers, retaining foreign-key owners, pending
+values, first conflicts and retry identity. Provider-first Task create/edit is deleted.
+
+October 8 Project creation, exact-ID binding and activation now save through
+`sqlite/project_selection.rs` without provider I/O. Creation/selection and original
+name commit together; reservations retain UUIDs/mappings. Status receipts retain
+conflicts and later edits. YAML imports require exact saved identity; terminal/invalid
+facts cannot replace selection. Offline proofs establish no delivery. Active Workflow state now proves started work for rotation without inventing Started.
+
+Wave schema/provisioning/definitions, membership, rotation and deletion/refiling
+still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
+pending presentation and composed reconnect remain unfinished. Project updates
+also lack a revision precondition. The one draft starts at v0.13.10 (`fc0bb97f7`);
+installation remains unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

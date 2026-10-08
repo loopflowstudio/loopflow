@@ -54,16 +54,16 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
-        let (abandoned, completed): (bool, bool) = conn.query_row(
+        let (abandoned, completed, active): (bool, bool, bool) = conn.query_row(
             &format!(
-                "SELECT state='abandoned',state='done' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
+                "SELECT state='abandoned',state='done',state='active' FROM (SELECT {} AS state FROM tasks t WHERE t.id=?1)",
                 super::durable::task_state_sql("t")
             ),
             [task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         Ok(TaskStartEvidence {
-            begun,
+            begun: begun || active,
             authored: None,
             published: false,
             abandoned,

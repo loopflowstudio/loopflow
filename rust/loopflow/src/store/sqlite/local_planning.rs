@@ -272,7 +272,6 @@ impl SqliteStore {
             )?;
             let now = now_unix();
             let mut parent: Option<WaveId> = None;
-            let mut selected = None;
             for part in name.split('/') {
                 let existing: Option<(WaveId, Option<String>)> = tx
                     .query_row(
@@ -282,7 +281,7 @@ impl SqliteStore {
                         |row| Ok((row.get(0)?, row.get(1)?)),
                     )
                     .optional()?;
-                let (wave, project) = match existing {
+                let (wave, _) = match existing {
                     Some(existing) => existing,
                     None => {
                         let wave = WaveId::new();
@@ -297,29 +296,11 @@ impl SqliteStore {
                     }
                 };
                 parent = Some(wave);
-                selected = project;
             }
             let wave = parent.expect("validated personal Wave has at least one component");
-            let project = if let Some(selected) = selected {
-                ProjectId::parse(&selected)
-                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
-            } else {
-                let project = ProjectId::new();
-                tx.execute(
-                    "INSERT INTO projects(id,wave_id,created_at,updated_at,
-                    project_slug,project_name,project_prompt_context,status,workflow)
-                    VALUES(?1,?2,?3,?3,?4,?4,'','started','')",
-                    params![project.as_str(), wave, now, name],
-                )?;
-                durable::inherit_project_placement(&tx, &project)?;
-                tx.execute(
-                    "UPDATE waves SET current_project_id=?2 WHERE id=?1",
-                    params![wave, project.as_str()],
-                )?;
-                project
-            };
             tx.commit()?;
-            project
+            drop(conn);
+            self.ensure_project(&wave, name)?
         };
         self.project(&project)?.ok_or(StoreError::NotFound)
     }

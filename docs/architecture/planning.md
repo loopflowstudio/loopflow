@@ -112,7 +112,7 @@ that selection readable; retained archival, invalidation or membership conflicts
 still make it unavailable. These local guarantees do not fix Linear's unconditional
 update race.
 
-## Connected Project selection
+## Project creation and selection
 
 ```bash
 lf wave bind-project product <project-uuid> --json
@@ -130,13 +130,18 @@ work require that exact Project to be In Progress; another In Progress Project
 does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
-`ensure` activates the configured Backlog or Planned Project with a status-only
-write. Without a binding it reserves one UUID in SQLite before creation, attaches
-it to the Wave's Initiative, activates it, then commits selection and creation settlement together. Retry
-reuses the reservation across uncertain responses and failed binding writes.
-Terminal, archived, paused or foreign Projects report their condition without
-replacement. Names, content and an empty workflow remain intact. Ensure neither searches
-for candidates nor performs rotation; status and roadmap never call it. Desktop
+`ensure` activates the configured Backlog or Planned Project in SQLite and records
+its status change for delivery. Without a binding, creation, original name,
+selection and the local transition receipt commit together. Retry reuses that
+identity and preserves later edits. Existing provider creation reservations retain
+their UUID and mappings. No provider request is needed, including during an outage.
+Terminal, archived, paused or foreign Projects retain their history. Names, content
+and an empty workflow remain intact. Binding accepts the durable or mapped ID of
+an already saved Project; it does not fetch a missing Project. Legacy YAML import
+retains the original bytes and requires that exact Project's saved record.
+Project export and safe status delivery remain unfinished; a locally active Project
+is not proof of Linear activation. Ensure never searches for candidates or rotates
+Projects; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
 `project_readiness` through `lf monitor work --watch --json`. Committed selection,

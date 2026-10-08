@@ -803,7 +803,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 println!(
-                    "Wave {wave}: Project {} ({}) is active",
+                    "Wave {wave}: Project {} ({}) is active locally",
                     result.name, result.id
                 );
             }

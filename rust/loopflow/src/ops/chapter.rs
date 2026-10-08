@@ -223,7 +223,7 @@ pub(crate) async fn rotate(
             continue;
         };
         if !dry_run {
-            super::project::import_binding(&store, &wave, &ctx, &acquisition).await?;
+            super::project::import_binding(&store, &wave, &acquisition).await?;
         }
         let binding = read_project_binding(&store.sqlite, wave.id()).map_err(error)?;
         let existing = store

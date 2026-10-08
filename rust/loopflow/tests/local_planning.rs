@@ -1063,6 +1063,172 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
 }
 
 #[test]
+fn project_creation_binding_and_activation_save_offline() {
+    for connected in [false, true] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        if connected {
+            repo.create_file(".lf/config.yaml", "pm:\n  linear_team: fixture-team\n");
+        }
+        let path = home.path().join("loopflow.db");
+        let store = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
+        let canonical = loopflow::repository::CanonicalRepo::discover(repo.path()).unwrap();
+        let wave = loopflow::work::wave::Wave::new(
+            loopflow::id::WaveId::new(),
+            "product".into(),
+            canonical.to_string(),
+        );
+        store.create_wave(&wave).unwrap();
+        let args = ["wave", "ensure", "product", "--json"];
+        let mut first = command(repo.path(), home.path(), &args)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let second = lf(repo.path(), home.path(), &args);
+        assert!(first.wait().unwrap().success());
+        let created = lf(repo.path(), home.path(), &args);
+        assert_eq!(created, second);
+        let projects = store.list_projects(Some(wave.id())).unwrap();
+        assert_eq!(projects.len(), 1);
+        let id = projects[0].id.clone();
+        assert!(projects[0].plan.linear_id.is_none());
+        assert!(store.list_tasks(Some(wave.id())).unwrap().is_empty());
+        let db = rusqlite::Connection::open(&path).unwrap();
+        let intent: String = db
+            .query_row(
+                "SELECT local_plan_json FROM project_transitions WHERE wave_id=?1",
+                [wave.id()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&intent).unwrap()["name"],
+            "product"
+        );
+        // Creation retries keep later authored content; binding accepts either identity.
+        lf(
+            repo.path(),
+            home.path(),
+            &[
+                "project",
+                "edit",
+                id.as_str(),
+                "--name",
+                "Authored name",
+                "--summary",
+                "Retain summary",
+            ],
+        );
+        for mapped in [false, true] {
+            let provider = "11111111-1111-4111-8111-111111111111";
+            db.execute("UPDATE projects SET external_project_id=?2,status='backlog',project_prompt_context=?3,workflow='feature' WHERE id=?1", rusqlite::params![id.as_str(),mapped.then_some(provider),"workflow: feature\n\n## KRs\n\n- [ ] Preserve Tasks\n"]).unwrap();
+            db.execute(
+                "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+                [wave.id()],
+            )
+            .unwrap();
+            let bound = lf(
+                repo.path(),
+                home.path(),
+                &["wave", "bind-project", "product", id.as_str(), "--json"],
+            );
+            assert_eq!(bound["status"], "backlog");
+            let active = lf(repo.path(), home.path(), &args);
+            assert_eq!(active["status"], "started");
+            assert_eq!(active["name"], "Authored name");
+            assert_eq!(active["summary"], "Retain summary");
+            assert_eq!(active["workflow"], "feature");
+            assert_eq!(active["krs"][0]["text"], "Preserve Tasks");
+            let changes = store.pending_project_changes(&id).unwrap();
+            let state = changes
+                .iter()
+                .find(|change| change.field == "status")
+                .unwrap();
+            assert_eq!(state.value, "started");
+            lf(repo.path(), home.path(), &args);
+            lf(
+                repo.path(),
+                home.path(),
+                &["wave", "bind-project", "product", id.as_str(), "--json"],
+            );
+            assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
+            if mapped {
+                let mut incoming: loopflow::pm::PmProject = serde_json::from_value(active).unwrap();
+                incoming.status = loopflow::pm::ProjectStatus::Completed;
+                incoming.revision = Some("2026-10-08T11:00:00Z".into());
+                incoming.initiative_ids = vec!["initiative".into()];
+                incoming.team_ids = vec!["fixture-team".into()];
+                store
+                    .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
+                    .unwrap();
+                let pending = store.pending_project_changes(&id).unwrap();
+                let status = pending
+                    .iter()
+                    .find(|change| change.field == "status")
+                    .unwrap();
+                assert_eq!(status.id, state.id);
+                assert_eq!(status.value, "started");
+                assert_eq!(status.conflict.as_ref().unwrap()["value"], "completed");
+                assert_eq!(
+                    db.query_row(
+                        "SELECT status FROM projects WHERE id=?1",
+                        [id.as_str()],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                    "started"
+                );
+            }
+        }
+        db.execute(
+            "UPDATE projects SET status='completed' WHERE id=?1",
+            [id.as_str()],
+        )
+        .unwrap();
+        assert!(!command(repo.path(), home.path(), &args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        assert_eq!(
+            db.query_row(
+                "SELECT status FROM projects WHERE id=?1",
+                [id.as_str()],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "completed"
+        );
+        db.execute(
+            "UPDATE waves SET current_project_id=NULL WHERE id=?1",
+            [wave.id()],
+        )
+        .unwrap();
+        for selector in [id.as_str(), "Authored name"] {
+            assert!(!command(
+                repo.path(),
+                home.path(),
+                &["wave", "bind-project", "product", selector, "--json"]
+            )
+            .output()
+            .unwrap()
+            .status
+            .success());
+        }
+        assert!(db
+            .query_row(
+                "SELECT current_project_id FROM waves WHERE id=?1",
+                [wave.id()],
+                |row| row.get::<_, Option<String>>(0)
+            )
+            .unwrap()
+            .is_none());
+        assert!(!repo.path().join("wave").exists());
+        assert_eq!(store.list_projects(Some(wave.id())).unwrap().len(), 1);
+    }
+}
+
+#[test]
 fn project_edits_save_offline_in_both_connection_modes() {
     for (connected, mapped) in [(false, false), (false, true), (true, false), (true, true)] {
         let repo = TestRepo::new();

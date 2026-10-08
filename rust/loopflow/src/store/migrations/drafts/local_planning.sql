@@ -382,7 +382,7 @@ CREATE TABLE project_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
-    field TEXT NOT NULL CHECK(field IN ('name','summary','workflow','krs','metric_targets')),
+    field TEXT NOT NULL CHECK(field IN ('name','summary','workflow','krs','metric_targets','status')),
     value_json TEXT NOT NULL CHECK(json_valid(value_json)),
     base_json TEXT CHECK(base_json IS NULL OR json_valid(base_json)),
     conflict_json TEXT CHECK(conflict_json IS NULL OR json_valid(conflict_json)),

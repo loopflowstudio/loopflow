@@ -128,7 +128,8 @@ Author and retain a [chapter plan](architecture/planning.md#rotate-the-plan-pres
 with exact Wave/destination IDs and nonempty KRs. Select `create: false` for an
 existing Project or allocate one UUID for creation. The repository operation
 rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
-Project ensure needs neither a chapter nor KRs.
+Project ensure needs neither a chapter nor KRs. Creation and activation save locally
+in both connection modes, retaining identity and pending delivery during outages.
 
 The preview lists each successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Unreviewed backlog

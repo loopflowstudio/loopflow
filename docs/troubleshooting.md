@@ -19,8 +19,8 @@ failures even when ordinary commands work. A receipt proves invocation, not
 successful completion of its Flow or Skill.
 
 For a missing receipt, inspect the executable and log path Doctor prints. Jobs
-installed before the stable entry gate may pin an inactive retained binary and
-fail before recording a receipt. After installing a release with this repair,
+installed before the stable entry gate may pin a superseded binary, which a
+later install removes, and fail before recording a receipt. After installing a release with this repair,
 run `lf cron sync --wave <wave>` from that Wave's repository to refresh its jobs;
 use `lf cron sync --repo` for repository Task checks. New scheduled invocations
 follow the selected installation across promotions. Existing Sessions

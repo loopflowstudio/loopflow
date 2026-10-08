@@ -9,8 +9,8 @@ use tokio::sync::Barrier;
 
 use super::test_fixture::{now, token, Fixture};
 use super::{
-    linear_refresh_lock, pm_show_async, resolve_local_pm_token, PmRefresh, PmShowOptions,
-    PmTestContext, PM_TEST_CONTEXT,
+    linear_refresh_lock, pm_show_async, resolve_pm_token, PmRefresh, PmShowOptions, PmTestContext,
+    PM_TEST_CONTEXT,
 };
 use crate::durable::Author;
 use crate::ops::error::OpsResult;
@@ -24,8 +24,8 @@ use crate::work::project::{Project, ProjectId};
 use crate::work::wave::Wave;
 
 impl Fixture {
-    async fn resolve(&self, url: &str) -> OpsResult<Option<String>> {
-        scoped(self.context(""), url, resolve_local_pm_token()).await
+    async fn resolve(&self, url: &str) -> OpsResult<String> {
+        scoped(self.context(""), url, resolve_pm_token()).await
     }
 
     async fn assert_token(&self, expected: &ProviderToken) {
@@ -374,17 +374,17 @@ async fn linear_oauth_concurrent_alias_readers_share_one_rotation() {
     let first_ctx = fixture.context("");
     let first_url = url.clone();
     let first =
-        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_local_pm_token()).await });
+        tokio::spawn(async move { scoped(first_ctx, &first_url, resolve_pm_token()).await });
     entered.wait().await;
     let second_ctx = PmTestContext {
         path: alias,
         store: other,
         graphql_url: String::new(),
     };
-    let second = scoped(second_ctx, &url, resolve_local_pm_token());
+    let second = scoped(second_ctx, &url, resolve_pm_token());
     let (second, _) = tokio::join!(second, release.wait());
-    assert!(first.await.unwrap().unwrap().as_deref() == Some("A2"));
-    assert!(second.unwrap().as_deref() == Some("A2"));
+    assert!(first.await.unwrap().unwrap() == "A2");
+    assert!(second.unwrap() == "A2");
     assert_eq!(requests.lock().await.len(), 1);
 }
 
@@ -400,8 +400,7 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
         let (response, entered, release) = gated(response);
         let (url, requests) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver =
-            tokio::spawn(async move { scoped(ctx, &url, resolve_local_pm_token()).await });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
         entered.wait().await;
         let winner = token("interactive", "interactive-refresh", now() + 86400);
         if delete {
@@ -410,9 +409,9 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
             fixture.store.upsert_provider_token(&winner).await.unwrap();
         }
         release.wait().await;
-        let result = resolver.await.unwrap().unwrap();
+        let result = resolver.await.unwrap();
         if delete {
-            assert!(result.is_none());
+            assert!(failure_message(result).contains("No Linear credential found"));
             assert!(fixture
                 .store
                 .get_provider_token("linear")
@@ -420,7 +419,7 @@ async fn linear_oauth_interactive_connection_and_deletion_win_inflight_exchange(
                 .unwrap()
                 .is_none());
         } else {
-            assert!(result.as_deref() == Some("interactive"));
+            assert!(result.unwrap() == "interactive");
             fixture.assert_token(&winner).await;
         }
         assert_eq!(requests.lock().await.len(), 1);
@@ -440,11 +439,11 @@ async fn linear_oauth_recovers_after_rolled_back_rotation() {
             let error = failure_message(result);
             assert!(error.contains("persist") && !error.contains("reconnect"));
         } else {
-            assert!(result.unwrap().as_deref() == Some("A1"));
+            assert!(result.unwrap() == "A1");
         }
         fixture.assert_token(&original).await;
         conn.execute_batch("DROP TRIGGER reject_rotation").unwrap();
-        assert!(fixture.resolve(&url).await.unwrap().as_deref() == Some("A2"));
+        assert!(fixture.resolve(&url).await.unwrap() == "A2");
         assert!(requests
             .lock()
             .await
@@ -466,16 +465,16 @@ async fn linear_oauth_cancelled_lock_waiter_never_exchanges() {
         .await
         .is_err());
     drop(lock);
-    assert!(fixture.resolve(&url).await.unwrap().as_deref() == Some("A2"));
+    assert!(fixture.resolve(&url).await.unwrap() == "A2");
     assert_eq!(requests.lock().await.len(), 1);
     assert!(original.access_token == "A1");
 }
 
 #[tokio::test]
-async fn linear_oauth_optional_local_authority_and_legacy_guidance() {
+async fn linear_oauth_missing_credential_and_legacy_guidance() {
     let fixture = Fixture::new().await;
     let (url, requests) = test_server::spawn(vec![]).await;
-    assert!(fixture.resolve(&url).await.unwrap().is_none());
+    assert!(failure_message(fixture.resolve(&url).await).contains("No Linear credential found"));
     let mut original = fixture.seed(now() - 1).await;
     original.oauth_client_id = None;
     fixture
@@ -510,8 +509,7 @@ async fn linear_oauth_failed_refresh_checks_expiry_at_return() {
         let (response, entered, release) = gated(rejected("unknown"));
         let (url, _) = test_server::spawn(vec![response]).await;
         let ctx = fixture.context("");
-        let resolver =
-            tokio::spawn(async move { scoped(ctx, &url, resolve_local_pm_token()).await });
+        let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
         entered.wait().await;
         if expires_during_request {
             let remaining = (expires as i128 * 1_000_000_000
@@ -524,7 +522,7 @@ async fn linear_oauth_failed_refresh_checks_expiry_at_return() {
         if expires_during_request {
             assert!(result.is_err());
         } else {
-            assert!(result.unwrap().as_deref() == Some("A1"));
+            assert!(result.unwrap() == "A1");
         }
         fixture.assert_token(&original).await;
     }
@@ -574,25 +572,7 @@ async fn pm_read_linear_oauth_sqlite_contention_has_bounded_failure_and_recovers
         Some(previous)
     );
     drop(guard);
-    assert!(fixture.resolve(&url).await.unwrap().as_deref() == Some("A2"));
-}
-
-#[tokio::test]
-async fn linear_oauth_ssh_forwards_only_a_current_optional_bearer() {
-    let fixture = Fixture::new().await;
-    let (url, _) = test_server::spawn(vec![rotated(), rejected("invalid_grant")]).await;
-    let forward = || crate::lf::commands::ssh::resolve_pm_token_for_test();
-    assert!(scoped(fixture.context(""), &url, forward()).await.is_none());
-    fixture.seed(now() - 1).await;
-    assert!(
-        scoped(fixture.context(""), &url, forward())
-            .await
-            .as_deref()
-            == Some("A2")
-    );
-    let original = fixture.seed(now() - 1).await;
-    assert!(scoped(fixture.context(""), &url, forward()).await.is_none());
-    fixture.assert_token(&original).await;
+    assert!(fixture.resolve(&url).await.unwrap() == "A2");
 }
 
 #[derive(Clone)]
@@ -652,7 +632,7 @@ async fn oauth_trace_process_entry() {
         .finish();
     tracing::subscriber::set_global_default(subscriber).unwrap();
     let value = fixture.resolve(&url).await.unwrap();
-    assert!(value.as_deref() == Some(original.access_token.as_str()));
+    assert!(value == original.access_token);
     let captured = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
     assert!(captured.contains("proactive Linear refresh failed"));
     assert!(!captured.contains("synthetic-secret"));
@@ -666,10 +646,10 @@ async fn linear_oauth_stalled_first_attempt_leaves_time_for_one_replay() {
     let (url, requests) = test_server::spawn(vec![response, rotated()]).await;
     let ctx = fixture.context("");
     let start = Instant::now();
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_local_pm_token()).await });
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
     entered.wait().await;
     let value = resolver.await.unwrap().unwrap();
-    assert!(value.as_deref() == Some("A2"));
+    assert!(value == "A2");
     assert!(start.elapsed() < Duration::from_secs(5));
     assert_eq!(requests.lock().await.len(), 2);
 }
@@ -681,7 +661,7 @@ async fn linear_oauth_stale_rejection_does_not_condemn_expired_winner() {
     let (response, entered, release) = gated(rejected("invalid_grant"));
     let (url, _) = test_server::spawn(vec![response]).await;
     let ctx = fixture.context("");
-    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_local_pm_token()).await });
+    let resolver = tokio::spawn(async move { scoped(ctx, &url, resolve_pm_token()).await });
     entered.wait().await;
     let winner = token("newer-access", "newer-refresh", now() - 1);
     fixture.store.upsert_provider_token(&winner).await.unwrap();

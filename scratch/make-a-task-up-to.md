@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · draft for Jack Heart's design review · 2026-10-07
+LOO-418 · reviewed decisions; first implementation milestone · 2026-10-07
 
 ## Decision and intended experience
 
@@ -9,9 +9,14 @@ chain. Follow-through is a follow-up Task: file it after landing, then complete
 the landed Task. Dependent implementation starts in another stacked Task before
 its parent merges. A recommendation can finish without a PR.
 
-This design proposes the mechanisms below; Jack has not approved them. His launch
-instruction authorizes the first `feature` edge, `task-design`, ending at `design`.
-This artifact is that edge's output. No implementation or landing is claimed.
+Jack Heart confirmed the completion rule during design review on October 7:
+`PR merges → file follow-ups or record “none needed” → Task completes`.
+Jack then clarified that no Task at `end` may remain incomplete. Restore
+`lf task complete ISSUE` as an alias for `lf task move ISSUE end`, sharing one
+transition and its checks. Jack subsequently requested continued advancement.
+The first implementation milestone is Flow launch/status correctness and the
+completion alias. The remaining lifecycle mechanisms retain their stated review
+status; this milestone neither completes LOO-418 nor authorizes landing.
 
 The experience: a Task has one outcome, an optional PR link, and one Workflow
 position. After delivery, its page says either **Done · Follow-up LOO-…**, or
@@ -60,6 +65,7 @@ Inspected base: `626789dcd0382c6754ba3b7c61ea2448b57658ce`.
 | `pm_create_task_idempotent` | Existing filing stores a content marker and reconciles uncertain creation, but searches the currently selected Project. A retry after rotation can miss the original issue. Follow-through needs a persisted destination and issue identity before external mutation. |
 | `task_operate.md`, `wave_operate.md`, `ops/cron.rs` | Operators leave unstarted backlog alone. The minute reconcile command observes delivery and does not launch Flows. A due date is not an installed timer or permission to start work. |
 | #1439 / `9c7b6828a`, current CLI command tree | Flow resume and Session ready/complete are removed. A stopped Flow remains history; no replacement resume/acknowledgement controller is required here. |
+| `task_session.md` with included `task_operate.md`; installed `task/session` | No explicit completion call; guidance stops when the Task lands. Update it to finish follow-through and verify completion. The restored Task command does not restore Session completion controls. |
 
 ### The launch defect has a shared cause
 
@@ -91,9 +97,23 @@ Sources inspected October 7: [Linear SDK schema](https://github.com/linear/linea
 [issue relations](https://linear.app/docs/issue-relations),
 [due dates](https://linear.app/docs/due-dates).
 
-## Proposed decisions on the five questions
+## Decisions and proposed mechanisms
 
 ### 1. Follow-through belongs in the landing Flow, after verified merge
+
+**Accepted by Jack Heart, 2026-10-07:** every merged Task receives an automatic
+follow-through check, including a manual GitHub merge:
+`PR merges → file follow-ups or record “none needed” → Task completes`.
+For LOO-407's case, the source Task completes after filing the installed-release
+check; the new Task owns obtaining that evidence. A refactor with no remaining
+obligation completes after recording none, without another review click.
+
+If no finishing Flow or operator runs, even a routine merged Task stays visibly
+pending. Merge alone cannot establish that no follow-up is needed. Jack accepted
+the normal landing Flow plus recovery by the next Task/Wave operation, without
+a new watcher. An open conversation does not schedule its next turn; unattended
+recovery depends on an installed operator schedule. Polling limits and the exact
+filing interface below remain proposals.
 
 Keep `lf land` and `lf arm` as prepare/request/return operations. Add an explicit
 `--wait` to land for callers that own a blocking Flow. It uses the existing finite
@@ -103,9 +123,12 @@ interruption or timeout returns held, leaving merge intent and evidence intact.
 These are proposed initial operational limits, not measured performance claims.
 CI repair remains the existing CI watcher's responsibility.
 
-Change `ship` to `gate → cmd: pr land --wait → follow-through`. The Flow's successful
-arrival at end completes the Task only after its follow-through disposition is
-durable. No new Workflow review node is needed: routine filing is autonomous,
+Change `ship` to `gate → cmd: land --wait → follow-through`. The `follow-through`
+skill files or links the remaining Tasks, records the disposition, then calls
+`lf task complete ISSUE`. The command itself runs no skill and files no Tasks.
+The enclosing Workflow's subsequent arrival at end is idempotent: one completion,
+one history transition and retryable provider writeback. No new Workflow review
+node is needed: routine filing is autonomous,
 while an unresolved scope decision is a reported blocker in the existing Task
 conversation. A bare land, reviewer merge, or out-of-band merge records
 **Merged · Follow-through pending**. Reconciliation records facts and can finish
@@ -113,15 +136,27 @@ an already recorded disposition; it never manufactures an agent verdict.
 
 The existing Task/Wave operator may launch a fresh `finish-delivery` Flow for a
 merged Task whose original Flow is gone. That Flow runs only `follow-through`
-and the ordinary Task end operation. It inspects every associated live Flow
+which ends with the same completion command. It inspects every associated live Flow
 first. It does not rerun gate, re-arm the PR, resume an old Flow, or need the
 Workflow template to still exist. A live ship Flow owns its own finish.
+
+Update `task/operate`, and therefore its included instructions in `task/session`,
+to continue past merge until follow-through and completion are recorded, or a
+concrete blocker remains. If the disposition is already durable, call
+`lf task complete ISSUE` and reread status; otherwise run the remaining
+follow-through. A successful agent turn or Flow exit alone never proves done.
 
 Give the follow-through skill the accepted Task brief, recorded acceptance
 limits, merged PR/head, delivery evidence and any existing linked follow-ups.
 Landing skills identify likely follow-through before scratch cleanup and include
 the exact unverified outcome in durable PR copy. The post-merge skill reads that
 copy and the brief; deleted scratch is never a required input.
+
+Keep the checkout available while follow-through is pending. Merge observation
+must not complete the Task or retire the checkout before the next Flow step can
+run. After the disposition reaches end, existing cleanup may retain a checkout
+for its live Flow or Session without keeping the Task unfinished. Prove this
+ordering with reconciliation running between merge and the follow-through step.
 
 File a follow-up for a concrete accepted obligation whose evidence becomes
 available later: installation, real usage, production behavior, an agreed dated
@@ -197,13 +232,21 @@ between/active, end/done; abandoned remains its separate mark. No new “landed
 Task” state or stored `done` flag. Merge and follow-through are delivery facts
 shown alongside that position.
 
+**Jack Heart's clarification, 2026-10-07:** `end` and completed are the same fact.
+Restore `lf task complete ISSUE` solely as an alias for `lf task move ISSUE end`.
+Both enter the existing `task_end`/`reach_end` operation, as does automatic
+arrival at end; neither spelling can bypass the completion checks. If a check
+fails, preserve the current Workflow position. A repeated completion succeeds
+without another move or duplicated filings. No completion flag, intermediate
+"at end but incomplete" state, or Session ready/complete API is added.
+
 For a Task that has a PR, end requires authoritative merge plus a durable
 none/filed disposition. An open or closed-unmerged PR cannot become successful
 delivery. Explicitly abandoning the Task remains available. Reopening a closed
 PR reuses the same PR; a different PR requires a different Task. Reopening the
 Task for a correction never grants another PR slot.
 
-For a Task with no PR, an accepted empty edge or explicit `lf task move ISSUE end`
+For a Task with no PR, an accepted empty edge or explicit `lf task complete ISSUE`
 completes it. Commits and files can be research artifacts; their presence does
 not manufacture a PR requirement. Preserve its checkout whenever deletion would
 lose work. Completion and physical cleanup remain separate, as in #1488.
@@ -221,8 +264,8 @@ normal screens and launch context say “Pull request” and omit it when absent
 
 Delete `land -c` and `--next` (also arm/submit variants). Bare land has one
 meaning; `--wait` changes waiting, not completion policy. Taskless PR delivery
-continues without inventing a Task or follow-up. `task move end` uses the same
-delivery facts as automatic arrival; `--force` must not bypass merge or required
+continues without inventing a Task or follow-up. `task complete` and `task move end`
+use the same delivery facts as automatic arrival; `--force` must not bypass merge or required
 filing. An early Linear auto-completion is reported as provider conflict, then
 reconciled to the actual Workflow state, never adopted as local completion.
 
@@ -346,9 +389,16 @@ exercise those exact cases.
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
-its own Task and child-specific design. None of these slices is implemented.
+its own Task and child-specific design. None of these slices is implemented yet.
 
-1. **This slice — truthful Flow launch.** Correct admission/child cwd and
+**Current milestone:** slice 1 and the `task complete` alias from slice 3,
+through focused verification and demo. The alias shares today's end operation;
+the stronger post-merge follow-through checks arrive with slice 3. Preserve the
+remaining scope below, and do not present the milestone as the complete Task.
+Jack has not settled the remaining product choices under Remaining review
+boundary; this milestone does not require them.
+
+1. **First demonstration — truthful Flow launch.** Correct admission/child cwd and
    shared Flow association. Add a held mechanical Flow in
    `task_flow_launch_tests` launched from a sibling checkout; assert target
    Started, target inventory and status while still running, plus retained
@@ -364,6 +414,8 @@ its own Task and child-specific design. None of these slices is implemented.
 3. **Finish delivery through linked Tasks.** Replace keep-open obligations,
    implement durable filing/retry and due-date projection, update land waiting,
    ship/finish Flows, operator guidance and shared pending/done presentation.
+   Restore `task complete` as the end-move alias, used by follow-through and the
+   Task operator; keep the existing completion operation as the single owner.
    A stopped post-land Flow must be finishable without rerunning delivery.
 4. **Carry design into dependent work.** Add explicit checkout handoff and
    update decomposition guidance. Exercise two children with distinct designs,
@@ -386,9 +438,10 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | Observable result | Headless proof owner |
 | --- | --- |
 | One merged Task becomes end/done only after its zero-or-more follow-ups are durably resolved; CLI, work monitor and Desktop agree on PR, state and links | Extend `task_flow_launch_tests`, `land_tests`, DTO fixtures and `TaskFlowProofTests`/`RegistryQueryTests` with the same lifecycle population |
+| `task complete`, `task move end` and automatic arrival produce the same end/done result; refusal leaves position unchanged; completion within follow-through followed by driver arrival or retry produces one transition | Task launch integration, Task authority tests and command-tree coverage; operator prompt scenarios include merged but unfinished Tasks |
 | Real Git fixture plus simulated GitHub merge and Linear mutation crosses store, public CLI JSON, monitor projection and Swift decode/view; no live provider or display is required | New lifecycle case in existing Task launch suite; serialize its resulting wire fixture for both Rust `dto_fixtures` and Swift `DTOFixtureTests`/headless Task view assertions |
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
-| Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
+| Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
 | Research reaches done with `pr: null`; retained drafts/commits and Sessions stay reachable; no hidden Working PR is created | `task_initialization_tests`, `task_diff_tests`, Task launch and shared DTO/view fixtures |
 | Child publishes before parent merge, accepts parent updates and survives squash with one PR and its own design; changed handoff input never overwrites child edits | Existing `sync_tests` stack scenarios plus `task_initialization_tests` |
 | Due tomorrow is absent from today's due list, present on the next due Wave pass, and never auto-completes; unscheduled coverage is stated honestly | PM projection/operator prompt scenarios with fixed dates; Desktop/CLI use the same due date |
@@ -403,10 +456,12 @@ that ordinary Task reads add no per-follow-up subprocess or network call.
 
 ## Remaining review boundary
 
-Jack's zero-or-one PR and separate follow-through decisions are binding. Proposed
-choices needing design review are the waited ship edge, removing `-c`, optional
-explicit design handoff, the disposition required before completion, and due
-follow-ups returning to the owning Wave without implicitly enabling a schedule.
+Jack's zero-or-one PR and post-merge follow-through check are accepted: file
+follow-ups or record none needed before completing every merged Task. Jack also
+accepted the landing Flow/operator recovery approach and clarified that end is
+completion, with `task complete` an alias for moving to end. Remaining proposals
+include polling limits, filing interface, removing `-c`, explicit design handoff,
+and due follow-ups returning to the owning Wave without enabling a schedule.
 Live migration, closing LOO-385, automatic filing of unrelated improvements,
 publishing/landing this branch and claimed production acceptance are excluded.
 

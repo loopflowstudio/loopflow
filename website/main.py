@@ -1,6 +1,5 @@
 import difflib
 import hashlib
-import json
 import os
 import posixpath
 import re
@@ -32,7 +31,7 @@ app, rt = fast_app(
         ),
         Link(
             rel="stylesheet",
-            href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
+            href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap",
         ),
         Link(rel="stylesheet", href=f"/static/style.css?v={STYLE_VERSION}"),
     ),
@@ -59,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Features", href="/#features")),
+                Li(A("Flows", href="/#flows")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -135,31 +134,14 @@ def _require_content_path(path: str) -> object:
 
 
 # Homepage
+HOME_CONTENT = _require_content_path("homepage")
 HERO_CONTENT = _require_content_path("homepage.hero")
 OWNERSHIP_CONTENT = _require_content_path("homepage.ownership")
-LEVELS_CONTENT = _require_content_path("homepage.levels")
-SHOWCASE_CONTENT = _require_content_path("homepage.showcase")
+FLOWS_CONTENT = _require_content_path("homepage.flows")
+TASKS_CONTENT = _require_content_path("homepage.tasks")
+MAC_CONTENT = _require_content_path("homepage.mac")
 WHY_CONTENT = _require_content_path("homepage.why")
-AUTONOMY_CONTENT = _require_content_path("homepage.autonomy")
 INSTALL_CONTENT = _require_content_path("homepage.install")
-
-for required_key in (
-    "homepage.hero.tagline",
-    "homepage.hero.subline",
-    "homepage.hero.loopflow_download_url",
-    "homepage.hero.example.steps",
-    "homepage.ownership.items",
-    "homepage.levels.items",
-    "homepage.showcase.items",
-    "homepage.showcase.pointer",
-    "homepage.showcase.highlight",
-    "homepage.why.claim",
-    "homepage.why.paragraphs",
-    "homepage.autonomy.levels",
-    "homepage.install.command_display",
-    "homepage.install.command_copy",
-):
-    _require_content_path(required_key)
 
 # Markdown rendering
 
@@ -314,12 +296,8 @@ ALL_DOC_PAGES = DOC_PAGES + ARCHITECTURE_PAGES
 DOCS_NAV = [(page.title, page.slug) for page in DOC_PAGES]
 DOC_DESCRIPTIONS = {page.slug: page.description for page in DOC_PAGES}
 DOC_PAGE_BY_SLUG = {page.slug: page for page in ALL_DOC_PAGES}
-DOC_AREA_BY_PAGE = {
-    page.slug: area for area in DOCS_AREAS for page in area.pages
-}
-DOC_AREA_BY_PAGE.update(
-    {page.slug: ARCHITECTURE_AREA for page in ARCHITECTURE_PAGES}
-)
+DOC_AREA_BY_PAGE = {page.slug: area for area in DOCS_AREAS for page in area.pages}
+DOC_AREA_BY_PAGE.update({page.slug: ARCHITECTURE_AREA for page in ARCHITECTURE_PAGES})
 
 
 def generate_llms_txt() -> str:
@@ -371,9 +349,7 @@ def generate_llms_full_txt() -> str:
 
 def generate_sitemap_xml() -> str:
     pages = ["", "/download", "/docs"] + [
-        f"/docs/{slug}"
-        for _, slug in DOCS_NAV
-        if slug != "index" and doc_path(slug)
+        f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
     for page in pages:
@@ -407,9 +383,7 @@ def _split_doc_source(content: str) -> tuple[str, str]:
     return match.group(1).strip(), source[match.end() :].lstrip()
 
 
-def _resolve_doc_target(
-    target: str, current_slug: str, architecture: bool = False
-) -> str:
+def _resolve_doc_target(target: str, current_slug: str, architecture: bool = False) -> str:
     if target.startswith(("#", "/", "http://", "https://", "mailto:")):
         return target
 
@@ -442,9 +416,7 @@ def _resolve_doc_target(
     return target
 
 
-def _resolve_markdown_targets(
-    content: str, current_slug: str, architecture: bool = False
-) -> str:
+def _resolve_markdown_targets(content: str, current_slug: str, architecture: bool = False) -> str:
     pattern = re.compile(r"(!?\[[^\]]*\]\()([^)\s]+)([^)]*\))")
 
     def replace(match: re.Match[str]) -> str:
@@ -454,12 +426,8 @@ def _resolve_markdown_targets(
     return pattern.sub(replace, content)
 
 
-def render_markdown(
-    content: str, current_slug: str = "index", architecture: bool = False
-) -> list:
-    source = _resolve_markdown_targets(
-        _strip_frontmatter(content), current_slug, architecture
-    )
+def render_markdown(content: str, current_slug: str = "index", architecture: bool = False) -> list:
+    source = _resolve_markdown_targets(_strip_frontmatter(content), current_slug, architecture)
     html = markdown_to_html(
         source,
         extensions=("fenced_code", "sane_lists", "tables", "toc"),
@@ -506,17 +474,9 @@ def DocsNav(current: str = "index"):
                         Li(
                             A(
                                 page.title,
-                                href=(
-                                    f"/docs/{page.slug}"
-                                    if page.slug != "index"
-                                    else "/docs"
-                                ),
+                                href=(f"/docs/{page.slug}" if page.slug != "index" else "/docs"),
                                 cls="active" if page.slug == current else None,
-                                **(
-                                    {"aria-current": "page"}
-                                    if page.slug == current
-                                    else {}
-                                ),
+                                **({"aria-current": "page"} if page.slug == current else {}),
                             ),
                             cls="docs-nav-child" if page.parent else None,
                         )
@@ -584,11 +544,7 @@ def ArchitectureNav(current: str):
                                     page.title,
                                     href=_architecture_href(page.slug),
                                     cls="active" if page.slug == current else None,
-                                    **(
-                                        {"aria-current": "page"}
-                                        if page.slug == current
-                                        else {}
-                                    ),
+                                    **({"aria-current": "page"} if page.slug == current else {}),
                                 ),
                                 cls="docs-nav-child" if page.parent else None,
                             )
@@ -744,9 +700,7 @@ def _doc_title(slug: str) -> str:
     return page.title if page else slug.title()
 
 
-def markdown_doc_response(
-    slug: str, canonical_path: str | None = None
-) -> PlainTextResponse | None:
+def markdown_doc_response(slug: str, canonical_path: str | None = None) -> PlainTextResponse | None:
     path = doc_path(slug)
     if not path:
         return None
@@ -797,32 +751,14 @@ SITEMAP_XML_CONTENT = generate_sitemap_xml()
 # Pages
 
 
-def _provenance_line(sidecar_path: Path):
-    """The caption's provenance line, only when the sidecar exists and parses."""
-    if not sidecar_path.is_file():
-        return None
-    try:
-        provenance = json.loads(sidecar_path.read_text())
-        captured_at = provenance["captured_at"][:10]
-        wave = provenance["wave"]
-        app_version = provenance["app_version"]
-    except (KeyError, TypeError, json.JSONDecodeError):
-        return None
-    scope = f" from the {wave} wave" if wave else ""
-    return P(
-        f"Captured {captured_at}{scope} · Loopflow {app_version}",
-        cls="loopflow-showcase-provenance",
-    )
-
-
 def _loopflow_diagram(example) -> FT:
-    """The hero's example Flow: steps down a rail, one edge looping back, one exiting."""
+    """Steps down a rail, one edge looping back, one exiting."""
     steps = example["steps"]
     rows = [(12 + 50 * index, step) for index, step in enumerate(steps)]
     last_y = rows[-1][0]
     loop_y = next(y for y, step in rows if step["name"] == example["loop_to"])
 
-    def name_end(name: str) -> int:
+    def _name_end(name: str) -> int:
         return 26 + round(len(name) * 7.9) + 12
 
     parts = [
@@ -840,8 +776,8 @@ def _loopflow_diagram(example) -> FT:
             f'<text class="detail" x="26" y="{y + 21}">{step["detail"]}</text>'
         )
     parts.append(
-        f'<path class="edge" d="M{name_end(steps[-1]["name"])} {last_y}H250V{loop_y}'
-        f'H{name_end(example["loop_to"])}" marker-end="url(#loopflow-arrow)"/>'
+        f'<path class="edge" d="M{_name_end(steps[-1]["name"])} {last_y}H250V{loop_y}'
+        f'H{_name_end(example["loop_to"])}" marker-end="url(#loopflow-arrow)"/>'
         f'<text class="edge-label" transform="translate(266 {(last_y + loop_y) // 2}) rotate(90)" '
         f'text-anchor="middle">{example["loop_label"]}</text>'
         f'<path class="edge" d="M8 {last_y + 8}V{last_y + 50}" marker-end="url(#loopflow-arrow)"/>'
@@ -860,292 +796,208 @@ def _loopflow_diagram(example) -> FT:
     )
 
 
-def _section_head(content, heading_id: str) -> FT:
-    return Div(
-        Div(
-            P(content["label"], cls="home-label") if "label" in content else None,
-            H2(content["heading"], id=heading_id),
-        ),
-        P(content["introduction"]),
-        cls="home-section-head",
-    )
+def _inline_command(text: str) -> list:
+    """Set the command name in monospace without treating copy as HTML."""
+    return [Code(part) if part == "lf" else part for part in re.split(r"\b(lf)\b", text)]
 
 
-def _part(part) -> FT:
-    return Article(
-        H3(part["title"]),
-        P(part["description"], cls="feature-description"),
-        A(part["link_label"], Span(" →", aria_hidden="true"), href=part["href"]),
-        cls="home-part",
-    )
+def _terminal(content: str, label: str) -> FT:
+    lines = []
+    for line in content.rstrip().splitlines():
+        if line.startswith("#"):
+            lines.extend((Span(line, cls="c"), "\n"))
+            continue
+        if line.startswith("$ "):
+            lines.append(Span("$", cls="p"))
+            line = line[1:]
+        command, marker, comment = line.partition("  #")
+        lines.extend(B(part) if part == "lf" else part for part in re.split(r"\b(lf)\b", command))
+        if marker:
+            lines.append(Span(marker + comment, cls="c"))
+        lines.append("\n")
+    lines.pop()
+    return Pre(*lines, cls="term", tabindex="0", aria_label=label)
 
 
-def _levels_section() -> FT:
-    return Section(
-        Div(
-            _section_head(LEVELS_CONTENT, "levels-heading"),
-            Ol(
-                *[
-                    Li(
-                        Div(P(item["label"], cls="home-label"), H3(item["title"])),
-                        Div(
-                            P(item["text"]),
-                            Div(*[_part(part) for part in item["parts"]], cls="home-parts")
-                            if "parts" in item
-                            else None,
-                            A(item["link_label"], Span(" →", aria_hidden="true"), href=item["href"])
-                            if "href" in item
-                            else None,
-                        ),
-                        cls="home-way",
-                    )
-                    for item in LEVELS_CONTENT["items"]
-                ],
-                cls="home-ways",
-            ),
-            cls="home-wrap",
-        ),
-        id="features",
-        cls="home-levels-section",
-        aria_labelledby="levels-heading",
-    )
-
-
-def _showcase_frames() -> list[dict]:
-    """A frame renders only when its image exists; a missing capture never ships as a 404."""
-    return [
-        item
-        for item in SHOWCASE_CONTENT["items"]
-        if (STATIC_DIR / item["image"].removeprefix("/static/")).is_file()
-    ]
-
-
-def _showcase_section():
-    frames = _showcase_frames()
-    if not frames:
-        return None
-    pointer = SHOWCASE_CONTENT["pointer"]
-    highlight = SHOWCASE_CONTENT["highlight"]
-    position = (
-        f"--pointer-left:{pointer['left']}%;--pointer-top:{pointer['top']}%;"
-        f"--hit-left:{highlight['left']}%;--hit-top:{highlight['top']}%;"
-        f"--hit-width:{highlight['width']}%;--hit-height:{highlight['height']}%"
-    )
-    provenance = []
-    for frame in frames:
-        sidecar = (STATIC_DIR / frame["image"].removeprefix("/static/")).with_suffix(".json")
-        if (line := _provenance_line(sidecar)) is not None:
-            provenance.append(line)
-    return Section(
-        Div(
-            _section_head(SHOWCASE_CONTENT, "product-heading"),
-            Div(
-                *[
-                    Img(
-                        src=frame["image"],
-                        alt=frame["image_alt"],
-                        cls="home-shot is-current" if index == 0 else "home-shot",
-                        data_frame=frame["id"],
-                    )
-                    for index, frame in enumerate(frames)
-                ],
-                Span(cls="home-stage-hit", aria_hidden="true"),
-                Span(I(), cls="home-stage-pointer", aria_hidden="true"),
-                cls="home-stage",
-                style=position,
-                data_stage="",
-            ),
-            Div(
-                Div(
-                    *[
-                        Button(
-                            Span(f"{index}", aria_hidden="true"),
-                            f" {frame['label']}",
-                            type="button",
-                            data_frame=frame["id"],
-                            data_caption=frame["caption"],
-                            aria_pressed="true" if index == 1 else "false",
-                        )
-                        for index, frame in enumerate(frames, start=1)
-                    ],
-                    cls="home-stage-tabs",
-                    role="group",
-                    aria_label="Views",
-                ),
-                P(
-                    frames[0]["caption"],
-                    cls="home-stage-caption",
-                    aria_live="polite",
-                    data_caption="",
-                ),
-                cls="home-stage-bar",
-            ),
-            Div(
-                P(SHOWCASE_CONTENT["note"]),
-                *provenance,
-                P(
-                    "Full size: ",
-                    *[A(frame["label"], href=frame["image"]) for frame in frames],
-                    cls="home-stage-links",
-                ),
-                cls="home-stage-note",
-            ),
-            Div(
-                *[P(B(item["title"]), f" {item['text']}") for item in SHOWCASE_CONTENT["notes"]],
-                cls="home-stage-points",
-            ),
-            cls="home-wrap",
-        ),
-        id="product",
-        cls="home-showcase",
-        aria_labelledby="product-heading",
-    )
-
-
-def _autonomy_section() -> FT:
-    link = AUTONOMY_CONTENT["link"]
-    return Section(
-        Div(
-            Div(
-                H2(AUTONOMY_CONTENT["heading"], id="autonomy-heading"),
-                P(AUTONOMY_CONTENT["introduction"]),
-                cls="home-section-head",
-            ),
-            Div(
-                *[
-                    Div(
-                        Div(Span(level["label"], cls="home-label"), H3(level["title"])),
-                        Ol(
-                            *[
-                                Li(step["name"], cls="you" if step["you"] else None)
-                                for step in level["steps"]
-                            ],
-                            cls="home-staff",
-                        ),
-                        P(level["description"]),
-                        cls="home-level",
-                    )
-                    for level in AUTONOMY_CONTENT["levels"]
-                ],
-                cls="home-levels",
-            ),
-            P(
-                Span(f"● {AUTONOMY_CONTENT['legend_you']}"),
-                Span(f"○ {AUTONOMY_CONTENT['legend_agent']}"),
-                A(link["label"], Span(" →", aria_hidden="true"), href=link["href"]),
-                cls="home-legend",
-            ),
-            cls="home-wrap",
-        ),
-        cls="home-autonomy",
-        aria_labelledby="autonomy-heading",
-    )
-
-
-def build_homepage():
-    loopflow_download_url = HERO_CONTENT["loopflow_download_url"]
-    example = HERO_CONTENT["example"]
-    install_display = INSTALL_CONTENT["command_display"].strip()
-    install_copy = INSTALL_CONTENT["command_copy"]
-
+def _section_heading(content: dict) -> tuple:
     return (
-        Title("Loopflow, a software instrument"),
-        SkipLink(),
-        Navbar(),
-        Main(
-            # Hero — headline and one sentence, beside an example loopflow
-            Section(
-                Div(
+        P(content["label"], cls="eyebrow"),
+        H2(content["heading"]),
+        P(*_inline_command(content["introduction"]), cls="lede"),
+    )
+
+
+def _capture(content: dict) -> tuple:
+    return (
+        Div(
+            Img(
+                src=content["image"],
+                alt=content["image_alt"],
+                width=content["width"],
+                height=content["height"],
+                loading="lazy",
+            ),
+            cls="window",
+        ),
+        P(content["caption"], cls="capture-label"),
+    )
+
+
+def _flows_section() -> FT:
+    example = FLOWS_CONTENT["example"]
+    return Section(
+        *_section_heading(FLOWS_CONTENT),
+        *_capture(FLOWS_CONTENT["capture"]),
+        Div(
+            Div(
+                P(example["label"], cls="eyebrow"),
+                _loopflow_diagram(example),
+                P(example["caption"], " ", Span(example["file"], cls="folio"), cls="capture-label"),
+            ),
+            _terminal(FLOWS_CONTENT["commands"], "A Flow file and how to run it"),
+            cls="pair",
+        ),
+        Div(
+            *[
+                Article(
+                    H3(part["title"]),
+                    P(*_inline_command(part["description"])),
+                    A(part["link"]["label"], href=part["link"]["href"]),
+                )
+                for part in FLOWS_CONTENT["parts"]
+            ],
+            cls="parts",
+        ),
+        id="flows",
+        cls="block",
+    )
+
+
+def _tasks_section() -> FT:
+    return Section(
+        *_section_heading(TASKS_CONTENT),
+        Div(
+            *[
+                Article(
+                    Div(item["label"], Span(item["title"]), cls="tag"),
                     Div(
+                        P(*_inline_command(item["text"])),
+                        P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
+                        if "link" in item
+                        else None,
+                    ),
+                    _terminal(item["commands"], item["label"] + " example"),
+                    cls="work-row",
+                )
+                for item in TASKS_CONTENT["items"]
+            ],
+            cls="work-rows",
+        ),
+        id="tasks",
+        cls="block",
+    )
+
+
+def build_homepage() -> tuple:
+    return (
+        Title("Loopflow — " + HERO_CONTENT["tagline"]),
+        SkipLink(),
+        Div(
+            Header(
+                A(Img(src="/static/logo.svg", alt=""), "loopflow", href="/", cls="brand"),
+                Nav(
+                    *[
+                        A(
+                            link["label"],
+                            href=link["href"],
+                            cls="optional" if link["href"].startswith("#") else None,
+                        )
+                        for link in HOME_CONTENT["navigation"]
+                    ],
+                    aria_label="Main navigation",
+                ),
+            ),
+            Main(
+                Section(
+                    Div(
+                        P(HERO_CONTENT["label"], cls="eyebrow kicker"),
                         H1(HERO_CONTENT["tagline"]),
-                        P(HERO_CONTENT["subline"], cls="tagline hero-subline"),
+                        P(HERO_CONTENT["subline"], cls="intro"),
                         Div(
-                            A(
-                                "Download for Mac",
-                                href=loopflow_download_url,
-                                cls="btn btn-primary",
-                            ),
-                            A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                            cls="hero-actions",
+                            *[
+                                A(
+                                    link["label"],
+                                    href=link["href"],
+                                    cls="button solid" if index == 0 else "button",
+                                )
+                                for index, link in enumerate(HERO_CONTENT["actions"])
+                            ],
+                            cls="actions",
                         ),
                     ),
-                    Aside(
-                        P(example["label"], cls="home-label"),
-                        _loopflow_diagram(example),
-                        P(example["caption"]),
-                        P(example["file"], cls="home-file"),
-                        cls="home-example",
-                    ),
-                    cls="home-wrap home-hero-grid",
+                    Div(_terminal(HERO_CONTENT["commands"], "lf commands")),
+                    cls="home-hero",
                 ),
-                cls="hero home-hero",
-            ),
-            Section(
-                Div(
+                Section(
                     *[
-                        Div(H2(item["title"]), P(item["text"]))
+                        Div(B(item["title"]), *_inline_command(item["text"]))
                         for item in OWNERSHIP_CONTENT["items"]
                     ],
-                    cls="home-wrap home-owned-grid",
+                    cls="strip",
+                    aria_label="Ownership",
                 ),
-                cls="home-owned",
-                aria_label="Ownership",
-            ),
-            _levels_section(),
-            _showcase_section(),
-            Section(
-                Div(
-                    P(WHY_CONTENT["label"], cls="home-label"),
+                _flows_section(),
+                _tasks_section(),
+                Section(
+                    *_section_heading(MAC_CONTENT),
+                    *_capture(MAC_CONTENT["capture"]),
+                    id="mac",
+                    cls="block",
+                ),
+                Section(
+                    P(WHY_CONTENT["label"], cls="eyebrow"),
                     Div(
-                        H2(WHY_CONTENT["claim"]),
-                        *[
-                            P(B(WHY_CONTENT["lead"]), f" {paragraph}")
-                            if index == 0
-                            else P(paragraph)
-                            for index, paragraph in enumerate(WHY_CONTENT["paragraphs"])
-                        ],
+                        P(WHY_CONTENT["claim"], cls="claim"),
+                        P(B(WHY_CONTENT["lead"])),
+                        *[P(paragraph) for paragraph in WHY_CONTENT["paragraphs"]],
+                        cls="essay",
                     ),
-                    cls="home-wrap home-why-grid",
+                    id="why",
+                    cls="block",
                 ),
-                id="why",
-                cls="home-why",
-            ),
-            _autonomy_section(),
-            # Install — the app first; the command line tool rides along
-            Section(
-                Div(
+                Section(
+                    Div(P(INSTALL_CONTENT["label"], cls="eyebrow"), H2(INSTALL_CONTENT["heading"])),
                     Div(
-                        P(INSTALL_CONTENT["label"], cls="home-label"),
-                        H2(INSTALL_CONTENT["heading"], cls="quick-install-heading"),
-                        Div(
+                        _terminal(INSTALL_CONTENT["commands"], "Install Loopflow"),
+                        P(
+                            *[
+                                A(link["label"], href=link["href"])
+                                for link in INSTALL_CONTENT["links"]
+                            ],
                             A(
-                                "Download for Mac",
-                                href=loopflow_download_url,
-                                cls="btn btn-primary",
+                                INSTALL_CONTENT["download_label"],
+                                href=INSTALL_CONTENT["download_url"],
                             ),
-                            A("Read the docs", href="/docs", cls="btn btn-secondary"),
-                            cls="hero-actions",
-                        ),
-                        P(INSTALL_CONTENT["note"], cls="install-note"),
-                        P(INSTALL_CONTENT["requirement"], cls="install-note"),
-                    ),
-                    Div(
-                        P(INSTALL_CONTENT["cli_label"], cls="install-note"),
-                        Div(
-                            Pre(Code(install_display), cls="install-code", tabindex="0"),
-                            CopyButton(install_copy),
-                            cls="install-code-wrapper",
+                            cls="capture-label install-links",
                         ),
                     ),
-                    cls="home-wrap home-install-grid",
+                    id="start",
+                    cls="start",
                 ),
-                cls="quick-install home-install",
+                id="main-content",
+                cls="home",
             ),
-            id="main-content",
-            cls="home",
+            Footer(
+                Span(HOME_CONTENT["footer"]["text"]),
+                Div(
+                    *[
+                        A(link["label"], href=link["href"])
+                        for link in HOME_CONTENT["footer"]["links"]
+                    ]
+                ),
+            ),
+            cls="home-page",
         ),
-        SiteFooter(),
-        Script(src=f"/static/home.js?v={STYLE_VERSION}", defer=True),
     )
 
 
@@ -1208,11 +1060,7 @@ def _docs_page(slug: str, title: str, architecture: bool = False):
     page = DOC_PAGE_BY_SLUG.get(slug)
     return (
         Title(title),
-        *(
-            (Meta(name="robots", content="noindex,nofollow"),)
-            if architecture
-            else ()
-        ),
+        *((Meta(name="robots", content="noindex,nofollow"),) if architecture else ()),
         SkipLink(),
         Script(src="/static/docs.js", defer=True),
         Navbar(),
@@ -1367,7 +1215,7 @@ def get():
                             ),
                             A(
                                 "Download for Mac",
-                                href=HERO_CONTENT["loopflow_download_url"],
+                                href=INSTALL_CONTENT["download_url"],
                                 cls="btn btn-primary",
                             ),
                             cls="mac-app-option",

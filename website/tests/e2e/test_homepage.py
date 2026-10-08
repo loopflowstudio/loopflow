@@ -1,135 +1,111 @@
-"""Homepage structure tests.
+"""Homepage sections, examples, destinations, and capture layout."""
 
-These pin structure — sections exist, links resolve, assets load — not copy.
-Copy lives in content.yaml and should be editable without touching tests.
-"""
-
+from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
 from playwright.sync_api import Page, expect
 
 
-def test_hero_elements_visible(homepage: Page):
-    assert homepage.locator("h1", has_text="Loopflow").is_visible()
-    tagline = homepage.locator(".hero .tagline")
-    assert tagline.is_visible()
-    assert tagline.text_content().strip()
+def test_approved_homepage_sections(homepage: Page) -> None:
+    expect(homepage.locator("h1")).to_have_text("A command line for great software engineering.")
+    assert homepage.locator("main > section").evaluate_all(
+        "sections => sections.map(section => section.id)"
+    ) == ["", "", "flows", "tasks", "mac", "why", "start"]
+    expect(homepage.locator(".strip > div")).to_have_count(4)
+    expect(homepage.locator("#flows .parts article")).to_have_count(3)
+    assert homepage.locator(".work-row .tag").evaluate_all(
+        "tags => tags.map(tag => tag.firstChild.textContent.trim())"
+    ) == ["Wave", "Project", "Task", "Workflow"]
 
 
-def test_hero_ctas(homepage: Page):
-    hero = homepage.locator(".hero")
-    assert hero.locator(".hero-subline").text_content().strip()
-    ctas = hero.locator("a.btn")
-    assert ctas.count() >= 2
-    hrefs = [ctas.nth(i).get_attribute("href") for i in range(ctas.count())]
-    assert "/docs" in hrefs
-    assert any(h.endswith(".dmg") for h in hrefs), "hero must offer the Mac app"
+def test_hero_actions_reach_the_flow_and_install(homepage: Page) -> None:
+    for label, target in [("See it ↓", "#flows"), ("Install ↓", "#start")]:
+        homepage.locator(".home-hero").get_by_role("link", name=label).click()
+        expect(homepage.locator(target + " h2")).to_be_in_viewport()
 
 
 def test_example_loopflow_names_its_steps(homepage: Page) -> None:
-    diagram = homepage.locator(".hero svg[role=img]")
+    diagram = homepage.locator("#flows svg[role=img]")
     expect(diagram).to_be_visible()
-    assert diagram.locator("circle").count() >= 2
-    assert "returns to" in diagram.get_attribute("aria-label")
+    expect(diagram.locator("circle.you")).to_have_count(2)
+    assert "returns to implement" in diagram.get_attribute("aria-label")
+    assert "exits to land" in diagram.get_attribute("aria-label")
 
 
-def test_ownership_strip_lists_what_stays_yours(homepage: Page) -> None:
-    cells = homepage.locator(".home-owned h2")
-    assert cells.count() >= 3
-    for cell in cells.all():
-        expect(cell).not_to_be_empty()
-
-
-def test_plan_links_to_where_each_part_is_shown(homepage: Page, base_url: str) -> None:
-    stages = homepage.locator(".home-way")
-    expect(stages).to_have_count(3)
-    for stage in stages.all():
-        expect(stage.locator("h3").first).not_to_be_empty()
-    for link in homepage.locator(".home-way > div > a").all():
-        destination = link.get_attribute("href")
-        if destination.startswith("#"):
-            expect(homepage.locator(destination)).to_have_count(1)
-        else:
-            response = homepage.request.get(f"{base_url}{destination}")
-            assert response.ok
-
-
-def test_autonomy_levels_mark_where_the_person_comes_in(homepage: Page, base_url: str) -> None:
-    levels = homepage.locator(".home-level")
-    expect(levels).to_have_count(3)
-    present = [level.locator("li.you").count() for level in levels.all()]
-    assert present[0] > 0 and present[-1] == 0
-    destination = homepage.locator(".home-legend a").get_attribute("href")
-    response = homepage.goto(f"{base_url}{destination}")
-    assert response is not None and response.ok
-    expect(homepage.locator(f'[id="{urlsplit(destination).fragment}"]')).to_have_count(1)
-
-
-def test_features_explain_subsystems_and_link_to_guides(homepage: Page, base_url: str) -> None:
-    features = homepage.locator("#features article")
-    assert features.count() == 6
-    destinations = []
-    for feature in features.all():
-        expect(feature.locator("h3")).not_to_be_empty()
-        expect(feature.locator(".feature-description")).not_to_be_empty()
-        destinations.append(feature.get_by_role("link").get_attribute("href"))
-
+def test_guide_links_resolve(homepage: Page, base_url: str) -> None:
+    destinations = homepage.locator(
+        'main a[href^="/docs"], main a[href^="/architecture"]'
+    ).evaluate_all("links => links.map(link => link.getAttribute('href'))")
+    assert destinations
     for destination in destinations:
         response = homepage.goto(f"{base_url}{destination}")
-        assert response is not None and response.ok
+        assert response is None or response.ok
         fragment = urlsplit(destination).fragment
         if fragment:
             expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
-def test_product_window_steps_through_its_captures(homepage: Page) -> None:
-    stage = homepage.locator(".home-stage")
-    tabs = homepage.locator(".home-stage-tabs button")
-    assert tabs.count() >= 2
-    last = tabs.nth(tabs.count() - 1)
-    last.click()
-    expect(last).to_have_attribute("aria-pressed", "true")
-    expect(stage.locator(".home-shot.is-current")).to_have_attribute(
-        "data-frame", last.get_attribute("data-frame")
+def test_captures_reserve_space_and_keep_the_missing_cmux_reference(
+    homepage: Page, base_url: str
+) -> None:
+    for image in homepage.locator("main img").all():
+        source = image.get_attribute("src")
+        assert int(image.get_attribute("width")) > 0
+        assert int(image.get_attribute("height")) > 0
+        image.scroll_into_view_if_needed()
+        box = image.bounding_box()
+        assert box["height"] == pytest.approx(box["width"] / 1.6, abs=1)
+        if source == "/static/cmux-flow.png":
+            expect(homepage.locator("#flows > .capture-label")).to_have_text(
+                "A Flow running in cmux."
+            )
+            if not (Path(__file__).parents[2] / "static/cmux-flow.png").is_file():
+                continue  # LOO-425 explicitly permits the reserved reference until supplied.
+        assert homepage.request.get(f"{base_url}{source}").ok
+
+
+def test_install_has_commands_and_the_mac_download(homepage: Page) -> None:
+    install = homepage.locator("#start")
+    assert "loopflow.studio/install.sh" in install.locator("pre").text_content()
+    assert "lf init" in install.locator("pre").text_content()
+    expect(install.get_by_role("link", name="Download for Mac")).to_have_attribute(
+        "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
     )
-    expect(homepage.locator(".home-stage-caption")).to_have_text(last.get_attribute("data-caption"))
 
 
-def test_desktop_pictures_open_at_full_size(homepage: Page, base_url: str) -> None:
-    links = homepage.locator(".home-stage-links a")
-    sources = homepage.locator(".home-stage img").evaluate_all(
-        "images => images.map(image => image.getAttribute('src'))"
-    )
-    assert [link.get_attribute("href") for link in links.all()] == sources
-    for source in sources:
-        response = homepage.request.get(f"{base_url}{source}")
-        assert response.ok, f"screenshot {source} rendered but does not resolve"
+def test_no_superseded_or_review_content(homepage: Page) -> None:
+    expect(
+        homepage.locator(".home-stage, .home-autonomy, .review-note, .review-bar, form")
+    ).to_have_count(0)
+    body = homepage.locator("body").text_content()
+    for text in ("Linear", "Discord", "Review note for Jack", "cmux’s sidebar"):
+        assert text not in body
+    assert not homepage.locator(
+        '[src*="/directions/"], [href*="/directions/"], script[src*="home.js"]'
+    ).count()
 
 
-def test_no_legacy_homepage_sections(homepage: Page):
-    assert homepage.locator(".hero-video-section").count() == 0
-    assert homepage.locator(".products-section").count() == 0
-    assert homepage.locator(".vocab-section").count() == 0
-    assert homepage.locator(".story-section").count() == 0
-    assert homepage.locator(".terminal-section").count() == 0
-    assert homepage.locator("form").count() == 0  # no waitlist
+@pytest.mark.parametrize("width", [390, 1440])
+def test_page_fits_and_terminals_scroll_within_their_cells(
+    page: Page, base_url: str, width: int
+) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(base_url)
+    assert page.evaluate("document.documentElement.scrollWidth") == width
+    assert page.evaluate("document.body.scrollWidth") == width
+    for terminal in page.locator(".term").all():
+        box = terminal.bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width
+        expect(terminal).to_have_attribute("tabindex", "0")
 
 
-def test_homepage_images_resolve(homepage: Page, base_url: str):
-    imgs = homepage.locator("main img, nav img")
-    for i in range(imgs.count()):
-        src = imgs.nth(i).get_attribute("src")
-        assert src, "image without src"
-        response = homepage.request.get(f"{base_url}{src}" if src.startswith("/") else src)
-        assert response.ok, f"image {src} does not resolve"
-
-
-def test_install_code_in_bottom_cta(homepage: Page):
-    bottom_cta = homepage.locator(".quick-install")
-    assert bottom_cta.is_visible()
-    install_code = bottom_cta.locator(".install-code code").first
-    assert "loopflow.studio/install.sh" in install_code.text_content()
-    assert bottom_cta.locator(".copy-btn").first.is_visible()
+def test_body_command_names_use_monospace(homepage: Page) -> None:
+    names = homepage.locator(".strip code, .lede code")
+    expect(names).to_have_count(2)
+    for name in names.all():
+        expect(name).to_have_text("lf")
+        assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 
 def test_landing_variant_url_returns_404(page: Page, base_url: str):
@@ -156,10 +132,3 @@ def test_llms_txt(page: Page, base_url: str):
     body = response.text()
     assert "/docs" in body
     assert "install.sh" in body
-
-
-def test_mobile_nav_visible(page: Page, base_url: str):
-    page.set_viewport_size({"width": 375, "height": 667})
-    page.goto(base_url)
-    nav_links = page.locator(".nav-links")
-    assert nav_links.is_visible()

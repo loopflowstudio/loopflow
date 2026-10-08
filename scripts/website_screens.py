@@ -47,7 +47,7 @@ class CaptureProvenance:
     """What the caption claims and the gate checks: when, which Wave, which build."""
 
     captured_at: str
-    wave: str | None
+    wave: str
     app_version: str
 
 
@@ -183,7 +183,7 @@ def validate_capture(image: Path, *, now: datetime | None = None) -> tuple[list[
             warnings.append(
                 f"{image}: capture is {age.days} days old (stale after {MAX_CAPTURE_AGE.days})"
             )
-    if provenance.wave is not None and not provenance.wave:
+    if not provenance.wave:
         errors.append(f"{sidecar}: wave is empty")
     if not provenance.app_version:
         errors.append(f"{sidecar}: app_version is empty")

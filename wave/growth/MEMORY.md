@@ -9,6 +9,8 @@ intends is unconfirmed.
 ## Positioning (decided 2026-09-26)
 
 Jack Heart set these in one design session. Wording in quotes is his.
+The October 7 homepage approval below supersedes these earlier homepage
+constraints where its exact copy differs; the docs decisions remain separate.
 
 - Loopflow is "a software instrument: it doesn't make the software for you;
   you make the software through it." Jack weighed "software orchestra" and
@@ -184,18 +186,43 @@ would record unstarted work as finished, so they wait for Jack to cancel.
   from connecting several people's individual setups into one shared
   company. The site does not state this plan.
 
-## Approved copy
+## Homepage approved 2026-10-07
+
+Jack Heart approved prototype 05 ("this looks great"), recorded in LOO-425.
+Its copy is now preserved in `website/content.yaml`: "Loopflow is a software
+instrument" above "A command line for great software engineering." The subline
+is "A free, open-source podium for conducting your software orchestra, with
+native macOS and terminal interfaces." Preserve Jack's wording; add no musical
+language. This approval supersedes the September homepage order and the earlier
+rebuild in [PR #1410](https://github.com/loopflowstudio/loopflow/pull/1410).
+
+The page leads with commands, then ownership, Flows in the terminal, four rows
+(Wave, Project, Task, Workflow), the Mac app, why, and install. The three-frame
+animation, Discord room, and separate autonomy comparison are removed. No Linear
+name, review UI, testimonials, or invented captures belong on the page. The Mac
+download remains available and body mentions of `lf` use monospace.
+
+The terminal image is `website/static/cmux-flow.png`, captioned "A Flow running
+in cmux." It was not supplied at implementation: keep the reference with reserved
+space and disclose its absence in the PR. No cmux sidebar behavior is claimed.
+The Mac image remains the unedited October 1 capture with its provenance sidecar.
+Browser layout and CLI help were checked; this does not establish a fresh-machine
+install journey or an observed cmux Flow run. LOO-425's directive ends at PR
+publication, despite the broader outcome mentioning production deployment.
+
+## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all
 day going in circles, and it's hard to tell which is happening. Loopflow
 keeps track, so you can see what got done and what still needs you." It is
-the tone reference. On the homepage it is the first problem and solve pair.
+the earlier tone reference; its homepage problem/solve placement is superseded
+by the October 7 approval.
 
 Jack chose "One task at a time" and "Make the plan," and left "Let it
-build" as "fine for now." The other homepage lines are drafts he has seen
+build" as "fine for now." The other September homepage lines were drafts he had seen
 and not approved line by line.
 
-- The homepage follows the take Jack called "probably closest": lead with
+- The September homepage followed the take Jack called "probably closest": lead with
   the rhythm of one piece of work, shown as steps. Two other takes, one
   leading with the problem and one short invitation, were set aside.
 - Jack wanted the circles paragraph to be "more of a features list or a

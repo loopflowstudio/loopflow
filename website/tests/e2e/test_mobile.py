@@ -34,7 +34,7 @@ class TestMobileNavNoOverlap:
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
 
-        nav_links = page.locator(".nav-links a:visible")
+        nav_links = page.locator(".home-page nav a:visible")
         count = nav_links.count()
 
         if count < 2:
@@ -64,8 +64,8 @@ class TestMobileNavNoOverlap:
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
 
-        logo = page.locator(".nav-logo")
-        nav_links = page.locator(".nav-links")
+        logo = page.locator(".home-page .brand img")
+        nav_links = page.locator(".home-page nav")
 
         logo_box = logo.bounding_box()
         links_box = nav_links.bounding_box()
@@ -87,12 +87,12 @@ class TestMobileNavNoOverlap:
         page.goto(base_url)
         page.wait_for_load_state("networkidle")
 
-        nav_title = page.locator(".nav-title")
-        nav_links = page.locator(".nav-links")
+        nav_title = page.locator(".home-page .brand")
+        nav_links = page.locator(".home-page nav")
 
         # Skip if nav-title doesn't exist (some pages may not have it)
         if nav_title.count() == 0:
-            pytest.skip("No .nav-title element")
+            pytest.skip("No .home-page .brand element")
 
         title_box = nav_title.bounding_box()
         links_box = nav_links.bounding_box()
@@ -169,7 +169,7 @@ class TestMobileHeroSection:
 
     def test_hero_section_centered(self, mobile_page: Page):
         """Hero content should be centered on mobile."""
-        hero = mobile_page.locator(".hero, .hero-section, section").first
+        hero = mobile_page.locator(".home-hero, .hero, .hero-section, section").first
         hero_box = hero.bounding_box()
         viewport = mobile_page.viewport_size
 
@@ -199,7 +199,7 @@ class TestMobileTouchTargets:
 
     def test_buttons_touch_target_size(self, mobile_page: Page):
         """Buttons should be at least 44x44px for touch."""
-        buttons = mobile_page.locator("a.btn, button")
+        buttons = mobile_page.locator("a.button, a.btn, button")
         count = buttons.count()
 
         violations = []
@@ -224,7 +224,7 @@ class TestMobileTouchTargets:
 
     def test_nav_links_touch_target_size(self, mobile_page: Page):
         """Nav links should have adequate touch targets."""
-        links = mobile_page.locator(".nav-links a")
+        links = mobile_page.locator(".home-page nav a")
         count = links.count()
 
         for i in range(count):

@@ -1043,7 +1043,7 @@ native resume remain unverified. LOO-422 owns broader titles.
 
 Terminal, batch and persistent harnesses share one context-file writer; stubs
 prove transport/retention, not native resume.
-Demo evidence remains in Git. `44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpoint,
+`44fe36620:wave/infrastructure/MEMORY.md` retains caller-checkpoint,
 common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
 remains unresolved. Claude success proves no repair.
 
@@ -1063,15 +1063,12 @@ subagent names do not select lf's harness. Independent fixes preserve saved Sess
 placement, active captures on refused continuation and unpublished reservations on
 publication failure. Launcher success proves no provider exit.
 
-Compression removed queue/custody, PTY/inbox, engine restart, dispatch recovery,
-provider-only probes and the replay parser; history: `1e4ae02a5`, `754efacb2`,
-`31e0640eb`. Native/sibling history and stale-client rejection remain required.
-`dd2cdba82` removed unreachable ClaudeHarness plugin state; source audit:
-`48d145b78`. Native terminal snapshots retain declarations and exact arguments;
-gathered context is a lossless JSON literal in the user message. Escape native
-argument/preprocessing syntax in that context. Rejected hooks put context in
-system messages; Claude shell preprocessing became a model tool instruction,
-missing first-request context. Exact counterexamples: `4624224bb`, this section.
+Compression history: `1e4ae02a5`, `754efacb2`, `31e0640eb`, `dd2cdba82`;
+source audit: `48d145b78`. Native/sibling history and stale-client rejection remain
+required. Native terminal snapshots retain declarations, exact arguments and
+lossless JSON user context; escape native argument/preprocessing syntax.
+Rejected hooks changed context authority; shell preprocessing missed first-request
+context. Exact counterexamples: `4624224bb`, this section.
 
 Codex 0.160.1 ignores typed skill input outside its discovered catalog, but an
 explicit Markdown skill reference selects the original path on both surfaces.
@@ -1085,20 +1082,15 @@ managed context or excerpts. Captured input identifies a Flow; ordinary selectio
 also retains an in-memory invocation. PATH discovery replaces availability's
 `--version` subprocess/cache without changing actual launch failure handling.
 
-Ordinary lf fixtures prove native terminal model/argument/context fidelity,
-single-file collisions, out-of-catalog Codex expansion, custom-prompt translation,
-and provider asset reads against fake APIs. Equal-context plain baselines and the
-PR-base startup comparison now live in
+Fixtures prove native model/argument/context fidelity, collisions, out-of-catalog
+Codex expansion, custom-prompt translation and fake-API asset reads. Comparisons:
 [scripts/benchmarks/skill-invocation](../../scripts/benchmarks/skill-invocation/README.md).
-The PR-base sample shows no added startup second; base's post-provider Git failure
-limits it to startup boundaries. Plain-native comparisons still show overhead;
-no production speedup, live compliance or terminal UI is proved. Prior exact
-costs remain at `d505007b1:scratch/run-any-claude-or-codex.md`.
+PR-base startup shows no added second; base's post-provider Git failure limits
+that evidence. Plain-native overhead remains; production speedup, live compliance
+and terminal UI are unproved. Prior costs: `d505007b1:scratch/run-any-claude-or-codex.md`.
 
 October 8 gate found Codex terminal treating translated YAML's leading `---` as
 an option. A prompt separator fixes the ordinary launch; the real-provider fixture
 now proves source, exact arguments, user context and bundled asset read. Native
 Claude/Codex home continuity, reconnect and headless gate pass; hosted CI remains.
-Release was the only immediate child found; its goal and complete memory were read.
-Its operation-entry lesson applies: provider success alone does not prove launch.
 No merge or Task completion is claimed.

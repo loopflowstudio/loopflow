@@ -783,6 +783,35 @@ fn linear_completing_a_task_that_never_started_withdraws_it() {
 }
 
 #[test]
+fn workflow_restart_keeps_the_captured_graph_and_execution_history() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
+    let before = task.workflow();
+    let processes = support::recorded_flows(task.home.path());
+    fs::write(
+        task.repo.path().join(".lf/workflows/rounds.yaml"),
+        "invalid: source\n",
+    )
+    .unwrap();
+    task.ok(&["task", "workflow", "restart", "INF-123"]);
+    let after = task.workflow();
+    assert_eq!(
+        after["position"],
+        serde_json::json!({"kind":"node","node":"start"})
+    );
+    assert_eq!(after["nodes"], before["nodes"]);
+    assert_eq!(after["edges"], before["edges"]);
+    assert_eq!(
+        after["history"].as_array().unwrap().len(),
+        before["history"].as_array().unwrap().len() + 1
+    );
+    assert_eq!(support::recorded_flows(task.home.path()), processes);
+    let shown = task.run(&["task", "workflow", "show", "INF-123", "--json"]);
+    assert!(shown.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
+        after
+    );
 }
 
 #[test]
@@ -875,3 +904,4 @@ fn remaining_work_is_visible_until_an_explicit_evidence_decision() {
     assert_eq!(count(), 2);
     task.ok(&["task", "move", "INF-123", "end"]);
     assert_eq!(task.state(), "done");
+}

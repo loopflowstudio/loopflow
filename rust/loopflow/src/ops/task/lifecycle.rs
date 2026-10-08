@@ -484,3 +484,83 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
 }
 
+/// A Flow whose driver died is history; only live or unresolved execution waits.
+pub(super) fn associated_work_blockers(store: &SharedStore, task: &Task) -> OpsResult<Vec<String>> {
+    associated_execution_blockers(store, task)
+}
+
+fn open_work(store: &SharedStore, task: &Task) -> OpsResult<crate::task_work::TaskWork> {
+    let open = store.sqlite.open_processes().map_err(task_error)?;
+    store
+        .sqlite
+        .task_open_work(&task.id, &open)
+        .map_err(task_error)
+}
+
+/// Restoring a checkout preserves idle Flows; only unresolved execution waits.
+pub(super) fn associated_execution_blockers(
+    store: &SharedStore,
+    task: &Task,
+) -> OpsResult<Vec<String>> {
+    execution_blockers(store, &open_work(store, task)?)
+}
+
+fn execution_blockers(
+    store: &SharedStore,
+    work: &crate::task_work::TaskWork,
+) -> OpsResult<Vec<String>> {
+    let mut blockers = Vec::new();
+    // The caller cannot outlive the processes that launched it, nor wait on
+    // the Flow whose step it is. Lineage exempts waiting, not authority.
+    let mut lineage = HashSet::new();
+    let mut next = crate::journal::current_process_lfid();
+    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
+        next = store
+            .sqlite
+            .process(&id)
+            .map_err(task_error)?
+            .and_then(|process| process.parent_process_lfid);
+    }
+    // A Flow is its driver and step Processes; the loop over Processes below judges
+    // them. Sessions are judged here on their own evidence.
+    for session in &work.sessions {
+        if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
+            if input.completed_at.is_none() && !input.interactive && !input.input_published {
+                blockers.push(format!("Session {} has a reserved input", session.id));
+            }
+        }
+        if store
+            .sqlite
+            .session_has_pending_turn(&session.id)
+            .map_err(task_error)?
+            && (session.completed_at.is_none()
+                || crate::ops::task_automation::session_engine_unresolved(
+                    &store.sqlite,
+                    &session.id,
+                )?)
+        {
+            blockers.push(format!(
+                "Session {} has an unresolved provider turn",
+                session.id
+            ));
+        }
+    }
+    for process in work
+        .processes
+        .iter()
+        .filter(|process| process.completed_at.is_none())
+    {
+        if lineage.contains(&process.lfid) {
+            continue;
+        }
+        if crate::journal::process_evidence(&store.sqlite, &process.lfid)
+            != crate::journal::ProcessIdentityEvidence::Dead
+        {
+            blockers.push(format!(
+                "Process {} has live or unresolved execution; inspect `lf monitor show {}`",
+                process.lfid, process.lfid
+            ));
+        }
+    }
+    Ok(blockers)
+}

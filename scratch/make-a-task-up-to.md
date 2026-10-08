@@ -348,7 +348,7 @@ graphs and their invocation binaries remain historical execution inputs; do not
 rewrite a running graph to remove an old flag. Newly compiled Flows and documented
 commands must use the new command contract.
 
-### Delete — do not maintain (remaining lifecycle slices)
+### Delete — do not maintain
 
 These cuts are implemented together in slices 2–4; retained historical readers
 are the explicit migration exception:
@@ -363,6 +363,11 @@ are the explicit migration exception:
   Rust/Swift DTO fixtures together, including explicit null for no PR.
 - `land -c`/serial guidance in LOOPFLOW.md, landing/capture/ship-decomposed and
   operator skills, `docs/lf*.md`, delivery architecture and affected READMEs.
+
+The compression review also removed the surviving Swift `startNextPr` action,
+keep-open summary/reader, and disposition-aware repair-command helper. Writers
+leave retired disposition columns untouched; historical events still feed the
+shared follow-through projection. No further deletion target is currently known.
 
 Retain exact-head landing generations, CI repair deduplication, Git mutation
 locks, safe cleanup, Task history, shared status/monitor reads, symlink-safe file
@@ -552,4 +557,11 @@ filing date instead of Linear's observed due date. Confirmation now records the
 provider date, including removal; the retry receipt retains its original payload.
 The lost-response/changed-chapter regression covers both date edits and removal.
 
-Check (2026-10-08): `cargo test -p loopflow --lib ops::task::follow_through::tests::operation_retries_pinned_filing_after_lost_responses_and_chapter_change -- --exact` passed (1); post-sync `task_flow_launch_tests::running_flows_belong_to_the_target_checkout_and_retain_their_caller` passed (1, five paths); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.
+Range verification now reads Task placement directly, without reading or creating
+a temporary PR. Completion reconciliation uses its existing gate once; the store
+still checks disposition transactionally. Filing reuses its initial PR read.
+Review also corrected the CI repair prompt's completion promise and the Desktop
+mock's malformed optional-PR JSON; its existing decode test proves the repair.
+Earlier post-sync checks are retained at `6d18dad0a:scratch/make-a-task-up-to.md`.
+
+Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): `cargo test -p loopflow --test task_pr_range_tests --test task_follow_through_tests` passed (16); `cargo test -p loopflow --lib` with filters `ops::task::tests::watched_landing_completes_task_only_from_merged_pr_evidence`, `ops::task::follow_through::tests`, and `store::sqlite::pr_landings::tests` passed (5); `swift test --package-path swift --filter 'MockWaveFixtureTests|DTOFixtureTests|TaskFlowTests/deliveryEvidence'` passed (31); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.

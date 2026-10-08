@@ -10,7 +10,8 @@ Fix failing CI checks and leave the repaired PR published with auto-merge enable
 
 Start from an up-to-date branch, repair the recorded head's failures, verify the
 repair, and publish it with auto-merge enabled. Later finite checks observe
-GitHub and complete the Task only after an authoritative merge.
+GitHub for authoritative merge; the finishing Flow or Task/Wave operator owns
+follow-through and Task completion.
 
 ## Workflow
 

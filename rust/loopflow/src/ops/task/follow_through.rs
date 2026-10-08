@@ -24,7 +24,8 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("follow-through needs a placed Task"))?;
-        if let Some(pr) = store.active_task_pr(&task.id).await.map_err(task_error)? {
+        let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
+        if let Some(pr) = &pr {
             if pr.phase() != PrPhase::Merged {
                 return Err(task_error(
                     "File follow-through after the pull request merges",
@@ -105,7 +106,6 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                     .map_err(task_error)?;
                 time::Date::parse(due, &format).map_err(task_error)?;
             }
-            let pr = store.active_task_pr(&task.id).await.map_err(task_error)?;
             let source = pr
                 .as_ref()
                 .and_then(|pr| pr.github())

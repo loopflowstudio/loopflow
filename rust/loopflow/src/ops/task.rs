@@ -1020,7 +1020,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
         .await
         .map_err(|error| task_error(error.to_string()))?
         .ok_or_else(|| task_error(format!("stack parent {requested:?} has no Task")))?;
-    // A retry names the retained PR, even if its Task has since opened another PR.
+    // A retry retains the recorded parent, including migrated PR history.
     let parent = match &task.parent_pr_id {
         Some(id) => store.get_task_pr(id).await,
         None => store.active_task_pr(&parent_task.id).await,
@@ -2318,11 +2318,11 @@ pub(crate) fn require_task_pr_range_nonempty(repo: &Path) -> OpsResult<()> {
 /// against `origin/<default>` like a root PR.
 async fn resolve_verifier_upstream(
     store: &SharedStore,
-    pr: &TaskPr,
+    task: &Task,
     repo: &Path,
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
-    if let Some(parent_id) = pr.parent_pr_id.as_ref() {
+    if let Some(parent_id) = task.parent_pr_id.as_ref() {
         let parent = store
             .get_task_pr(parent_id)
             .await
@@ -2372,17 +2372,12 @@ async fn verify_task_pr_range_mode(
     stale_base: StaleBaseAction,
     upstream_override: Option<(String, String)>,
 ) -> OpsResult<()> {
-    let mut pr = store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-        .unwrap_or_else(|| task_pr_for_publication(task));
     let branch =
         current_branch(repo)?.ok_or_else(|| task_error("Task worktree is not on a branch"))?;
-    if pr.branch != branch {
+    if task.branch != branch {
         return Err(task_error(format!(
-            "Task {} active PR expects branch {:?}, but the worktree is on {:?}",
-            task.plan.identifier, pr.branch, branch
+            "Task {} expects branch {:?}, but the worktree is on {:?}",
+            task.plan.identifier, task.branch, branch
         )));
     }
 
@@ -2399,11 +2394,11 @@ async fn verify_task_pr_range_mode(
     });
     let (base_ref, upstream) = match pinned {
         Some(target) => target,
-        None => resolve_verifier_upstream(store, &pr, repo, &default_branch).await?,
+        None => resolve_verifier_upstream(store, task, repo, &default_branch).await?,
     };
     let head = rev_parse(repo, "HEAD")
         .map_err(|error| task_error(format!("failed to resolve Task HEAD: {error}")))?;
-    let base = pr.base_commit.clone();
+    let base = &task.base_commit;
     let identifier = &task.plan.identifier;
     let short = |sha: &str| sha.chars().take(12).collect::<String>();
 
@@ -2414,7 +2409,7 @@ async fn verify_task_pr_range_mode(
         ))
     })?;
 
-    if merge_base == base {
+    if &merge_base == base {
         // Parity holds: the GitHub range is exactly base_commit..HEAD.
         return Ok(());
     }
@@ -2424,22 +2419,25 @@ async fn verify_task_pr_range_mode(
     // that branch: what it carries is the PR's published work. Either way, heal
     // the recorded base to the true fork point so lf diff --files and the
     // durable evidence report the minimal M..HEAD range.
-    if crate::engine::git::is_ancestor(repo, &base, &merge_base)?
-        || was_published_tip(repo, &branch, &base)
+    if crate::engine::git::is_ancestor(repo, base, &merge_base)?
+        || was_published_tip(repo, &branch, base)
     {
         if stale_base == StaleBaseAction::Accept {
             return Ok(());
         }
-        pr.base_commit = merge_base.clone();
-        pr.updated_at = time::OffsetDateTime::now_utc();
         store
-            .sync_task_placement(&task.id, &pr.base_commit, false, pr.updated_at)
+            .sync_task_placement(
+                &task.id,
+                &merge_base,
+                false,
+                time::OffsetDateTime::now_utc(),
+            )
             .await
             .map_err(|error| task_error(format!("failed to heal Task PR base: {error}")))?;
         return Ok(());
     }
 
-    if crate::engine::git::is_ancestor(repo, &merge_base, &base)? {
+    if crate::engine::git::is_ancestor(repo, &merge_base, base)? {
         // M < B: the recorded base carries commits not on the upstream — the
         // foreign ancestry that contaminated #877/#882. Refuse before push.
         let range = format!("{merge_base}..{base}");
@@ -2451,8 +2449,8 @@ async fn verify_task_pr_range_mode(
             "Task {identifier} PR range is contaminated: recorded base {} carries commit(s) \
              not on {base_ref}, which would leak into the PR:\n{commits}\naffecting files:\n{files}\n\
              Refused before any push. Recover with:\n  git rebase --onto {base_ref} {} {branch}",
-            short(&base),
-            short(&base),
+            short(base),
+            short(base),
         )));
     }
 
@@ -2474,8 +2472,8 @@ async fn verify_task_pr_range_mode(
          Commits on {base_ref} not reachable from the recorded base:\n{upstream_commits}\
          affecting files:\n{upstream_files}\n\
          Recover with:\n  git rebase --onto {base_ref} {} {branch}",
-        short(&base),
-        short(&base),
+        short(base),
+        short(base),
     )))
 }
 
@@ -2488,7 +2486,7 @@ fn was_published_tip(repo: &Path, branch: &str, commit: &str) -> bool {
 }
 
 /// Core authoritative non-empty proof. Runs the ancestry parity check (which
-/// heals a stale base in place), then re-reads the PR and refuses when the tree
+/// heals a stale base in place), then re-reads Task placement and refuses when the tree
 /// at HEAD matches the healed recorded base — an empty range that must not
 /// reach `gh pr create/edit/ready/merge`. The emptiness check uses the
 /// **recorded** `base_commit`, not a recomputed merge-base, so it stays
@@ -2806,16 +2804,9 @@ fn cached_github_observation(pr: &TaskPr, now: time::OffsetDateTime) -> Option<O
     })
 }
 
-/// The PR this reconcile answers for: the active row, else the newest published
-/// settlement. Merged evidence remains available to completion retries.
-///
 /// `abandoned_at` on a published PR caches GitHub's closed state rather than
 /// deciding it — `lf pr abandon` runs `gh pr close` before stamping it — so a
 /// reopen must be able to clear it. A merge is terminal: GitHub cannot unmerge.
-async fn reconcile_subject(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
-    store.active_task_pr(&task.id).await.map_err(task_error)
-}
-
 async fn reconcile_task_pr_observation(
     store: &SharedStore,
     task: &mut Task,
@@ -2825,7 +2816,7 @@ async fn reconcile_task_pr_observation(
     // Refuse overlap so a remote read begun before a push cannot overwrite the
     // request or head recorded by the command that completed after it.
     let _mutation = lock_task_pr_mutation(&task.worktree)?;
-    let Some(mut pr) = reconcile_subject(store, task).await? else {
+    let Some(mut pr) = store.active_task_pr(&task.id).await.map_err(task_error)? else {
         return Ok(None);
     };
     if pr.phase() == PrPhase::Merged {
@@ -3207,7 +3198,7 @@ async fn reach_end(
             .await
             .map_err(task_error)?
             .is_none();
-    // The completion gate requires every active PR to be settled. Do not
+    // The completion gate requires merge and follow-through for a PR. Do not
     // bypass that fact or infer merge from a green head.
     let gate = task_completion_gate(store, task).await?;
     if let Some(refusal) = gate.refusal(&task.plan.identifier) {
@@ -3430,22 +3421,6 @@ pub(crate) async fn task_completion_gate(
     Ok(gate)
 }
 
-async fn merged_completing_pr(store: &SharedStore, task: &Task) -> OpsResult<Option<TaskPr>> {
-    if !store
-        .sqlite
-        .task_follow_through(&task.id)
-        .map_err(task_error)?
-        .resolved()
-    {
-        return Ok(None);
-    }
-    Ok(store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(task_error)?
-        .filter(|pr| pr.phase() == PrPhase::Merged))
-}
-
 /// Reconcile retained delivery on the repository's existing periodic check.
 /// Historical keep-open decisions need a scope decision; elapsed age is no evidence.
 pub(crate) async fn reconcile_delivered_task(
@@ -3470,17 +3445,6 @@ pub(crate) async fn reconcile_delivered_task(
     if let Observation::Degraded { reason, .. } = &task.observation {
         return Err(task_error(reason));
     }
-    if !store
-        .active_task_pr(&task.id)
-        .await
-        .map_err(task_error)?
-        .is_some_and(|pr| pr.phase() == PrPhase::Merged)
-    {
-        return Ok(());
-    }
-    if task_work_status(store, task).await? == WorkStatus::Done {
-        return reconcile_task_completion(store, task).await;
-    }
     // Observing a merge succeeded even while authored follow-through is pending.
     reconcile_task_completion(store, task).await
 }
@@ -3503,7 +3467,12 @@ pub(crate) async fn reconcile_task_completion(
         WorkStatus::Abandoned => return Ok(()),
         WorkStatus::Ready => {}
     }
-    let Some(pr) = merged_completing_pr(store, task).await? else {
+    let Some(pr) = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .filter(|pr| pr.phase() == PrPhase::Merged)
+    else {
         return Ok(());
     };
     let gate = task_completion_gate(store, task).await?;
@@ -5388,10 +5357,10 @@ mod tests {
             assert_eq!(store.work_status(&work).await.unwrap(), WorkStatus::Ready);
             let gate = super::task_completion_gate(&store, &task).await.unwrap();
             assert!(gate.reason().contains("Follow-through"));
-            assert_eq!(
-                store.sqlite.task_follow_up(&task.id).unwrap(),
-                Some(follow_up.clone())
-            );
+            let disposition = store.sqlite.task_follow_through(&task.id).unwrap();
+            assert!(disposition.needs_conversion);
+            assert!(disposition.scope_notes[0].contains(&follow_up.outcome));
+            assert!(disposition.scope_notes[0].contains(&follow_up.evidence));
         }
         store
             .sqlite

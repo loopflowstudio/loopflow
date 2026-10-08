@@ -175,13 +175,11 @@ impl super::SqliteStore {
             // and its OS lock until it finishes. A blocked retry can relocate.
             transaction.execute(
                 "UPDATE pr_landings
-                 SET requested_head_sha=?2, after_merge=COALESCE(after_merge,?3), next_slug=COALESCE(next_slug,?4), updated_at=?5
+                 SET requested_head_sha=?2, updated_at=?3
                  WHERE id=?1 AND state IN ('watching', 'repairing')",
                 params![
                     existing.id.as_str(),
                     landing.requested_head_sha,
-                    Option::<String>::None,
-                    Option::<String>::None,
                     timestamp(landing.updated_at),
                 ],
             )?;
@@ -215,13 +213,12 @@ impl super::SqliteStore {
         transaction.execute(
             "INSERT INTO pr_landings (
                 id, repo, pr_number, worktree, branch, task_id,
-                requested_head_sha, observed_head_sha, merge_commit, after_merge,
-                next_slug, state, generation, supervisor_placement, supervisor_machine_id,
+                requested_head_sha, observed_head_sha, merge_commit, state, generation, supervisor_placement, supervisor_machine_id,
                 supervisor_process_id, supervisor_heartbeat_at,
                 blocked_reason, created_at, updated_at
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10, ?11, ?12,
-                NULL, NULL, NULL, NULL, NULL, ?13, ?13
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10,
+                NULL, NULL, NULL, NULL, NULL, ?11, ?11
              )",
             params![
                 landing.id.as_str(),
@@ -232,8 +229,6 @@ impl super::SqliteStore {
                 landing.task_id.as_ref().map(TaskId::as_str),
                 landing.requested_head_sha,
                 landing.observed_head_sha,
-                Option::<String>::None,
-                Option::<String>::None,
                 landing.state.as_str(),
                 landing.generation as i64,
                 timestamp(landing.created_at),

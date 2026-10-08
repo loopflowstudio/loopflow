@@ -640,9 +640,8 @@ fn process_ci_fix(
         .as_ref()
         .map(|task_id| format!("\nTask context: {task_id}"))
         .unwrap_or_default();
-    let arm_command = repair_arm_command(landing);
     let mut prompt = format!(
-        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `{arm_command}` to publish and enable auto-merge with the requested Task disposition. Do not invoke `lf pr land` or wait for merge; a later finite check observes the result and completes after merge.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
+        "{skill}\n\nRepair the exact recorded landing incident below. Start with `lf sync`. Repair and verify, then run `lf arm` to publish and enable auto-merge. Do not invoke `lf pr land` or wait for merge; a later finite check observes the merge; Task follow-through remains with its finishing Flow or operator.\n\nRepository: {}\nPull request: #{}\nBranch: {}\nFailed head: {}\nFailing checks:\n{}{}",
         incident.repo,
         incident.pr_number,
         landing.branch,
@@ -778,10 +777,6 @@ fn process_ci_fix(
     let conclusion = parse_repair_conclusion(&conclusion)?;
     eprintln!("ci-fix: {}", conclusion.summary());
     Ok(conclusion)
-}
-
-fn repair_arm_command(_landing: &PrLanding) -> String {
-    "lf arm".into()
 }
 
 fn ci_incident(landing: &PrLanding, checks: &[CiCheck], now: OffsetDateTime) -> CiIncident {

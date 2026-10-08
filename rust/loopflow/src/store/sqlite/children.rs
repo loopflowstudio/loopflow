@@ -559,17 +559,6 @@ impl SqliteStore {
         task_events_after_in(&conn, task_id, cursor)
     }
 
-    pub fn task_follow_up(
-        &self,
-        task_id: &TaskId,
-    ) -> StoreResult<Option<crate::work::task::TaskFollowUp>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(match task_follow_up_in(&conn, task_id)? {
-            Some(TaskEventKind::FollowUp { remaining, .. }) => remaining,
-            _ => None,
-        })
-    }
-
     pub fn task_event(&self, task_id: &TaskId, event_id: i64) -> StoreResult<Option<TaskEvent>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
@@ -1094,14 +1083,14 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
     conn.execute(
         "INSERT INTO task_prs (
             id, task_id, sequence, slug, branch, base_commit,
-            publication_requested_at, after_merge, next_slug,
+            publication_requested_at,
             github_number, github_url, merge_commit, abandoned_at,
             created_at, updated_at, github_head_sha, ci_observation, parent_pr_id,
             github_observation,
             linear_attachment_id, linear_comment_id, linear_link_error,
             merge_mode, merge_requested_at, merge_head_sha,
             pr_title, pr_body, pr_copy_head_sha
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
         params![
             pr.id.as_str(),
             pr.task_id.as_str(),
@@ -1110,8 +1099,6 @@ fn insert_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<()> {
             pr.branch,
             pr.base_commit,
             publication.map(|publication| publication.requested_at.unix_timestamp()),
-            Option::<String>::None,
-            Option::<String>::None,
             github.map(|github| i64::from(github.number)),
             github.map(|github| github.url.as_str()),
             pr.merge_commit,
@@ -1158,15 +1145,15 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
     let merge = publication.and_then(|publication| publication.merge.as_ref());
     conn.execute(
         "UPDATE task_prs SET
-            publication_requested_at=?7, after_merge=COALESCE(after_merge,?8), next_slug=COALESCE(next_slug,?9),
-            github_number=?10, github_url=?11, merge_commit=?12,
-            abandoned_at=?13, updated_at=?15, github_head_sha=?16,
-            ci_observation=?17, github_observation=?19,
-            linear_attachment_id=?20, linear_comment_id=?21, linear_link_error=?22,
-            merge_mode=?23, merge_requested_at=?24, merge_head_sha=?25,
-            pr_title=?26, pr_body=?27, pr_copy_head_sha=?28
+            publication_requested_at=?7,
+            github_number=?8, github_url=?9, merge_commit=?10,
+            abandoned_at=?11, updated_at=?13, github_head_sha=?14,
+            ci_observation=?15, github_observation=?17,
+            linear_attachment_id=?18, linear_comment_id=?19, linear_link_error=?20,
+            merge_mode=?21, merge_requested_at=?22, merge_head_sha=?23,
+            pr_title=?24, pr_body=?25, pr_copy_head_sha=?26
          WHERE id=?1 AND task_id=?2 AND sequence=?3 AND slug=?4
-           AND branch=?5 AND base_commit=?6 AND created_at=?14",
+           AND branch=?5 AND base_commit=?6 AND created_at=?12",
         params![
             pr.id.as_str(),
             pr.task_id.as_str(),
@@ -1175,8 +1162,6 @@ fn update_task_pr(conn: &Connection, pr: &TaskPr) -> StoreResult<usize> {
             pr.branch,
             pr.base_commit,
             publication.map(|publication| publication.requested_at.unix_timestamp()),
-            Option::<String>::None,
-            Option::<String>::None,
             github.map(|github| i64::from(github.number)),
             github.map(|github| github.url.as_str()),
             pr.merge_commit,
@@ -1659,17 +1644,4 @@ pub(super) fn insert_project_event_in(
         kind: kind.clone(),
         created_at: crate::store::rows::unix_to_datetime(created_at),
     })
-}
-
-fn task_follow_up_in(conn: &Connection, task_id: &TaskId) -> StoreResult<Option<TaskEventKind>> {
-    let json: Option<String> = conn
-        .query_row(
-            "SELECT kind_json FROM task_events WHERE task_id=?1
-         AND json_extract(kind_json, '$.kind')='follow_up' ORDER BY id DESC LIMIT 1",
-            [task_id.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    json.map(|json| serde_json::from_str(&json).map_err(StoreError::from))
-        .transpose()
 }

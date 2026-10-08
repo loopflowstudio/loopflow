@@ -28,7 +28,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
         if startable { return .run }
     case .openPr:
         if task.pr?.publication?.github != nil { return .openPr }
-    case .startNextPr, .noAction, .none:
+    case .noAction, .none:
         break
     }
     return nil

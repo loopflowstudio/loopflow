@@ -331,7 +331,7 @@ enum MockWaveFixture {
                   "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
                   "workspace": {
                     "slug": "infrastructure-task",
-                    "branch": "jack/infrastructure.task.20260713_1200", "base_commit": "fixture-base"
+                    "branch": "jack/infrastructure.task.20260713_1200", "base_commit": "fixture-base",
                     "worktree": "/src/loopflow.infrastructure.task"
                   }
                 },

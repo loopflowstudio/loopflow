@@ -1083,12 +1083,12 @@ lost-reply/draft recovery: `54b309ab6`; competing-start counterexample:
 Historical expansion proves no new application.
 
 October 8's `02a073349` proves native queue admission across dropped reply,
-cancellation and handoff, preserving draft/sibling/history. `496652f1d` adds
-terminal-free consumption and engine death with pending inputs: unchanged queue
-bytes survive, and native resume completes two inputs on separate turns without
-resubmission.
-Resume can empty the queue before its userMessage appears; that gap cannot
-authorize resend. LF admission, idempotency and external effects remain unproved.
+cancellation and handoff, preserving draft/sibling/history. `ed9ad8a61` retains
+terminal-free and pending-restart proofs: queue bytes survive; resume completes
+two inputs on separate turns without resubmission. `34e77951d` shares waits;
+each input requires one match and its own outcome. An empty queue before native
+history appears cannot authorize resend. LF admission, idempotency and external
+effects remain unproved.
 
 LF maps only its first start per writer; retries retain distinct IDs and ambiguous
 receipts stay uncertain. Controlled handoff preserves text/capture/siblings/ancestry.

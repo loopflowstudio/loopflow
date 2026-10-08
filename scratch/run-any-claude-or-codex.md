@@ -7,8 +7,9 @@ same-harness invocation, translated cross-harness ports, inlined builtins,
 ## Status and decisions
 
 PR #1497 merged as `b6bc42998`; PR 2 preserves follow-up.
-Reconciled October 8 against native queue proof `02a073349`, probe compression
-`f63d7863b` and headless/pending-restart probes beginning at `496652f1d`.
+Reconciled October 8 through `34e77951d`: native queue proof `02a073349`,
+headless/pending-restart proofs `496652f1d` and `ed9ad8a61`, and shared receipt
+waits that retain each input's unique identity and requested terminal outcome.
 Provider admission, terminal-free consumption and pending-queue restart now have
 passing candidates; dependent LF integration remains unfinished.
 `c91648d63` retains the counterexample: idle-read plus `turn/start` can join a
@@ -147,9 +148,8 @@ The probe and its limitations live in the benchmark README.
 ## Remaining implementation
 
 1. **Current-owner admission, capture ownership and native consumption together.**
-   `02a073349` establishes the provider candidate described above; repeating the
-   idle-read/start investigation is unnecessary. LF still needs to retain each
-   pending `SkillInvocation`, context, capture and dispatch identity in existing
+   `02a073349` establishes the provider candidate described above. LF still needs
+   to retain each pending `SkillInvocation`, context, capture and dispatch identity in existing
    Session history without replacing the active capture or claiming another
    driver. No migration, new queue owner, extra Session or provider extension is
    selected. Same-Session invocation syntax remains an open implementation choice.
@@ -207,8 +207,11 @@ The probe and its limitations live in the benchmark README.
    Resume is asynchronous: the queue can empty before its userMessage appears.
    Recovery must wait for retained input identity, never resend on that gap.
    Store fixtures and provider probes do not compose into LF acceptance;
-   gate/review retain the real entry-point proof. No LF production change was
-   made in this recovery-probe cut.
+   gate/review retain the real entry-point proof. LF pending-recovery acceptance
+   also needs two retained inputs across engine death before consumption: distinct
+   capture attribution and matching-turn settlement, with the second input
+   surviving completion of the first. No LF production change was made in this
+   recovery-probe cut.
 
 2. Native Codex selection and terminal transport. The additive alias remains a
    provider-only candidate with unresolved placement, lifetime and name semantics.
@@ -372,4 +375,4 @@ dispatch and admission. Related Intelligence context/attribution findings were
 read selectively. The local `origin/main` reference remains at the PR base
 `812d8cc55`; no upstream fetch or provider refresh was performed.
 
-Check (2026-10-08): `uv run --with 'websockets>=15,<16' pytest -q scripts/benchmarks/skill-invocation/test_{codex_request_mapping,request_mapping}.py` (25), Ruff, network-isolated native queue-headless/queue-restart (4/3 requests, no titles), queue-race/boundary (7 each, 2 titles), and diff checks pass. Rust unchanged; LF admission, fidelity and gate/review acceptance remain.
+Check (2026-10-08): reuse recorded probe pytest (25), Ruff and isolated queue-headless/queue-restart (4/3 requests, no titles), queue-race/boundary (7 each, 2 titles); prose reconciliation checked with `git diff --check` and `lf context --skill realign --json`. LF admission, fidelity and gate/review acceptance remain.

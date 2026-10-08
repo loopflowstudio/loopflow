@@ -46,10 +46,12 @@ ID through handoff; it must not generate another ID and resend uncertain input.
 Native receipt observations do not settle delivery or establish native expansion.
 
 2026-10-08: a two-client Codex race invalidates idle-read plus turn/start as
-boundary admission. The later `--queue-race` proof demonstrates existing native
+boundary admission. The `--queue-race` proof demonstrates existing native
 `thread/queue/add` admission, preserving a competing turn, sibling work and native
 terminal draft through dropped enqueue acknowledgement and connection handoff.
-Use that mechanism as the implementation candidate; no provider extension or
-replacement terminal is implied. LF's current single-capture/first-completion
-driver must change with admission, not merely send the new RPC. This is observed
-implementation evidence, not a new product decision attributed to Jack Heart.
+`ed9ad8a61` also proves terminal-free consumption and recovery of two still-pending
+inputs after engine death. Native resume can empty the queue before history shows
+the input; absence during that gap cannot authorize resubmission. This mechanism
+remains the LF integration candidate, without a provider extension or replacement
+terminal. Admission, capture attribution, matching completion and teardown remain
+one coordinated repair. These are observations, not new decisions by Jack Heart.

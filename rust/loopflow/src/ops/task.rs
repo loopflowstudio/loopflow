@@ -770,250 +770,131 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
 }
 
 fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsResult<Task> {
-    let TaskProcessOptions {
-        wave: expected_wave,
-        name,
-        stack_on,
-        directive,
-        flow: requested_flow,
-        agent: requested_agent,
-        reason,
-        end,
-    } = options;
-    let directive = directive
-        .map(|directive| {
-            let directive = directive.trim().to_string();
-            if directive.is_empty() {
-                Err(task_error("directive cannot be empty"))
-            } else {
-                Ok(directive)
-            }
-        })
-        .transpose()?;
-    let existing = block_on_task(async {
+    if options
+        .directive
+        .as_deref()
+        .is_some_and(|text| text.trim().is_empty())
+    {
+        return Err(task_error("directive cannot be empty"));
+    }
+    block_on_task(async {
         let store = task_store().await?;
-        let mut existing = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| task_error(format!("failed to read task registry: {error}")))?;
-        if let Some(task) = &mut existing {
-            if let Some(expected) = &expected_wave {
-                let wave = owning_wave(&store, task).await?;
-                if wave.slug() != expected {
-                    return Err(task_error(format!(
-                        "--wave {expected} does not own Task {} (Wave {})",
-                        task.plan.identifier,
-                        wave.slug()
-                    )));
-                }
+        let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
+        let saved = store.get_task_by_issue(issue).await.map_err(task_error)?;
+        let acquired = saved.is_none();
+        let task = match saved {
+            Some(task) => task,
+            None => {
+                // An unknown provider alias needs acquisition once. All saved Tasks
+                // then use their stored identity and the same placement transaction.
+                let resolved =
+                    super::task_pm::resolve_task_async(&main, issue, super::pm::PmRefresh::Auto)
+                        .await?;
+                store
+                    .get_task_by_issue(&resolved.item.id)
+                    .await
+                    .map_err(task_error)?
+                    .ok_or_else(|| {
+                        task_error("accepted planning did not retain the Task identity")
+                    })?
             }
-            let status = task_work_status(&store, task).await?;
-            match status {
-                WorkStatus::Done => {
-                    return Err(task_error(format!(
-                        "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
-                        task.plan.identifier, task.plan.identifier
-                    )))
-                }
-                WorkStatus::Abandoned => {
-                    return Err(task_error(format!(
+        };
+        let wave = owning_wave(&store, &task).await?;
+        let canonical = crate::repository::CanonicalRepo::discover(&main).map_err(task_error)?;
+        if crate::repository::CanonicalRepo::discover(Path::new(wave.repo())).map_err(task_error)?
+            != canonical
+        {
+            return Err(task_error("Task belongs to another repository"));
+        }
+        if options
+            .wave
+            .as_deref()
+            .is_some_and(|expected| expected != wave.slug())
+        {
+            return Err(task_error(format!(
+                "requested Wave does not own Task {} (Wave {})",
+                task.plan.identifier,
+                wave.slug()
+            )));
+        }
+        match task_work_status(&store, &task).await? {
+            WorkStatus::Done => {
+                return Err(task_error(format!(
+                    "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
+                    task.plan.identifier, task.plan.identifier
+                )))
+            }
+            WorkStatus::Abandoned => {
+                return Err(task_error(format!(
                     "Task {} is abandoned; inspect its retained history with `lf task status {}`",
                     task.plan.identifier, task.plan.identifier
                 )))
-                }
-                WorkStatus::Ready => {}
             }
-            if let Some(requested) = name.as_deref() {
-                let requested = parse_workspace_slug(requested)?;
-                if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
-                    return Err(task_error(format!(
-                        "Task {} already uses workspace name {:?}",
-                        task.plan.identifier, task.workspace_slug
-                    )));
-                }
-            }
-            if directive.is_some() {
+            WorkStatus::Ready => {}
+        }
+        if !acquired && options.directive.is_some() {
+            return Err(task_error(format!(
+                "Task {} already exists; use `lf task comment {} <new-direction>`",
+                task.plan.identifier, task.plan.identifier
+            )));
+        }
+        if let Some(name) = options.name.as_deref() {
+            let requested = parse_workspace_slug(name)?;
+            if task.worktree.is_some() && requested.as_str() != task.workspace_slug {
                 return Err(task_error(format!(
-                    "Task {} already exists; use `lf task comment {} <new-direction>`",
-                    task.plan.identifier, task.plan.identifier,
+                    "Task {} already uses workspace name {:?}",
+                    task.plan.identifier, task.workspace_slug
                 )));
             }
         }
-        Ok(existing)
-    })?;
-    if let Some(mut existing) = existing {
-        if existing.worktree.is_none() {
-            existing = block_on_task(place_unplaced_task(
-                repo,
-                &existing,
-                name.as_deref(),
-                stack_on.as_deref(),
-            ))?;
-        }
-        if let Some(parent) = stack_on.as_deref() {
-            block_on_task(async {
-                stack_existing_task(&task_store().await?, &existing, parent).await
-            })?;
-        }
-        block_on_task(async {
-            let store = task_store().await?;
-            restore_task_checkout(&store, &existing).await
-        })?;
-        return Ok(existing);
-    }
-    let main_repo = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-    let resolved =
-        crate::ops::task_pm::resolve_task(&main_repo, issue, crate::ops::pm::PmRefresh::Auto)?;
-    // Validate the same stored definition that traversal will capture, before placement.
-    if let Some(flow) = requested_flow.as_deref().filter(|flow| *flow != END) {
-        let definition = block_on_task(async {
-            let store = task_store().await?;
-            let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
-                .map_err(task_error)?;
-            let wave = store
-                .get_wave_at(&locator)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("owning Wave is not initialized"))?;
-            super::project::load_workflow(&store, wave.id(), flow, repo)
-        })?;
-        if definition.is_none() {
-            load_task_flow(repo, flow)?;
-        }
-    }
-    if let Some(expected) = &expected_wave {
-        if &resolved.wave != expected {
-            return Err(task_error(format!(
-                "--wave {expected} does not own Task {} (Wave {})",
-                resolved.item.identifier, resolved.wave
-            )));
-        }
-    }
-    require_startable_issue(&resolved.item)?;
-    let prepared = block_on_task(prepare_task_placement(
-        &main_repo,
-        &resolved.item.name,
-        Some(&resolved.item),
-        &TaskProcessOptions {
-            wave: expected_wave,
-            reason,
-            name,
-            stack_on,
-            directive,
-            flow: requested_flow,
-            agent: requested_agent,
-            end,
-        },
-    ))?;
-    place_prepared_task(main_repo, resolved, prepared)
-}
-
-/// Recover checkout files from retained Task placement without replacing history.
-async fn place_unplaced_task(
-    repo: &Path,
-    task: &Task,
-    name: Option<&str>,
-    stack_on: Option<&str>,
-) -> OpsResult<Task> {
-    let store = task_store().await?;
-    if store
-        .sqlite
-        .project_planning_authority(&task.project_id)
-        .map_err(task_error)?
-        == crate::planning::PlanningAuthority::Linear
-    {
-        let main = crate::engine::worktrees::main_repo_root(repo)?;
-        let resolved = super::task_pm::resolve_task_async(
-            &main,
-            task.plan.linear_id()?.as_str(),
-            super::pm::PmRefresh::Auto,
-        )
-        .await?;
-        require_startable_issue(&resolved.item)?;
-        let prepared = prepare_task_placement(
-            &main,
-            &resolved.item.name,
-            Some(&resolved.item),
-            &TaskProcessOptions {
-                name: name.map(str::to_string),
-                stack_on: stack_on.map(str::to_string),
-                agent: task.agent.clone(),
-                ..Default::default()
-            },
-        )
-        .await?;
-        return tokio::task::spawn_blocking(move || place_prepared_task(main, resolved, prepared))
-            .await
-            .map_err(task_error)?;
-    }
-    let wave = owning_wave(&store, task).await?;
-    let acquisition = super::pm::lock_wave_planning(&wave).await?;
-    let main = crate::engine::worktrees::main_repo_root(repo)?;
-    if crate::repository::CanonicalRepo::discover(&main)
-        .map_err(task_error)?
-        .to_string()
-        != wave.repo()
-    {
-        return Err(task_error("Task belongs to another repository"));
-    }
-    let uuid = task.id.as_str().trim_start_matches("task_");
-    let title = derive_workspace_slug(&task.plan.title)?;
-    let slug = name.map(str::to_string).unwrap_or_else(|| {
-        format!(
-            "{}-{}",
-            title.as_str(),
-            uuid.chars().take(12).collect::<String>()
-        )
-    });
-    let branch = format!("lf/{uuid}/{}", title.as_str());
-    let mut plan = plan_branch_placement(&main, parse_workspace_slug(&slug)?, Some(&branch))?;
-    let parent = if let Some(selector) = stack_on {
-        let parent = store
-            .get_task_by_issue(selector)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("stack parent has no Task"))?;
-        if parent.id == task.id {
-            return Err(task_error("a Task cannot stack on itself"));
-        }
-        Some(
-            store
-                .active_task_pr(&parent.id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("stack parent has no active PR"))?,
-        )
-    } else {
-        None
-    };
-    plan.base_ref = match &parent {
-        Some(pr) => rev_parse(&main, &pr.branch)?,
-        None => resolve_upstream_base(&main, &plan.base_ref)?.1,
-    };
-    let now = time::OffsetDateTime::now_utc();
-    let pr = TaskPr {
-        id: TaskPrId::new(),
-        task_id: task.id.clone(),
-        sequence: 1,
-        slug: slug.clone(),
-        branch: plan.branch,
-        base_commit: plan.base_ref,
-        parent_pr_id: parent.map(|pr| pr.id),
-        publication: None,
-        merge_commit: None,
-        abandoned_at: None,
-        ci_observation: None,
-        github_observation: None,
-        linear_attachment_id: None,
-        linear_comment_id: None,
-        linear_link_error: None,
-        created_at: now,
-        updated_at: now,
-    };
-    store
-        .place_task(&task.id, &plan.worktree_path, &slug, &pr, Some(acquisition))
-        .await
-        .map_err(task_error)
+        let task = if task.worktree.is_none() {
+            if let Some(flow) = options.flow.as_deref().filter(|flow| *flow != END) {
+                if super::project::load_workflow(&store, wave.id(), flow, repo)?.is_none() {
+                    load_task_flow(repo, flow)?;
+                }
+            }
+            let mut item = local_task_item(&store, &task)?;
+            // A retained provider branch may already own Git work. It is metadata,
+            // not a reason to reacquire planning or allocate another Task.
+            if let Some(id) = &task.plan.linear_id {
+                if let Some(record) = store
+                    .sqlite
+                    .pm_task_observation(wave.repo(), "linear", id.as_str())
+                    .map_err(task_error)?
+                    .record
+                {
+                    item.branch_name = record.item.branch_name;
+                }
+            }
+            let uuid = task.id.as_str().trim_start_matches("task_");
+            let title = derive_workspace_slug(&task.plan.title)?;
+            let name = options.name.clone().unwrap_or_else(|| {
+                format!(
+                    "{}-{}",
+                    title.as_str(),
+                    uuid.chars().take(12).collect::<String>()
+                )
+            });
+            let placement = prepare_task_placement(
+                &main,
+                &task.plan.title,
+                Some(&item),
+                &TaskProcessOptions {
+                    name: Some(name),
+                    ..options.clone()
+                },
+            )
+            .await?;
+            place_prepared_task(&store, &task.id, placement).await?
+        } else {
+            if let Some(parent) = options.stack_on.as_deref() {
+                stack_existing_task(&store, &task, parent).await?;
+            }
+            restore_task_checkout(&store, &task).await?;
+            task
+        };
+        Ok(task)
+    })
 }
 
 async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
@@ -1187,9 +1068,20 @@ async fn prepare_task_placement(
         None => derive_workspace_slug(title)?,
     };
     let workspace_slug = segment.as_str().to_string();
-    let branch = item
+    let recorded_branch = item
         .and_then(|item| item.branch_name.as_deref())
         .filter(|branch| !branch.is_empty());
+    let generated_branch = item
+        .filter(|item| item.id.starts_with("task_"))
+        .map(|item| {
+            Ok::<_, OpsError>(format!(
+                "lf/{}/{}",
+                item.id.trim_start_matches("task_"),
+                derive_workspace_slug(title)?.as_str()
+            ))
+        })
+        .transpose()?;
+    let branch = recorded_branch.or(generated_branch.as_deref());
     let mut plan = plan_branch_placement(main_repo, segment, branch)
         .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
@@ -1211,7 +1103,9 @@ async fn prepare_task_placement(
                 ))
             })?;
         if item.is_some_and(|item| {
-            parent_task.plan.linear_id.as_ref().map(|id| id.as_str()) == Some(item.id.as_str())
+            parent_task.id.as_str() == item.id
+                || parent_task.plan.linear_id.as_ref().map(|id| id.as_str())
+                    == Some(item.id.as_str())
         }) {
             return Err(task_error("a Task cannot stack on itself"));
         }
@@ -1248,7 +1142,7 @@ async fn prepare_task_placement(
             base_commit
         }
     };
-    let github = if branch.is_some() || plan.strategy != PlacementStrategy::Create {
+    let github = if recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create {
         super::pr::branch_pr(main_repo, &plan.branch)?
             .map(|pr| {
                 Ok::<_, OpsError>(GithubPr {
@@ -1295,9 +1189,9 @@ async fn prepare_task_placement(
     })
 }
 
-fn place_prepared_task(
-    main_repo: PathBuf,
-    resolved: crate::ops::task_pm::ResolvedTask,
+async fn place_prepared_task(
+    store: &SharedStore,
+    task_id: &crate::durable::TaskId,
     prepared: TaskPlacement,
 ) -> OpsResult<Task> {
     let TaskPlacement {
@@ -1308,98 +1202,97 @@ fn place_prepared_task(
         requested_agent,
         directive,
     } = prepared;
-    block_on_task(async move {
-        let store = task_store().await?;
-        let locator = crate::work::wave::WaveLocator::discover(&main_repo, &resolved.wave)
-            .map_err(task_error)?;
-        let wave = store
-            .get_wave_at(&locator)
+    let (mut task, acquisition) = loop {
+        let task = store
+            .get_task(task_id)
             .await
             .map_err(task_error)?
-            .ok_or_else(|| task_error("owning Wave is not initialized"))?;
+            .ok_or_else(|| task_error("Task is unavailable"))?;
+        let wave = owning_wave(store, &task).await?;
         let acquisition = super::pm::lock_wave_planning(&wave).await?;
-        super::project::resolve_project_for_task(&store, &wave, &resolved.project.id).await?;
-        // Re-resolve after worktree planning: a concurrent run may have created
-        // the Task in the gap. Non-terminal Work wins. Terminal Work remains
-        // authoritative and requires an explicit recovery transition.
-        let mut task = store
-            .get_task_by_issue(&resolved.item.id)
+        let current = store
+            .get_task(task_id)
             .await
             .map_err(task_error)?
-            .ok_or_else(|| task_error("accepted planning did not retain the Task identity"))?;
-        if matches!(
-            task_work_status(&store, &task).await?,
-            WorkStatus::Done | WorkStatus::Abandoned
-        ) {
-            return Err(task_error(format!(
-                "Task {} is terminal; inspect its retained history",
-                task.plan.identifier
-            )));
+            .ok_or_else(|| task_error("Task is unavailable"))?;
+        // Refiling may have finished before this guard was acquired. Continue
+        // under the current owner rather than carrying the previous Wave's lock.
+        if current.wave_id == task.wave_id {
+            break (current, acquisition);
         }
-        if task.worktree.is_some() {
-            select_task_agent(&store, &mut task, requested_agent.as_deref()).await?;
-            restore_task_checkout(&store, &task).await?;
-            return Ok(task);
-        }
-        let now = time::OffsetDateTime::now_utc();
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: task.id.clone(),
-            sequence: 1,
-            slug: workspace_slug.clone(),
-            branch: plan.branch.clone(),
-            base_commit: plan.base_ref.clone(),
-            parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
-            publication: github.map(|github| PrPublication {
-                requested_at: now,
-                presentation: None,
-                github: Some(github),
-                merge: None,
-            }),
-            merge_commit: None,
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: now,
-            updated_at: now,
-        };
+    };
+    if matches!(
+        task_work_status(store, &task).await?,
+        WorkStatus::Done | WorkStatus::Abandoned
+    ) {
+        return Err(task_error(format!(
+            "Task {} is terminal; inspect its retained history",
+            task.plan.identifier
+        )));
+    }
+    if task.worktree.is_some() {
+        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
+        restore_task_checkout(store, &task).await?;
+        return Ok(task);
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let pr = TaskPr {
+        id: TaskPrId::new(),
+        task_id: task.id.clone(),
+        sequence: 1,
+        slug: workspace_slug.clone(),
+        branch: plan.branch.clone(),
+        base_commit: plan.base_ref.clone(),
+        parent_pr_id: stack_parent.as_ref().map(|parent| parent.id.clone()),
+        publication: github.map(|github| PrPublication {
+            requested_at: now,
+            presentation: None,
+            github: Some(github),
+            merge: None,
+        }),
+        merge_commit: None,
+        abandoned_at: None,
+        ci_observation: None,
+        github_observation: None,
+        linear_attachment_id: None,
+        linear_comment_id: None,
+        linear_link_error: None,
+        created_at: now,
+        updated_at: now,
+    };
 
-        task = store
-            .place_task(
+    task = store
+        .place_task(
+            &task.id,
+            &plan.worktree_path,
+            &workspace_slug,
+            &pr,
+            Some(acquisition),
+        )
+        .await
+        .map_err(task_error)?;
+    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
+    if let Some(direction) = directive.as_deref() {
+        append_task_comment(store, &task, direction, true)?;
+    }
+    // A competing reservation may have won. Restore its persisted placement,
+    // never the losing caller's plan or PR.
+    if let Err(error) = restore_task_checkout(store, &task).await {
+        if let Err(event_error) = store
+            .append_task_event(
                 &task.id,
-                &plan.worktree_path,
-                &workspace_slug,
-                &pr,
-                Some(acquisition),
+                &TaskEventKind::Failed {
+                    error: error.to_string(),
+                    resumable: true,
+                },
             )
             .await
-            .map_err(task_error)?;
-        select_task_agent(&store, &mut task, requested_agent.as_deref()).await?;
-        if let Some(direction) = directive.as_deref() {
-            append_task_comment(&store, &task, direction, true)?;
+        {
+            tracing::warn!(task = %task.id, %event_error, "checkout failed after placement committed; failure event did not persist");
         }
-        // A competing reservation may have won. Restore its persisted placement,
-        // never the losing caller's plan or PR.
-        if let Err(error) = restore_task_checkout(&store, &task).await {
-            if let Err(event_error) = store
-                .append_task_event(
-                    &task.id,
-                    &TaskEventKind::Failed {
-                        error: error.to_string(),
-                        resumable: true,
-                    },
-                )
-                .await
-            {
-                tracing::warn!(task = %task.id, %event_error, "checkout failed after placement committed; failure event did not persist");
-            }
-            return Err(error);
-        }
-        Ok(task)
-    })
+        return Err(error);
+    }
+    Ok(task)
 }
 
 pub fn task_create(
@@ -5672,7 +5565,7 @@ mod tests {
     fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        for moved in [false, true] {
+        {
             let repo = loopflow_test_support::TestRepo::new();
             let fixture = runtime.block_on(task_fixture_at("EXISTING", repo.path().to_path_buf()));
             std::env::set_var("LF_HOME", fixture._database.path());
@@ -5696,18 +5589,9 @@ mod tests {
             snapshot.items[0].state = Some("unstarted".into());
             snapshot.items[0].project_id = Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3".into());
             snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
-            let resolved = crate::ops::task_pm::ResolvedTask {
-                wave: "task-recovery".into(),
-                observed_at: 1,
-                project: snapshot.projects[0].clone(),
-                item: snapshot.items[0].clone(),
-            };
             snapshot.items[0].name = "Accepted after resolution".into();
             snapshot.items[0].description = "Preserve this direction".into();
             snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
-            if moved {
-                snapshot.items[0].project_id = Some("foreign-project".into());
-            }
             runtime
                 .block_on(fixture.store.put_pm_snapshot(
                     crate::store::PmSnapshotRow {
@@ -5734,24 +5618,18 @@ mod tests {
                 requested_agent: None,
                 directive: None,
             };
-            let result = super::place_prepared_task(
-                repo.path().to_path_buf(),
-                resolved.clone(),
-                prepared(checkout.clone()),
-            );
-            if moved {
-                let error = result.unwrap_err().to_string();
-                assert!(
-                    error.contains("accepted planning did not retain the Task identity"),
-                    "{error}"
-                );
-                assert!(runtime
-                    .block_on(fixture.store.get_task_by_issue("new-issue"))
-                    .unwrap()
-                    .is_none());
-                assert!(!checkout.exists());
-            } else {
-                let task = result.unwrap();
+            let saved = runtime
+                .block_on(fixture.store.get_task_by_issue("new-issue"))
+                .unwrap()
+                .unwrap();
+            let task = runtime
+                .block_on(super::place_prepared_task(
+                    &fixture.store,
+                    &saved.id,
+                    prepared(checkout.clone()),
+                ))
+                .unwrap();
+            {
                 assert_eq!(task.plan.title, "Accepted after resolution");
                 assert_eq!(task.plan.description, "Preserve this direction");
                 assert_eq!(task.plan.pm_snapshot_synced_at, Some(7));
@@ -5771,12 +5649,13 @@ mod tests {
                     .unwrap();
                 std::fs::remove_dir_all(&checkout).unwrap();
                 let losing_checkout = repo.path().join("another-candidate");
-                let restored = super::place_prepared_task(
-                    repo.path().to_path_buf(),
-                    resolved,
-                    prepared(losing_checkout.clone()),
-                )
-                .unwrap();
+                let restored = runtime
+                    .block_on(super::place_prepared_task(
+                        &fixture.store,
+                        &task.id,
+                        prepared(losing_checkout.clone()),
+                    ))
+                    .unwrap();
                 assert_eq!(restored, task);
                 assert!(checkout.join(".git").exists());
                 assert!(!losing_checkout.exists());

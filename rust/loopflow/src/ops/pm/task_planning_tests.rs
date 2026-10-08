@@ -715,8 +715,13 @@ fn task_creation_and_edit_do_not_require_a_post_write_wave_snapshot() {
             },
         )
         .unwrap();
-        let record =
-            crate::ops::task_pm::resolve_task(&repo, &created.id, PmRefresh::Never).unwrap();
+        let record = runtime
+            .block_on(crate::ops::task_pm::resolve_task_async(
+                &repo,
+                &created.id,
+                PmRefresh::Never,
+            ))
+            .unwrap();
         assert_eq!(record.item.name, "Continue the existing training Task");
         assert_eq!(record.item.id, created.id);
         assert_eq!(

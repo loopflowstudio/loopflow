@@ -405,3 +405,152 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         before_prs
     );
 }
+
+#[test]
+fn saved_task_checkout_works_offline_with_and_without_linear() {
+    for connected in [false, true] {
+        let repo = TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let fixture = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let original_prs = runtime
+            .block_on(fixture.store.task_prs(&fixture.task.id))
+            .unwrap();
+        let mut snapshot = runtime
+            .block_on(fixture.store.pm_snapshot(&fixture.task.wave_id))
+            .unwrap()
+            .unwrap();
+        let mut item = snapshot.snapshot.items[0].clone();
+        item.id = "offline-placement-issue".into();
+        item.identifier = "INF-456".into();
+        item.name = "Saved Task placement".into();
+        item.branch_name = None;
+        snapshot.snapshot.items.push(item);
+        runtime
+            .block_on(fixture.store.put_pm_snapshot(snapshot, None))
+            .unwrap();
+        let task = runtime
+            .block_on(fixture.store.get_task_by_issue("INF-456"))
+            .unwrap()
+            .unwrap();
+        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+        if connected {
+            fs::create_dir_all(repo.path().join(".lf")).unwrap();
+            fs::write(
+                repo.path().join(".lf/config.yaml"),
+                "pm:\n  provider: linear\n  linear_team: unreachable-team\n",
+            )
+            .unwrap();
+        } else {
+            conn.execute(
+                "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+                [task.id.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                [task.project_id.as_str()],
+            )
+            .unwrap();
+        }
+        // A saved edit must survive allocation, even while an older provider fact remains.
+        conn.execute(
+            "UPDATE tasks SET issue_title='Retain local direction',planning_revision=3 WHERE id=?1",
+            [task.id.as_str()],
+        )
+        .unwrap();
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        let checkout = || {
+            let mut command = unbound_command(
+                Path::new(env!("CARGO_BIN_EXE_lf")),
+                repo.path(),
+                &[
+                    "task",
+                    "checkout",
+                    task.id.as_str(),
+                    "--name",
+                    "offline-placement",
+                    "--json",
+                ],
+            );
+            for (name, _) in std::env::vars_os() {
+                if name.to_string_lossy().starts_with("LINEAR_") {
+                    command.env_remove(name);
+                }
+            }
+            command
+                .env("HOME", home.path())
+                .env("LF_HOME", home.path())
+                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+                .env("LF_USER_NAME", "Fixture Person")
+                .output()
+                .unwrap()
+        };
+        let first = checkout();
+        assert!(
+            first.status.success(),
+            "{}",
+            String::from_utf8_lossy(&first.stderr)
+        );
+        let placed = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(placed.plan, saved.plan);
+        assert_eq!(placed.project_id, saved.project_id);
+        assert_eq!(placed.wave_id, saved.wave_id);
+        let worktree = placed.worktree.as_ref().unwrap();
+        assert!(worktree.join(".git").exists());
+        let prs = runtime.block_on(fixture.store.task_prs(&task.id)).unwrap();
+        assert_eq!(prs.len(), 1);
+        assert_eq!(
+            prs[0].branch,
+            format!(
+                "lf/{}/retain-local-direction",
+                task.id.as_str().trim_start_matches("task_")
+            )
+        );
+        let events = runtime
+            .block_on(fixture.store.task_events_after(&task.id, 0))
+            .unwrap();
+        fs::remove_dir_all(worktree).unwrap();
+        let retried = checkout();
+        assert!(
+            retried.status.success(),
+            "{}",
+            String::from_utf8_lossy(&retried.stderr)
+        );
+        assert!(worktree.join(".git").exists());
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.get_task(&task.id))
+                .unwrap()
+                .unwrap(),
+            placed
+        );
+        assert_eq!(
+            runtime.block_on(fixture.store.task_prs(&task.id)).unwrap(),
+            prs
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.task_events_after(&task.id, 0))
+                .unwrap(),
+            events
+        );
+        assert_eq!(
+            runtime
+                .block_on(fixture.store.task_prs(&fixture.task.id))
+                .unwrap(),
+            original_prs
+        );
+        let executions: i64 = conn.query_row(
+            "SELECT (SELECT count(*) FROM agent_sessions WHERE task_id=?1) + (SELECT count(*) FROM task_workflows WHERE task_id=?1)",
+            [task.id.as_str()], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(executions, 0);
+    }
+}

@@ -53,12 +53,12 @@ saves abandonment and cancellation identity atomically in both modes, deleting
 provider-first decision writers. Cleanup checks execution separately and cannot
 reverse the decision. Safe cancellation delivery remains unimplemented and pending.
 
-October 8's uncommitted placement reduction shares one transaction and restores
-the winning checkout/PR. Its queued writer retains the Wave lock after caller
-cancellation. Authority dispatch and mapped-only provider validation still survive:
-paired store fixtures prove no common offline command path. The ownership/deletion
-cut, definitions, fields and unmapped export remain unfinished. Public resolution,
-composed reconnect and installed acceptance remain unproved.
+`bd8d0191a` retains shared placement, winning checkout/PR recovery and Wave locks
+through caller cancellation. The next cut shares offline checkout preparation;
+paired CLI fixtures retain edits and restore the same PR/path. Mapped-only provider
+fact validation survives. Common schema, definitions, creation/edit and rotation
+remain; LOO-412 has no coherent writer boundary. Public resolution, composed
+reconnect and installed acceptance remain unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

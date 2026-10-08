@@ -64,24 +64,6 @@ pub(crate) fn current_project(store: &Store, wave: &Wave) -> OpsResult<PmProject
     select_project(store, wave, &projects).cloned()
 }
 
-pub(crate) async fn resolve_project_for_task(
-    store: &Store,
-    wave: &Wave,
-    project_id: &str,
-) -> OpsResult<Project> {
-    let current = current_project(store, wave)?;
-    if current.id != project_id {
-        return Err(project_error(
-            "new Tasks require the Wave's configured Project",
-        ));
-    }
-    store
-        .get_project_by_project(&current.id)
-        .await
-        .map_err(project_error)?
-        .ok_or_else(|| project_error("current Project is unavailable; sync the Wave"))
-}
-
 /// Explicitly seed a Wave's shared selection with an existing Project UUID.
 /// Switching an established binding belongs to Project rotation.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<PmProject> {

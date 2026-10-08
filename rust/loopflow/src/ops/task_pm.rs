@@ -29,12 +29,6 @@ pub fn load_wave(repo: &Path, wave: &str, refresh: PmRefresh) -> OpsResult<PmSho
     )
 }
 
-pub fn resolve_task(repo: &Path, issue: &str, refresh: PmRefresh) -> OpsResult<ResolvedTask> {
-    let runtime = tokio::runtime::Runtime::new()
-        .map_err(|error| OpsError::Message(format!("failed to create async runtime: {error}")))?;
-    runtime.block_on(resolve_task_async(repo, issue, refresh))
-}
-
 pub(crate) async fn resolve_task_async(
     repo: &Path,
     issue: &str,

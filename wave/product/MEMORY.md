@@ -435,12 +435,11 @@ minute cron and wanted that cron removed. October 4 retired Flow resumption.
 Unreviewed exceptions—taskless landing, unarmed reporting, Desktop view—and proof
 limits remain at `53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
 
-October 8, LOO-418: Jack confirmed `land --wait` must repair its own PR with
-Desktop closed, sharing existing landing claims. Default waiting was not accepted.
-Repeated land on a merged Task PR succeeds without preparation,
-preserving finishing work. A busy checkout must not let one observer mark another
-waiter's delivery failed. Recorded waiting Flow/Task controllers do not compete
-with their child's repair; unrelated work and unresolved provider turns still do.
+October 8, LOO-418: Jack confirmed self-contained CI repair with Desktop closed
+and requested explicit `land --wait-and-fix` naming. Default waiting was not accepted.
+Repeated land succeeds after merge, preserving finishing work. A busy checkout
+must not poison another waiter's delivery. Recorded waiting controllers permit
+their child's repair; unrelated work and unresolved provider turns still block.
 
 Finite landing (#1382) provided continuation after caller exit; #1384 moved
 repair to the watcher. #1287 fixed repair permissions and locks retained across

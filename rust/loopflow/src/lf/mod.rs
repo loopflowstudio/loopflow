@@ -1216,9 +1216,9 @@ pub enum PrCommand {
     },
     /// Request auto-merge, retain settlement intent, and return.
     Land {
-        /// Wait up to 30 minutes for verified merge; timeout retains the request
+        /// Wait up to 30 minutes for merge and repair failing CI; timeout retains the request
         #[arg(long)]
-        wait: bool,
+        wait_and_fix: bool,
         #[arg(long)]
         strict: bool,
         #[arg(long)]
@@ -2297,15 +2297,19 @@ mod tests {
     }
 
     #[test]
-    fn landing_wait_is_explicit_and_serial_dispositions_are_rejected() {
-        let land =
-            Cli::try_parse_from(["lf", "pr", "land", "--wait"]).expect("parse waited landing");
+    fn landing_wait_and_fix_is_explicit_and_serial_dispositions_are_rejected() {
+        let land = Cli::try_parse_from(["lf", "pr", "land", "--wait-and-fix"])
+            .expect("parse waited landing");
         assert!(matches!(
             land.command,
             Some(Commands::Pr {
-                cmd: Some(PrCommand::Land { wait: true, .. })
+                cmd: Some(PrCommand::Land {
+                    wait_and_fix: true,
+                    ..
+                })
             })
         ));
+        assert!(Cli::try_parse_from(["lf", "pr", "land", "--wait"]).is_err());
         for command in ["land", "arm", "submit"] {
             assert!(Cli::try_parse_from(["lf", "pr", command, "-c"]).is_err());
             assert!(Cli::try_parse_from(["lf", "pr", command, "--next", "follow-up"]).is_err());

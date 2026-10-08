@@ -2563,7 +2563,7 @@ fn release_land_options(copy: Option<PrCopy>) -> LandOptions {
         strict: true,
         local: false,
         create_pr: false,
-        wait: false,
+        wait_and_fix: false,
         worktree: None,
         commit_message: None,
         pr_title: copy.as_ref().map(|copy| copy.title.clone()),

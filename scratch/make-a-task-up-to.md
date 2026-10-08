@@ -25,6 +25,30 @@ position. After delivery, its page says either **Done · Follow-up LOO-…**, or
 says “PR 2,” retains an unexplained open state, or waits for production evidence
 that belongs to another Task. Research reaches `end` without a phantom PR slot.
 
+## Alignment with local planning (2026-10-08)
+
+Jack Heart requested avoiding duplicate data types and making repair explicit in
+`--wait-and-fix`. The landing flag replaces `--wait`; ship and all callers use
+that spelling. Bare landing still returns after requesting merge.
+
+LOO-406 now implements the complete local planning lifecycle. Its October 8
+brief and checkout use the existing Task, TaskPlan and TaskSnapshot, with optional
+Linear mapping and checkout. TaskSnapshot is the assembled read, not another
+stored Task or planning authority. Preserve one model and one read path when the
+branches integrate: local identity and optional placement from LOO-406, one
+optional PR and follow-through from LOO-418. Do not introduce local/Linear or
+delivery-specific Task copies. Shared fields should come from their owning record;
+computed status, work and actions belong in the read projection.
+
+Integration remains: reconcile overlapping Task/TaskSnapshot and Rust/Swift wire
+changes, make branch/base placement absent until checkout, and route follow-up
+creation, links and completion through LOO-406's shared local planning APIs.
+The current follow-through implementation still calls Linear directly; merging
+the DTOs alone will not make that path work without Linear. Verify unplaced,
+PR-less and merged-with-follow-up Tasks through both CLI and Desktop, including
+local filing/completion without provider calls. No second filing or completion
+implementation should survive. LOO-406's active checkout was inspected read-only.
+
 ## Demo
 
 In an isolated fixture repository, start a child Task while its parent's PR is
@@ -55,7 +79,7 @@ Initial inventory: `626789dcd0382c6754ba3b7c61ea2448b57658ce`. Reconciled
 October 7 after integrating `35e759aaf`: #1492 supplies the FlowProcess API and
 `flow list --processes`; #1495 simplifies completion readiness and keeps
 terminal Task actions inert. The implementation preserves those changes. This inventory records the
-pre-change mechanisms; ship now runs `gate → land --wait → follow-through`.
+pre-change mechanisms; ship now runs `gate → land --wait-and-fix → follow-through`.
 
 | Existing mechanism | Finding and treatment |
 | --- | --- |
@@ -149,7 +173,7 @@ step on October 8; Infrastructure [LOO-435](https://linear.app/loopflow/issue/LO
 owns that separate design. The current correction preserves held exit 3 through
 the Flow instead of converting it to failure and replaying gate.
 
-Change `ship` to `gate → cmd: land --wait → follow-through`. The `follow-through`
+Change `ship` to `gate → cmd: land --wait-and-fix → follow-through`. The `follow-through`
 skill files or links the remaining Tasks, records the disposition, then calls
 `lf task complete ISSUE`. The command itself runs no skill and files no Tasks.
 The enclosing Workflow's subsequent arrival at end is idempotent: one completion,
@@ -590,4 +614,4 @@ Held exit 3 now survives the Flow driver and prevents automatic whole-Flow retri
 Bare and waited land return success for a merged Task PR, including a completed
 Task and explicit worktree selection, without clearing newly written scratch.
 
-Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): focused `land_tests` (`waited_`, `lf_pr_land_returns_before_later_checks_repair_and_observe_merge`), `task_flow_launch_tests::a_held_command_stops_the_task_run_without_repeating_the_flow`, and lib `completed_session_with_exited_provider_does_not_block_task_work` passed (5 tests, including 7 watcher scenarios); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; prior lifecycle/Swift proof remains at `cdde9f6a2:scratch/make-a-task-up-to.md`; gate owns affected acceptance, capable CI owns Docker installation, demo owns Jack's judgment.
+Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): renamed-flag parser, CLI shorthand, Flow graph and `land_tests waited_` passed (14 tests); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed. Earlier landing/lifecycle evidence: `aae4c809c:scratch/make-a-task-up-to.md`; full gate, Docker CI, LOO-406 integration and demo remain.

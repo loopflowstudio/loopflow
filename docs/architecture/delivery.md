@@ -11,7 +11,7 @@ lf checkout INF-123
 lf --task INF-123 implement
 lf commit -m "parser: accept nested groups"
 lf pr publish --title "Parser: accept nested groups"
-lf land --wait
+lf land --wait-and-fix
 lf task follow-up INF-123 --none 'No accepted obligations remain'
 lf task complete INF-123
 ```
@@ -298,7 +298,7 @@ recorded before Task settlement; a failed local or Linear settlement keeps the
 landing pending and the next check retries it.
 
 After verified merge the Task shows **Merged · Follow-through pending**.
-`ship` runs gate, `land --wait`, then follow-through. Waited landing uses the
+`ship` runs gate, `land --wait-and-fix`, then follow-through. Waited landing uses the
 existing observation and CI repair path every 15 seconds for at most 30 minutes,
 releasing its lock between reads. Repair admission exempts only the calling
 command and its recorded Flow drivers and Task carrier, which wait for it;

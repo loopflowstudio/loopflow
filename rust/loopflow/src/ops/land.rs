@@ -21,7 +21,7 @@ pub struct LandOptions {
     pub strict: bool,
     pub local: bool,
     pub create_pr: bool,
-    pub wait: bool,
+    pub wait_and_fix: bool,
     pub worktree: Option<String>,
     pub commit_message: Option<String>,
     pub pr_title: Option<String>,

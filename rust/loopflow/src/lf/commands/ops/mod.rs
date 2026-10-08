@@ -38,7 +38,13 @@ use std::time::Instant;
 
 pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
     let progress = CliProgress;
-    let wait = matches!(cmd, Some(PrCommand::Land { wait: true, .. }));
+    let wait_and_fix = matches!(
+        cmd,
+        Some(PrCommand::Land {
+            wait_and_fix: true,
+            ..
+        })
+    );
     match cmd {
         None => pr_status(),
         Some(PrCommand::Reconcile) => {
@@ -76,7 +82,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: false,
                 create_pr: *create_pr,
-                wait: false,
+                wait_and_fix: false,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -94,7 +100,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
             body,
         })
         | Some(PrCommand::Land {
-            wait: _,
+            wait_and_fix: _,
             strict,
             local,
             worktree,
@@ -106,7 +112,7 @@ pub fn run_pr(cmd: Option<&PrCommand>, cli_agent: Option<&str>) -> Result<()> {
                 strict: *strict,
                 local: *local,
                 create_pr: true,
-                wait,
+                wait_and_fix,
                 worktree: worktree.clone(),
                 commit_message: message.clone(),
                 pr_title: title.clone(),
@@ -628,7 +634,7 @@ pub(crate) fn land_repo(
         }
     })?;
     if let Some(pr) = pr {
-        if options.wait {
+        if options.wait_and_fix {
             crate::engine::agent::register_interrupt_cleanup(|| {
                 eprintln!("Landing wait interrupted; merge intent retained.");
             });

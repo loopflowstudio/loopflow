@@ -12,7 +12,7 @@ follow-through must be able to read them after merge without scratch.
 
 ```bash
 lf land                 # prepare, request exact-head auto-merge, return
-lf land --wait          # also wait for authoritative merge
+lf land --wait-and-fix  # wait for merge and repair failing CI
 ```
 
 The operation owns preparation, sync, publication, and exact-head auto-merge.
@@ -23,7 +23,7 @@ another landing watcher.
 
 Bare land and `lf arm` return after recording intent. `lf pr reconcile` checks
 recorded landings once; `lf ci watch` repairs actionable CI while installed and
-running. `--wait` observes and repairs its own PR every 15 seconds for at most
+running. `--wait-and-fix` observes and repairs its own PR every 15 seconds for at most
 30 minutes, including with Desktop closed. It shares the incident reservation
 with the watcher, so an unchanged incident receives one repair. Each check
 releases the landing lock. Timeout leaves intent intact and returns held;

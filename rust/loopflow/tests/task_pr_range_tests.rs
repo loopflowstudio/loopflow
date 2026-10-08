@@ -29,7 +29,7 @@ fn land_options(create_pr: bool, pr_title: &str) -> LandOptions {
         strict: true,
         local: false,
         create_pr,
-        wait: false,
+        wait_and_fix: false,
         worktree: None,
         commit_message: None,
         pr_title: Some(pr_title.to_string()),

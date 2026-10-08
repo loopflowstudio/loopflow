@@ -34,7 +34,7 @@ Review corrections (2026-10-08, findings from `cdde9f6a2`):
   A watcher reports busy work without marking delivery failed. The combined
   headless Task/Flow/wait/repair/merge/follow-through fixture passes.
 - Jack asked whether already-merged `land` should succeed with a clear message.
-  Previously only `--wait` checked before preparation. Jack approved the
+  Previously only the waited path checked before preparation. Jack approved the
   correction: bare land shares that success path, confirms
   the same PR, preserves pending follow-through, and performs no publication,
   sync, scratch cleanup or new merge request. Keep failed/unknown observation
@@ -47,3 +47,8 @@ held exit 3, which the Flow previously turned into failure and retried. Bare lan
 waiting by default remains an unaccepted suggestion. Historical finite landing
 was for continuation after caller exit (#1382), then watcher-owned repair
 (#1384); the inspected record does not establish a particular crash as the cause.
+
+Jack Heart (October 8) requested no duplicate Task data types and explicit
+`--wait-and-fix` naming. The design records the LOO-406 integration gap: shared
+optional placement/identity and local follow-up filing/completion, not DTO merging
+alone. Existing LOO-406 types are reused; its active checkout is unchanged.

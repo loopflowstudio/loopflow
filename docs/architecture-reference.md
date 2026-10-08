@@ -808,7 +808,7 @@ Task row ----> managed worktree ----> commits
 5. PR landing is fenced by landing generation. A check repairs an unchanged
    incident once; a moved head requires fresh evidence. A blocked landing still
    observes merge, and explicit arm or land resumes it.
-6. Verified merge leaves follow-through pending. `ship` uses `land --wait`,
+6. Verified merge leaves follow-through pending. `ship` uses `land --wait-and-fix`,
    then files linked follow-up Tasks or records none needed before completing.
    The next Task/Wave operation recovers stopped finishing work with
    `finish-delivery`, after checking live drivers. Reconciliation records facts

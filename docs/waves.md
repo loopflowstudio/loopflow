@@ -432,7 +432,7 @@ steering and recovery use the same commands for people and agents:
 [The Agent API → Steer](agent-api.md#steer).
 
 ```bash
-lf land --wait
+lf land --wait-and-fix
 lf task follow-up INF-124 --none 'No accepted obligations remain'
 lf task complete INF-124
 ```

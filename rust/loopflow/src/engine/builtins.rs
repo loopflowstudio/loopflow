@@ -350,7 +350,7 @@ mod tests {
             .contains("flow: refresh"));
         assert!(get_builtin_flow("ship")
             .expect("Task final flow")
-            .contains("- cmd: land --wait"));
+            .contains("- cmd: land --wait-and-fix"));
         assert!(get_builtin_flow("ship")
             .unwrap()
             .contains("- follow-through"));

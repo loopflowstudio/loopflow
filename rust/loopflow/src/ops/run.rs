@@ -420,7 +420,7 @@ mod tests {
                 prepared.prompt.matches("Keep rollback available.").count(),
                 1
             );
-            assert!(prepared.config.task_prompt.contains(goal));
+            assert!(prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
                 &prepared.config.system_prompt,
@@ -429,7 +429,9 @@ mod tests {
             );
             assert_eq!(
                 context
-                    .task
+                    .system
+                    .as_ref()
+                    .unwrap()
                     .assets
                     .iter()
                     .filter(|asset| {

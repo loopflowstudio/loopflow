@@ -631,14 +631,32 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
             // An external application launch has no child process receipt.
             capture.begin_provider_spawn()?;
         }
+        let context_file = if target == ProcessTarget::Tui
+            && matches!(built.harness.as_str(), "claude" | "codex")
+        {
+            Some(write_prompt_log(
+                &built.repo_root,
+                &crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config),
+                &format!("{}.context", built.log_name),
+                None,
+            )?)
+        } else {
+            None
+        };
+        let prompt = if context_file.is_some() {
+            &built.agent_config.task_prompt
+        } else {
+            &built.prompt
+        };
         let result = launch_session_with_env(
             target,
             &built.harness,
             built.model.as_deref(),
             &built.repo_root,
-            &built.prompt,
+            prompt,
             &environment,
             provider_session_id.as_deref(),
+            context_file.as_deref(),
         );
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())
@@ -911,7 +929,9 @@ pub(crate) fn attributed_context(
     );
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
-        let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
+        let goal = tagged_block(system_prompt, &open, "</lf:wave>")
+            .or_else(|| tagged_block(task_prompt, &open, "</lf:wave>"))
+            .unwrap_or(open.as_str());
         push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     for document in &components.docs {
@@ -1294,7 +1314,7 @@ mod tests {
                     built.prompt.matches("<lf:user>").count(),
                     usize::from(!context.is_empty())
                 );
-                assert!(built.agent_config.task_prompt.contains(&context));
+                assert!(built.agent_config.system_prompt.contains(&context));
                 assert!(!built
                     .prompt
                     .contains("display name is \"Repository Owner\""));
@@ -1326,7 +1346,7 @@ mod tests {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
-            assert!(built.agent_config.task_prompt.contains(expected));
+            assert!(built.agent_config.system_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
         }
         std::env::set_var("LF_USER_NAME", "Jack");
@@ -1634,11 +1654,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let built = build_bound_prompt_at(Some("proof"), "reconcile", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("runtime evidence bytes"));
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("handoff evidence bytes"));
     }
 
@@ -1660,23 +1680,37 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
         let committed = built
             .agent_config
-            .task_prompt
+            .system_prompt
             .find("committed evidence bytes")
             .unwrap();
         let untracked = built
             .agent_config
-            .task_prompt
+            .system_prompt
             .find("untracked evidence bytes")
             .unwrap();
         assert!(committed < untracked);
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/a-committed.md")
-        }));
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
-        }));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/a-committed.md")
+            }));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
+            }));
     }
 
     #[test]
@@ -1705,21 +1739,28 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("runtime evidence bytes"));
         assert!(!built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("evidence published after launch"));
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("inspect the complete basis"));
-        assert!(built.agent_config.task_prompt.contains("Task seed"));
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
-        }));
+        assert!(built.agent_config.system_prompt.contains("Task seed"));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
+            }));
     }
 
     #[test]
@@ -1806,11 +1847,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         )
         .unwrap();
 
-        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.agent_config.system_prompt.matches(goal).count(), 1);
         assert_eq!(built.prompt.matches(goal).count(), 1);
         assert!(built
             .context
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
@@ -1986,20 +2029,27 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let task = crate::engine::format_claude_task_prompt(&components);
-        let prepared = attributed_context(&components, "", &task, &[]);
-        assert_eq!(prepared.task.text, task);
+        let system =
+            crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+        let prepared = attributed_context(&components, &system, "", &[]);
+        assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
             (ContextAssetKind::Scratch, "> &#36;kickoff"),
             (ContextAssetKind::Memory, "Earlier &#36;design"),
             (ContextAssetKind::UserMessage, "Build it."),
         ] {
             assert!(
-                prepared.task.assets.iter().any(|asset| {
-                    asset.kind == kind
-                        && task[asset.byte_start as usize..asset.byte_end as usize]
-                            .contains(expected)
-                }),
+                prepared
+                    .system
+                    .as_ref()
+                    .unwrap()
+                    .assets
+                    .iter()
+                    .any(|asset| {
+                        asset.kind == kind
+                            && system[asset.byte_start as usize..asset.byte_end as usize]
+                                .contains(expected)
+                    }),
                 "missing attribution for {kind:?}"
             );
         }
@@ -2028,24 +2078,29 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             steers,
             ..Default::default()
         };
-        let task = crate::engine::format_claude_task_prompt(&components);
-        let prepared = attributed_context(&components, "", &task, &[]);
+        let system =
+            crate::engine::format_prompt(crate::engine::PromptFormatMode::Full, &components);
+        let prepared = attributed_context(&components, &system, "", &[]);
 
         let block = prepared
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .find(|asset| asset.kind == ContextAssetKind::Steer)
             .expect("steers are their own asset");
-        let text = &task[block.byte_start as usize..block.byte_end as usize];
+        let text = &system[block.byte_start as usize..block.byte_end as usize];
         assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
         assert!(prepared
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .filter(|asset| asset.kind == ContextAssetKind::Goal)
             .all(
-                |asset| !task[asset.byte_start as usize..asset.byte_end as usize]
+                |asset| !system[asset.byte_start as usize..asset.byte_end as usize]
                     .contains("keep the API stable")
             ));
         let recorded = prepared

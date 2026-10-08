@@ -774,6 +774,7 @@ pub fn build_claude_session_turn_args(
 pub fn build_claude_stream_session_args(
     config: &AgentConfig,
     resume_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
@@ -781,7 +782,9 @@ pub fn build_claude_stream_session_args(
         "--input-format".to_string(),
         "stream-json".to_string(),
     ];
-    args.extend(claude_args_for(config, resume_id).to_args());
+    let mut claude_args = claude_args_for(config, resume_id);
+    claude_args.system_prompt_file = context_file.map(Path::to_path_buf);
+    args.extend(claude_args.to_args());
     args
 }
 

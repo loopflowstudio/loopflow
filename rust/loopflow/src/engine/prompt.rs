@@ -1501,10 +1501,7 @@ fn ensure_gitignore_entry(repo_root: &Path, entry: &str) -> Result<(), CoreError
     Ok(())
 }
 
-/// Render system-safe reference sections (instructions only, no user content).
-///
-/// These are safe to include in the system prompt without triggering
-/// third-party app classifiers: loopflow, surface.
+/// Render Loopflow's operating and surface instructions.
 pub fn format_system_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1559,8 +1556,7 @@ pub fn format_wave_sections(components: &PromptComponents) -> Vec<String> {
 
 /// Render user-content reference sections (docs, diffs, wave context, clipboard).
 ///
-/// These contain repo content that may trigger third-party app classifiers
-/// if placed in the system prompt. Safe to include in the user message.
+/// Preserve source boundaries and reference escaping in the assembled context.
 pub fn format_content_sections(components: &PromptComponents) -> Vec<String> {
     let mut parts = Vec::new();
 
@@ -1738,38 +1734,18 @@ pub fn format_prompt(mode: PromptFormatMode, components: &PromptComponents) -> S
     }
 }
 
-/// Format context components for system prompt (everything except task).
+/// Render the reference context without the skill or current request.
 pub fn format_context_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Context, components)
 }
 
-/// Format task prompt for user message (skill + free text).
+/// Render the skill and current request without reference context.
 pub fn format_task_prompt(components: &PromptComponents) -> String {
     format_prompt(PromptFormatMode::Task, components)
 }
 
-/// Format system prompt for Claude (system-safe sections only).
-///
-/// Excludes docs, diffs, wave context, and clipboard — those go in the task
-/// prompt to avoid triggering third-party app classifiers.
-pub fn format_claude_system_prompt(components: &PromptComponents) -> String {
-    format_system_sections(components).join("\n\n")
-}
-
-/// Format task prompt for Claude (content sections + skill + message).
-pub fn format_claude_task_prompt(components: &PromptComponents) -> String {
-    let mut parts = format_content_sections(components);
-
-    if let Some(ref skill) = components.skill {
-        parts.push(format_skill_tag(skill));
-    }
-
-    if let Some(ref message) = components.message {
-        parts.push(render_message(message));
-    }
-
-    parts.join("\n\n")
-}
+/// Starts the turn after the assembled instructions have loaded from the system file.
+pub const INITIAL_TURN_PROMPT: &str = "Follow the instructions in the supplied context.";
 
 /// Write a runtime prompt file and return its path.
 ///
@@ -1893,14 +1869,13 @@ mod tests {
             format_prompt(PromptFormatMode::Full, &components),
             format_context_prompt(&components),
             format_task_prompt(&components),
-            format_claude_task_prompt(&components),
         ] {
             assert!(!prompt.contains("$kickoff"));
             assert!(!prompt.contains("$wave/operate"));
             assert!(prompt.contains("&#36;kickoff"));
             assert!(prompt.contains("&#36;{HOME} &#36;HOME &#36;(pwd) &#36;5 café"));
         }
-        let submitted = format_claude_task_prompt(&components);
+        let submitted = format_prompt(PromptFormatMode::Full, &components);
         assert!(submitted.contains("Use $implement."));
         assert!(submitted
             .contains("The selected skill and live request determine the current operation."));

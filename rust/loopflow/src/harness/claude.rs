@@ -106,7 +106,9 @@ impl ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let args = build_claude_stream_session_args(config, resume_id.as_deref());
+        let context_file = super::write_system_prompt_file(config)?;
+        let args =
+            build_claude_stream_session_args(config, resume_id.as_deref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);

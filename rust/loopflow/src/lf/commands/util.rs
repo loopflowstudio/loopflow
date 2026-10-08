@@ -75,9 +75,11 @@ pub fn launch_session(
         prompt,
         &BTreeMap::new(),
         None,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Provider launch inputs and its optional file-backed context.
 pub(crate) fn launch_session_with_env(
     target: ProcessTarget,
     harness: &str,
@@ -86,6 +88,7 @@ pub(crate) fn launch_session_with_env(
     prompt: &str,
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Result<()> {
     let launch = build_session_launch(
         target,
@@ -94,6 +97,7 @@ pub(crate) fn launch_session_with_env(
         worktree,
         prompt,
         provider_session_id,
+        context_file,
     )?;
 
     if target == ProcessTarget::Ide {
@@ -123,9 +127,17 @@ fn build_session_launch(
     worktree: &Path,
     prompt: &str,
     provider_session_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Result<SessionLaunch> {
     let worktree = absolute_path(worktree);
-    let command = build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
+    let command = build_session_command(
+        harness,
+        model,
+        &worktree,
+        prompt,
+        provider_session_id,
+        context_file,
+    )?;
     let ide_url = if target == ProcessTarget::Ide {
         build_ide_url(harness, &worktree, prompt)
     } else {
@@ -154,6 +166,7 @@ pub(crate) fn build_session_command(
     worktree: &Path,
     prompt: &str,
     provider_session_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
     let cwd = worktree.to_path_buf();
     let worktree_arg = worktree.to_string_lossy().to_string();
@@ -170,6 +183,13 @@ pub(crate) fn build_session_command(
                 args.push(dir.to_string_lossy().to_string());
             }
             args.extend(codex_permission_args(Some(worktree), false, false));
+            if let Some(path) = context_file {
+                args.push("-c".to_string());
+                args.push(format!(
+                    "model_instructions_file={}",
+                    serde_json::to_string(&path.to_string_lossy())?
+                ));
+            }
             args.push(prompt.to_string());
             Ok(SessionCommand {
                 program: "codex".to_string(),
@@ -190,6 +210,10 @@ pub(crate) fn build_session_command(
             if let Some(provider_session_id) = provider_session_id {
                 args.push("--session-id".to_string());
                 args.push(provider_session_id.to_string());
+            }
+            if let Some(path) = context_file {
+                args.push("--append-system-prompt-file".to_string());
+                args.push(path.to_string_lossy().to_string());
             }
             // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
@@ -1555,6 +1579,7 @@ mod tests {
             &path(),
             "fix it",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -1589,6 +1614,7 @@ mod tests {
                 &path(),
                 "test",
                 None,
+                None,
             )
             .expect("build bare harness launch");
             assert!(
@@ -1607,9 +1633,16 @@ mod tests {
     fn session_launch_tui_codex_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch =
-            build_session_launch(ProcessTarget::Tui, "codex", None, &worktree, "fix it", None)
-                .expect("build launch");
+        let launch = build_session_launch(
+            ProcessTarget::Tui,
+            "codex",
+            None,
+            &worktree,
+            "fix it",
+            None,
+            None,
+        )
+        .expect("build launch");
 
         let idx = launch
             .command
@@ -1634,6 +1667,7 @@ mod tests {
             &path(),
             "fix it",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -1657,6 +1691,7 @@ mod tests {
             &path(),
             "test",
             Some("01234567-89ab-cdef-0123-456789abcdef"),
+            None,
         )
         .expect("build launch");
 
@@ -1871,6 +1906,7 @@ mod tests {
             &worktree,
             "fix it",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -2064,6 +2100,7 @@ mod tests {
             &path(),
             "fix it",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -2093,6 +2130,7 @@ mod tests {
             &path(),
             "fix & test\nnow",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -2112,6 +2150,7 @@ mod tests {
             &path(),
             "fix & test\nnow",
             None,
+            None,
         )
         .expect("build launch");
 
@@ -2130,6 +2169,7 @@ mod tests {
             None,
             &path(),
             "fix it",
+            None,
             None,
         )
         .expect("build launch");

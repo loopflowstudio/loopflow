@@ -37,6 +37,24 @@ pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> R
     set_vendor_std_env(command, &context.lf_bin, &context.lf_home)
 }
 
+pub(crate) fn write_system_prompt_file(config: &AgentConfig) -> Result<Option<std::path::PathBuf>> {
+    let prompt = crate::engine::agent::system_prompt_with_structured_replies(config);
+    if prompt.trim().is_empty() {
+        return Ok(None);
+    }
+    let cwd = config
+        .cwd
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(std::env::current_dir)?;
+    Ok(Some(crate::engine::prompt::write_prompt_log(
+        &cwd,
+        &prompt,
+        "session.context",
+        None,
+    )?))
+}
+
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
     for name in crate::engine::agent::EXECUTION_IDENTITY_ENV {
         command.env_remove(name);

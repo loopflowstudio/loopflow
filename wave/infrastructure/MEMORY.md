@@ -374,18 +374,12 @@ unproved. The branch’s prior memory curation remains in Git history at
 
 ## Operator acceptance and account direction (2026-10-04)
 
-Jack Heart directed the Wave to finish LOO-295 and LOO-342 using actual machine
-usage rather than another staged acceptance exercise. Both now read `done`
-through `lf task status`. LOO-367's retained feature invocation completed design
-review, traversed four loop returns and reached demo; LOO-285 independently
-reached demo after four returns. Together with LOO-295's reconciled merged
-PR #1283, this closes its remaining continuation proof. Its unrelated viewer and
-earlier assessment survive at `~/.lf-retired/20261004-loo295/scratch`.
-
-LOO-342's installed routing checks and ongoing main-Home usage establish its
-outcome. Jack explicitly declined more work on retired Ask tooling. Four old
-stores still had legacy process handles at that read; their later authorized
-retirement is recorded below. Cleanup no longer blocks this Task's completion.
+Jack Heart closed LOO-295 and LOO-342 on actual machine usage; both read `done`.
+LOO-367/285's retained Flow progress and PR #1283 established continuation;
+installed routing established the one-Home outcome. Jack declined retired Ask
+work. Exact acceptance and preserved viewer artifacts:
+`35e759aaf4:wave/infrastructure/MEMORY.md` under this heading. Legacy retirement
+below supersedes the then-live process handles.
 
 LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
 cross-binary history means discovering native Session records across folders,
@@ -555,15 +549,13 @@ Unshipped branch evidence: `986be7988:wave/infrastructure/MEMORY.md`.
 
 ## One main Home (LOO-342, curated 2026-10-04)
 
-Jack Heart approved the one-Home cutover: ordinary CLI commands, Task workers,
-Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
-`LF_HOME` experiment initializes once and needs a fresh directory after schema
-changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
-at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
-reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
-The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
-configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
+Jack Heart approved ordinary commands and workers using installed `lf` and `~/.lf`.
+An explicit `LF_HOME` experiment initializes once and needs a fresh directory after
+schema changes. PR #1381 (`6c73356074c4`) shipped; v0.12.31 routing acceptance passed
+and LOO-342 reads done. Current behavior: [CLI docs](../../docs/lf.md#use-one-machine)
+and [Machines](../../docs/architecture/machines.md#one-main-machine).
+Exact release/recovery receipts and older evidence pointers:
+`35e759aaf4:wave/infrastructure/MEMORY.md` under this heading.
 
 ### Legacy retirement completed (2026-10-04)
 
@@ -1070,8 +1062,19 @@ follow-ups. Measure command drift, avoidable rebases and post-land repairs befor
 tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 “up/down 5ths” referent remains unresolved and deferred.
 
-## Direct invocation and large inputs (curated 2026-10-05)
+## Direct invocation and large inputs (LOO-429, 2026-10-07)
 
-`44fe36620:wave/infrastructure/MEMORY.md` retains evidence. Preserve caller-owned
-checkpointing, common invocation loading and Claude's file-backed stdin. Rejected
-Codex `turn/start` remaining waiting is unresolved; Claude success proves no repair.
+Jack Heart selected all assembled context in the system file: instructions,
+Wave memory/goals, scratch, docs, diff, clipboard, skill and Task brief. No curated
+split, fallback or lf-side refusal wording. The historical Claude block was a
+first-response error inside its terminal, not launch failure. His October 7
+headless readback probes proved file delivery on that account, not interactive
+acceptance. Publish for review; do not land before Jack's real first-response
+check in cmux, including large memory, Claude plan mode, Codex and titles.
+
+File transport must cover terminal, batch and persistent harnesses. Preserve
+source attribution and retained context for native resume. IDE deep links have
+no file channel. LOO-428 owns duplicate Codex flags and Flow output.
+`44fe36620:wave/infrastructure/MEMORY.md` retains earlier caller-checkpointing,
+common-loading and Claude-stdin evidence; rejected Codex `turn/start` waiting
+remains unresolved. Claude success proves no repair.

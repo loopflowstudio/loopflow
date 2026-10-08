@@ -178,7 +178,7 @@ async fn confirm_intent(
         issue_id: item.id,
         identifier: item.identifier,
         url: item.url,
-        due: intent.due.clone(),
+        due: item.due_date,
     })
 }
 

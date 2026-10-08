@@ -332,6 +332,7 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
                 let issue = linear.issues.get_mut(&original.issue_id).unwrap();
                 issue["title"] = json!("Edited after filing");
                 issue["projectId"] = json!("moved-project");
+                issue["dueDate"] = json!("2026-10-12");
                 linear.unavailable = false;
             }
             // Changed arguments and a now-invalid destination must not replace a receipt.
@@ -366,7 +367,7 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
             assert_eq!(linked.intents, std::slice::from_ref(&original));
             assert_eq!(linked.links.len(), 1);
             assert_eq!(linked.links[0].issue_id, original.issue_id);
-            assert_eq!(linked.links[0].due, original.due);
+            assert_eq!(linked.links[0].due.as_deref(), Some("2026-10-12"));
             provider.lock().unwrap().relations_unavailable = true;
             let error = task_follow_up(repo.path(), "FIX-1", &finish).unwrap_err();
             assert!(
@@ -375,11 +376,15 @@ fn operation_retries_pinned_filing_after_lost_responses_and_chapter_change() {
             );
             assert_eq!(pending(), linked);
             provider.lock().unwrap().relations_unavailable = false;
+            provider.lock().unwrap().issues.get_mut(&original.issue_id).unwrap()["dueDate"] =
+                Value::Null;
             task_follow_up(repo.path(), "FIX-1", &finish).unwrap();
             let filed = store.sqlite.task_follow_through(&task.id).unwrap();
             assert!(filed.resolved());
             assert_eq!(filed.intents, std::slice::from_ref(&original));
-            assert_eq!(filed.links, linked.links);
+            assert_eq!(filed.links.len(), 1);
+            assert_eq!(filed.links[0].issue_id, original.issue_id);
+            assert_eq!(filed.links[0].due, None);
             assert_eq!(filed.reason, finish.finish);
             assert!(runtime
                 .block_on(task_completion_gate(&store, &task))

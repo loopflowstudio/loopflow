@@ -1,4 +1,4 @@
-# lf in existing terminal hosts · 2026-10-07
+# Terminal-host adoption trial · 2026-10-07
 
 **Interactive Flows now preserve the native agent UI.** Jack Heart exercised the
 fixed binary in cmux and herdr. Separate account-free fixtures cover CLI transport

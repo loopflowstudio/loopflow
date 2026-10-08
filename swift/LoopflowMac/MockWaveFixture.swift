@@ -343,7 +343,7 @@ enum MockWaveFixture {
                   "provider": "codex",
                   "started": true
                 },
-                "flow": {"recommended":"feature","record":{"kind":"none"},"controls":[]},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
                 "directive": {
                   "version": 2,
                   "kind": "replacement",
@@ -424,7 +424,7 @@ enum MockWaveFixture {
                   "workspace": null
                 },
                 "runtime": null,
-                "flow": {"recommended":"feature","record":{"kind":"none"},"controls":[]},
+                "workflow_name":"feature","latest_flow_process":null,"execution":null,"run_control":{"unavailable":null},
                 "directive": null,
                 "next_move": {
                   "owner": "wave",

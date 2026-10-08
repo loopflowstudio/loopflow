@@ -173,7 +173,7 @@
       ],
       "started_at": 10,
       "completed_at": 20,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
@@ -187,7 +187,7 @@
       ],
       "started_at": 20,
       "completed_at": 30,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
@@ -201,7 +201,7 @@
       ],
       "started_at": 30,
       "completed_at": 40,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
@@ -215,7 +215,7 @@
       ],
       "started_at": 40,
       "completed_at": 50,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {
@@ -229,7 +229,7 @@
       ],
       "started_at": 50,
       "completed_at": 60,
-      "outcome": "ok",
+      "outcome": "succeeded",
       "exit_code": 0
     },
     {

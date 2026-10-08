@@ -249,25 +249,25 @@ If the user wants remote execution, explain the durable sequence and use the
 actual ids observed from the commands:
 
 ```bash
-lf ssh <host> machine id --json
-lf observe <machine-id> ssh://<user>@<host>
-lf ssh <machine-id> account --cached
-lf ssh <machine-id> account route
+lf machine add <ssh-target> --label <label>
+lf machine list --json
+lf --machine <machine-id> account --cached
+lf --machine <machine-id> account route
 lf wave list --json
 lf wave place <wave-id> <machine-id>
 lf wave status <wave> --json
-lf ssh <machine-id> --wave <wave> wave/operate
+lf --machine <machine-id> --wave <wave> wave/operate
 ```
 
-`lf ssh` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
+`lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. The remote process can select from subscription accounts forwarded
 for that invocation and accounts installed on the remote Machine. GitHub, PM, and
 secret authority use the remote machine's installed credentials. Before
 placement, use remote reads to verify that the remote has `lf`, the repository,
-required accounts, and the intended route. `lf observe` records the
-mutable SSH route for the stable MachineId. Placement is allowed only while no execution
-is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
-`lf ssh <machine-id>` to run on the remote Machine. Observing a route,
+required accounts, and the intended route. `lf machine add` discovers the identity
+and records its label, repository and SSH route. Placement is allowed only while
+no execution is live. `lf --wave <wave> wave/operate` makes a finite pass locally; prefix it with
+`lf --machine <machine-id>` to run on the remote Machine. Adding a machine,
 changing placement, and starting a Wave each change durable execution state.
 
 ## 6. Prove the result

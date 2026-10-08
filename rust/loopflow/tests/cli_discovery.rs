@@ -476,10 +476,6 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "ssh", "somewhere", "show", "--help"]),
-        ["lf", "machine", "ssh", "somewhere", "show", "--help"]
-    );
-    assert_eq!(
         normalized(&["lf", "run", "land", "--", "--help"]),
         ["lf", "run", "land", "--", "--help"]
     );
@@ -749,4 +745,55 @@ fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
         .unwrap()
         .contains("Empty goal"));
     assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
+fn remote_selection_preserves_command_arguments_and_literal_boundaries() {
+    use loopflow::lf::navigation::machine_invocation;
+    let args = [
+        "lf",
+        "--account",
+        "personal@",
+        "--machine=mini",
+        "--secret",
+        "SENTRY_AUTH_TOKEN",
+        "--forward-agent",
+        "--task",
+        "LOO-123",
+        "implement",
+        "--",
+        "--machine",
+        "literal",
+    ]
+    .map(String::from);
+    let (cli, command) = machine_invocation(&args).unwrap().unwrap();
+    assert_eq!(cli.machine.as_deref(), Some("mini"));
+    assert!(cli.account.is_empty());
+    assert_eq!(cli.secret, ["SENTRY_AUTH_TOKEN"]);
+    assert!(cli.forward_agent);
+    assert_eq!(
+        command,
+        [
+            "--account",
+            "personal@",
+            "--task",
+            "LOO-123",
+            "implement",
+            "--",
+            "--machine",
+            "literal"
+        ]
+    );
+    for args in [
+        vec!["lf", "commit", "-m", "--machine"],
+        vec!["lf", "--docs", "--machine", "status"],
+        vec!["lf", "skill", "--", "--machine", "literal"],
+    ] {
+        assert!(
+            machine_invocation(&args.iter().map(|s| (*s).to_string()).collect::<Vec<_>>())
+                .unwrap()
+                .is_none()
+        );
+    }
+    assert!(machine_invocation(&["lf", "--machine"].map(String::from)).is_err());
 }

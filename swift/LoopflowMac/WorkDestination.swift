@@ -9,6 +9,7 @@ enum WorkDestination: Hashable {
     case task(String)
     case session(String)
     case flow(String)
+    case workflow(String)
     case rename(String)
     case bind(String)
     case flowLog(String)

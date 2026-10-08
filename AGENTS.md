@@ -213,6 +213,13 @@ Flow authority and never rewrites historical usage. Every Flow naming the Task
 is equally its work; a stopped Flow is history its caller inspects, never a
 position to resume. A Task with no Workflow takes up its Project's `workflow:`
 on its first `lf task run`; one that named its own keeps it.
+WorkflowDefinition and FlowDefinition occupy separate `.lf/workflows/` and
+`.lf/flows/` namespaces. `lf project workflow` owns definition discovery,
+customization and Project selection. `lf task workflow show` reads the captured
+instance; `restart` moves it to `start` without reloading or executing anything.
+`lf flow` handles autonomous definitions and `--processes` inspects execution.
+Task projections expose Workflow selection, latest FlowProcessDetail, execution
+evidence and TaskRunControl separately; latest never grants primary authority.
 A Workflow is the Task's outer shape: the workflow definition it took up,
 whose nodes are where a person takes part in the Task conversation and whose
 edges each run one Flow, plus the Task's stored position on it. The graph is
@@ -228,7 +235,7 @@ compiled graph at launch, then each step's Process, node and iteration counts.
 Every Flow process gets one; none is primary for a Task. A step is the plain command
 (`lf -b skill <name> [message]` or the operation's own) and neither reads nor
 writes it. Running, finished and results are read from Processes, never stored
-twice. Template composition expands the graph; loop passes are node/iteration
+twice. FlowComposition describes resolved composition, which expands the graph; loop passes are node/iteration
 positions on step rows, not child Flows.
 
 Repository rotation converges on an explicit target through fresh provider facts
@@ -243,7 +250,7 @@ collide across history. References use `process_lfid` and `parent_process_lfid`.
 AgentSession is one durable agent conversation, interactive or headless; identity,
 name, feedback and native history survive driver replacement. Product text says
 Session for interactive and Run for headless work. Waiting is the one attention
-state, judged in Rust from a provider stream `lf` owns. A step's result
+state, judged in Rust from owned provider streams and validated terminal reports. A step's result
 is how its process exited; a deciding or routing step also answers through the
 Session turn its Process captured. Agent outcomes and retries belong in Session
 history; mechanical results are step Process exits. A Session reaches its Flow

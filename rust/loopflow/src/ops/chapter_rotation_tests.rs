@@ -6,7 +6,7 @@ use super::{
     serve_fixture, task_started_at, Arc, Mutex, PmTestContext, PM_TEST_CONTEXT,
 };
 use crate::ops::chapter::{rotate, ChapterPlan, WaveChapterPlan};
-use crate::ops::project::{write_plan, PlanChange};
+
 use crate::pm::{PmKr, ProjectContent};
 use crate::work::wave::WaveLocator;
 use serde_json::json;
@@ -431,7 +431,7 @@ async fn rotation_excludes_checkout_starts_and_failed_reset_retries_preserving_s
             iterations: None,
             task_id: None,
             wave_id: None,
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: None,
             bound_at: None,
             interactive: false,
@@ -788,15 +788,11 @@ async fn changing_the_workflow_keeps_the_projects_krs() {
     PM_TEST_CONTEXT
         .scope(copy_context(&context), async {
             let selected = plan(&context, &repo, &["a"]).await;
-            let wave = context
-                .store
-                .get_wave(&selected.waves[0].wave_id)
-                .await
-                .unwrap()
-                .unwrap();
-            write_plan(&repo, &wave, PlanChange::Workflow("research".into()))
+            let result = crate::ops::project::workflow(&repo, old_id("a"), Some("research"))
                 .await
                 .unwrap();
+            assert_eq!(result.workflow, "research");
+            assert_eq!(selected.waves.len(), 1);
         })
         .await;
     let state = provider.lock().await;

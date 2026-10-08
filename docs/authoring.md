@@ -249,10 +249,17 @@ is no approve or complete command. Give feedback in the Task conversation,
 which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
-`research` (findings, no PR). `lf flow list` shows workflows beside Flows with
-their source; `lf flow customize NAME` writes a builtin to `.lf/workflows/` or
-`.lf/flows/` and prints the path. `.lf/workflows/NAME.yaml` wins over a Flow of
-the same name. An invalid file stays listed with its reason.
+`research` (findings, no PR). `lf project workflow list` lists Workflows;
+`lf flow list` lists autonomous Flows. `lf project workflow customize NAME`
+copies a builtin into `.lf/workflows/`; `lf flow customize NAME` uses
+`.lf/flows/`. Both reuse existing local files and print the path.
+Overrides stay within their kind: a Flow and a Workflow can share a name.
+An invalid local source stays unavailable and never exposes a hidden builtin.
+
+`lf project workflow set PROJECT NAME` changes what future Tasks take up.
+Existing Tasks retain their captured graph. `lf task workflow restart ISSUE`
+moves that graph to `start`, retaining its move and execution history; it
+neither reloads the definition nor executes work.
 
 A Flow that repeats a step passes it `--steers-after STEER`, so the step
 receives only Task direction newer than its last run. The option works on any

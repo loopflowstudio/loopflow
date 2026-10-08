@@ -49,6 +49,31 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
 - The outline lists started Tasks only (2026-09-25). LOO-382 asked that a
   new Task appear there; Jack kept the rule for now (2026-10-05).
 
+## Workflow and Flow alignment (LOO-386, 2026-10-07)
+
+Jack Heart retained Workflow and Flow, scoped commands to Project and Task, and
+specified restart resets position. After reviewing PR #1492 and accepting
+TaskRunEvidence, he requested “lets ship it”: gate then
+Task-completing landing. Review and approval: `9669d67d5:scratch/workflow-review.md`.
+
+Definitions have independent namespaces; navigation carries kind and name.
+Project selection affects future take-up; restart retains the captured graph and
+history. Workflow selection, latest FlowProcessDetail, execution evidence and
+TaskRunControl stay separate; latest grants no authority. LOO-400's landed
+`e467ea995` supplies Process/LFID and the migration; old captures remain readable.
+
+Choices: list/customize under `project workflow`, Project IDs or unique name/slug,
+and Flow inspection `--processes`. Failed catalogs stay errors; single-definition
+reads skip enumeration. Diagrams read FlowProcessDetail directly. Process success
+is `succeeded`, not `ok`. Restart leaves an active Flow running but prevents its
+arrival from advancing the reset Task.
+
+Gate repaired fixtures missed by focused checks: absent
+execution is null, and every Task needs run_control. A nested macOS sandbox
+failed to launch; the test passed under its own restrictions. Rust and Swift
+failures passed focused reruns. Approval establishes no native Desktop, live
+planning, configured-provider proof or chapter KR.
+
 ## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
 
 Jack Heart approved landing on October 6 after three Desktop looks at a fixture
@@ -105,6 +130,13 @@ flow -b) apis."
   at `end`; the abandoned mark stays.
 - "run is one conceptual attempt, exec is one lf invocation." `lf task run`
   moves the Workflow and `lf run` does not: "worth it to keep lf run simple."
+- LOO-386 steers, October 6: "run for workflow api and exec for flow datamodel."
+  One Task run may start several Flow execs; a headless conversation also spans
+  Execs. Edges stay named by their Flow/skill, unique from one node; decision
+  labels are not being introduced. Jack: "Flow is too deeply engrained to
+  explore really changing it right now." Pipeline, Step flow and Compute flow
+  remain historical suggestions. Jack accepted Workflow and Flow on October 7;
+  the owner-scoped implementation below supersedes the naming draft.
 - Dropping per-node steer acknowledgement was "potentially bad": it had
   stopped runaway token counts. Restored as `--steers-after`.
 - The first Task sheet was "kinda yucky." Wanted and built: the Workflow graph
@@ -136,8 +168,9 @@ flow -b) apis."
   checkout; an empty unpublished PR is retired at `end` (reverses part of
   W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
   settles the landing, the Task stays active and flagged until forced.
-- `feature` ends at a published PR with no design-review pause; `ship` lands
-  after the demo; `code` equals `pursue`. Main's `lf flow end` (#1435) is
+- The earlier `feature` without a design-review pause is superseded: inspected
+  at `6448e3c9e` on October 7, its nodes are `design` and `demo`, with `ship`
+  reaching `end`. `code` equals `pursue`. Main's `lf flow end` (#1435) is
   dropped. `lf commit -p` pushes; plain commit stays local.
 - Waiting is one reading per Session, saved at most every 5 s: an unanswered
   question, or no open tool call and a hand-back or 120 s of quiet. Codex
@@ -186,39 +219,24 @@ Eleven `ops::chapter` tests fail only in `cargo test --lib`.
 
 ## Session and operate pairs (2026-10-05)
 
-Jack Heart's decisions on [LOO-383](https://linear.app/loopflow/issue/LOO-383):
-the Wave conversation is operations, and “reliably finishing stuff ive started
-and isnt blocked on me” is the goal.
+Jack Heart, [LOO-383](https://linear.app/loopflow/issue/LOO-383): the Wave
+conversation operates; keep started Tasks moving, leave unstarted backlog alone,
+and inline the operate procedure in each session skill. `task/session` stays
+plain; its primary wrapper remembers the ID (LOO-364). Jack approved the demo
+and requested PR-linked reports grouped as waiting on him, moving and stuck.
+Leaving unarmed merges to Jack is unreviewed.
 
-- Operators keep every started Task moving and leave unstarted backlog alone
-  “for now at least.” A defined Flow with steps left proceeds without asking.
-  A Task whose Flow ended before landing waits on Jack; how a Task changes its
-  Flow is wanted and undesigned.
-- Each session carries its operate procedure inline (“just make it work
-  reliably”). The branch composes session file plus operate body at build time.
-- `task/session` is a plain skill; a primary Task Session is “just a smaller
-  wrapper around this that saves that id in a field” (LOO-364).
+PR #1439 supersedes stopped-Flow continuation: a Task run starts fresh execs;
+reconcile never resumes. The agent's unreviewed policy waits on Jack at nodes
+and reruns failed edges for three attempts. Historical decisions and the dated
+disabled-cron observation: `6448e3c9e:wave/product/MEMORY.md`, this heading.
 
-Lessons: the observed failure copied `next_move.owner: wave` into the reply, so
-the operator reported its own queue as a handoff. A status label naming the
-reader's own scope must say so in the prompt. Nothing re-invokes a
-conversation. On Jack's Home that day the minute check was disabled and
-Product's declared `wave/operate` cron was not installed. Before continuing
-work, check every Flow and unfinished Exec against `lf ps --json`, or a
-second driver starts.
-
-Jack approved the branch in demo review and asked for the operator report
-grouped as waiting on him, moving and stuck, with PR links. Leaving an unarmed
-merge to the person is the branch's choice; Jack did not answer.
-
-PR #1439 changed the contract: `lf task run` always starts a fresh Flow,
-nothing continues a stopped one and reconcile never resumes. The agent's
-unreviewed replacement: a Task at a node waits on Jack; a failed edge is
-rerun, three more attempts.
-
-Limits: the [review](../../docs/reviews/session-operate-prompts.md) holds
-simulated walk-throughs and two read-only model runs. Installed behavior is
-unshown; an open conversation keeps its old text until `lf session replace`.
+An operator once reported `next_move.owner: wave` as someone else's handoff:
+name the reader's own responsibility explicitly. Nothing re-invokes a
+conversation. Inspect every Flow/unfinished Exec against `lf ps --json` before
+launching again. The [review](../../docs/reviews/session-operate-prompts.md) has
+simulations and two read-only model runs, not installed proof. Open conversations
+keep old instructions until `lf session replace`.
 
 ## Capture and configurable New Session (2026-10-03 UTC)
 
@@ -564,8 +582,8 @@ animates. Research sources and Jack's decisions are preserved in
 Jack separated follow-ups LOO-298/299/300 (detail at `9771ff7d7`) so LOO-291 can deliver S1–S5, the recorder,
 signposts and assign-on-change fixes. The accepted Run/Session tables and universal
 bind are future implementation, documented in [Infrastructure memory](../infrastructure/MEMORY.md#data-model-and-performance-decisions-2026-09-26).
-Chapter history becoming navigable is part of that approved model; the current
-Wave → Task UI is a scope limit, not a prohibition on a Chapter object.
+Chapter history remains part of that direction; the current contract uses past
+Linear Projects, with no Chapter table. Navigation stays Wave → Task.
 The [scope handoff](https://github.com/loopflowstudio/loopflow/blob/be7a02db0/scratch/deferred-work.md)
 records the split. Local proof does not establish merger or Jack's acceptance.
 
@@ -782,42 +800,28 @@ caps, and keep missing ownership evidence explicit.
 
 ## Chapter decisions and review lessons (2026-09-23)
 
-- **The sealed chapter records the accepted starting plan**, not the provisional
-  summer drafts: [.lf/chapters/20260923T000959Z-502f011b/start.md](../../.lf/chapters/20260923T000959Z-502f011b/start.md).
-  The interval is 23 September–21 October, starting at 00:09:59 UTC. Gate 2
-  accepted the plan; it did not authorize publication. The 24 September human
-  amendments above govern current hierarchy and ownership. The summer review judged
-  39 KRs (2 hold, 16 do not, 21 unknown); the start freeze contains 42 because
-  List adds three previously unreviewed claims. Those are different populations.
-- **Product value is explicitly chosen external progress.** Current Work
-  direction plus material Task progress in any three of Cube, Etude, Kata, and
-  Hootro makes a successful week. An open Session, refreshed plan, settled Run,
-  or Loopflow self-hosting repair is insufficient. Small/Medium/Big are company
-  review heuristics, never runtime limits. Preserve capacity outside Loopflow.
-- **The summer reset clarified ownership through real use.** Product dogfood
-  built much of the execution foundation; that was useful discovery, not simply
-  work in the wrong Wave. Infrastructure now owns execution and self-hosting
-  repair, Intelligence owns evidence, and Product owns the external experience.
-  The validated Sessions design is a foundation to finish, not restart.
-- **Review rows before telling the story.** Freeze the exact Project/KR union,
-  including retired or rewritten claims; keep each report's Run id and recompute
-  totals from rows. A definition verdict is not another KR. A complete current
-  roster cannot establish complete historical lineage. Missing duration proof is
-  unknown unless a dated in-scope counterexample disproves the claim.
-- **Keep evidence and user consequences together.** Each Project report needs
-  both exact observations and a concise account of who benefited, what changed,
-  and why the KRs prove it. Carry, learned, not actually prioritized, and misplaced
-  work are separate judgments; review proposes, accepted start applies.
-- **Chapter review now aggregates one report per Wave.** The former direct
-  Project-review shortcut belongs to the multi-Project chapter. Preserve exact
-  historical KR membership and dated reports; current operations must not recreate
-  a Project operator. Run settlement and the report together establish completion;
-  unknown liveness remains unknown. Archive authority follows explicit Task binding.
-- **The baseline cannot recover missing KR history.** PM retains current text
-  and `holds` with one overwritten snapshot timestamp. The new start ledger
-  establishes a forward boundary; retain later wording changes as dated evidence.
-  Append-only PM revisions or provider KR identities remain an instrumentation
-  option when a real review needs lineage the archive cannot supply.
+The accepted start, not the summer draft, is frozen at
+[the chapter start](../../.lf/chapters/20260923T000959Z-502f011b/start.md)
+(23 September–21 October). Gate 2 accepted planning, not publication. The later
+September 24 hierarchy decisions govern. Historical KR counts and dated review
+mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
+
+- Product value is human-selected external progress in any three of Cube,
+  Etude, Kata and Hootro. Sessions, planning churn and Loopflow self-hosting
+  alone earn no credit. Preserve external capacity; Small/Medium/Big are review
+  heuristics, never runtime limits.
+- Product's dogfood revealed execution work: Infrastructure now owns execution,
+  Intelligence evidence, and Product the external experience. Finish validated
+  foundations instead of restarting them.
+- Freeze the exact Project/KR union before review; recompute totals from rows.
+  Definitions and KRs are separate verdicts, and current rosters cannot prove
+  historical completeness. Missing duration evidence stays unknown.
+- Keep observations beside beneficiary and consequence. Carry, learned, not
+  prioritized and misplaced are different findings. Review proposes; accepted
+  start applies. A report plus execution settlement establishes completion.
+- PM's overwritten snapshot cannot recover KR history. The start ledger is a
+  forward boundary; retain later wording as dated evidence. Append-only provider
+  revisions remain an option when a real review needs unavailable lineage.
 
 ## Work and continuity (reconciled 2026-09-23)
 
@@ -896,12 +900,12 @@ lfd and resident-cron contracts remain in
 
 ## Shared planning and runtime vocabulary
 
-Wave → Task is the public planning model. Chapter/Project identity remains internal
-and historical. Shared status, roadmap, cached plan and Rust/Swift fixtures must
-change together; hiding a Project array only in Swift retains the obsolete contract.
-Run records launch provenance and can be prepared before a provider starts; Session
-names human continuity/boundary; Exec supplies process ownership evidence. None can
-substitute for another merely because identifiers coincide.
+Wave → Task is public planning; Chapter/Project identity stays internal and
+historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
+together. AgentSession owns interactive Session/headless Run continuity and
+history; Process owns an lf invocation; FlowProcess records one Flow driver's graph
+and steps. A Task run may start several Flow processes. No separate Run owner is
+restored because identifiers happen to coincide.
 
 ## Swift data path — RegistryQuery is the single reader
 

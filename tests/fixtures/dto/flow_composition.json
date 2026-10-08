@@ -1,6 +1,5 @@
 {
   "name": "study",
-  "kind": "flow",
   "source": null,
   "graph": {
     "name": "study",
@@ -196,7 +195,8 @@
       ]
     }
   },
-  "template": {
+  "unavailable": null,
+  "composition": {
     "revision": "fixture-study-composition",
     "items": [
       {
@@ -278,7 +278,5 @@
         ]
       }
     ]
-  },
-  "unavailable": null,
-  "workflow": null
+  }
 }

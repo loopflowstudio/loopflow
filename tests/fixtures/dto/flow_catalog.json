@@ -1,7 +1,6 @@
 [
   {
     "name": "feature",
-    "kind": "flow",
     "source": null,
     "graph": {
       "name": "feature",
@@ -266,7 +265,7 @@
       }
     },
     "unavailable": null,
-    "template": {
+    "composition": {
       "revision": "fixture-feature-composition",
       "items": [
         {
@@ -326,95 +325,13 @@
           "paths": {}
         }
       ]
-    },
-    "workflow": null
+    }
   },
   {
     "name": "broken",
-    "kind": "flow",
     "source": ".lf/flows/broken.yaml",
     "graph": null,
     "unavailable": "failed to load skill \"missing\": not found",
-    "template": null,
-    "workflow": null
-  },
-  {
-    "name": "code",
-    "kind": "workflow",
-    "source": null,
-    "graph": null,
-    "template": null,
-    "workflow": {
-      "name": "code",
-      "nodes": [
-        {
-          "name": "demo",
-          "skill": "demo",
-          "description": "you try the change"
-        }
-      ],
-      "edges": [
-        {
-          "from": "start",
-          "to": "demo",
-          "flow": "pursue"
-        },
-        {
-          "from": "demo",
-          "to": "demo",
-          "flow": "pursue"
-        },
-        {
-          "from": "demo",
-          "to": "end",
-          "flow": "ship"
-        }
-      ]
-    },
-    "unavailable": null
-  },
-  {
-    "name": "proof",
-    "kind": "workflow",
-    "source": ".lf/workflows/proof.yaml",
-    "graph": null,
-    "template": null,
-    "workflow": null,
-    "unavailable": "invalid flow: workflow proof: stage lost is unreachable from start"
-  },
-  {
-    "name": "research",
-    "kind": "workflow",
-    "source": null,
-    "graph": null,
-    "template": null,
-    "workflow": {
-      "name": "research",
-      "nodes": [
-        {
-          "name": "findings",
-          "skill": "research",
-          "description": "you read the findings"
-        }
-      ],
-      "edges": [
-        {
-          "from": "start",
-          "to": "findings",
-          "flow": "research"
-        },
-        {
-          "from": "findings",
-          "to": "findings",
-          "flow": "research"
-        },
-        {
-          "from": "findings",
-          "to": "end",
-          "flow": null
-        }
-      ]
-    },
-    "unavailable": null
+    "composition": null
   }
 ]

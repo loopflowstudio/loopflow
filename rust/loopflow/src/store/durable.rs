@@ -35,17 +35,36 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.local_machine()).await
     }
 
-    pub async fn observe_machine(
+    pub async fn add_machine(
         &self,
         machine_id: &MachineId,
-        route: &str,
+        target: &str,
+        label: &str,
+        repo: &str,
     ) -> StoreResult<Machine> {
         let machine_id = machine_id.clone();
-        let route = route.to_string();
+        let (target, label, repo) = (target.to_string(), label.to_string(), repo.to_string());
         run_sqlite(&self.sqlite, move |store| {
-            store.observe_machine(&machine_id, &route)
+            store.add_machine(&machine_id, &target, &label, &repo)
         })
         .await
+    }
+
+    pub async fn machines(&self) -> StoreResult<Vec<Machine>> {
+        run_sqlite(&self.sqlite, move |store| store.machines()).await
+    }
+
+    pub async fn rename_machine(&self, label: &str, name: &str) -> StoreResult<()> {
+        let (label, name) = (label.to_string(), name.to_string());
+        run_sqlite(&self.sqlite, move |store| {
+            store.rename_machine(&label, &name)
+        })
+        .await
+    }
+
+    pub async fn remove_machine(&self, label: &str) -> StoreResult<()> {
+        let label = label.to_string();
+        run_sqlite(&self.sqlite, move |store| store.remove_machine(&label)).await
     }
 
     pub async fn placement(&self, work: &WorkRef) -> StoreResult<Placement> {
@@ -171,12 +190,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removing_connection_preserves_placement_and_identity() {
+        let (store, work) = wave_work().await;
+        let id = crate::durable::MachineId::new();
+        let added = store
+            .add_machine(&id, "mini", "builder", "/projects/repo")
+            .await
+            .unwrap();
+        store.place_work(&work, &id).await.unwrap();
+        assert!(store
+            .add_machine(&crate::durable::MachineId::new(), "other", "builder", ".")
+            .await
+            .is_err());
+        store.rename_machine("builder", "mini").await.unwrap();
+        assert_eq!(store.machines().await.unwrap()[0].id, id);
+        store.remove_machine("mini").await.unwrap();
+        assert!(store.machines().await.unwrap().is_empty());
+        assert_eq!(store.placement(&work).await.unwrap().machine_id, id);
+        let retained = store.machine_by_id(&id).await.unwrap().unwrap();
+        assert_eq!(retained.created_at, added.created_at);
+        assert_eq!(retained.route, "mini");
+        assert!(retained.label.is_none());
+        assert!(retained.repo.is_none());
+    }
+
+    #[tokio::test]
     async fn placement_preserves_the_selected_home() {
         let (store, work) = wave_work().await;
         let local = store.local_machine().await.unwrap();
 
         let remote = store
-            .observe_machine(&crate::durable::MachineId::new(), "ssh://jack@buildbox")
+            .add_machine(
+                &crate::durable::MachineId::new(),
+                "ssh://jack@buildbox",
+                "ssh://jack@buildbox",
+                ".",
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -194,13 +243,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_machine_route_cannot_be_observed_as_remote() {
+    async fn local_machine_cannot_be_added_as_remote() {
         let (store, _) = wave_work().await;
         let local = store.local_machine().await.unwrap();
 
         assert!(matches!(
-            store.observe_machine(&local.id, "ssh://jack@elsewhere").await,
-            Err(StoreError::InvalidData(message)) if message.contains("cannot replace local Machine")
+            store.add_machine(&local.id, "ssh://jack@elsewhere", "ssh://jack@elsewhere", ".").await,
+            Err(StoreError::InvalidData(message)) if message.contains("cannot add the local machine")
         ));
         assert_eq!(store.local_machine().await.unwrap(), local);
     }

@@ -1,88 +1,102 @@
-"""Homepage structure tests.
+"""Homepage sections, examples, destinations, and capture layout."""
 
-These pin structure — sections exist, links resolve, assets load — not copy.
-Copy lives in content.yaml and should be editable without touching tests.
-"""
+from urllib.parse import urlsplit
 
-from playwright.sync_api import Page
-
-
-def test_hero_elements_visible(homepage: Page):
-    assert homepage.locator("h1", has_text="Loopflow").is_visible()
-    tagline = homepage.locator(".hero .tagline")
-    assert tagline.is_visible()
-    assert tagline.text_content().strip()
+import pytest
+from playwright.sync_api import Page, expect
 
 
-def test_hero_ctas(homepage: Page):
-    hero = homepage.locator(".hero")
-    assert hero.locator(".hero-subline").text_content().strip()
-    ctas = hero.locator("a.btn")
-    assert ctas.count() >= 2
-    hrefs = [ctas.nth(i).get_attribute("href") for i in range(ctas.count())]
-    assert "/docs" in hrefs
-    assert any(h.endswith(".dmg") for h in hrefs), "hero must offer the Mac app"
+def test_approved_homepage_sections(homepage: Page) -> None:
+    expect(homepage.locator("h1")).to_have_text("A command line for great software engineering.")
+    assert homepage.locator("main > section").evaluate_all(
+        "sections => sections.map(section => section.id)"
+    ) == ["", "", "flows", "tasks", "mac", "why", "start"]
+    expect(homepage.locator(".strip > div")).to_have_count(4)
+    expect(homepage.locator("#flows .parts article")).to_have_count(3)
+    assert homepage.locator(".work-row .tag").evaluate_all(
+        "tags => tags.map(tag => tag.firstChild.textContent.trim())"
+    ) == ["Wave", "Project", "Task", "Workflow"]
 
 
-def test_pillars_section(homepage: Page):
-    section = homepage.locator(".capabilities-section")
-    assert section.is_visible()
-    items = section.locator(".capability-item")
-    assert items.count() >= 3
-    for i in range(items.count()):
-        assert items.nth(i).locator("h3").text_content().strip()
+def test_hero_actions_reach_the_flow_and_install(homepage: Page) -> None:
+    for label, target in [("See it ↓", "#flows"), ("Install ↓", "#start")]:
+        homepage.locator(".home-hero").get_by_role("link", name=label).click()
+        expect(homepage.locator(target + " h2")).to_be_in_viewport()
 
 
-def test_building_blocks(homepage: Page):
-    section = homepage.locator(".building-blocks-section")
-    assert section.is_visible()
-    assert section.locator(".code-block").count() >= 1
+def test_example_loopflow_names_its_steps(homepage: Page) -> None:
+    diagram = homepage.locator("#flows svg[role=img]")
+    expect(diagram).to_be_visible()
+    expect(diagram.locator("circle.you")).to_have_count(2)
+    assert "returns to implement" in diagram.get_attribute("aria-label")
+    assert "exits to land" in diagram.get_attribute("aria-label")
 
 
-def test_wave_building_block_does_not_define_measures(homepage: Page):
-    section = homepage.locator(".building-blocks-section")
-    wave = section.locator(".building-block-item", has_text="wave/auth/GOAL.md")
-    assert wave.count() == 1
-    assert "## Measures" not in wave.text_content()
+def test_guide_links_resolve(homepage: Page, base_url: str) -> None:
+    destinations = homepage.locator(
+        'main a[href^="/docs"], main a[href^="/architecture"]'
+    ).evaluate_all("links => links.map(link => link.getAttribute('href'))")
+    assert destinations
+    for destination in destinations:
+        response = homepage.goto(f"{base_url}{destination}")
+        assert response is None or response.ok
+        fragment = urlsplit(destination).fragment
+        if fragment:
+            expect(homepage.locator(f'[id="{fragment}"]')).to_have_count(1)
 
 
-def test_screenshot_section_only_when_capture_exists(homepage: Page, base_url: str):
-    """The demo section renders only when the capture file is present —
-    a missing image never ships as a 404."""
-    section = homepage.locator(".loopflow-showcase-section")
-    if section.count():
-        figures = section.locator("figure")
-        assert figures.count() >= 1
-        for i in range(figures.count()):
-            src = figures.nth(i).locator("img").get_attribute("src")
-            response = homepage.request.get(f"{base_url}{src}")
-            assert response.ok, f"screenshot {src} rendered but does not resolve"
+def test_captures_reserve_space_and_load(homepage: Page, base_url: str) -> None:
+    for image in homepage.locator("main img").all():
+        source = image.get_attribute("src")
+        assert int(image.get_attribute("width")) > 0
+        assert int(image.get_attribute("height")) > 0
+        image.scroll_into_view_if_needed()
+        box = image.bounding_box()
+        assert box["height"] == pytest.approx(box["width"] / 1.6, abs=1)
+        assert homepage.request.get(f"{base_url}{source}").ok
 
 
-def test_no_legacy_homepage_sections(homepage: Page):
-    assert homepage.locator(".hero-video-section").count() == 0
-    assert homepage.locator(".products-section").count() == 0
-    assert homepage.locator(".vocab-section").count() == 0
-    assert homepage.locator(".story-section").count() == 0
-    assert homepage.locator(".terminal-section").count() == 0
-    assert homepage.locator("form").count() == 0  # no waitlist
+def test_install_has_commands_and_the_mac_download(homepage: Page) -> None:
+    install = homepage.locator("#start")
+    assert "loopflow.studio/install.sh" in install.locator("pre").text_content()
+    assert "lf init" in install.locator("pre").text_content()
+    expect(install.get_by_role("link", name="Download for Mac")).to_have_attribute(
+        "href", "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+    )
 
 
-def test_homepage_images_resolve(homepage: Page, base_url: str):
-    imgs = homepage.locator("main img, nav img")
-    for i in range(imgs.count()):
-        src = imgs.nth(i).get_attribute("src")
-        assert src, "image without src"
-        response = homepage.request.get(f"{base_url}{src}" if src.startswith("/") else src)
-        assert response.ok, f"image {src} does not resolve"
+def test_no_superseded_or_review_content(homepage: Page) -> None:
+    expect(
+        homepage.locator(".home-stage, .home-autonomy, .review-note, .review-bar, form")
+    ).to_have_count(0)
+    body = homepage.locator("body").text_content()
+    for text in ("Linear", "Discord", "Review note for Jack", "cmux’s sidebar"):
+        assert text not in body
+    assert not homepage.locator(
+        '[src*="/directions/"], [href*="/directions/"], script[src*="home.js"]'
+    ).count()
 
 
-def test_install_code_in_bottom_cta(homepage: Page):
-    bottom_cta = homepage.locator(".quick-install")
-    assert bottom_cta.is_visible()
-    install_code = bottom_cta.locator(".install-code code").first
-    assert "loopflow.studio/install.sh" in install_code.text_content()
-    assert bottom_cta.locator(".copy-btn").first.is_visible()
+@pytest.mark.parametrize("width", [390, 1440])
+def test_page_fits_and_terminals_scroll_within_their_cells(
+    page: Page, base_url: str, width: int
+) -> None:
+    page.set_viewport_size({"width": width, "height": 900})
+    page.goto(base_url)
+    assert page.evaluate("document.documentElement.scrollWidth") == width
+    assert page.evaluate("document.body.scrollWidth") == width
+    for terminal in page.locator(".term").all():
+        box = terminal.bounding_box()
+        assert box["x"] >= 0 and box["x"] + box["width"] <= width
+        expect(terminal).to_have_attribute("tabindex", "0")
+
+
+def test_body_command_names_use_monospace(homepage: Page) -> None:
+    names = homepage.locator(".strip code, .lede code")
+    expect(names).to_have_count(2)
+    for name in names.all():
+        expect(name).to_have_text("lf")
+        assert "JetBrains Mono" in name.evaluate("el => getComputedStyle(el).fontFamily")
 
 
 def test_landing_variant_url_returns_404(page: Page, base_url: str):
@@ -109,10 +123,3 @@ def test_llms_txt(page: Page, base_url: str):
     body = response.text()
     assert "/docs" in body
     assert "install.sh" in body
-
-
-def test_mobile_nav_visible(page: Page, base_url: str):
-    page.set_viewport_size({"width": 375, "height": 667})
-    page.goto(base_url)
-    nav_links = page.locator(".nav-links")
-    assert nav_links.is_visible()

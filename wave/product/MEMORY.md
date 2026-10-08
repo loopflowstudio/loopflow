@@ -4,30 +4,29 @@ Renamed from `concerto` in the 2026-07-08 wave/project/task restructure. The wav
 scope widened past the Mac app: product now owns the shared API and every surface
 (CLI, Mac, iOS, agent turns, workers). Older “Concerto” notes mean the Mac surface.
 
-## Task delivery boundary (LOO-418, 2026-10-07)
+## Task delivery boundary (LOO-418, reconciled 2026-10-08)
 
 Jack Heart decided: zero or one PR per Task. Every merge requires follow-ups
 filed or “none needed” recorded before completion; end means completed.
-Dependent PRs use stacked Tasks. Jack accepted waited landing plus recovery by
+Dependent PRs use stacked Tasks. Jack accepted waited landing and recovery by
 the next Task/Wave operation, without a new watcher. No schedule means no wake.
 Jack required the full lifecycle on #1499 before demo, no landing. This
-supersedes older chain/keep-open directions.
+supersedes older chain/keep-open directions, including LOO-408's default completion.
 
-The branch moves checkout placement onto Task, makes its PR optional, and
-replaces serial rotation and keep-open obligations with linked follow-ups.
-Historical PRs and unresolved scope survive migration. LOO-385 overlaps; its
-inspected planning was unstarted, not closed. `task complete` and moving to end
-share checks; research retains files/commits without a PR. Merge alone stays
-pending. Ship waits then files; operators can run only the missing finish.
+Task owns placement and one optional PR. Historical PRs and unresolved scope
+survive migration. LOO-385 overlaps; its inspected planning was unstarted, not
+closed. `task complete` and moving to end share checks; research retains artifacts
+without a PR. Merge alone stays pending; operators can run only the missing finish.
 
-Retries need durable UUIDs and original destination/payload before mutation.
-Failed draft promotion must retain the previous confirmed copy. Handoff copies selected child designs, preserving
-later edits. Task placement owns the validated PR copy, never the reverse.
+Retries pin UUIDs and destination/payload before mutation. Confirmed links use
+Linear's observed due date, including removal; the retry payload stays immutable.
+Failed draft promotion retains confirmed copy. Selected design handoffs preserve
+child edits. Task placement owns the validated PR copy, never the reverse.
 Admission records performed location; Flow registration and Started are atomic.
 
-Proof is isolated Git/SQLite, simulated providers and headless Swift, not live
-migration, installed behavior or native acceptance. Gate and Jack's complete
-demo remain. Earlier evidence: `7add4e5f3:scratch/make-a-task-up-to.md`.
+Isolated Git/SQLite, simulated providers and headless Swift prove separate paths,
+not a unified lifecycle, live migration, installed behavior or native acceptance.
+Gate and Jack's complete demo remain. Evidence: `20564402b:scratch/make-a-task-up-to.md`.
 
 ## Live Home reconciliation (2026-10-05)
 

@@ -298,7 +298,8 @@ landing pending and the next check retries it.
 After verified merge the Task shows **Merged · Follow-through pending**.
 `ship` runs gate, `land --wait`, then follow-through. Waited landing uses the
 existing observation path every 15 seconds for at most 30 minutes, releasing
-its lock between reads. Timeout or interruption retains intent and reports held.
+its lock between reads. Timeout retains intent and returns held (exit 3);
+interruption retains intent and returns stopped (exit 130).
 Neither ordinary reconciliation nor a manual GitHub merge manufactures a verdict.
 Keep the checkout available for the finishing step.
 

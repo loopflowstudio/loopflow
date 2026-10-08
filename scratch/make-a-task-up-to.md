@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · full lifecycle implementation; demo after completion · 2026-10-07
+LOO-418 · implementation complete locally; gate and full demo remain · reconciled 2026-10-08
 
 ## Decision and intended experience
 
@@ -86,23 +86,24 @@ A disposable SQLite probe executed the actual released Started trigger with one
 Task and one recorded Flow. Caller cwd reproduced “Started requires recorded Task
 work”; changing only that row's cwd to the Task checkout allowed Started. This
 proves the predicate failure and, with the dispatch ordering, a concrete defective
-path. It is not a replay of every October 7 launch; path aliases and direct
-`--task` launches need public CLI regression coverage too.
+path. Public CLI coverage now exercises sibling, direct `--task`, plain checkout,
+symlink and `--wt` launches. Neither fixture replays every October 7 launch.
 
 ### Provider support
 
 Linear's official generated SDK defines `IssueCreateInput.id` (UUID v4),
 `dueDate` (`TimelessDate`) and `IssueRelationCreateInput`, including related issues.
-Use a generated UUID v4 persisted before mutation, not a hash disguised as UUID v4.
-The client in this checkout only sends basic issue creation fields and does not
-project due dates or issue relations. Extend that existing client and PM model.
-Schema support is verified; live writes and retry semantics are not yet proven.
+The existing Linear client now creates issues with persisted UUID v4 identities,
+dates and related-issue links; PM projects dates and follow-up sources. Simulated
+provider tests cover lost responses, issue edits/moves and chapter rotation.
+Live provider writes remain unproven. Confirmation takes the observed due date,
+including removal, while the retry intent keeps its original payload.
 
 Sources inspected October 7: [Linear SDK schema](https://github.com/linear/linear/blob/master/packages/sdk/src/_generated_documents.ts),
 [issue relations](https://linear.app/docs/issue-relations),
 [due dates](https://linear.app/docs/due-dates).
 
-## Decisions and proposed mechanisms
+## Accepted decisions and implemented mechanisms
 
 ### 1. Follow-through belongs in the landing Flow, after verified merge
 
@@ -117,18 +118,18 @@ If no finishing Flow or operator runs, even a routine merged Task stays visibly
 pending. Merge alone cannot establish that no follow-up is needed. Jack accepted
 the normal landing Flow plus recovery by the next Task/Wave operation, without
 a new watcher. An open conversation does not schedule its next turn; unattended
-recovery depends on an installed operator schedule. Polling limits and the exact
-filing interface below remain proposals.
+recovery depends on an installed operator schedule. The polling limits and filing
+interface below are implemented defaults, not separately approved decisions.
 
-Keep `lf land` and `lf arm` as prepare/request/return operations. Add an explicit
-`--wait` to land for callers that own a blocking Flow. It uses the existing finite
+`lf land` and `lf arm` remain prepare/request/return operations. Land supports
+`--wait` for callers that own a blocking Flow. It uses the existing finite
 landing observation operation, releases its lock between checks, and never runs
 an agent inside reconciliation. Poll every 15 seconds for at most 30 minutes;
 timeout returns held (exit 3), leaving merge intent and evidence intact.
 Interruption uses the existing global handler (exit 130), which stops a Flow
 without retry and retains merge intent. A second Tokio signal handler conflicted
 with that owner in the public CLI test and was removed.
-These are proposed initial operational limits, not measured performance claims.
+These are initial operational defaults, not measured performance claims.
 CI repair remains the existing CI watcher's responsibility.
 
 Change `ship` to `gate → cmd: land --wait → follow-through`. The `follow-through`
@@ -175,9 +176,9 @@ imagined enhancements are suggestions, not accepted work or automatic filing.
 No accepted remaining obligation means record `none` with a short reason and
 complete. Ambiguous accepted scope remains visibly pending for Jack's decision.
 
-Repurpose `lf task follow-up ISSUE`: it now files or links actual Tasks, or
-records that none is needed. Remove the current `--outcome/--evidence/--check-at/
---clear` contract. Proposed forms are `--title … --notes … --due YYYY-MM-DD`,
+`lf task follow-up ISSUE` now files or links actual Tasks, or records that none
+is needed. It replaces `--outcome/--evidence/--check-at/--clear`. Supported forms
+are `--title … --notes … --due YYYY-MM-DD`,
 `--existing ISSUE`, and `--none REASON`; allow repeated filings before recording
 the disposition complete with `--finish REASON`. `--none` resolves a disposition
 with no filings; `--finish` verifies all recorded intents and their links before
@@ -285,8 +286,8 @@ exact-time alarm. Extend the existing PM read/DTO to carry the optional date and
 follow-up references. The owning Wave's next `wave/operate` pass lists due
 follow-ups, even if unstarted, separately from unrelated backlog.
 
-**Proposed authorization boundary:** filing creates an obligation to return to,
-not permission to execute arbitrary future work. The pass surfaces a due Task
+**Implemented authorization boundary, not separately approved by Jack:** filing
+creates an obligation to return to, not permission to execute arbitrary future work. The pass surfaces a due Task
 for selection unless its brief already authorizes a concrete unattended check.
 An authorized check uses ordinary Task execution and the existing liveness
 inspection. Missing credentials, installation, date or provider evidence leaves
@@ -415,7 +416,7 @@ the filing disposition. The implementation defaults below are reversible choices
 not additional decisions attributed to Jack. Docker installation coverage belongs
 to capable CI; installed/native proof is absent and landing is unauthorized.
 
-1. **First demonstration — truthful Flow launch (implemented locally).**
+1. **Truthful Flow launch.**
    `task_flow_launch_tests` holds a real mechanical Flow in a disposable Home:
    Task run from a sibling, direct `--task`, plain checkout, symlink and `--wt`
    all show target Started and current Flow in status and inventory, retain
@@ -425,20 +426,18 @@ to capable CI; installed/native proof is absent and landing is unauthorized.
    `task complete` shares `workflow_set(..., end)` with move; tests cover
    refusal without movement, force/reason, retained input and idempotent retry.
    No provider or native Desktop acceptance follows from these fixtures.
-2. **Remove serial authority and placeholder coupling.** Migrate placement,
-   optional current PR and read-only history; delete rotation and cut CLI/Swift
-   consumers over in the same slice. Preserve stack/restore/file operations.
-   Prove research with committed findings can end without a PR and retains its
-   files, and an open published PR cannot masquerade as completed research.
-3. **Finish delivery through linked Tasks.** Replace keep-open obligations,
-   implement durable filing/retry and due-date projection, update land waiting,
-   ship/finish Flows, operator guidance and shared pending/done presentation.
-   Use the restored `task complete` alias from follow-through and the Task
-   operator; extend the shared end checks without restoring execution blockers.
-   A stopped post-land Flow must be finishable without rerunning delivery.
-4. **Carry design into dependent work.** Add explicit checkout handoff and
-   update decomposition guidance. Exercise two children with distinct designs,
-   repeated placement, parent code/scratch changes, and parent squash merge.
+2. **Optional PR and Task-owned placement.** Rotation and placeholders are
+   removed; CLI/Swift expose one optional PR and migration retains historical
+   rows. Research completion retains committed findings and dirty files; an
+   open published PR still blocks successful completion.
+3. **Linked follow-through.** Durable filing/retry, dates, waited landing,
+   finishing Flows and pending/done projections replace keep-open obligations.
+   The skill and operators use the shared completion alias. Separate fixtures
+   cover filing and completion; the unified lifecycle proof below remains.
+4. **Selected design handoff.** Checkout transfers an explicit child design;
+   retries preserve edited/deleted child notes and conflicts retain both inputs.
+   `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
+   parent changes and squash integration. The complete stacked demo remains.
 
 Gate runs the changed-aware headless plan once:
 
@@ -462,7 +461,7 @@ also run `cargo test -p loopflow --lib engine::flow_graph::tests`.
 | Lost creation response, crash before local receipt, simultaneous finishing callers, issue edited/moved and chapter rotated all reuse one child; provider failure leaves explicit pending state | PM/Linear tests, `task_pr_authority_tests` and Task launch integration; assert issue population and Task state, not mock calls |
 | Bare land, waited land and out-of-band merge all converge; wait timeout/interruption does not clear intent, replay gate or complete early; reconciliation between merge and filing retains the checkout for the next step | `land_tests`, `pr_landing` tests and a public CLI held-Flow case |
 | Research reaches done with `pr: null`; retained drafts/commits and Sessions stay reachable; no hidden Working PR is created | `task_initialization_tests`, `task_diff_tests`, Task launch and shared DTO/view fixtures |
-| Child publishes before parent merge, accepts parent updates and survives squash with one PR and its own design; changed handoff input never overwrites child edits | Existing `sync_tests` stack scenarios plus `task_initialization_tests` |
+| Child publishes before parent merge, accepts parent updates and survives squash with one PR and its own design; changed handoff input never overwrites child edits | Existing `sync_tests` stack scenarios plus `task_handoff_tests` |
 | Due tomorrow is absent from today's due list, present on the next due Wave pass, and never auto-completes; unscheduled coverage is stated honestly | PM projection/operator prompt scenarios with fixed dates; Desktop/CLI use the same due date |
 | Populated zero/one/multi-PR and old remaining-work records retain IDs, active code, pending obligations, history and provider writeback under upgrade | `store::migrations` plus disposable installation harness |
 
@@ -473,9 +472,9 @@ crash or access loss; this design claims neither. No new performance metric is
 needed for these bounded reads and existing UI surfaces. Gate should verify
 that ordinary Task reads add no per-follow-up subprocess or network call.
 
-## Working implementation (2026-10-07)
+## Implementation evidence (reconciled 2026-10-08)
 
-Slices 2–4 now have code in the working tree: Task-owned checkout placement,
+The committed implementation includes Task-owned checkout placement,
 optional current PR with immutable historical rows, post-merge disposition and
 UUID-pinned Linear filing, waited land/finishing Flows, shared due/link projections,
 and explicit design handoff. Focused implementation checks pass. The earlier
@@ -522,16 +521,13 @@ The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
 does not install a schedule, and unattended execution requires a concrete check
 already authorized in the brief. These are reversible implementation choices,
-not separate approvals attributed to Jack. Validate them in the complete demo;
-do not stop this implementation merely because they were previously proposals.
-Preserve the liveness, retry, history and migration protections above.
+not separate approvals attributed to Jack. Their review belongs in the complete
+demo, with the liveness, retry, history and migration protections above intact.
 
-Update the same PR through pursue. Live Home migration, closing LOO-385,
+PR #1499 remains the single delivery boundary. Live Home migration, closing LOO-385,
 automatic filing of unrelated improvements, landing this branch and claimed
 production acceptance remain excluded. Full affected verification belongs to
-gate; unavailable Docker installation coverage stays with capable CI. An actual
-failure or new consequential ambiguity must be reported, not hidden by reducing
-the Task's intended outcome.
+gate; unavailable Docker installation coverage stays with capable CI.
 
 Review (2026-10-07): the inverse Flow lookup uses indexed Process-bound Session
 rows and shared membership predicates, avoiding a scan of all Process history
@@ -564,4 +560,4 @@ Review also corrected the CI repair prompt's completion promise and the Desktop
 mock's malformed optional-PR JSON; its existing decode test proves the repair.
 Earlier post-sync checks are retained at `6d18dad0a:scratch/make-a-task-up-to.md`.
 
-Check (2026-10-08, inherited `LF_*`/`LOOPFLOW_*` cleared): `cargo test -p loopflow --test task_pr_range_tests --test task_follow_through_tests` passed (16); `cargo test -p loopflow --lib` with filters `ops::task::tests::watched_landing_completes_task_only_from_merged_pr_evidence`, `ops::task::follow_through::tests`, and `store::sqlite::pr_landings::tests` passed (5); `swift test --package-path swift --filter 'MockWaveFixtureTests|DTOFixtureTests|TaskFlowTests/deliveryEvidence'` passed (31); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.
+Check (2026-10-08): prose reconciliation `git diff --check` passed; `lf context --wave product --skill realign --json` fits memory/scratch limits; reused implementation evidence (inherited `LF_*`/`LOOPFLOW_*` cleared): `cargo test -p loopflow --test task_pr_range_tests --test task_follow_through_tests` passed (16); `cargo test -p loopflow --lib` with filters `ops::task::tests::watched_landing_completes_task_only_from_merged_pr_evidence`, `ops::task::follow_through::tests`, and `store::sqlite::pr_landings::tests` passed (5); `swift test --package-path swift --filter 'MockWaveFixtureTests|DTOFixtureTests|TaskFlowTests/deliveryEvidence'` passed (31); `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; gate owns affected suites/automated acceptance, capable CI owns Docker installation, demo owns Jack's judgment.

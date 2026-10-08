@@ -14,6 +14,10 @@ The probe supersedes the earlier feedback's unproved lost-reply boundary: it pro
 provider-level recovery and terminal draft preservation. LF now retains native
 message correlation and recovers receipt evidence across driver handoffs; pending
 skill admission and native-boundary consumption remain unimplemented.
+October 8's competing-start probe invalidates idle-read plus `turn/start` as an
+atomic admission mechanism: exact native receipts can survive without expansion.
+Dependent queue implementation is stopped at this design conflict; receipt
+validation is implemented as observation only. Full scope remains required.
 Catalog consolidation and Claude headless native dispatch through canonical commands
 and taskless Flows are implemented locally. Headless continuation atomically admits its driver and next capture and
 assembles context in the saved Session workspace. Codex native delivery, terminal transport and
@@ -139,7 +143,22 @@ The probe and its limitations live in the benchmark README.
 
 ## Remaining implementation
 
-1. **Current-owner delivery; provider transport proved, LF integration outstanding:**
+1. **Current-owner delivery; native boundary arbitration unresolved:**
+   The two-client `--boundary-race` probe reads idle, then starts another client's
+   turn before sending the skill. Codex joins that active turn and retains exactly
+   one matching receipt including skill/path, arguments and context, but sends no
+   skill expansion to the model. A fresh turn expands it. Four fake-API requests
+   prove the race on 0.160.1. This supersedes the assumption that boundary
+   observation plus matching receipt content suffices. The earlier lost-reply/draft
+   proof remains valid for its sequential case only.
+   The Session fence excludes stale driver writes, not competing native starts.
+   Before consumption, design one boundary reservation through the existing driver
+   covering LF input and native client starts, preserving native controls and
+   drafts across handoff. Identify every writer, including clients already attached
+   to the engine; read/check/send or retry cannot provide exclusion. This is required
+   implementation, not authority to disconnect native clients, replace terminals,
+   change the provider protocol or reject shared engines. No reservation mechanism
+   is yet proved. This contract needs design review before dependent queue work.
    admit retained `SkillInvocation` plus context into the Session's own history without replacing its active capture.
    Its existing driver must consume pending input at a native turn boundary.
    The caller must not start another driver or steal an in-progress draft.
@@ -168,6 +187,10 @@ The probe and its limitations live in the benchmark README.
    completion authority. Pending-input settlement must still validate exactly
    one receipt against retained skill/path, arguments and context. Native
    completion/interruption and external effects remain separate facts.
+   Source now records `content_matches` (true/false for one receipt, null for
+   missing/duplicates), normalizing only empty native text annotations. It rejects
+   reusing a native message ID across captures. Neither change establishes fresh-turn
+   admission or expansion; matched content grants no settlement.
    Acceptance combines held-owner admission without active-capture replacement,
    boundary consumption, an LF start reply dropped after provider acceptance,
    caller cancellation and driver handoff, and native terminal draft preservation.
@@ -221,6 +244,11 @@ with missing/duplicate matches and separate continuation identity. Neither proof
 performs new skill admission through a held owner, drops an LF RPC acknowledgement,
 or demonstrates LF terminal draft preservation; the earlier provider-only draft and
 lost-reply evidence remains separate.
+
+Review found that a capture-scoped duplicate check allowed another capture to reuse
+the native ID and match the first input's receipt. The check now spans the Session;
+separate continuations still receive distinct IDs. Tests retain changed content and
+missing/duplicate sets without Started/Completed authority.
 
 Review found that using the capture itself as the native ID would reject legitimate
 retry continuations or conflate their different input bytes. Keeping the mapping in
@@ -308,4 +336,4 @@ MEMORY.md were read. Its operation-entry and false-success lessons apply to nati
 dispatch and admission. Related Intelligence context/attribution findings were
 read selectively; no provider state refresh or upstream fetch was performed.
 
-Check (2026-10-08, realign): `git diff --check` and `lf context --skill realign --json` pass within budget; unchanged code reuses `d5b943701`'s recorded build, Clippy, formatting and 18 focused tests; LF admission/recovery, native fidelity, costs and third-party acceptance remain for implementation and gate/review.
+Check (2026-10-08): `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`, fmt/Ruff/diff checks, isolated `cargo test -p loopflow --lib codex_` (64), probe pytest (14), `codex_request_mapping.py --boundary-race` (four requests) and rebuilt `codex_connect.py --launch --public-connect` pass; `lf context --skill implement --json` fits; boundary arbitration/admission, fidelity and gate/review acceptance remain.

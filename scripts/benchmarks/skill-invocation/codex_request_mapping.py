@@ -505,6 +505,86 @@ async def _steer_redelivery(
     return checks
 
 
+async def _boundary_race(
+    codex: str,
+    workspace: Path,
+    env: dict[str, str],
+    source: Path,
+    context: str,
+    delivery: tuple[threading.Event, threading.Event],
+) -> dict:
+    received, release = delivery
+    endpoint = workspace.parent / "race.sock"
+    async with _app_server(codex, workspace, env, endpoint):
+        async with (
+            unix_connect(str(endpoint), uri="ws://localhost") as owner,
+            unix_connect(str(endpoint), uri="ws://localhost") as competitor,
+        ):
+            await _initialize_socket(owner)
+            await _initialize_socket(competitor)
+            thread = await _ws_request(
+                owner,
+                "thread/start",
+                {"cwd": str(workspace), "approvalPolicy": "never", "sandbox": "read-only"},
+            )
+            thread_id = thread["thread"]["id"]
+            await _ws_request(
+                owner,
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": "Complete baseline."}],
+                },
+            )
+            await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
+            idle = await _read_thread(owner, thread_id)
+            await _ws_request(competitor, "thread/resume", {"threadId": thread_id})
+            competing = await _ws_request(
+                competitor,
+                "turn/start",
+                {
+                    "threadId": thread_id,
+                    "input": [{"type": "text", "text": "Start competing turn."}],
+                },
+            )
+            if not await asyncio.to_thread(received.wait, 15):
+                raise RuntimeError("fake API did not receive the competing turn")
+            message_id = uuid.uuid4().hex
+            inputs = [
+                {"type": "skill", "name": "audit", "path": str(source)},
+                {"type": "text", "text": f"$audit {context}"},
+                {"type": "text", "text": "Separate context."},
+            ]
+            try:
+                started = await _ws_request(
+                    owner,
+                    "turn/start",
+                    {"threadId": thread_id, "clientUserMessageId": message_id, "input": inputs},
+                )
+            finally:
+                release.set()
+            await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
+            history = await _read_thread(owner, thread_id)
+            matches = _invocation_receipts(history, message_id)
+            checks = {
+                "observed_idle": len(idle["turns"]) == 1
+                and idle["turns"][0]["status"] == "completed",
+                "start_joined_competing_turn": started["turn"]["id"] == competing["turn"]["id"],
+                "one_correlated_receipt": len(matches) == 1,
+                "receipt_on_competing_turn": len(matches) == 1
+                and matches[0][0]["id"] == competing["turn"]["id"],
+                "receipt_retains_skill": len(matches) == 1
+                and inputs[0] in matches[0][1]["content"],
+                "receipt_retains_arguments_and_context": len(matches) == 1
+                and [item["text"] for item in matches[0][1]["content"] if item["type"] == "text"]
+                == [inputs[1]["text"], inputs[2]["text"]],
+            }
+            # A new turn proves that the selected skill itself is valid.
+            await _ws_request(owner, "turn/start", {"threadId": thread_id, "input": inputs})
+            await _ws_until(owner, lambda event: event.get("method") == "turn/completed")
+            return checks
+
+
 def _skill_paths(request: dict) -> list[str]:
     return [
         block["text"].split("<path>", 1)[1].split("</path>", 1)[0]
@@ -532,6 +612,7 @@ def _probe(
     additive: str | None = None,
     redelivery: bool = False,
     boundary: bool = False,
+    boundary_race: bool = False,
 ) -> bool:
     requests = []
     received, release = threading.Event(), threading.Event()
@@ -553,7 +634,11 @@ def _probe(
             native_turn = any(
                 text.startswith("<skill>\n") for text in _last_user_texts(requests[-1])
             )
-            if (redelivery and len(requests) in (1, 3)) or (boundary and native_turn):
+            if (
+                (redelivery and len(requests) in (1, 3))
+                or (boundary and native_turn)
+                or (boundary_race and len(requests) == 2)
+            ):
                 received.set()
                 if not release.wait(20):
                     self.send_error(504, "steering probe did not release the fixture")
@@ -629,6 +714,10 @@ def _probe(
                 snapshot.write_text(source)
 
                 async def _native() -> dict:
+                    if boundary_race:
+                        return await _boundary_race(
+                            codex, workspace, env, skill, context, (received, release)
+                        )
                     if boundary:
                         return await _boundary_recovery(
                             codex, workspace, env, skill, context, (received, release)
@@ -643,6 +732,21 @@ def _probe(
                         )
 
                 checks = asyncio.run(_native())
+                if boundary_race:
+                    checks.update(
+                        expected_requests=len(requests) == 4,
+                        raced_start_not_expanded=len(requests) >= 3
+                        and not _skill_paths(requests[2]),
+                        fresh_start_expanded=len(requests) == 4
+                        and str(skill) in _skill_paths(requests[3]),
+                    )
+                    print(
+                        json.dumps(
+                            {"mode": "boundary-race", "requests": len(requests), "checks": checks}
+                        ),
+                        flush=True,
+                    )
+                    return all(checks.values())
                 if boundary:
                     native_requests = [
                         request
@@ -845,6 +949,11 @@ def main() -> int:
         help="Check duplicate structured steering with an identical RPC id",
     )
     mode.add_argument(
+        "--boundary-race",
+        action="store_true",
+        help="Start another client's turn between idle observation and native skill delivery",
+    )
+    mode.add_argument(
         "--boundary",
         action="store_true",
         help="Lose a native turn reply, cancel its waiter and recover on a new connection",
@@ -860,6 +969,7 @@ def main() -> int:
             args.additive,
             args.redelivery,
             args.boundary,
+            args.boundary_race,
         )
         else 1
     )

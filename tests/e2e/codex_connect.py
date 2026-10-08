@@ -600,6 +600,7 @@ def _public_connection_contract(
             assert receipt["input_id"] == dispatched["input_id"]
             assert receipt["client_id"] == dispatched["params"]["clientUserMessageId"]
             assert len(receipt["receipts"]) == 1, receipt
+            assert receipt["content_matches"] is True, receipt
             native = receipt["receipts"][0]["item"]
             assert native["clientId"] == receipt["client_id"]
             assert [block["text"] for block in native["content"]] == [

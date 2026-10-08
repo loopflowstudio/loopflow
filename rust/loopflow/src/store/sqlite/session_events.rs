@@ -55,8 +55,10 @@ impl SqliteStore {
             }
             let key = format!("{capture}:codex_dispatch:{message}");
             let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed' AND receipt_key=?2)",
-                params![session, key], |row| row.get(0),
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1 AND kind='observed'
+                 AND json_extract(payload,'$.type')='codex_input_dispatch'
+                 AND json_extract(payload,'$.params.clientUserMessageId')=?2)",
+                params![session, message], |row| row.get(0),
             )?;
             if exists {
                 return Err(StoreError::InvalidAuthority(
@@ -124,9 +126,17 @@ impl SqliteStore {
                     StoreError::InvalidData("Codex dispatch has no native message identity".into())
                 })?;
             let matches = receipts.get(message).map(Vec::as_slice).unwrap_or_default();
+            let content_matches = match matches {
+                [receipt] => Some(codex_input_matches(
+                    &dispatch["params"]["input"],
+                    &receipt["item"]["content"],
+                )),
+                _ => None,
+            };
             let payload = serde_json::to_string(&serde_json::json!({
                 "type":"codex_input_receipts", "input_id":capture,
                 "provider_thread":thread, "client_id":message, "receipts":matches,
+                "content_matches":content_matches,
             }))?;
             let key = format!(
                 "{capture}:codex_receipts:{:x}",
@@ -502,6 +512,30 @@ impl SqliteStore {
     }
 }
 
+// Native history adds empty editor annotations to plain text. Compare every
+// other field and preserve block order. Matching bytes do not prove expansion:
+// Codex can retain a skill item while steering it into an already active turn.
+fn codex_input_matches(input: &Value, content: &Value) -> bool {
+    let (Some(input), Some(content)) = (input.as_array(), content.as_array()) else {
+        return false;
+    };
+    let normalize = |block: &Value| {
+        let mut block = block.clone();
+        if block["type"] == "text" && block["text_elements"].as_array().is_some_and(Vec::is_empty) {
+            block
+                .as_object_mut()
+                .expect("text block is an object")
+                .remove("text_elements");
+        }
+        block
+    };
+    !input.is_empty()
+        && input
+            .iter()
+            .map(normalize)
+            .eq(content.iter().map(normalize))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::session::SessionEventKind;
@@ -585,6 +619,7 @@ mod tests {
             .unwrap();
         assert_eq!(receipt.payload["receipts"].as_array().unwrap().len(), 1);
         assert_eq!(receipt.payload["receipts"][0]["item"]["content"], input);
+        assert_eq!(receipt.payload["content_matches"], true);
         assert!(history.iter().all(|event| !matches!(
             event.kind,
             crate::session::SessionEventKind::Started | crate::session::SessionEventKind::Completed
@@ -622,6 +657,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(missing.payload["receipts"], serde_json::json!([]));
+        assert!(missing.payload["content_matches"].is_null());
 
         let mut duplicate = turns.clone();
         duplicate[0]["items"]
@@ -658,7 +694,73 @@ mod tests {
                 {"turn_id":"later-turn","item":duplicate[1]["items"][0]},
             ])
         );
-        assert_eq!(store.session_driver(&session.id).unwrap(), Some(successor));
+        assert!(receipts.payload["content_matches"].is_null());
+        let mut changed = turns.clone();
+        changed[0]["items"][0]["content"][0]["path"] = json!("/wrong/SKILL.md");
+        store
+            .record_codex_input_receipts(&session.id, "thread", &changed)
+            .unwrap();
+        let history = store.session_history(&session.id, 0, 0).unwrap();
+        let mismatch = history
+            .iter()
+            .rev()
+            .find(|event| event.payload["client_id"] == "message-1")
+            .unwrap();
+        assert_eq!(mismatch.payload["content_matches"], false);
+        assert!(history.iter().all(|event| !matches!(
+            event.kind,
+            SessionEventKind::Started | SessionEventKind::Completed
+        )));
+        assert_eq!(
+            store.session_driver(&session.id).unwrap(),
+            Some(successor.clone())
+        );
+
+        // Another capture cannot claim the same native message after handoff.
+        super::super::sessions::test_capture(&conn, &session.id, "another-capture");
+        assert!(store
+            .dispatch_codex_input(
+                &session.id,
+                &successor,
+                "another-capture",
+                &params,
+                || -> crate::store::StoreResult<()> {
+                    panic!("native message identity was reused by another capture")
+                }
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn codex_receipts_validate_exact_skill_arguments_and_context() {
+        let input = json!([
+            {"type":"skill","name":"audit","path":"/selected/SKILL.md"},
+            {"type":"text","text":"$audit  exact arguments\n"},
+            {"type":"text","text":"separate context"},
+        ]);
+        let mut native = input.clone();
+        native[1]["text_elements"] = json!([]);
+        native[2]["text_elements"] = json!([]);
+        assert!(super::codex_input_matches(&input, &native));
+        for (block, field, replacement) in [
+            (0, "name", json!("other")),
+            (0, "path", json!("/collision/SKILL.md")),
+            (1, "text", json!("$audit exact arguments")),
+            (2, "text", json!("different context")),
+            (
+                1,
+                "text_elements",
+                json!([{"text":"unexpanded attachment"}]),
+            ),
+        ] {
+            let mut changed = native.clone();
+            changed[block][field] = replacement;
+            assert!(!super::codex_input_matches(&input, &changed));
+        }
+        native.as_array_mut().unwrap().swap(1, 2);
+        assert!(!super::codex_input_matches(&input, &native));
+        assert!(!super::codex_input_matches(&input, &json!(null)));
+        assert!(!super::codex_input_matches(&json!([]), &json!([])));
     }
 
     #[test]

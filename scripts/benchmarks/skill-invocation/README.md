@@ -331,6 +331,30 @@ No automatic retries were added. The official
 thread/read, turn/start and socket interfaces; the generated 0.160.1 schema and
 real-client receipts establish the correlation field used here.
 
+## Competing starts at a native boundary
+
+```sh
+uv run python scripts/test_network.py uv run --offline --script \
+  scripts/benchmarks/skill-invocation/codex_request_mapping.py --boundary-race
+```
+
+October 8, Codex 0.160.1: one socket reads a completed baseline; a second
+socket starts the same thread before the first sends its skill `turn/start`.
+The fake API holds the competing response until the skill request is accepted.
+The second start joins the competing turn. Native history retains exactly one
+matching `clientId`, selected skill/path, exact arguments and separate context,
+but the model request contains no native expansion. A subsequent fresh turn
+expands the same skill. Four fake-API requests establish this counterexample;
+exit zero means it reproduced, not that admission works.
+
+Idle observation followed by `turn/start` is not atomic boundary admission.
+Matching receipt content proves retained bytes, not native expansion or a new
+turn. LF's driver fence serializes writes against handoff; it does not currently
+reserve a native boundary against competing starts. Delivery needs that boundary
+contract before pending-input consumption can rely on it. This probe uses two
+protocol clients, not a terminal, LF admission or live models. The earlier
+lost-reply/draft probe still establishes its separate sequential case.
+
 ## LF dispatch receipts and reconnect
 
 ```sh
@@ -347,6 +371,11 @@ fenced but have no retained input mapping. This is not pending-input consumption
 resubmitting. Missing and
 duplicate receipts remain recorded uncertainty; receipt observation grants no
 new driver, native-turn origin, completion or external-effect claim.
+`content_matches` compares the exact ordered input blocks, disregarding only
+empty native text-editor annotations. A single changed receipt is false; missing
+or duplicate matches are null. True establishes no skill expansion, as the
+competing-start probe demonstrates. Native message IDs cannot be reused by
+another capture in the same Session.
 
 A capture can include a retry's different continuation, so its key cannot itself
 be the identity of every native message. Each dispatch retains its own

@@ -1036,10 +1036,9 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-08)
 
-`470382987:wave/infrastructure/MEMORY.md` retains prior probes; `44fe36620` retains
-large-input evidence. Preserve caller-owned checkpointing, common invocation loading
-and Claude's file-backed stdin. Rejected Codex `turn/start` remaining waiting is
-unresolved; Claude success proves no repair.
+Prior probes: `470382987`; large inputs: `44fe36620`, this file. Preserve caller
+checkpointing, common invocation loading and Claude file-backed stdin. Rejected
+Codex starts remaining waiting are unresolved.
 
 LOO-420: Jack Heart selected native same-harness invocation, translated ports,
 inlined builtins, `--agent`/`-a`, terminal/headless and same-conversation use through
@@ -1051,16 +1050,13 @@ Jack removed `--ide` after installed
 0.13.9 launches lacked native identity and both reconnects failed. Preserve history;
 launcher success proves no engine exit.
 
-Local Claude headless LF/Flow fake-API receipts prove native expansion, exact
-arguments and user-only context after SKILL.md removal with a same-name collision.
-Capture-local plugins retain provenance but link current siblings at launch, not
-captured assets. Removing the bundle removes resource availability; changed base
-paths leave parent-relative resources and plugin variables unresolved. Full controls
-remain unproved. Context acknowledgement must not settle the skill. Builtins stay
-inline; ports report unenforced declarations. These are not accepted fidelity losses.
-Intelligence's October 1 ablation shows omitted context returning through disk reads;
-cost comparisons need repeated baselines and resumed history, absent from its pilot.
-No live-model fidelity or cost improvement is established.
+Claude's local headless LF/Flow fake-API proofs cover native expansion, exact
+arguments and user-only context after source removal/collision. Private plugins
+retain provenance but link current siblings; deleted bundles, parent-relative
+paths, plugin variables and full controls remain unresolved. Context acknowledgement
+cannot settle the skill. Builtins stay inline; ports' unenforced declarations are
+not accepted fidelity losses. Intelligence's ablation found omitted context returning
+via reads; repeated cost baselines, resumed history and live fidelity remain unproved.
 
 Codex 0.160.1 ignores unregistered explicit paths despite success. Its per-cwd
 extra-root field is ignored; the working replacement changes engine-global roots.
@@ -1072,15 +1068,13 @@ This candidate proves no LF dispatch, placement/lifetime, native-name fidelity o
 complete controls/resources. Earlier receipts prove resume with context resupply,
 not recall.
 
-Claude's hook maps context to system on tested Sonnet/Opus; queued user context
-survives resume without resupply or answer leakage. PTY injection submits drafts;
-inbox slash text stays unexpanded. A replacement terminal remains unapproved.
-Headless resume atomically admits capture and driver. Fixtures prove held-owner
-preservation, losing claims, handoff and failed publication, not current-owner
-delivery or installed continuity. `cbb402869`'s cross-directory CLI fixture uses
-saved Session cwd for context, provider and replayable capture; LF Process cwd
-records the caller. Native identity and historical bytes survive. Capture cwd
-cannot substitute for Process provenance.
+Claude's hook sends system context on tested Sonnet/Opus; queued user context
+survives resume without resupply/leakage. PTY injection submits drafts; inbox slash
+text stays unexpanded. Replacement terminals remain unapproved. Atomic capture/driver
+admission preserves held owners, losing claims, handoff and failed publication;
+it proves no current-owner delivery or installed continuity. `cbb402869` preserves
+native identity/history and uses Session cwd for context/provider/replay, caller cwd
+for Process provenance.
 
 Codex 0.160.1 steers omit native expansion; repeated RPC ids duplicate input.
 `54b309ab6` proves socket recovery after a dropped start reply, waiter cancellation
@@ -1089,13 +1083,20 @@ Completion/interruption stay distinct. Seven requests include two titles;
 historical expansion is not new application. This proves correlation, not idempotency,
 external effects or LF admission.
 
-LF retains message ID, capture, exact input and provenance before its first
-captured start per writer; later starts remain fenced without that mapping.
-Retries can send different continuations within one capture.
-Reconnect observes without resubmission; store proofs retain
-uncertain writes and missing/duplicate matches. LF's controlled-client handoff
-preserves text, capture, siblings and ancestry; held-owner admission, dropped-ack/draft
-recovery and native expansion remain unproved. Resume clears structured invocation;
-pending consumption, catalog/resources and Claude parity remain unfinished.
-Observation grants no authority.
+October 8's two-client boundary race reads idle, then starts a competing turn.
+Codex joins it, retaining exactly one matching skill/path/arguments/context receipt
+without expansion; a fresh turn expands. Four fake-API requests prove the
+counterexample, not LF admission. Idle observation plus matching receipts cannot
+reserve a boundary. Existing driver fencing excludes stale writes, not competing
+starts; arbitration needs design before queue consumption. No scope reduction is
+selected.
+
+LF retains native ID/capture/input/provenance only for its first start per writer;
+later starts lack that mapping. Retry continuations get distinct IDs. Receipt
+content comparison leaves missing/duplicates uncertain; cross-capture ID reuse is
+rejected. Observation grants no authority or expansion proof. Controlled-client
+handoff preserves text/capture/siblings/ancestry without resubmission. Held-owner
+admission, LF dropped-ack/draft recovery, catalog/resources and Claude parity remain
+unfinished; resume clears structured invocation. Prior detail: `94006060f` under
+this heading.
 [Probes and limits](../../scripts/benchmarks/skill-invocation/README.md).

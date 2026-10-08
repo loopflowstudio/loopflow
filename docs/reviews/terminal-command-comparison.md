@@ -39,6 +39,13 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   installed binary (`home`, `ssh`, `flow show --sessions`). Source also exposes
   `flow show --processes`. Exact older commands below are explicitly the installed
   baseline; they are not current design recommendations.
+- Source rechecked at **7e852defe** on October 7: root `lf open` now launches
+  the app and rejects non-macOS, but lacks a terminal alternative and Work target.
+  HTML `lf screenshot` is removed. Repository-window addressing, remote Desktop
+  opening and programmatic pane control remain absent. Global `--machine` uses
+  one saved repository; it does not establish cross-machine correspondence or
+  route arbitrary repository locations. Earlier installed spellings below remain
+  baseline evidence.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API
@@ -84,8 +91,8 @@ related Tasks' boundaries; this Task exposes the existing workspace owners.
 
 | Job | cmux command (evidence) | lf / Desktop today (L) | herdr command (H) | Judgment and owner |
 |---|---|---|---|---|
-| Open on a supported platform | Mac app control; no Linux Desktop trial | Desktop is macOS; CLI works on Linux | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/427. |
-| ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | `lf desktop`; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
+| Open on a supported platform | Mac app control; no Linux Desktop trial | Source `lf open` rejects non-macOS; no terminal alternative yet | Terminal host, not a Mac app launcher | **worse** — explicit, actionable Linux errors for Desktop operations; LOO-426/427. |
+| ★ Open a working directory | `<path>`, `open`, `new-workspace --cwd PATH` (P for new-workspace) | Installed `lf desktop`; source `lf open` launches the app only; `open 'loopflow://open?repo=PATH'`; Task links below | `workspace create --cwd PATH`; `worktree open` | **worse** — app launch and Work opening are separate; LOO-426. |
 | ★ Open the actual Task/conversation | `new-workspace --command CMD`; `new-surface --command CMD` (P) | `open 'loopflow://task/ISSUE?repo=PATH&session=ID'`; no installed `lf open ISSUE` | `tab create`, then `pane run P CMD` | **worse** — Task links already preserve Work identity, but lack the one-command entry; LOO-426. |
 | ★ Open everything waiting | `jump-to-unread` (H); notifications are not Work Waiting | `lf session list --waiting --json`; no batch Desktop open | `agent list`; no matching batch open found | **want** — open shared Waiting conversations once, not every completed Run; LOO-426. |
 | ★ Open/identify the repository window | `new-window`, `list-windows`, `current-window` (P except current-window) | Native windows; no addressable window inventory | `session list`; terminal-host windows are outside herdr | **want** — at most one window per repository across machines; repeated opens reuse it and commands address the repo; LOO-427 arrangement slice. |
@@ -110,7 +117,7 @@ related Tasks' boundaries; this Task exposes the existing workspace owners.
 | ★ Read the displayed terminal | `read-screen --surface S --lines N`, `capture-pane` (P for read-screen) | Native terminal display only; `lf monitor show ID --final` is a recorded conclusion, **not** the screen | `pane read P --source visible --lines N`; `agent read` | **want** — bounded passive reads of exact rendered surfaces; keep the relay byte-transparent under LOO-415. LOO-427 terminal I/O slice. |
 | ★ Read selection or scrollback | `read-selection`, `read-screen --selection`, `read-screen --scrollback` (H) | Copy/selection and scrolling in UI; no targeted read API | `pane read --source recent`; no selection command found | **want** — useful for discussing what Jack is looking at; LOO-427 terminal I/O slice. |
 | Read durable conversation history | `sessions`, `vault sessions`, `vault search`, `vault checkpoints`, `recover` (H) | `lf session list --search TEXT`, `lf session history ID`, `lf monitor show ID --events` | `session list` is host lifetime, not provider history; `agent read` is terminal output | **worse** — shared history exists; outside-lf adoption/name-based continuation belongs to LOO-424. |
-| Capture a native window | `shot` (P); `record start/stop/status/note/list` (H) | AppleScript `capture screenshot` captures the key window, not an explicit target; `lf screenshot` captures HTML/URLs only | — | **worse** — current capture cannot establish which addressed window rendered; support explicit capture with Desktop inspection, not a video editor. |
+| Capture a native window | `shot` (P); `record start/stop/status/note/list` (H) | AppleScript `capture screenshot` captures the key window, not an explicit target; installed `lf screenshot` captured HTML/URLs and is now removed | — | **worse** — current capture cannot establish which addressed window rendered; support explicit capture with Desktop inspection, not a video editor. |
 | Inspect patch/files beside work | `diff`, `markdown`, `open` (H) | `lf task diff ISSUE`, `lf task files ISSUE`, `lf task file ISSUE PATH`; Files/Diff pane | Shell/editor; no equivalent viewer command found | **have** — Task-backed file and diff identity is already useful; formatted Markdown is optional, not a new comparison Task. |
 | Review comments/findings | `comments list`, `review list`, `review show`, `review findings` (H) | `lf task comment ISSUE`, Task Description/comments, PR links, skills | Shell tools; no parallel review commands found | **have** — preserve authored Task/PR review; no host-specific review database. |
 | ★ Discover version support vs legal action | `capabilities`, `ping`, `version`, `socket-status` (P except socket-status) | `lf --version`, `lf list --json`; shared Session/Task action projections; no app capability read | `api schema`, `status --json` (P for status only) | **want** — local operation discovery and legal actions, without cross-version negotiation (LOO-411); Desktop arrangement and LOO-397. |

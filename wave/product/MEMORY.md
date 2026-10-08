@@ -6,9 +6,9 @@ scope widened past the Mac app: product now owns the shared API and every surfac
 
 ## Current direction after the October 7 Tasks
 
-Reconciled from LOO-387–430 briefs and available non-progress comments for
-LOO-427, not from the older installed 0.13.9 help. LOO-389's brief was read;
-its comment read failed on an unbound Initiative. These decisions supersede older designs; dated receipts remain evidence.
+LOO-387–430 briefs and available LOO-427 non-progress comments supersede older
+designs and installed 0.13.9 help. LOO-389's brief was read; its comment read
+failed on an unbound Initiative.
 
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
@@ -46,8 +46,19 @@ its comment read failed on an unbound Initiative. These decisions supersede olde
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack corrected scope: identity, repository-window control
 and terminal I/O belong in one LOO-427 diff, with internal slices; premature
-LOO-430/431/432 are folded back. An owned cmux probe proved arrangement, output
-and draft retention, then cleaned up. No provider, herdr-pane or Desktop parity proof.
+LOO-430/431/432 are folded back. Jack authorized implementation through demo
+review. The owned cmux probe proved arrangement, output and draft retention,
+then cleaned up; no provider, herdr-pane or Desktop parity proof.
+
+Source at `7e852defe` (October 7): `CanonicalRepo` is Machine-local;
+`RepoId` derives owner/repo without the host; `Machine.repo` is one saved directory,
+not a correspondence. Re-registering replaces that directory. Rust-owned repository
+groups remain a proposal. LOO-411's no-per-call-repository-override decision means
+grouping alone cannot route multiple repositories. Resolve this with LOO-426;
+never switch the saved default per request.
+Root `lf open` is implemented, but Work targeting and a Linux terminal alternative
+remain. LOO-427 has no production implementation. Exact pane targets prevent
+redirection, not unsent-draft conflicts; LOO-387's UX choice remains open.
 
 ## Live Home reconciliation (2026-10-05)
 
@@ -448,29 +459,18 @@ authorize an automatic Project reset, Task cancellation or claims of measured ga
 
 ## CI watcher decisions (2026-10-01)
 
-Jack Heart's decisions on [LOO-365](https://linear.app/loopflow/issue/LOO-365),
-in the order he revised them:
+Jack Heart's [LOO-365](https://linear.app/loopflow/issue/LOO-365) decisions:
+one optional repo-wide watcher for terminal, launchd or Desktop. Correctness is
+independent. The clock starts ci-fix without an owning conversation, once per
+PR/failing head. Taskless PRs are reported, not repaired. Future watchers stay
+separate programs. Jack preferred the watcher to the one-minute cron
+and wanted the cron removed; the branch retired only its repair path.
 
-- The watcher is an optional helper Desktop owns, or a command a person runs.
-  "not this always on 24 7 server that we expect to always be running."
-  Correctness never depends on it.
-- CI repair needs no owning conversation: the clock starts one ci-fix run,
-  deduplicated per PR and failing head. TaskSessions stay conversations with Jack.
-- It is repo-wide and does one job. "A PR with no Task is reported, not
-  repaired." Any future watcher is its own program, not a plug-in to this one.
-- One command, three ways to run it: a terminal, a launchd service, and Desktop
-  per open repository. A second copy never repeats a fix.
-- "i would prefer this watcher service to the one minute cron." The branch
-  retires the cron's repair path only; the cron still resumes Flows and settles
-  merges. Deleting the cron outright remains Jack's stated preference.
-
-`lf ci watch` implements this on the LOO-365 branch: REST polling with ETags
-detects, and the existing landing check confirms and admits the repair, so the
-landing lock, generation and incident reservation are the only claim. Not yet
-proven against a real failing landing. Open choices the branch made without
-Jack's confirmation: a standalone `lf land` PR with no Task is still repaired;
-a failing Task PR nobody armed is only reported; watcher state has no Desktop
-view yet (LOO-353).
+`lf ci watch` uses REST/ETags and existing landing admission/claim. No real
+failing landing was proved.
+Unreviewed choices: standalone `lf land` without a Task still repairs; an unarmed
+Task PR is only reported; Desktop has no watcher view. TaskSessions remain
+conversations with Jack. Dated detail: `8813ee7bb:wave/product/MEMORY.md`, this heading.
 
 ## Skill reduction decisions (2026-09-28)
 

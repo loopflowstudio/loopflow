@@ -1,1 +1,0 @@
-Simplify Task settlement and keep terminal actions inert

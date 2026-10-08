@@ -120,8 +120,7 @@ command-line argument. Provider refusals remain visible in the native terminal.
 
 Selected Wave goals are supplied once as complete `GOAL.md` documents. Repeated
 requests for the same document do not repeat its contents; distinct memory files
-remain separate even when their text matches. IDE launches with Wave documents
-use the assembled prompt so those references reach the provider.
+remain separate even when their text matches.
 
 Launching a Flow for an existing Task uses valid cached planning regardless of age.
 Known invalidation, removal, terminal state or ownership changes still block.

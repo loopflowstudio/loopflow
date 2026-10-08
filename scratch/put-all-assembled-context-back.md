@@ -21,22 +21,22 @@ Main's LOO-420 integration removes IDE deep links and keeps terminal/headless
 execution. The launch fixtures use its renamed `-a` agent selector. LOO-428's
 flags and Flow output are untouched.
 
-## Delete — do not maintain
+## Completed reduction
 
 Removed `format_claude_system_prompt`, `format_claude_task_prompt` and
 `build_claude_session_turn_args` in the earlier implementation. Queue compression
-also removes `PromptFormatMode`, `format_context_prompt`, `format_task_prompt`,
+also removed `PromptFormatMode`, `format_context_prompt`, `format_task_prompt`,
 their exclusive tests and the single-use `format_reference_sections` wrapper.
 Repository-wide caller inspection found only full rendering in production.
 `format_prompt` now takes just the components; escaping, source order and full
 rendering checks survive. No remaining deletion targets were identified.
 
-## Reconciled evidence (2026-10-07)
+## Reconciled evidence (2026-10-08)
 
 The split renderers, classifier claims and unused Claude turn launcher are gone.
 The active stream launcher covers large context and structured reply guidance;
 full rendering and attribution tests cover the surviving system channel. The queue
-pass removes the unused partial-render APIs as well; no fallback or refusal
+pass removed the unused partial-render APIs as well; no fallback or refusal
 classifier remains.
 
 Terminal fixtures exercise the real CLI with argument-limited provider scripts.
@@ -44,7 +44,9 @@ The Codex headless fixture checks thread configuration, the short first turn and
 the retained file after exit. It does not resume a native provider. Claude's
 stream test checks file contents and arguments, not provider acceptance. These
 boundaries follow Release's entry-point lesson: a helper proof cannot establish
-the composed user experience. No additional code repair was identified.
+the composed user experience. No additional code repair was identified. Source
+inspection after sync confirms the shared writer and full renderer remain in use.
+The adjacent CLI documentation's obsolete IDE-launch claim is removed.
 
 ## Measurements
 
@@ -110,12 +112,10 @@ Error: session launcher exited with status exit status: 2
 
 This matches LOO-428's assigned duplicate-Codex-flag scope. The output establishes
 an argument-parsing failure, not a system-context refusal or successful delivery.
-No Codex readback or title acceptance is established. Preserve the configured
-wrapper path for the eventual retry; do not bypass it to claim cmux acceptance.
-Recommended next action: integrate LOO-428's flag repair when available, rebuild
-the candidate, and have Jack Heart rerun the Codex command below to obtain the
-marker readback and visible title. Claude plan mode can be checked independently
-now. The all-context system-file design remains unchanged.
+No Codex readback or title acceptance is established. The eventual retry needs
+LOO-428's flag repair, a rebuilt candidate and Jack Heart's configured cmux wrapper
+path to establish marker readback and visible title. Claude plan mode is an
+independent observation. The all-context system-file design remains unchanged.
 
 The outstanding acceptance belongs to Jack Heart: a candidate build followed by
 these real-account checks from this checkout inside cmux, with its wrappers on
@@ -138,16 +138,19 @@ was 174,826 bytes. No installed-store migration or installation is involved.
 
 The fixed first user message may change host/provider titles; LOO-422 owns that
 broader experience. Gate/CI owns the full affected suites. Release is the only
-immediate child with memory in this checkout. Its goal, memory headings,
-publication/acceptance, scheduled-failure and pending-version sections were read;
-the retained landing incident was not reread.
+immediate child with memory in this checkout. Its complete goal and memory were
+read on October 8; operation-entry proofs and preservation of original failure
+evidence remain applicable and already live in Infrastructure memory.
 
-Checks: `cargo test -p loopflow --test context_tests --test golden_prompt` PASS (17 + 1); compiled lib test `reference_rendering_preserves_live_requests_and_original_components` PASS (1); `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` PASS. Gate owns affected suites; earlier transport/attribution results remain at `7611c2866:scratch/put-all-assembled-context-back.md`.
+Compress's focused test, format and Clippy passes remain at
+`2d333d18c:scratch/put-all-assembled-context-back.md`; earlier transport and
+attribution results remain at `7611c2866:scratch/put-all-assembled-context-back.md`.
 
-Sync check (main `873f40e30`): `cargo test -p loopflow --test context_launch_tests terminal_context_uses_files_and_preserves_failed_sessions` PASS (1, Claude + Codex fixtures); broader checks remain with gate.
+The sync checkpoint `752e2bc5a` records a passing terminal fixture for both
+providers against main `873f40e30`. The final sync to `812d8cc55` succeeded at
+`2d333d18c`; no new product checks are claimed for that later merge.
 
-`lf context --skill compress` reports all sources within budget; memory is
-15,998/16,000 tokens. No limit was raised.
+Checks (realign): `git diff --check` PASS; `lf context --skill realign` PASS (memory 15,985/16,000 tokens, all sources within limits); prose-only edits, product suites deferred to gate.
 
 ## PR walkthrough (2026-10-07)
 
@@ -164,14 +167,17 @@ Walkthrough checks: revision-pinned excerpts and local HTML anchors verified;
 desktop/narrow captures and expanded disclosure inspected with `lf screenshot`;
 product checks were not rerun for this artifact.
 
-## Landing direction (2026-10-07)
+## Landing direction (reconciled 2026-10-08)
 
-Jack Heart requested landing after the PR walkthrough. This supersedes the
-earlier hold on landing; it does not establish the unobserved acceptance checks.
+Jack Heart requested landing and Task completion after the PR walkthrough. This
+supersedes the earlier hold; it does not establish the unobserved acceptance checks.
 Jack Heart clarified that the Task must advance through queued preparation
-before landing. Run the existing `queue` Flow (compress → sync → realign → gate),
-then the Task’s `ship` edge (gate → `pr land -c`) only if queue succeeds. The ship
-gate should reuse still-valid checks under the repository verification cadence.
+before landing. Queue Flow `c73755d7-02ce-45cc-855a-b8105cd4979b` completed
+compress and its checks, then stopped at sync because its tracked scratch note
+remained dirty. The note is committed at `752e2bc5a`, and sync succeeded. Jack's
+October 8 continuation places this reconciliation before the caller's Task
+`ship` edge (gate → `pr land -c`). Affected verification and delivery remain;
+compress is complete. Still-valid checks follow the repository reuse cadence.
 The remaining live-account checks stay unproved; they no longer hold landing.
 Durable findings are retained in Infrastructure memory; this
 design, `scratch/pr-review.html` and its five captures are preserved at

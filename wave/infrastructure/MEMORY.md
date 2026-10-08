@@ -161,13 +161,9 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 
 ## Retained capture storage and autonomous cleanup (2026-10-05)
 
-Jack Heart delegated LOO-370's autonomous source delivery. Infrastructure selected
-one opaque `~/.lf/runs` root, superseding physical relocation; the Task brief and
-comment `3829b49e-2ade-4bee-8850-2ae2297399a8` record that decision. PR #1450
-(`1af81fe03`) is integrated. Session identity controls conversations; capture keys
-select history. Preservation constraints and contrary evidence remain under
-Capture cutover below. This decision authorizes neither installed conversion nor
-live interruption. Earlier detail: `6448e3c9e:wave/infrastructure/MEMORY.md`.
+LOO-370's decision and preservation limits live under Capture cutover below.
+PR #1450 (`1af81fe03`) is integrated. Delegation and the exact Task steer remain
+at `2d333d18c:wave/infrastructure/MEMORY.md` under this heading.
 
 ## Project configuration and review direction (2026-10-05)
 
@@ -1066,8 +1062,8 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 Jack Heart selected all assembled context in one system file, including skills
 and Task briefs; no split, fallback or lf-side refusal wording. The historical
 Claude block was a first-response error inside its terminal. Jack requested
-queue preparation then landing of PR #1498, superseding the review-only boundary;
-unobserved checks remain unproved.
+queue preparation then landing of PR #1498 and Task completion, superseding the
+review-only boundary; unobserved checks remain unproved and do not hold landing.
 
 Jack's cmux screenshot shows Claude reading the exact fixture marker, OpenCode
 and the first Infrastructure memory heading. Its title was “Supplied context

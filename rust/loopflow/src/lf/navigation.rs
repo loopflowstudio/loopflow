@@ -102,6 +102,20 @@ fn descendant_flag<'a>(command: &'a Command, value: &str) -> Option<&'a clap::Ar
     })
 }
 
+fn takes_separate_value(tree: &Command, current: &Command, value: &str, boundary: bool) -> bool {
+    if value.contains('=') || (!value.starts_with("--") && value.len() > 2) {
+        return false;
+    }
+    flag(current, value)
+        .or_else(|| flag(tree, value))
+        .or_else(|| {
+            (!boundary)
+                .then(|| descendant_flag(current, value))
+                .flatten()
+        })
+        .is_some_and(|arg| arg.get_action().takes_values())
+}
+
 /// Remove only transport options; the target owns command parsing and placement.
 pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>, clap::Error> {
     let tree = command_tree();
@@ -120,20 +134,8 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         if value.starts_with('-') {
             let name = value.split('=').next().expect("split has a first item");
             let is_transport = matches!(name, "--machine" | "--secret" | "--forward-agent");
-            let argument = flag(current, value)
-                .or_else(|| flag(&tree, value))
-                .or_else(|| {
-                    (!boundary)
-                        .then(|| descendant_flag(current, value))
-                        .flatten()
-                });
             let start = index;
-            let attached_short_value = !value.starts_with("--") && value.len() > 2;
-            if argument.is_some_and(|arg| arg.get_action().takes_values())
-                && !value.contains('=')
-                && !attached_short_value
-                && index + 1 < args.len()
-            {
+            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
             }
             let tokens = &args[start..=index];
@@ -201,19 +203,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             let selects_location = matches!(value.split('=').next(), Some("--task" | "--wt"))
                 && (path.is_empty() || flag(current, value).is_none());
             output.push(value.clone());
-            let argument = flag(current, value)
-                .or_else(|| flag(&tree, value))
-                .or_else(|| {
-                    (!boundary)
-                        .then(|| descendant_flag(current, value))
-                        .flatten()
-                });
-            let attached_short_value = !value.starts_with("--") && value.len() > 2;
-            if argument.is_some_and(|arg| arg.get_action().takes_values())
-                && !value.contains('=')
-                && !attached_short_value
-                && index + 1 < args.len()
-            {
+            if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;
                 output.push(args[index].clone());
             }

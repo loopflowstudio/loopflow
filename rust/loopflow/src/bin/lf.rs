@@ -1452,9 +1452,7 @@ fn run() -> anyhow::Result<()> {
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
-    // Every MachineId-addressed SSH hop proves it reached the intended authority
-    // before reads or mutations dispatch. Raw-host bootstrap carries no
-    // expectation and falls through.
+    // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
 
     let mut direct_binding = None;

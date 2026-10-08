@@ -376,6 +376,10 @@ The review-addition compression removes `SshOutcome` and `ssh_args`: SSH returns
 the existing command result directly, and forwarding setup/cancellation reuse
 one route and connection argument vector. This avoids rebuilding transport state
 during cleanup and retains remote exit codes, broker cleanup and diagnostics.
+The selector compression removes the preamble's arbitrary `extra_env` bundle
+and optional identity path: it takes the saved Machine and participant name
+directly. Local normalization and remote selection share option-value scanning,
+so command text and attached flag values keep the same boundaries.
 
 Remaining targets belong to later slices. Each removes what it replaces;
 Codex's disposition remains unresolved as noted above:
@@ -436,6 +440,11 @@ the rename. The ignored `home:` GOAL key retains its rejection fixture.
   5. `gh` accepts a copied token and both machines keep working.
 
 ## Evidence
+
+The superseded pre-selector walkthrough is preserved at
+`6886ec8db5cfac61bf74c6e2704aeb78270ad5bf:scratch/pr-review.html`.
+Its unshared-SSH, missing-install-offer and stacked-base findings were resolved
+as described below; it no longer describes the current review surface.
 
 - LOO-393's one commit (`d19a24a19`) is retained in Git as
   `08191d19269af96e15d79918689a04b4fa44dc30:scratch/loo-393-checkpoint.patch`. `TaskRecord`, `PrRecord` and `from_task`
@@ -504,4 +513,4 @@ compiled remote CLI against a separate registry and proves `machine add` changes
 that registry only. Simulated transports do not establish configured SSH/account
 continuity; the earlier real SSH sharing proof still covers unchanged transport.
 
-Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, and focused `cargo nextest run` over SSH transport, Session open argv, `machine_commands`, `cli_discovery`, and `documented_commands` pass (46 tests; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); generated Clap reference, `git diff --check`, and `lf context --skill realign` pass. Affected gate and disposable-account published-installer proof remain with gate/CI.
+Checks: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, and `lf context --skill compress` pass; `cargo nextest run -p loopflow --lib --test cli_discovery --test machine_commands -E 'test(lf::commands::ssh::tests::) | binary(cli_discovery) | binary(machine_commands)' --no-fail-fast` builds and passes 42 tests (LF_/LOOPFLOW_ cleared, LF_BIN pinned), with one open-output-handle warning in `preamble_omits_absent_credentials`; prior broader checks remain at `6886ec8db:scratch/work-on-another-machine-name.md`. Affected gate, leak investigation and disposable-account published-installer proof remain with gate/CI.

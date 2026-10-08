@@ -28,6 +28,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{anyhow, Context};
 
+use crate::durable::Machine;
 use crate::pm::PmProviderKind;
 use crate::provider_account::lease::{
     self, AccountLeaseBroker, AccountLeaseHandle, AccountSelection, PreparedAccountLease,
@@ -151,20 +152,12 @@ pub fn run(
     let broker = account_lease.map(AccountLeaseBroker::start).transpose()?;
     let remote_handle = broker.as_ref().map(AccountLeaseBroker::remote_handle);
     let user_name = crate::engine::config::participant_name()?.unwrap_or_default();
-    let extra_env = vec![
-        (EXPECTED_MACHINE_ID_ENV, target.id.as_str()),
-        (crate::engine::config::USER_NAME_ENV, user_name.as_str()),
-    ];
     let preamble = build_preamble(
         &credentials,
         remote_handle.as_ref(),
-        &target.route,
-        target
-            .repo
-            .as_deref()
-            .expect("added machines have a repository"),
+        &target,
         &cmd,
-        &extra_env,
+        &user_name,
     );
     let result = run_ssh(&target.route, forward_agent, broker.as_ref(), &preamble);
     // Release the broker before reporting the remote command's result.
@@ -172,10 +165,7 @@ pub fn run(
     result
 }
 
-async fn resolve_target(
-    target: &str,
-    forward_agent: bool,
-) -> anyhow::Result<crate::durable::Machine> {
+async fn resolve_target(target: &str, forward_agent: bool) -> anyhow::Result<Machine> {
     let store = crate::store::open_existing_store()
         .await
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
@@ -355,10 +345,9 @@ fn is_valid_env_name(name: &str) -> bool {
 fn build_preamble(
     credentials: &Credentials,
     lease_handle: Option<&AccountLeaseHandle>,
-    host: &str,
-    repo: &str,
+    machine: &Machine,
     cmd: &[String],
-    extra_env: &[(&str, &str)],
+    user_name: &str,
 ) -> String {
     let mut lines: Vec<String> = Vec::new();
 
@@ -366,25 +355,25 @@ fn build_preamble(
     // non-interactive `bash -s`.
     lines.push(super::machine::REMOTE_PATH.to_string());
 
-    // Transport-supplied identity markers are exported before credentials so
-    // the remote can verify them during its earliest dispatch checks.
-    for (name, value) in extra_env {
-        lines.push(format!("export {name}={}", sh_quote(value)));
-    }
-    if extra_env
-        .iter()
-        .any(|(name, _)| *name == EXPECTED_MACHINE_ID_ENV)
-    {
-        lines.push(
-            "LF_REACHED_MACHINE_ID=$(lf machine id) || { echo 'remote lf could not read its MachineId' >&2; exit 1; }"
-                .to_string(),
-        );
-        lines.push(
-            "[ \"$LF_REACHED_MACHINE_ID\" = \"$LF_EXPECTED_MACHINE_ID\" ] || { echo \"remote Machine identity mismatch: expected $LF_EXPECTED_MACHINE_ID, reached $LF_REACHED_MACHINE_ID\" >&2; exit 1; }"
-                .to_string(),
-        );
-        lines.push("unset LF_REACHED_MACHINE_ID".to_string());
-    }
+    // Check the saved machine again after the probe, before exporting credentials.
+    lines.push(format!(
+        "export {EXPECTED_MACHINE_ID_ENV}={}",
+        sh_quote(machine.id.as_str())
+    ));
+    lines.push(format!(
+        "export {}={}",
+        crate::engine::config::USER_NAME_ENV,
+        sh_quote(user_name)
+    ));
+    lines.push(
+        "LF_REACHED_MACHINE_ID=$(lf machine id) || { echo 'remote lf could not read its MachineId' >&2; exit 1; }"
+            .to_string(),
+    );
+    lines.push(
+        "[ \"$LF_REACHED_MACHINE_ID\" = \"$LF_EXPECTED_MACHINE_ID\" ] || { echo \"remote Machine identity mismatch: expected $LF_EXPECTED_MACHINE_ID, reached $LF_REACHED_MACHINE_ID\" >&2; exit 1; }"
+            .to_string(),
+    );
+    lines.push("unset LF_REACHED_MACHINE_ID".to_string());
 
     if let Some(token) = nonempty(&credentials.gh_token) {
         lines.push(format!("export GH_TOKEN={}", sh_quote(token)));
@@ -486,6 +475,10 @@ fn build_preamble(
         ));
     }
 
+    let repo = machine
+        .repo
+        .as_deref()
+        .expect("added machines have a repository");
     let path = if repo.starts_with('/') {
         sh_quote(repo)
     } else {
@@ -496,7 +489,7 @@ fn build_preamble(
     };
     lines.push(format!(
         "cd -- {path} || {{ echo {} >&2; exit 1; }}",
-        sh_quote(&format!("no repo {repo} on {host}"))
+        sh_quote(&format!("no repo {repo} on {}", machine.route))
     ));
 
     let remote_cmd = cmd
@@ -623,10 +616,24 @@ fn run_ssh(
 mod tests {
     use super::{
         build_preamble, command_result, is_valid_env_name, reject_detached_account_forwarding,
-        sh_quote, Credentials, ProviderAuthority, EXPECTED_MACHINE_ID_ENV,
+        sh_quote, Credentials, ProviderAuthority,
     };
+    use crate::durable::{Machine, MachineId};
     use crate::provider_account::lease::{self, AccountLeaseHandle};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+
+    fn machine(repo: &str) -> Machine {
+        Machine {
+            id: MachineId::parse("home_00000000000000000000000000000001").unwrap(),
+            label: Some("mini".into()),
+            route: "mini-heart".into(),
+            repo: Some(repo.into()),
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            observed_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
 
     fn full_credentials() -> Credentials {
         Credentials {
@@ -673,10 +680,9 @@ mod tests {
         let preamble = build_preamble(
             &full_credentials(),
             Some(&handle),
-            "mini-heart",
-            "src/loopflow",
+            &machine("src/loopflow"),
             &cmd,
-            &[],
+            "",
         );
 
         assert!(preamble.contains("export GH_TOKEN='gh-secret'"));
@@ -717,7 +723,7 @@ mod tests {
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string(), "runs".to_string()];
-        let preamble = build_preamble(&creds, None, "host", "src/loopflow", &cmd, &[]);
+        let preamble = build_preamble(&creds, None, &machine("src/loopflow"), &cmd, "");
 
         assert!(preamble.contains("export CLAUDE_CODE_OAUTH_TOKEN='only-claude'"));
         assert!(!preamble.contains("GH_TOKEN"));
@@ -727,18 +733,14 @@ mod tests {
     }
 
     #[test]
-    fn home_command_carries_identity_and_no_origin_authority() {
+    fn machine_command_carries_identity_and_no_origin_authority() {
         let cmd = vec!["lf".to_string(), "start".to_string(), "product".to_string()];
         let preamble = build_preamble(
             &Credentials::default(),
             None,
-            "jack@buildbox",
-            "src/loopflow",
+            &machine("src/loopflow"),
             &cmd,
-            &[(
-                EXPECTED_MACHINE_ID_ENV,
-                "home_00000000000000000000000000000001",
-            )],
+            "",
         );
 
         assert!(preamble
@@ -767,7 +769,7 @@ mod tests {
             ..Credentials::default()
         };
         let cmd = vec!["lf".to_string()];
-        let preamble = build_preamble(&creds, None, "host", "src/loopflow", &cmd, &[]);
+        let preamble = build_preamble(&creds, None, &machine("src/loopflow"), &cmd, "");
 
         assert!(preamble.contains(r#"export GH_TOKEN='a'\''b; rm -rf ~ #'"#));
         // The dangerous substring never appears unquoted at a statement start.
@@ -776,22 +778,20 @@ mod tests {
 
     #[test]
     fn preferred_name_crosses_the_remote_shell_without_host_fallback() {
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join(".local/bin");
+        fs::create_dir_all(&bin).unwrap();
+        let lf = bin.join("lf");
+        fs::write(&lf, "#!/bin/sh\nif [ \"$1\" = machine ]; then echo \"$LF_EXPECTED_MACHINE_ID\"; else printf '%s' \"$LF_USER_NAME\"; fi\n").unwrap();
+        fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
         for name in ["Jack", "", "D'Angelo $(printf wrong)"] {
-            let cmd = vec![
-                "sh".into(),
-                "-c".into(),
-                "printf '%s' \"$LF_USER_NAME\"".into(),
-            ];
-            let preamble = build_preamble(
-                &Credentials::default(),
-                None,
-                "host",
-                ".",
-                &cmd,
-                &[(crate::engine::config::USER_NAME_ENV, name)],
-            );
+            let cmd = vec!["lf".into(), "user".into()];
+            let preamble = build_preamble(&Credentials::default(), None, &machine("."), &cmd, name);
             let output = std::process::Command::new("bash")
                 .args(["-c", &preamble])
+                .env_clear()
+                .env("HOME", home.path())
+                .env("PATH", "/usr/bin:/bin")
                 .env(crate::engine::config::USER_NAME_ENV, "Host Owner")
                 .output()
                 .unwrap();

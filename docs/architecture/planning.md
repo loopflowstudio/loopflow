@@ -96,7 +96,8 @@ advance unrelated fields. It never grants execution or provider-write authority.
 
 Task and Project field receipts share `sqlite/planning_changes.rs`, with separate
 foreign keys. Each receipt retains a stable mutation identity, baseline and first
-conflicting provider value. `sqlite/task_content.rs` owns Task fields and neighboring
+conflicting provider value. An observed conflict adopts Linear and retires that
+intention; an unchanged baseline preserves the pending save. `sqlite/task_content.rs` owns Task fields and neighboring
 rank changes; `sqlite/project_content.rs` owns Project fields, content and Workflow
 selection. Edits and receipts commit together before provider mapping or I/O.
 No-op saves preserve revisions and receipts without notifying readers. Accepted
@@ -117,9 +118,9 @@ preserve editable KRs and targets.
 The personal namespace and provider-first planning writers are deleted. Connected
 CLI edits report pending sync. Task/Project export, field/deletion/cancellation
 delivery, complete Desktop pending presentation and composed reconnect remain
-unfinished. Current ingestion retains pending local intentions on conflict;
-Jack Heart selected automatic Linear precedence for every observed planning conflict,
-with losing edits retained as history. That replacement remains to be implemented.
+unfinished. Ingestion adopts observed Linear conflicts and retains the losing
+local intentions in field, state and comment receipts. Retired intentions never
+reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.
 
 ## Project creation and selection
@@ -393,9 +394,9 @@ Foreground Task connections acquire repository membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
 attempt evidence and conflicting value. The latest receipt determines the displayed
 writeback state; Tasks store no separate copy. A response records only its captured
-effect, so it cannot settle a newer decision. Current manual state resolution
-supersedes the delivery identity without changing the Workflow; automatic Linear
-precedence remains unfinished. No local/provider clock comparison orders edits.
+effect, so it cannot settle a newer decision. State acquisition and delivery share
+one transactional reconciliation rule: observed conflicts adopt Linear and settle
+the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
 concurrent Linear edit between them. Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
@@ -493,7 +494,9 @@ lf --wave product wave/operate "review the current priorities"
 
 SQLite owns every Task comment. A save records the comment and its stable delivery
 UUID in one transaction, before contacting Linear. CLI and Desktop read the thread,
-pending IDs and conflict bodies from one SQLite snapshot. Mapped Tasks show pending sync;
+pending IDs and losing local bodies from one SQLite snapshot. An observed comment
+conflict adopts Linear’s body, author and time while the receipt retains both
+complete comments; no replacement comment is created. Mapped Tasks show pending sync;
 a foreground Task Session or Desktop Task connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally

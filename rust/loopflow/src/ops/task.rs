@@ -3686,7 +3686,7 @@ pub fn task_end(repo: &Path, issue: &str, note: Option<&str>, end: &EndOptions) 
     })
 }
 
-pub fn task_sync(issue: &str, resolve: Option<&str>, comment: Option<&str>) -> OpsResult<String> {
+pub fn task_sync(issue: &str) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -3694,56 +3694,6 @@ pub fn task_sync(issue: &str, resolve: Option<&str>, comment: Option<&str>) -> O
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        if let Some(comment) = comment {
-            let keep_local = match resolve {
-                Some("local") => true,
-                Some("linear") => false,
-                _ => return Err(task_error("comment resolution must be local or linear")),
-            };
-            let replacement = store
-                .sqlite
-                .resolve_task_comment(&task.id, comment, keep_local)
-                .map_err(task_error)?;
-            return Ok(match replacement {
-                Some(id) => format!(
-                    "{}: resolved comment {comment}; local body saved as {id} for synchronization",
-                    task.plan.identifier
-                ),
-                None => format!(
-                    "{}: resolved comment {comment}; retained Linear's body",
-                    task.plan.identifier
-                ),
-            });
-        }
-        if let Some(choice) = resolve {
-            if !matches!(choice, "local" | "linear") {
-                return Err(task_error("resolution must be local or linear"));
-            }
-            let delivery = store
-                .sqlite
-                .pending_task_state(&task.id)
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("Task has no pending state delivery"))?;
-            let wave = owning_wave(&store, &task).await?;
-            super::pm::repository_team_id(Path::new(wave.repo()))?;
-            let observed = tokio::time::timeout(Duration::from_secs(5), async {
-                let client = super::pm::issue_client(Path::new(wave.repo())).await?;
-                let (observed, _) = client
-                    .issue_ownership(task.plan.linear_id()?.as_str())
-                    .await
-                    .map_err(task_error)?
-                    .ok_or_else(|| task_error("Linked Linear issue is unavailable"))?;
-                Ok::<_, OpsError>(observed)
-            })
-            .await
-            .map_err(|_| {
-                task_error("Linear read timed out; conflict and saved decision retained")
-            })??;
-            store
-                .sqlite
-                .resolve_task_state(&delivery, &observed, choice == "local")
-                .map_err(task_error)?;
-        }
         // Independent effects do not make each other a prerequisite.
         let (state, comments) = tokio::join!(
             super::linear_observe::sync_task_state(&store, &task),

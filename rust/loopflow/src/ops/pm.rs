@@ -98,6 +98,7 @@ pub struct TaskComments {
     pub identifier: String,
     pub comments: Vec<TaskComment>,
     pub pending_sync: Vec<String>,
+    /// Losing local comment bodies; the thread contains the adopted Linear values.
     pub conflicts: std::collections::BTreeMap<String, String>,
     pub refresh_error: Option<String>,
 }

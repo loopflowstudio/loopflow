@@ -97,7 +97,7 @@ struct TaskCommentsView: View {
                             .foregroundStyle(palette.textTertiary)
                     }
                     if let conflict = thread.conflicts[comment.id] {
-                        Text("Conflicting Linear comment")
+                        Text("Saved local comment; Linear’s edit is current")
                             .font(Typography.strong(12.5))
                         MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }

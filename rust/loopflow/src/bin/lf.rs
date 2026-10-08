@@ -980,15 +980,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 Ok(())
             }
         },
-        TaskCommand::Sync {
-            issue,
-            resolve,
-            comment,
-        } => {
-            println!(
-                "{}",
-                loopflow::ops::task::task_sync(issue, resolve.as_deref(), comment.as_deref())?
-            );
+        TaskCommand::Sync { issue } => {
+            println!("{}", loopflow::ops::task::task_sync(issue)?);
             Ok(())
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
@@ -1264,13 +1257,8 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             println!("{}: updated task {}", result.wave, result.id);
             if result.sync_enabled && !result.pending_changes.is_empty() {
                 eprintln!(
-                    "Saved locally; pending Linear sync ({} fields, {} conflicts).",
-                    result.pending_changes.len(),
-                    result
-                        .pending_changes
-                        .iter()
-                        .filter(|change| change.conflict.is_some())
-                        .count()
+                    "Saved locally; pending Linear sync ({} fields).",
+                    result.pending_changes.len()
                 );
             }
             Ok(())
@@ -1314,7 +1302,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     };
                     println!("── {author} · {date}{sync}\n{}\n", comment.body.trim_end());
                     if let Some(body) = result.conflicts.get(&comment.id) {
-                        println!("Conflicting Linear comment:\n{body}\n");
+                        println!("Saved local comment; Linear’s edit is current:\n{body}\n");
                     }
                 }
             }
@@ -2017,13 +2005,8 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
 
 fn print_project_sync(saved: &loopflow::ops::project::ProjectPlanning) {
     if saved.sync_enabled && !saved.pending_changes.is_empty() {
-        let conflicts = saved
-            .pending_changes
-            .iter()
-            .filter(|change| change.conflict.is_some())
-            .count();
         eprintln!(
-            "Saved locally; pending Linear sync ({} fields, {conflicts} conflicts).",
+            "Saved locally; pending Linear sync ({} fields).",
             saved.pending_changes.len()
         );
     }

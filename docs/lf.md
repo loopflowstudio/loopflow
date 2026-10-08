@@ -349,16 +349,13 @@ and incoming planning. Status and Desktop retain pending synchronization feedbac
 
 ```bash
 lf task sync EXP-12                     # attempt pending delivery once
-lf task sync EXP-12 --resolve local     # explicitly retain the local state decision
-lf task sync EXP-12 --resolve linear    # retain Linear's state; leave the Workflow alone
-lf task sync EXP-12 --comment COMMENT_ID --resolve local # save local body as a new comment
 ```
 
-An uncertain delivery followed by a different Linear state retains both values.
-Resolution records a new decision; old delivery identities and Workflow history remain.
-For a comment conflict, `--resolve local` saves the local body under a new comment
-ID for active synchronization; `--resolve linear` keeps the observed Linear comment.
-Both retain the conflicting bodies. Retrying reuses the saved resolution.
+Observed conflicts adopt Linear automatically. The losing local state or comment
+remains in delivery history, and its delivery stops. An unchanged Linear baseline
+preserves pending local saves. Comment threads display Linear's current text beside
+the saved local body. Planning synchronization never moves the local Workflow.
+The separate provider read and write cannot prevent an unseen concurrent edit.
 
 ## Check authorized deliveries in the background
 

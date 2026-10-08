@@ -239,16 +239,6 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
     else {
         return Ok(());
     };
-    if delivery.conflict.is_some() {
-        return Ok(());
-    }
-    // The existing update protocol cannot preserve concurrent provider edits.
-    // Do not extend it to cancellation while its write guarantee is unresolved.
-    if delivery.target == "canceled" {
-        return store.sqlite.settle_task_state(&delivery, Some(
-            "Cancellation saved locally; safe Linear cancellation delivery is not implemented",
-        )).map_err(|e| message(&e));
-    }
     let attempt = async {
         let task = store
             .get_task(&task.id)
@@ -256,7 +246,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Task is missing".into()))?;
         let Some(issue) = &task.plan.linear_id else {
-            return Ok(false);
+            return Ok(());
         };
         let project = store
             .get_project(&task.project_id)
@@ -269,7 +259,7 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
         if !connected(wave.repo()) {
-            return Ok(false);
+            return Ok(());
         }
         let client = super::pm::issue_client(std::path::Path::new(wave.repo())).await?;
         let (observed, _) = client
@@ -282,32 +272,36 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
                 "Task membership changed in Linear; retained local decision".into(),
             ));
         }
-        if observed.state.as_deref() == Some(&delivery.target) {
-            return Ok(true);
+        if observed.state.is_none() {
+            return Err(OpsError::Message(
+                "Linear state is unknown; saved decision retained".into(),
+            ));
         }
-        // A provider clock is never compared to the local decision's clock.
-        // An uncertain prior write may have completed and then been reopened.
-        if delivery.attempted
-            || observed.state != delivery.base_state
-            || delivery.base_revision.is_none()
-            || observed.revision != delivery.base_revision
+        if !store
+            .sqlite
+            .observe_task_state(&delivery, &observed)
+            .map_err(|e| message(&e))?
         {
-            store
-                .sqlite
-                .conflict_task_state(&delivery, &observed)
-                .map_err(|e| message(&e))?;
-            return Err(OpsError::Message(format!(
-                "State conflict: saved locally as {}; Linear reports {} at revision {}. Delivery {} is retained; use `lf task sync {} --resolve local` or `--resolve linear`",
-                delivery.target, observed.state.as_deref().unwrap_or("unknown"),
-                observed.revision.as_deref().unwrap_or("unknown"), delivery.id, task.plan.identifier,
-            )));
+            return Ok(());
+        }
+        // Cancellation delivery belongs to the subsequent delivery cut.
+        if delivery.target == "canceled" {
+            return Err(OpsError::Message(
+                "Cancellation saved locally; safe Linear cancellation delivery is not implemented"
+                    .into(),
+            ));
+        }
+        if delivery.attempted {
+            return Err(OpsError::Message(
+                "Prior state delivery remains uncertain; saved decision retained".into(),
+            ));
         }
         if !store
             .sqlite
             .attempt_task_state(&delivery)
             .map_err(|e| message(&e))?
         {
-            return Ok(false);
+            return Ok(());
         }
         if delivery.target == "completed" {
             client
@@ -325,23 +319,20 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
             .await
             .map_err(|e| message(&e))?
             .ok_or_else(|| OpsError::Message("Linear state write has no readback".into()))?;
-        if confirmed.state.as_deref() != Some(&delivery.target) {
-            store
-                .sqlite
-                .conflict_task_state(&delivery, &confirmed)
-                .map_err(|e| message(&e))?;
-            return Err(OpsError::Message(format!(
-                "State conflict: saved locally as {}; Linear readback is {}",
-                delivery.target,
-                confirmed.state.as_deref().unwrap_or("unknown")
-            )));
+        if store
+            .sqlite
+            .observe_task_state(&delivery, &confirmed)
+            .map_err(|e| message(&e))?
+        {
+            return Err(OpsError::Message(
+                "Linear state write remains uncertain; saved decision retained".into(),
+            ));
         }
-        Ok::<bool, OpsError>(true)
+        Ok::<(), OpsError>(())
     };
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
     let error = match result {
-        Ok(Ok(true)) => None,
-        Ok(Ok(false)) => return Ok(()),
+        Ok(Ok(())) => return Ok(()),
         Ok(Err(error)) => Some(error.to_string()),
         Err(_) => Some(
             "Task state delivery timed out; saved decision and delivery identity retained".into(),

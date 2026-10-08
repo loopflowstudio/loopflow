@@ -157,6 +157,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
     let _lock = crate::journal::test_env_lock();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let directory = tempfile::tempdir().unwrap();
+    std::env::set_var("LF_HOME", directory.path());
     let repo = directory.path().join("repo");
     std::fs::create_dir_all(repo.join(".lf")).unwrap();
     std::fs::create_dir_all(repo.join("wave/product")).unwrap();
@@ -190,7 +191,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
         .unwrap();
     }
     let repo = std::fs::canonicalize(repo).unwrap();
-    let database = directory.path().join("registry.db");
+    let database = directory.path().join("loopflow.db");
     let store = Arc::new(
         open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
             .await
@@ -286,9 +287,9 @@ async fn task_comments_read_and_publish_without_starting_work() {
             assert_eq!(truncated.comments, read.comments);
 
             let task = store.get_task_by_issue("FIX-7").await.unwrap().unwrap();
-            rusqlite::Connection::open(directory.path().join("registry.db")).unwrap()
-                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error)
-                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending')",
+            rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap()
+                .execute("INSERT INTO task_state_deliveries(id,task_id,target,error,base_state,base_revision,attempted)
+                    VALUES('pending-completion',?1,'completed','unrelated completion remains pending','unstarted','2026-09-29T12:00:00.123Z',1)",
                     [task.id.as_str()]).unwrap();
             provider.lock().await.thread = Thread::Failing;
             let saved = task_comment_async(&repo, None, "FIX-7", Some("Keep the public name"), true)
@@ -406,8 +407,8 @@ exit 0
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             let conflict = store.sqlite.task_comments(&task.id).unwrap();
-            assert_eq!(conflict.conflicts[&collision], "Provider value survives");
-            assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body.starts_with("Local value survives"));
+            assert!(conflict.conflicts[&collision].starts_with("Local value survives"));
+            assert!(conflict.comments.iter().find(|c| c.id == collision).unwrap().body == "Provider value survives");
             assert!(!conflict.pending_sync.contains(&collision));
             // A late acknowledgement records delivery, not authority to discard
             // the newer remote value acquired while the create was in flight.
@@ -424,44 +425,17 @@ exit 0
                 amended["updatedAt"] = json!("2026-09-25T09:00:01Z");
             }
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
-            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().conflicts[&collision], "Provider correction survives");
+            assert_eq!(store.sqlite.task_comments(&task.id).unwrap().comments.iter().find(|c| c.id == collision).unwrap().body, "Provider correction survives");
             assert!(store.task_steers(&task.id).await.unwrap().iter().any(|steer| steer.text.contains("Provider correction survives")));
 
-            let before_resolution = store.task_steers(&task.id).await.unwrap();
-            let context = PM_TEST_CONTEXT.with(Clone::clone);
-            let selected_task = task.id.to_string();
-            let selected_comment = collision.clone();
-            let output = tokio::task::spawn_blocking(move || {
-                let parsed = crate::lf::Cli::try_parse_from([
-                    "lf", "task", "sync", &selected_task, "--comment", &selected_comment,
-                    "--resolve", "local",
-                ]).unwrap();
-                let Some(crate::lf::Commands::Task { cmd: crate::lf::TaskCommand::Sync { issue, resolve, comment } }) = parsed.command else {
-                    panic!("expected Task synchronization");
-                };
-                PM_TEST_CONTEXT.sync_scope(context, || crate::ops::task::task_sync(
-                    &issue, resolve.as_deref(), comment.as_deref(),
-                ).unwrap())
-            }).await.unwrap();
-            let replacement = store.sqlite.pending_task_comments(&task.id).unwrap();
-            assert_eq!(replacement.len(), 1);
-            let replacement = &replacement[0];
-            assert!(output.contains(&replacement.id));
-            assert_ne!(replacement.id, collision);
-            assert!(store.sqlite.task_comments(&task.id).unwrap().conflicts.is_empty());
-            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_resolution);
+            let before_retry = store.task_steers(&task.id).await.unwrap();
             let posted_before = provider.lock().await.posted.len();
-            provider.lock().await.lose_reply = true;
-            crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::sync_task_comments(&store, &task).await.unwrap();
             crate::ops::linear_observe::refresh_task_comments(&store, &task).await.unwrap();
             assert!(store.sqlite.pending_task_comments(&task.id).unwrap().is_empty());
-            let posted = provider.lock().await;
-            assert_eq!(posted.posted.len(), posted_before + 1);
-            assert_eq!(posted.posted.iter().find(|c| c["id"] == collision).unwrap()["body"], "Provider correction survives");
-            assert_eq!(posted.posted.iter().find(|c| c["id"] == replacement.id).unwrap()["body"], replacement.body);
-            drop(posted);
-            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_resolution);
+            assert_eq!(provider.lock().await.posted.len(), posted_before);
+            assert_eq!(store.task_steers(&task.id).await.unwrap(), before_retry);
+            assert!(crate::lf::Cli::try_parse_from(["lf", "task", "sync", "FIX-7", "--resolve", "local"]).is_err());
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);

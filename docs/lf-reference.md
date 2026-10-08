@@ -1382,13 +1382,11 @@ Concrete work and Task lifecycle
 
 ## lf task sync
 
-Synchronize a Task; explicitly resolve a state or comment conflict
+Synchronize a Task; observed planning conflicts adopt Linear
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `--resolve` | resolve |
-| `--comment` | Resolve this comment instead of the Task state; local keeps a new copy |
 | `--help / -h` | Print help |
 
 ## lf task workflow

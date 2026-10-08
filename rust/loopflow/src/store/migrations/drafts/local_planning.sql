@@ -234,9 +234,7 @@ CREATE TABLE task_comment_deliveries (
     comment_json TEXT NOT NULL CHECK(json_valid(comment_json)),
     acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)),
     error TEXT,
-    conflicting_comment_json TEXT CHECK(conflicting_comment_json IS NULL OR json_valid(conflicting_comment_json)),
-    resolution TEXT CHECK(resolution IN ('local','linear')),
-    replacement_comment_id TEXT REFERENCES task_comments(id) ON DELETE RESTRICT
+    conflicting_comment_json TEXT CHECK(conflicting_comment_json IS NULL OR json_valid(conflicting_comment_json))
 );
 CREATE INDEX idx_task_comments_task ON task_comments(task_id,created_at,id);
 CREATE TRIGGER store_revision_task_comments_insert AFTER INSERT ON task_comments

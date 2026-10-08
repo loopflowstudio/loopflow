@@ -526,7 +526,7 @@ fn project_accepted_planning(
             None => ProjectId::new(),
         };
         let project =
-            super::planning_changes::PlanningChanges::Project(&id).retain(tx, &project)?;
+            super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
         tx.execute(
             "INSERT INTO projects(id,wave_id,external_project_id,project_slug,project_name,
              project_prompt_context,pm_snapshot_synced_at,created_at,updated_at,workflow,status,project_summary,planning_provider_revision,planning_initiatives,planning_teams)
@@ -547,7 +547,7 @@ fn project_accepted_planning(
         )?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
-    // Pending fields keep their saved value; unrelated accepted facts advance.
+    // Reconcile pending fields against their provider baselines in the same transaction.
     let mut query = tx.prepare(&format!("WITH accepted AS ({ACCEPTED_WAVE_PROJECTS}) SELECT target.id,i.body,i.observed_at,p.id FROM tasks target JOIN pm_items i ON target.external_issue_id=i.id
          JOIN projects p ON p.external_project_id=i.project_id
          JOIN projects current ON current.id=target.project_id
@@ -555,7 +555,7 @@ fn project_accepted_planning(
          WHERE target.external_issue_id=i.id
          AND (current.wave_id=p.wave_id OR EXISTS(
              SELECT 1 FROM task_changes c WHERE c.task_id=target.id AND c.field='project_id'
-             AND c.acknowledged=0 AND json_extract(c.value_json,'$')=current.id
+             AND c.acknowledged=0 AND c.conflict_json IS NULL AND json_extract(c.value_json,'$')=current.id
              AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=target.id AND field='project_id')))
          AND i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
@@ -583,9 +583,15 @@ fn project_accepted_planning(
     drop(query);
     for (id, body, observed_at, project) in updates {
         let item: PmItem = serde_json::from_str(&body)?;
+        super::task_state_delivery::reconcile_in(
+            tx,
+            &crate::durable::TaskId::from_raw(&id),
+            &item,
+            None,
+        )?;
         let item =
             super::planning_changes::PlanningChanges::Task(&crate::durable::TaskId::from_raw(&id))
-                .retain(tx, &item)?;
+                .reconcile(tx, &item)?;
         let project: String = match item.project_id.as_deref() {
             Some(selected) => tx.query_row(
                 "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
@@ -811,7 +817,7 @@ fn put_project(
     Ok(())
 }
 
-fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
+pub(super) fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
     revision
         .map(|revision| {
             time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
@@ -827,7 +833,7 @@ fn revision_nanos(revision: Option<&str>) -> StoreResult<Option<i64>> {
         .transpose()
 }
 
-fn put_item(
+pub(super) fn put_item(
     conn: &Connection,
     repo: &str,
     provider: &str,

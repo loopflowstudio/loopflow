@@ -1165,14 +1165,23 @@ fn project_creation_binding_and_activation_save_offline() {
                 store
                     .put_pm_project(wave.id(), "linear", "initiative", &incoming, 20)
                     .unwrap();
-                let pending = store.pending_project_changes(&id).unwrap();
-                let status = pending
+                assert!(store
+                    .pending_project_changes(&id)
+                    .unwrap()
                     .iter()
-                    .find(|change| change.field == "status")
+                    .all(|change| change.field != "status"));
+                let losing: (String, String) = db
+                    .query_row(
+                        "SELECT value_json,conflict_json FROM project_changes WHERE id=?1",
+                        [&state.id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
                     .unwrap();
-                assert_eq!(status.id, state.id);
-                assert_eq!(status.value, "started");
-                assert_eq!(status.conflict.as_ref().unwrap()["value"], "completed");
+                assert_eq!(serde_json::from_str::<Value>(&losing.0).unwrap(), "started");
+                assert_eq!(
+                    serde_json::from_str::<Value>(&losing.1).unwrap()["value"],
+                    "completed"
+                );
                 assert_eq!(
                     db.query_row(
                         "SELECT status FROM projects WHERE id=?1",
@@ -1180,7 +1189,7 @@ fn project_creation_binding_and_activation_save_offline() {
                         |row| row.get::<_, String>(0)
                     )
                     .unwrap(),
-                    "started"
+                    "completed"
                 );
             }
         }
@@ -1386,15 +1395,15 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 home.path(),
                 &["project", "workflow", "show", id.as_str(), "--json"],
             );
-            assert_eq!(read["name"], "Saved");
-            assert_eq!(read["workflow"], "review");
+            assert_eq!(read["name"], "Remote name");
+            assert_eq!(read["workflow"], "research");
             assert_eq!(read["krs"][0]["holds"], true);
             assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
             let pending = read["pending_changes"].as_array().unwrap();
-            assert_eq!(pending[0]["id"], changes[0]["id"]);
-            assert_eq!(pending[0]["conflict"]["value"], "Remote name");
-            assert_eq!(pending[2]["conflict"]["value"], "research");
-            // Matching readback cannot erase an earlier conflict or acknowledge our unsent edit.
+            assert!(pending
+                .iter()
+                .all(|change| change["field"] != "name" && change["field"] != "workflow"));
+            // Later provider edits advance; superseded intentions never become pending again.
             incoming.name = "Saved".into();
             incoming.workflow = "review".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
@@ -1441,7 +1450,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["workflow"], content["workflow"]);
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
-        assert_eq!(saved["pending_changes"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            saved["pending_changes"].as_array().unwrap().len(),
+            if mapped { 2 } else { 4 }
+        );
         lf(repo.path(), home.path(), &args);
         let repeated = lf(
             repo.path(),
@@ -1461,16 +1473,12 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 home.path(),
                 &["project", "workflow", "show", id.as_str(), "--json"],
             );
-            assert_eq!(read["krs"], content["krs"]);
-            let pending = read["pending_changes"].as_array().unwrap();
-            let change = pending
+            assert_eq!(read["krs"][0]["text"], "Keep the concurrent provider plan");
+            assert!(read["pending_changes"]
+                .as_array()
+                .unwrap()
                 .iter()
-                .find(|change| change["field"] == "krs")
-                .unwrap();
-            assert_eq!(
-                change["conflict"]["value"][0]["text"],
-                "Keep the concurrent provider plan"
-            );
+                .all(|change| change["field"] != "krs"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join("wave").exists());
@@ -1700,15 +1708,28 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 )
                 .unwrap();
             let retained = store.planning_task(&second).unwrap().record.unwrap().item;
-            assert_eq!(retained.name, "Saved offline");
+            assert_eq!(retained.name, "Concurrent title");
             assert_eq!(retained.description, "");
             assert_eq!(retained.rank, 0);
-            assert_eq!(retained.assignee.as_deref(), Some("person-id"));
+            assert_eq!(retained.assignee.as_deref(), Some("remote-person"));
             assert!(retained.completed);
             let changes = store.pending_task_changes(&second).unwrap();
-            assert_eq!(changes[0].id, pending[0].id);
+            assert!(changes
+                .iter()
+                .all(|change| !matches!(change.field.as_str(), "name" | "assignee")));
+            let losing: (String, String) = conn
+                .query_row(
+                    "SELECT value_json,conflict_json FROM task_changes WHERE id=?1",
+                    [&pending[0].id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
             assert_eq!(
-                changes[0].conflict.as_ref().unwrap()["value"],
+                serde_json::from_str::<Value>(&losing.0).unwrap(),
+                "Saved offline"
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(&losing.1).unwrap()["value"],
                 "Concurrent title"
             );
             incoming.name = "Saved offline".into();
@@ -1997,7 +2018,6 @@ fn rotation_saves_membership_and_pending_effects_offline() {
             pending
         );
         if mapped {
-            let before = store.pending_task_changes(&active.id).unwrap();
             let mut remote = store.planning_task(&active.id).unwrap().record.unwrap();
             let project = remote.project.as_mut().unwrap();
             project.id = "third-provider-project".into();
@@ -2018,23 +2038,16 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
             assert_eq!(
                 store.task(&active.id).unwrap().unwrap().project_id,
-                existing.id
-            );
-            let conflict = store.pending_task_changes(&active.id).unwrap();
-            assert_eq!(conflict[0].id, before[0].id);
-            assert_eq!(conflict[0].value, existing.id.as_str());
-            assert_eq!(
-                conflict[0].conflict.as_ref().unwrap()["value"],
                 store
                     .project_by_project("third-provider-project")
                     .unwrap()
                     .unwrap()
                     .id
-                    .as_str()
             );
+            assert!(store.pending_task_changes(&active.id).unwrap().is_empty());
             assert_eq!(
                 store.planning_task(&active.id).unwrap().state,
-                loopflow::store::PlanningState::Invalid
+                loopflow::store::PlanningState::Available
             );
         }
         assert!(!repo.path().join("wave").exists());
@@ -2166,6 +2179,7 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
             assert_eq!(retained.plan.description, "Incoming after refiling");
             assert_eq!(store.pending_task_changes(&task.id).unwrap(), changes);
             let mut other = incoming.project.clone().unwrap();
+            // Preserve the duplicate slug: exact provider IDs must beat names.
             other.id = "competing".into();
             other.initiative_ids = vec!["competing".into()];
             incoming.project = Some(other);
@@ -2180,22 +2194,25 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
                     Some((&projects[2].wave_id, "competing")),
                 )
                 .unwrap();
-            let conflict = store.pending_task_changes(&task.id).unwrap();
-            assert_eq!(conflict[0].id, changes[0].id);
-            assert_eq!(conflict[0].value, projects[1].id.as_str());
+            assert!(store.pending_task_changes(&task.id).unwrap().is_empty());
             assert_eq!(
-                conflict[0].conflict.as_ref().unwrap()["value"],
-                projects[2].id.as_str()
+                store.task(&task.id).unwrap().unwrap().project_id,
+                projects[2].id
             );
             assert_eq!(
                 store.planning_task(&task.id).unwrap().state,
-                loopflow::store::PlanningState::Invalid
+                loopflow::store::PlanningState::Available
             );
         }
+        db.execute(
+            "UPDATE projects SET created_at=created_at+10 WHERE id=?1",
+            [projects[2].id.as_str()],
+        )
+        .unwrap();
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert_eq!(
             reopened.task(&task.id).unwrap().unwrap().project_id,
-            projects[1].id
+            projects[if mapped { 2 } else { 1 }].id
         );
         assert_eq!(
             reopened.pending_task_changes(&task.id).unwrap(),
@@ -2209,18 +2226,21 @@ fn refiling_saves_membership_offline_and_retains_inbound_changes() {
         )
         .unwrap();
         let pending = store.pending_task_changes(&task.id).unwrap();
-        assert!(!command(
+        let refused = command(
             repo.path(),
             home.path(),
-            &["task", "refile", task.id.as_str(), "--wave", "source"]
+            &["task", "refile", task.id.as_str(), "--wave", "source"],
         )
         .output()
-        .unwrap()
-        .status
-        .success());
+        .unwrap();
+        assert!(
+            !refused.status.success(),
+            "{}",
+            String::from_utf8_lossy(&refused.stdout)
+        );
         assert_eq!(
             store.task(&task.id).unwrap().unwrap().project_id,
-            projects[1].id
+            projects[if mapped { 2 } else { 1 }].id
         );
         assert_eq!(store.pending_task_changes(&task.id).unwrap(), pending);
         assert!(!repo.path().join("wave").exists());

@@ -19,8 +19,8 @@ identities, retained conflicts and reconnect deduplication. Jack Heart selected
 Linear as winner for every planning conflict.
 Without Linear, prefer the host where possible, otherwise last-write-wins with
 try-not-to-clobber and recoverable losing edits; LOO-412 owns ordering. Local saves
-remain immediate/pending. The accepted policy requires adopting observed Linear
-conflicts and retiring losing intentions; implementation remains unfinished.
+remain immediate/pending. The bounded source cut adopts observed Linear conflicts
+and retires losing intentions. Receipts preserve both values; unchanged baselines preserve saves.
 Sessions, Processes, Flow/captured Workflow
 position, reservations and checkouts never synchronize. Planning completion grants
 no Workflow movement, Process control or cleanup authority.
@@ -42,8 +42,8 @@ replication here or real plan publication to the public code repo is authorized.
 Foreground connections independently acquire comments/inventory and deliver mapped
 Tasks' effects. Receipts replace duplicate writeback state without inventing Workflow
 history. Effect locks exclude neither saves nor inbound reads. Acknowledgements
-cannot settle newer decisions. Current ingestion overlays pending local fields;
-manual `--resolve local|linear` remains implemented but superseded by Jack's policy.
+cannot settle newer decisions. Field/state ingestion and comment acquisition share
+that policy. Manual winner selection and replacement comments are removed.
 At `5a786d905`, inbound direction, threads and Steers commit together, without
 provider concurrency guarantees.
 
@@ -54,9 +54,9 @@ at `linear/linear@7d2bc4279f` exposes no expected-revision input for issue updat
 Extra reads and matching readback cannot prove preserved concurrent changes.
 The race remains a limit; Linear-wins resolves precedence, not atomicity.
 
-`b3cd894f3` retains both comment conflict values and retry-stable replacement
-identity without overwriting provider comments or repeating direction. `783305284`
-saves abandonment/cancellation atomically; cleanup checks execution separately.
+The conflict cut supersedes `b3cd894f3`’s manual comment choices: adopt provider
+body/author/time and retain the losing local comment, without replacement or echo.
+`783305284` saves abandonment/cancellation atomically; cleanup checks execution separately.
 Safe cancellation delivery remains pending.
 
 Common Task/Project writers, selection, rotation and refiling are committed;
@@ -66,15 +66,14 @@ selection. Wave documents, context, edits and relocation share SQLite;
 explicit ingestion preserves authored IDs and file bytes. The one v0.13.10 draft
 imports available registered definitions. Missing sources preserve identity for later
 import. Task deletion saves removal and stable pending identity atomically, retaining
-Workflow, Session, Process, PR, checkout and historical provider evidence. Its old
-provider-first writer is deleted. Local CLI/rollback/migration fixtures pass;
-stored plans remain readable beside missing or malformed provider evidence, while
-metric evaluation retains its evidence requirements. This proves neither installed
-conversion nor delivery. Historical uncertain relocation
-and provider transitions remain unresolved. LOO-412 can consume the committed source
-boundary; export, safe field/cancellation/deletion delivery, automatic Linear-wins
-adoption, pending presentation and composed reconnect remain unfinished. An ownership
-cut alone is not independently shippable connected behavior.
+Workflow, Session, Process, PR, checkout and historical provider evidence.
+Provider-first deletion is removed. Local/migration fixtures preserve IDs,
+definitions, rollback and readable saved plans beside malformed provider evidence.
+Installed conversion, delivery and historical uncertain relocations/transitions
+remain unproved. LOO-412 can consume the committed source
+boundary; export, field/cancellation/deletion delivery, pending presentation and
+composed reconnect remain unfinished. Ownership alone is not shippable connected
+behavior.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.

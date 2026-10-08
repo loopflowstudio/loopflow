@@ -92,7 +92,7 @@ impl<'a> PlanningChanges<'a> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
             "SELECT id,field,value_json,base_json,conflict_json FROM {owner}_changes c
-             WHERE {owner}_id=?1 AND acknowledged=0 AND seq=(SELECT max(seq) FROM {owner}_changes
+             WHERE {owner}_id=?1 AND acknowledged=0 AND conflict_json IS NULL AND seq=(SELECT max(seq) FROM {owner}_changes
                  WHERE {owner}_id=c.{owner}_id AND field=c.field) ORDER BY seq"
         ))?;
         let rows = query.query_map([id], |row| {
@@ -117,8 +117,9 @@ impl<'a> PlanningChanges<'a> {
         .collect()
     }
 
-    /// Reads retain the first conflict; matching values never acknowledge writes.
-    pub(super) fn retain<T: Serialize + DeserializeOwned>(
+    /// Unchanged baselines preserve saves; observed conflicts retire their delivery.
+    /// Both values remain in the receipt. Matching reads never acknowledge writes.
+    pub(super) fn reconcile<T: Serialize + DeserializeOwned>(
         self,
         conn: &Connection,
         observed: &T,
@@ -126,7 +127,11 @@ impl<'a> PlanningChanges<'a> {
         let (owner, _) = self.owner();
         let mut saved = serde_json::to_value(observed)?;
         for change in self.pending(conn)? {
-            let remote = self.normalize(conn, &change.field, saved[&change.field].clone())?;
+            // A normal inventory cannot observe deletion.
+            let Some(value) = saved.get(&change.field) else {
+                continue;
+            };
+            let remote = self.normalize(conn, &change.field, value.clone())?;
             if remote != change.value
                 && change
                     .base
@@ -137,8 +142,9 @@ impl<'a> PlanningChanges<'a> {
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
                     params![change.id, serde_json::json!({"revision": saved["revision"], "value": remote}).to_string()],
                 )?;
+            } else {
+                saved[&change.field] = change.value;
             }
-            saved[&change.field] = change.value;
         }
         Ok(serde_json::from_value(saved)?)
     }

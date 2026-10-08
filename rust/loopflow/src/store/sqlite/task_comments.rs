@@ -35,39 +35,26 @@ pub(super) fn ingest_task_comment(
             return Ok(());
         }
     }
-    let delivery: Option<(String, bool, bool)> = conn
+    let delivery: Option<(String, bool)> = conn
         .query_row(
-            "SELECT json_extract(comment_json,'$.body'),acknowledged,conflicting_comment_json IS NOT NULL FROM task_comment_deliveries WHERE comment_id=?1 AND resolution IS NULL",
+            "SELECT json_extract(comment_json,'$.body'),acknowledged FROM task_comment_deliveries
+             WHERE comment_id=?1 AND conflicting_comment_json IS NULL",
             [&comment.id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
-    if let Some((body, acknowledged, conflict)) = delivery {
+    if let Some((body, acknowledged)) = delivery {
         if body == comment.body {
-            if conflict {
-                return Ok(());
-            }
             conn.execute(
-                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL,conflicting_comment_json=NULL WHERE comment_id=?1",
+                "UPDATE task_comment_deliveries SET acknowledged=1,error=NULL WHERE comment_id=?1",
                 [&comment.id],
             )?;
+        } else if !acknowledged {
+            // Adopt Linear and retain the complete losing comment and observation.
             conn.execute(
-                "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
-                params![comment.id, comment.revision],
-            )?;
-            return Ok(());
-        }
-        if !acknowledged || conflict {
-            // Preserve both values; an ID collision is not an acknowledgement.
-            conn.execute(
-                "UPDATE task_comment_deliveries SET conflicting_comment_json=?2 WHERE comment_id=?1",
+                "UPDATE task_comment_deliveries SET conflicting_comment_json=?2,error=NULL WHERE comment_id=?1",
                 params![comment.id, serde_json::to_string(comment)?],
             )?;
-            conn.execute(
-                "UPDATE task_comments SET provider_revision=?2 WHERE id=?1",
-                params![comment.id, comment.revision],
-            )?;
-            return Ok(());
         }
     }
     let author = comment_author(comment);
@@ -152,9 +139,9 @@ impl SqliteStore {
             let mut query = tx.prepare(
                 "SELECT c.id,c.body,c.author,c.created_at,
                     d.acknowledged=0 AND d.conflicting_comment_json IS NULL,
-                    json_extract(d.conflicting_comment_json,'$.body')
+                    CASE WHEN d.conflicting_comment_json IS NOT NULL THEN json_extract(d.comment_json,'$.body') END
                  FROM task_comments c LEFT JOIN task_comment_deliveries d
-                     ON d.comment_id=c.id AND d.resolution IS NULL
+                     ON d.comment_id=c.id
                  WHERE c.task_id=?1 ORDER BY c.created_at,c.id",
             )?;
             let mut rows = query.query([task.id.as_str()])?;
@@ -233,79 +220,11 @@ impl SqliteStore {
             "SELECT c.id,c.body,c.author,c.created_at FROM task_comments c
              JOIN task_comment_deliveries d ON d.comment_id=c.id
              WHERE c.task_id=?1 AND d.acknowledged=0
-                 AND d.conflicting_comment_json IS NULL AND d.resolution IS NULL
+                 AND d.conflicting_comment_json IS NULL
              ORDER BY c.created_at,c.id",
         )?;
         let rows = query.query_map([task.as_str()], read_comment)?;
         rows.collect::<Result<_, _>>().map_err(StoreError::from)
-    }
-
-    /// Resolve the retained collision without overwriting a provider comment.
-    /// Keeping the local body publishes a new comment with its own durable ID.
-    pub fn resolve_task_comment(
-        &self,
-        task: &TaskId,
-        comment: &str,
-        keep_local: bool,
-    ) -> StoreResult<Option<String>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let saved = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
-        super::children::require_task_not_deleted(&tx, &saved)?;
-        let (original, conflict, resolved, replacement): (
-            String, Option<String>, Option<String>, Option<String>,
-        ) = tx.query_row(
-            "SELECT d.comment_json,d.conflicting_comment_json,d.resolution,d.replacement_comment_id
-             FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
-             WHERE c.id=?1 AND c.task_id=?2",
-            params![comment, task.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        ).optional()?.ok_or(StoreError::NotFound)?;
-        let choice = if keep_local { "local" } else { "linear" };
-        if let Some(resolved) = resolved {
-            if resolved != choice {
-                return Err(StoreError::InvalidAuthority(
-                    "comment conflict is already resolved; inspect its retained decision".into(),
-                ));
-            }
-            return Ok(replacement);
-        }
-        let observed: crate::pm::IssueComment =
-            serde_json::from_str(&conflict.ok_or_else(|| {
-                StoreError::InvalidData("comment has no retained conflict".into())
-            })?)?;
-        let original: TaskComment = serde_json::from_str(&original)?;
-        let replacement = if keep_local {
-            let id = uuid::Uuid::new_v4().to_string();
-            let created = time::OffsetDateTime::now_utc()
-                .format(&time::format_description::well_known::Rfc3339)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
-            let replacement = TaskComment {
-                id: id.clone(),
-                created_at: Some(created),
-                ..original
-            };
-            insert_authored_comment(&tx, task, &replacement)?;
-            // The original local comment already supplied its Steer. Republishing
-            // it must not repeat direction or start work.
-            Some(id)
-        } else {
-            None
-        };
-        tx.execute(
-            "UPDATE task_comments SET body=?2,author=?3,created_at=?4,provider_revision=?5 WHERE id=?1",
-            params![comment, observed.body, serde_json::to_string(&comment_author(&observed))?, observed.created_at, observed.revision],
-        )?;
-        tx.execute(
-            "UPDATE task_comment_deliveries SET resolution=?2,replacement_comment_id=?3 WHERE comment_id=?1",
-            params![comment, choice, replacement],
-        )?;
-        super::children::insert_task_event_in(&tx, task, &crate::work::task::TaskEventKind::Progress {
-            summary: format!("Resolved comment {comment}: retained Linear's comment{}; both conflict values remain in delivery history.",
-                replacement.as_ref().map(|id| format!(" and saved the local body as comment {id}")).unwrap_or_default()),
-        })?;
-        tx.commit()?;
-        Ok(replacement)
     }
 
     pub fn record_comment_delivery(&self, id: &str, error: Option<&str>) -> StoreResult<()> {
@@ -313,7 +232,7 @@ impl SqliteStore {
         // A late failed attempt cannot undo an acknowledgement from another reader.
         conn.execute(
             "UPDATE task_comment_deliveries SET acknowledged=?2,error=?3
-             WHERE comment_id=?1 AND acknowledged=0 AND resolution IS NULL",
+             WHERE comment_id=?1 AND acknowledged=0 AND conflicting_comment_json IS NULL",
             params![id, error.is_none(), error],
         )?;
         Ok(())
@@ -329,182 +248,107 @@ mod tests {
     use crate::work::wave::Wave;
 
     #[test]
-    fn comment_resolution_retains_both_values_and_retries_without_repeating_direction() {
-        for (keep_local, mapping) in [
-            (false, None),
-            (true, None),
-            (false, Some("linear-task")),
-            (true, Some("linear-task")),
-        ] {
-            let home = tempfile::tempdir().unwrap();
-            let database = home.path().join("store.db");
-            let store = SqliteStore::open_ephemeral(&database).unwrap();
-            let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
-            store.create_wave(&wave).unwrap();
-            let project = crate::durable::ProjectId::new();
-            let task = TaskId::new();
-            {
-                let conn = store.conn.lock().unwrap();
-                conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
-                    VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
-                conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
-                    VALUES(?1,?2,?3,?4,'Keep identity','',1,1,'keep-identity')", rusqlite::params![task.as_str(), project.as_str(), mapping,
-                        if mapping.is_some() { String::from("FIX-1") } else { format!("lf-{}", &task.as_str()[5..]) }]).unwrap();
-            }
-            let empty = store.task_comments(&task).unwrap();
-            assert_eq!(
-                empty.identifier,
-                if mapping.is_some() {
-                    String::from("FIX-1")
-                } else {
-                    format!("lf-{}", &task.as_str()[5..12])
-                }
-            );
-            assert!(empty.comments.is_empty());
-            assert!(empty.pending_sync.is_empty());
-            assert!(empty.conflicts.is_empty());
-            let original = TaskComment {
-                id: uuid::Uuid::new_v4().to_string(),
-                body: "Keep the local body".into(),
-                author: TaskCommentAuthor::Person {
-                    name: Some("Maya".into()),
-                },
-                created_at: Some("2026-10-08T01:00:00Z".into()),
-            };
-            let initial_state = store.task_state(&task).unwrap();
-            store.append_task_comment(&task, &original).unwrap();
-            let saved = store.task_comments(&task).unwrap();
-            assert_eq!(saved.comments, vec![original.clone()]);
-            assert_eq!(
-                saved.pending_sync,
-                if mapping.is_some() {
-                    vec![original.id.clone()]
-                } else {
-                    Vec::new()
-                }
-            );
-            let steers = store.task_steers(&task).unwrap();
-            let observed = crate::pm::IssueComment {
-                id: original.id.clone(),
-                body: "Keep the provider body".into(),
-                author_id: Some("person-2".into()),
-                author_name: Some("Quinn".into()),
-                created_at: Some("2026-10-08T01:01:00Z".into()),
-                revision: Some("2026-10-08T01:02:00Z".into()),
-            };
-            {
-                let conn = store.conn.lock().unwrap();
-                super::ingest_task_comment(&conn, &task, &observed).unwrap();
-                // A later echo cannot implicitly resolve an observed collision.
-                let echo = crate::pm::IssueComment {
-                    body: original.body.clone(),
-                    revision: Some("2026-10-08T01:03:00Z".into()),
-                    ..observed.clone()
-                };
-                super::ingest_task_comment(&conn, &task, &echo).unwrap();
-                conn.execute_batch(
-                    "CREATE TRIGGER fail_resolution BEFORE INSERT ON task_events
-                    BEGIN SELECT RAISE(ABORT,'fixture rollback'); END;",
-                )
-                .unwrap();
-            }
-            assert!(store
-                .resolve_task_comment(&task, &original.id, keep_local)
-                .is_err());
-            let conflicted = store.task_comments(&task).unwrap();
-            assert_eq!(conflicted.comments, vec![original.clone()]);
-            assert_eq!(conflicted.conflicts[&original.id], observed.body);
-            assert!(conflicted.pending_sync.is_empty());
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute_batch("DROP TRIGGER fail_resolution")
-                .unwrap();
-            assert!(store
-                .resolve_task_comment(&TaskId::new(), &original.id, keep_local)
-                .is_err());
-            let replacement = store
-                .resolve_task_comment(&task, &original.id, keep_local)
-                .unwrap();
-            assert_eq!(replacement.is_some(), keep_local);
-            let resolved = store.task_comments(&task).unwrap();
-            assert!(resolved.conflicts.is_empty());
-            assert_eq!(
-                resolved.pending_sync,
-                replacement
-                    .iter()
-                    .filter(|_| mapping.is_some())
-                    .cloned()
-                    .collect::<Vec<_>>()
-            );
-            let comments = resolved.comments;
-            let provider = comments.iter().find(|c| c.id == original.id).unwrap();
-            assert_eq!(provider.body, observed.body);
-            assert_eq!(
-                provider.author,
-                TaskCommentAuthor::Person {
-                    name: Some("Quinn".into())
-                }
-            );
-            assert_eq!(provider.created_at, observed.created_at);
-            let pending = store.pending_task_comments(&task).unwrap();
-            if let Some(id) = &replacement {
-                assert_eq!(pending.len(), 1);
-                assert_eq!(&pending[0].id, id);
-                assert_ne!(id, &original.id);
-                assert_eq!(pending[0].body, original.body);
-                assert_eq!(pending[0].author, original.author);
-            } else {
-                assert!(pending.is_empty());
-            }
-            assert_eq!(store.task_steers(&task).unwrap(), steers);
-            let retained: (String, String) = store.conn.lock().unwrap().query_row(
-                "SELECT comment_json,conflicting_comment_json FROM task_comment_deliveries WHERE comment_id=?1",
-                [&original.id], |row| Ok((row.get(0)?, row.get(1)?)),
-            ).unwrap();
-            assert_eq!(
-                serde_json::from_str::<TaskComment>(&retained.0).unwrap(),
-                original
-            );
-            assert_eq!(
-                serde_json::from_str::<crate::pm::IssueComment>(&retained.1).unwrap(),
-                observed
-            );
-            drop(store);
-            let store = SqliteStore::open_ephemeral(&database).unwrap();
-            assert_eq!(
-                store
-                    .resolve_task_comment(&task, &original.id, keep_local)
-                    .unwrap(),
-                replacement
-            );
-            assert!(store
-                .resolve_task_comment(&task, &original.id, !keep_local)
-                .is_err());
-            store.record_comment_delivery(&original.id, None).unwrap();
-            assert_eq!(store.pending_task_comments(&task).unwrap(), pending);
-            assert_eq!(store.task_comments(&task).unwrap().comments, comments);
-            assert_eq!(store.task_steers(&task).unwrap(), steers);
-            let amended = crate::pm::IssueComment {
-                body: "Later provider correction".into(),
-                revision: Some("2026-10-08T01:04:00Z".into()),
-                ..observed
-            };
-            super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended).unwrap();
-            assert!(store.task_comments(&task).unwrap().conflicts.is_empty());
-            assert_eq!(
-                store
-                    .task_comments(&task)
-                    .unwrap()
-                    .comments
-                    .iter()
-                    .find(|c| c.id == original.id)
-                    .unwrap()
-                    .body,
-                amended.body
-            );
-            assert_eq!(store.task_state(&task).unwrap(), initial_state);
+    fn linear_comment_adoption_preserves_local_history_and_execution() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let wave = Wave::new(WaveId::new(), "planning".into(), "/repo".into());
+        store.create_wave(&wave).unwrap();
+        let project = crate::durable::ProjectId::new();
+        let task = TaskId::new();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,created_at,updated_at,project_slug,project_name,project_prompt_context)
+                VALUES(?1,?2,1,1,'planning','Planning','')", rusqlite::params![project.as_str(), wave.id()]).unwrap();
+            conn.execute("INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+                VALUES(?1,?2,'linear-task','FIX-1','Keep identity','',1,1,'keep-identity')", rusqlite::params![task.as_str(), project.as_str()]).unwrap();
         }
+        let original = TaskComment {
+            id: uuid::Uuid::new_v4().to_string(),
+            body: "Keep the local body".into(),
+            author: TaskCommentAuthor::Person {
+                name: Some("Maya".into()),
+            },
+            created_at: Some("2026-10-08T01:00:00Z".into()),
+        };
+        let initial_state = store.task_state(&task).unwrap();
+        store.append_task_comment(&task, &original).unwrap();
+        let steers = store.task_steers(&task).unwrap();
+        let observed = crate::pm::IssueComment {
+            id: original.id.clone(),
+            body: "Provider body".into(),
+            author_id: Some("person-2".into()),
+            author_name: Some("Quinn".into()),
+            created_at: Some("2026-10-08T01:01:00Z".into()),
+            revision: Some("2026-10-08T01:02:00Z".into()),
+        };
+        {
+            let mut conn = store.conn.lock().unwrap();
+            let tx = conn.transaction().unwrap();
+            super::ingest_task_comment(&tx, &task, &observed).unwrap();
+            tx.rollback().unwrap();
+        }
+        assert_eq!(
+            store.task_comments(&task).unwrap().comments,
+            vec![original.clone()]
+        );
+        assert_eq!(
+            store.pending_task_comments(&task).unwrap(),
+            vec![original.clone()]
+        );
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &observed).unwrap();
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        store.record_comment_delivery(&original.id, None).unwrap();
+        store
+            .record_comment_delivery(&original.id, Some("late failure"))
+            .unwrap();
+        let thread = store.task_comments(&task).unwrap();
+        assert_eq!(thread.comments.len(), 1);
+        assert_eq!(thread.comments[0].body, observed.body);
+        assert_eq!(
+            thread.comments[0].author,
+            TaskCommentAuthor::Person {
+                name: Some("Quinn".into())
+            }
+        );
+        assert_eq!(thread.conflicts[&original.id], original.body);
+        assert!(thread.pending_sync.is_empty());
+        assert!(store.pending_task_comments(&task).unwrap().is_empty());
+        let receipt: (String, String, bool) = store.conn.lock().unwrap().query_row(
+            "SELECT comment_json,conflicting_comment_json,acknowledged FROM task_comment_deliveries WHERE comment_id=?1",
+            [&original.id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            serde_json::from_str::<TaskComment>(&receipt.0).unwrap(),
+            original
+        );
+        assert_eq!(
+            serde_json::from_str::<crate::pm::IssueComment>(&receipt.1).unwrap(),
+            observed
+        );
+        assert!(!receipt.2);
+        let stale = crate::pm::IssueComment {
+            body: original.body.clone(),
+            revision: Some("2026-10-08T01:00:00Z".into()),
+            ..observed.clone()
+        };
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &stale).unwrap();
+        assert_eq!(
+            store.task_comments(&task).unwrap().comments,
+            thread.comments
+        );
+        let amended = crate::pm::IssueComment {
+            body: "Later provider correction".into(),
+            revision: Some("2026-10-08T01:04:00Z".into()),
+            ..observed
+        };
+        super::ingest_task_comment(&store.conn.lock().unwrap(), &task, &amended).unwrap();
+        assert_eq!(
+            store.task_comments(&task).unwrap().comments[0].body,
+            amended.body
+        );
+        assert_eq!(store.task_steers(&task).unwrap(), steers);
+        assert_eq!(store.task_state(&task).unwrap(), initial_state);
     }
 }

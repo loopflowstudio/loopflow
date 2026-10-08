@@ -12,10 +12,20 @@ pub(crate) struct TaskStateDelivery {
     pub id: String,
     pub task_id: TaskId,
     pub target: String,
-    pub base_revision: Option<String>,
-    pub base_state: Option<String>,
     pub attempted: bool,
-    pub conflict: Option<String>,
+    base_revision: Option<String>,
+    base_state: Option<String>,
+}
+
+fn read_delivery(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskStateDelivery> {
+    Ok(TaskStateDelivery {
+        id: row.get(0)?,
+        task_id: TaskId::from_raw(row.get::<_, String>(1)?),
+        target: row.get(2)?,
+        attempted: row.get(3)?,
+        base_revision: row.get(4)?,
+        base_state: row.get(5)?,
+    })
 }
 
 pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreResult<()> {
@@ -42,6 +52,74 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
     Ok(())
 }
 
+/// Acquisition and delivery use the same transaction rule. No execution rows change.
+pub(super) fn reconcile_in(
+    conn: &Connection,
+    task: &TaskId,
+    observed: &crate::pm::PmItem,
+    expected: Option<&str>,
+) -> StoreResult<bool> {
+    let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
+        "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
+         FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
+         WHERE d.task_id=?1 AND d.settled=0
+         AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1)",
+        [task.as_str()],
+        |row| Ok((read_delivery(row)?, row.get(6)?)),
+    ).optional()?;
+    let Some((delivery, revision)) = pending else {
+        return Ok(false);
+    };
+    let TaskStateDelivery {
+        id,
+        target,
+        base_state,
+        base_revision,
+        attempted,
+        ..
+    } = delivery;
+    if expected.is_some_and(|expected| expected != id)
+        || super::planning::revision_nanos(observed.revision.as_deref())?
+            < super::planning::revision_nanos(revision.as_deref())?
+    {
+        return Ok(false);
+    }
+    let Some(state) = observed.state.as_deref() else {
+        return Ok(true);
+    };
+    if state == target {
+        conn.execute(
+            "UPDATE task_state_deliveries SET settled=1,error=NULL WHERE id=?1",
+            [&id],
+        )?;
+        return Ok(false);
+    }
+    // An unrelated provider revision does not conflict with an unattempted save.
+    // After an uncertain write, a changed revision may represent completion/reopening.
+    if observed.state == base_state && !(attempted && observed.revision != base_revision) {
+        return Ok(true);
+    }
+    conn.execute(
+        "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",
+        params![id, serde_json::to_string(observed)?],
+    )?;
+    conn.execute(
+        "UPDATE tasks SET planning_state=?2,planning_completed=?3,planning_completed_at=?4,
+         planning_provider_revision=?5,planning_revision=planning_revision+1 WHERE id=?1",
+        params![
+            task.as_str(),
+            observed.state,
+            observed.completed,
+            observed.completed_at,
+            observed.revision
+        ],
+    )?;
+    super::children::insert_task_event_in(conn, task, &crate::work::task::TaskEventKind::Progress {
+        summary: format!("Adopted Linear state {state}; local intention {target} remains in delivery {id}. Local Workflow unchanged."),
+    })?;
+    Ok(false)
+}
+
 impl SqliteStore {
     pub(crate) fn pending_planning_tasks(
         &self,
@@ -54,7 +132,7 @@ impl SqliteStore {
                 AND d.conflict_json IS NULL
                 AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)) OR EXISTS(
                 SELECT 1 FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
-                WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_comment_json IS NULL AND d.resolution IS NULL))")?;
+                WHERE c.task_id=t.id AND d.acknowledged=0 AND d.conflicting_comment_json IS NULL))")?;
         let ids = query
             .query_map([repo], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -65,76 +143,39 @@ impl SqliteStore {
             .collect()
     }
 
-    pub(crate) fn conflict_task_state(
+    /// Reconcile a delivery's read; true means its saved intention remains pending.
+    pub(crate) fn observe_task_state(
         &self,
         delivery: &TaskStateDelivery,
         observed: &crate::pm::PmItem,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let error = format!("State conflict: saved locally as {}; Linear reports {} at revision {}. Use `lf task sync {} --resolve local` or `--resolve linear`",
-            delivery.target, observed.state.as_deref().unwrap_or("unknown"), observed.revision.as_deref().unwrap_or("unknown"), delivery.task_id);
-        conn.execute(
-            "UPDATE task_state_deliveries SET conflict_json=?2,error=?3
-             WHERE id=?1 AND settled=0 AND conflict_json IS NULL",
-            params![
-                delivery.id,
-                serde_json::json!({"state":observed.state,"revision":observed.revision})
-                    .to_string(),
-                error
-            ],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn resolve_task_state(
-        &self,
-        delivery: &TaskStateDelivery,
-        observed: &crate::pm::PmItem,
-        keep_local: bool,
-    ) -> StoreResult<()> {
+    ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let current: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE id=?1
-            AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?2))",
-            params![delivery.id, delivery.task_id.as_str()],
-            |row| row.get(0),
-        )?;
-        if !current {
-            return Err(StoreError::InvalidAuthority(
-                "Task decision changed; inspect its current synchronization".into(),
-            ));
+        // Retain the provider baseline for the next local save. A response for an
+        // older delivery cannot ingest over the current decision.
+        let repo: Option<String> = tx
+            .query_row(
+                "SELECT w.repo FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
+             JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+             WHERE d.id=?1 AND d.task_id=?2 AND d.settled=0 AND t.external_issue_id=?3
+             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
+                params![delivery.id, delivery.task_id.as_str(), observed.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(repo) = repo else { return Ok(false) };
+        if !super::planning::put_item(
+            &tx,
+            &repo,
+            "linear",
+            super::super::rows::now_unix(),
+            observed,
+        )? {
+            return Ok(false);
         }
-        tx.execute(
-            "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state,settled)
-                SELECT ?2,task_id,move_seq,target,?3,?4,?5 FROM task_state_deliveries WHERE id=?1",
-            params![
-                delivery.id,
-                uuid::Uuid::new_v4().to_string(),
-                observed.revision,
-                observed.state,
-                !keep_local,
-            ],
-        )?;
-        if !keep_local {
-            tx.execute(
-                "UPDATE tasks SET planning_state=?2,planning_completed=?3,planning_completed_at=?4,
-                 planning_revision=planning_revision+1 WHERE id=?1",
-                params![
-                    delivery.task_id.as_str(),
-                    observed.state,
-                    observed.completed,
-                    observed.completed_at
-                ],
-            )?;
-        }
-        super::children::insert_task_event_in(&tx, &delivery.task_id, &crate::work::task::TaskEventKind::Progress {
-            summary: format!("Resolved planning state delivery {}: retained {}. Local Workflow unchanged. Linear state: {} at revision {}",
-                delivery.id, if keep_local { "local decision for synchronization" } else { "Linear state" },
-                observed.state.as_deref().unwrap_or("unknown"), observed.revision.as_deref().unwrap_or("unknown")),
-        })?;
+        let pending = reconcile_in(&tx, &delivery.task_id, observed, Some(&delivery.id))?;
         tx.commit()?;
-        Ok(())
+        Ok(pending)
     }
 
     pub(crate) fn pending_task_state(
@@ -143,22 +184,12 @@ impl SqliteStore {
     ) -> StoreResult<Option<TaskStateDelivery>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT d.id,d.target,d.base_revision,d.base_state,d.attempted,d.conflict_json
+            "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state
              FROM task_state_deliveries d JOIN tasks t ON t.id=d.task_id
              WHERE d.task_id=?1 AND d.settled=0 AND t.external_issue_id IS NOT NULL
              AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)",
             [task.as_str()],
-            |row| {
-                Ok(TaskStateDelivery {
-                    id: row.get(0)?,
-                    task_id: task.clone(),
-                    target: row.get(1)?,
-                    base_revision: row.get(2)?,
-                    base_state: row.get(3)?,
-                    attempted: row.get(4)?,
-                    conflict: row.get(5)?,
-                })
-            },
+            read_delivery,
         )
         .optional()
         .map_err(StoreError::from)

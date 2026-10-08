@@ -1003,7 +1003,7 @@ Machine command changes also require `cargo test -p loopflow --test global_comma
 to preserve repository-independent commands and explicit Machine isolation.
 When changing remote account-selection docs, run `cd website && uv run python
 dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
-guide must retain the current invocation, target catalog, and provenance contract.
+guide must retain the current invocation, laptop account selection, and target-resident login contract.
 
 For gate runs launched inside managed execution, clear inherited `LF_*` authority and
 pin `LF_BIN` to the checkout's compiled `target/debug/lf` before invoking the test

@@ -5,7 +5,9 @@ on an added machine, publish the stacked PR, then stop for review. No landing,
 real login, real credential read or real-account provider contact is authorized.
 LOO-411 / PR #1489 owns the parent machine records. Its later shared connection,
 remote-install offer, failure hints and global selector are integrated from parent
-`72f06221183c771ddd43eaabd8f968417a82c571` (October 7 sync).
+`72f06221183c771ddd43eaabd8f968417a82c571` (October 7 sync). Parent CI follow-up
+`d3c4dc7bc` is integrated through `dc3e9136e`; its website assertions for the
+retired forwarded catalog/provenance are replaced with resident-login expectations.
 
 The full remote-work design and dated decisions remain at
 `8f270beaf3cf752756bb0aaf254cf9a37dbc368d:scratch/work-on-another-machine-name.md`.
@@ -48,7 +50,7 @@ never be interpreted as absent and replaced. Once the file exists, later SSH rea
 avoid Keychain. New credential-free machines must be able to create their file
 without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
 
-## Delete — do not maintain
+## Removed mechanisms
 
 - SSH's ambient provider/GitHub/Linear token exports and Doppler `--secret` export.
 - The detached-form string check and account broker/socket forwarding.
@@ -61,15 +63,16 @@ without an unlocked Keychain. Existing encrypted tokens must remain decryptable.
   retain ordinary Session credential and account-selection isolation.
 - The `lf ssh` command, through LOO-411's global `--machine` selector cutover.
 
-Preserve managed account selection, local/shared account behavior, native identity,
-provider-owned refresh, historical captures, current machine records and routes.
+Managed account selection, local/shared behavior, native identity, provider-owned
+refresh, historical captures, machine records and routes remain.
 
 ## Remaining work
 
 - Publish the stacked PR and stop for Jack Heart's review. No landing.
 - Gate/CI owns the full affected suite. The focused source checks cover account
   routing, native receipt/registration, byte preservation, command discovery and
-  token-key handling. No installed store or real credential was used.
+  token-key handling. Child/output-handle cleanup remains unresolved. No installed
+  store or real credential was used.
 - Hand verification, first: a second login for the same account leaves the first
   signed in. Then independent Claude/Codex refresh chains; independent Linear
   grants refreshed on different days; copied gh token usable on both machines;
@@ -104,4 +107,4 @@ and `7a3f263cb:scratch/work-on-another-machine-name.md`. The after-skill account
 case failed before the argument-reordering repair and passed afterward. These
 fixtures establish no real refresh-chain or installed acceptance.
 
-Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test auth_tests -E 'test(provider_account::account_first_tests) | test(provider_account::inspection_tests) | test(provider_account::selection::) | test(lf::commands::profile::tests) | test(status_refreshes_by_default_and_cached_preserves_evidence)' --no-fail-fast` passed (29/29; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); nextest reported an open-output-handle leak for the pure route JSON fixture, so cleanup remains unproved; full affected verification and leak investigation belong to gate/CI.
+Checks: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and network-isolated `cargo nextest run -p loopflow --lib --test auth_tests -E 'test(provider_account::account_first_tests) | test(provider_account::inspection_tests) | test(provider_account::selection::) | test(lf::commands::profile::tests) | test(status_refreshes_by_default_and_cached_preserves_evidence)' --no-fail-fast` passed (29/29; inherited LF_/LOOPFLOW_ cleared, LF_BIN pinned); nextest reported an open-output-handle leak for the pure route JSON fixture, so cleanup remains unproved; full affected verification and leak investigation belong to gate/CI. Reconciliation: `cd website && uv run python dev.py test -k test_docs_subscriptions_page_owns_account_selection` passed (1/1, headless and network-isolated); `git diff --check` passed.

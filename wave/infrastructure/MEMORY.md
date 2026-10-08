@@ -32,13 +32,10 @@ first-install offer and recovery hints. Existing lf is never replaced; status,
 batch and JSON never install. Personal masters stay separate; agent forwarding
 has its own socket scope. Jack selected global `--machine <label>`, removing
 `lf ssh` without an alias; LOO-411 supplies the selector cutover. Loopback proofs
-establish reuse, not installation or account continuity. LOO-413 deletes the
-account broker, lent routes and their environment/fixture machinery together.
+establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
 selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
-alias or per-call repository override remains. LOO-413 connects account selections
-through resident logins and removes arbitrary secret forwarding. Focused source
-passes do not establish child cleanup; prior output-handle warnings remain evidence.
+alias or per-call repository override remains.
 Republish for review and stop; no landing or later-slice authority.
 
 ## Resident machine logins (LOO-413, 2026-10-07)
@@ -48,9 +45,13 @@ and landing. Transfer over stdin only to added machines. Preserve received login
 across registration failure; remote preferences cannot relax selected identity.
 Retain the encryption key atomically in a private file. An unreadable Keychain
 permits a new key only without existing encrypted tokens.
-LOO-411's `72f062211` selector is integrated. Reuse local argument reordering
+LOO-411's selector and `d3c4dc7bc` CI fixes are integrated. Reuse local argument reordering
 before remote account selection: flags after a skill otherwise bypass the
 restriction. Preserve `--` prompt literals and target-owned command resolution.
+Broker, lent routes, secret forwarding and route-source metadata are deleted.
+The parent's website assertions still required the retired catalog/provenance;
+the resident-login guide owns their replacement. Check inherited tests when
+deleting a mechanism. Focused passes retain an unresolved output-handle leak.
 Independent refresh chains, one-approval login, rebooted Mac
 access and installed acceptance remain unproved; fixtures cannot establish them.
 

@@ -75,9 +75,10 @@ def test_docs_subscriptions_page_owns_account_selection(
     text = " ".join(content.inner_text().split())
     assert "--only-account" in text
     assert "repository account route" in text
-    assert "lf --machine my-company --account personal@ implement" in text
-    assert "resolve against the target's combined local and forwarded catalog" in text
-    assert "local or forwarded provenance" in text
+    assert "lf --machine mini --account codex=work@ implement" in text
+    assert "Invocation selectors resolve against the laptop's managed logins" in text
+    assert "cannot fall back to a different login" in text
+    assert "Route candidates belong to the executing machine" in text
 
 
 def test_docs_nonexistent_redirects(page: Page, base_url: str):

@@ -568,10 +568,12 @@ a disposable copy and leaves the installed Machine unchanged.
 
 ### External systems
 
-Linear owns Initiative/Project/Issue planning shared with the team. GitHub owns
-PR heads, checks, and merge. Git owns commits and worktrees. Model providers own
-their session and usage semantics. Local rows cache or record observations from
-those systems; they never silently become substitute authority.
+Task and Project rows own saved planning; Linear mappings link optional provider
+observations and pending effects. LOO-406's Wave-definition and deletion cutover
+remains unfinished, as described above. Local settlement proves no provider delivery;
+inbound planning grants no Workflow movement or Process control. GitHub owns PR
+heads, checks and merge. Git owns commits and worktrees. Model providers own their
+session and usage semantics; local observations do not replace those authorities.
 
 ## Processes and public APIs
 

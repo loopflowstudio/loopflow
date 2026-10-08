@@ -63,13 +63,12 @@ Active Workflow proves started work without inventing Started. Shared identity r
 retain one row per Task and matching abbreviations. Detailed cuts and proof limits:
 `1815198f5:wave/infrastructure/MEMORY.md`, this heading.
 
-Rotation/refiling save membership and receipts together. Rotation's
-Wave/checkout locks retain started work and backlog; refiling locks both Waves and
-preserves recorded-work ownership. Retry retains input, IDs and edits.
-Receipts survive later mappings; inbound observations cross a pending refile's Wave
-boundary, retaining both conflict values while accepting unrelated edits. Uncertain
-prior transitions remain unresolved. Paired CLI proofs establish local saves,
-not provider delivery, installation or composed reconnect acceptance.
+`4be12b5c8`/`fa35cfd88`: rotation/refiling commit membership and receipts together.
+Rotation locks retain started work and backlog; refiling locks both Waves and
+preserves recorded-work ownership.
+Retry retains input, IDs, edits and later mappings. Inbound reads cross pending
+refiles, retaining both conflict values and unrelated edits. Earlier uncertain
+transitions remain unresolved. CLI fixtures prove local saves, not delivery, installation or composed reconnect.
 
 Wave schema/provisioning/definitions and deletion still block LOO-412's coherent boundary. Export, safe field delivery/resolution,
 pending presentation and composed reconnect remain unfinished. Project updates

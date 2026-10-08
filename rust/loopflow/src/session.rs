@@ -76,7 +76,7 @@ pub struct AgentSession {
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     /// The Flow whose step captured the current input; derived, never stored.
-    pub flow_id: Option<String>,
+    pub flow_process_lfid: Option<String>,
     pub work_source: Option<WorkSource>,
     /// Time of a prospective bind; absent for admission or unknown historical timing.
     pub bound_at: Option<i64>,
@@ -197,6 +197,8 @@ pub(crate) struct SessionSummary {
     pub driver_outcome: Option<String>,
     /// Waiting on a person, as of the read's clock.
     pub waiting: bool,
+    pub program_status: Option<crate::program_status::Records>,
+    pub provider_generation: i64,
     pub task_terminal: bool,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
@@ -211,14 +213,14 @@ pub(crate) struct SessionSummary {
     pub interactive: bool,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
-    pub flow_id: Option<String>,
+    pub flow_process_lfid: Option<String>,
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,
-    pub flow: Option<FlowSummary>,
+    pub flow: Option<FlowProcessSummary>,
     /// Whether this Session's step is the last its Flow launched.
     pub flow_step_latest: bool,
     pub independent: bool,
@@ -228,11 +230,11 @@ pub(crate) struct SessionSummary {
 
 /// A Flow as its driver Process records it; Current says nothing about a live process.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FlowSummary {
+pub struct FlowProcessSummary {
     /// The driver Process.
     pub id: String,
     pub name: String,
-    pub state: FlowSummaryState,
+    pub state: FlowProcessSummaryState,
     pub task_id: Option<TaskId>,
     pub wave_id: Option<WaveId>,
     /// When its latest step started, or its driver exited.
@@ -241,7 +243,7 @@ pub struct FlowSummary {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FlowSummaryState {
+pub enum FlowProcessSummaryState {
     /// The driver has no recorded exit.
     Current,
     Completed,
@@ -249,7 +251,7 @@ pub enum FlowSummaryState {
     Stopped,
 }
 
-impl FlowSummaryState {
+impl FlowProcessSummaryState {
     /// What a driver Process's recorded outcome and exit time say of its Flow.
     pub(crate) fn of_driver(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
         match (outcome, completed_at) {

@@ -821,7 +821,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1049,7 +1049,7 @@ mod durable_store_tests {
     }
 
     fn conversation(
-        flow_id: Option<String>,
+        flow_process_lfid: Option<String>,
         task_id: Option<TaskId>,
         wave_id: Option<WaveId>,
     ) -> crate::session::AgentSession {
@@ -1067,7 +1067,7 @@ mod durable_store_tests {
             iterations: None,
             task_id,
             wave_id,
-            flow_id,
+            flow_process_lfid,
             work_source: Some(WorkSource::Declared),
             bound_at: None,
             interactive: false,
@@ -1690,7 +1690,7 @@ mod durable_store_tests {
                 caller_artifact_key: None,
                 task_id: None,
                 wave_id: wave,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 id: id.to_string(),

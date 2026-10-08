@@ -774,7 +774,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
                 captured: None,
                 task_id: None,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 id: session_id.into(),

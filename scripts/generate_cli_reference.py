@@ -51,7 +51,7 @@ def main() -> None:
         "",
         "```bash",
         "lf task run EXP-12 pursue",
-        "lf flow show FLOW_ID --sessions --json",
+        "lf flow show FLOW_ID --processes --json",
         "lf task interrupt EXP-12",
         "```",
         "",

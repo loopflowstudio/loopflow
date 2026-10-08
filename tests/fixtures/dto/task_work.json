@@ -4,27 +4,15 @@
       "id": "manual",
       "title": "Checkout conversation",
       "interactive": false,
-      "flow_id": null,
-      "completed_at": null
+      "completed_at": null,
+      "flow_process_lfid": null
     },
     {
       "id": "review",
       "title": "Review",
       "interactive": true,
-      "flow_id": "11111111-1111-4111-8111-111111111111",
-      "completed_at": null
-    }
-  ],
-  "flows": [
-    {
-      "id": "11111111-1111-4111-8111-111111111111",
-      "name": "pursue",
-      "state": "current",
-      "task_id": null,
-      "wave_id": null,
-      "updated_at": 1,
-      "repo": "/repo",
-      "ended_at": null
+      "completed_at": null,
+      "flow_process_lfid": "11111111-1111-4111-8111-111111111111"
     }
   ],
   "processes": [
@@ -175,5 +163,17 @@
         "at": 1700000900
       }
     ]
-  }
+  },
+  "flow_processes": [
+    {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "name": "pursue",
+      "state": "current",
+      "task_id": null,
+      "wave_id": null,
+      "updated_at": 1,
+      "repo": "/repo",
+      "ended_at": null
+    }
+  ]
 }

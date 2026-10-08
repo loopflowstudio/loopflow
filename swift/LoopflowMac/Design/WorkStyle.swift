@@ -101,7 +101,7 @@ enum WorkTone {
     }
 }
 
-extension TaskFlowExecution {
+extension TaskExecutionState {
     /// Shared by Flow status, plan chips and navigation dots. Quiet states have no chip.
     var presentation: (label: String?, tone: WorkTone) {
         switch self {

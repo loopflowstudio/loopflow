@@ -15,7 +15,7 @@ private enum SessionFixtureKind: String {
             ? #"{"kind":"task","id":"task_00000000000000000000000000000001"}"#
             : "null"
         let membership = self == .flow
-            ? #"{"kind":"step","flow":"task-design","invocation_id":"fixture","step":"review-design","node":1,"iterations":[[]],"occurrence":"current"}"#
+            ? #"{"kind":"step","flow":"task-design","flow_process_lfid":"fixture","step":"review-design","node":1,"iterations":[[]],"occurrence":"current"}"#
             : #"{"kind":"independent"}"#
         let actions: String
         switch self {
@@ -33,7 +33,7 @@ private enum SessionFixtureKind: String {
           "ready_summary": \(summary),
           "work_path": null,
           "actions": \(actions),
-          "title_source": "generated", "flow_membership": \(membership), "task_ids": [], "terminal_ids": [],
+          "title_source": "generated", "flow_membership": \(membership), "task_ids": [], "provider_generation": 1, "terminal_ids": [],
           "open_argv": ["/usr/bin/tail", "-f", "/dev/null"]
         }
         """

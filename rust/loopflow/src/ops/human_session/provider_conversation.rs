@@ -236,7 +236,7 @@ pub(crate) async fn admit(store: &SharedStore, id: &str) -> Result<Option<AgentS
             iterations: None,
             task_id: None,
             wave_id: None,
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: None,
             bound_at: None,
             interactive: true,

@@ -172,9 +172,11 @@ pub struct SessionPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub primary_scope: Option<String>,
-    /// Waiting on a person, read from its provider's stream; absent when it is
+    /// Waiting on a person, judged from current stream or terminal reports; absent when it is
     /// working or nothing current says.
     pub attention: Option<SessionAttention>,
+    pub program_status: Option<crate::program_status::Records>,
+    pub provider_generation: i64,
     /// Its Task names it as the Task's primary conversation.
     pub task_primary: bool,
     pub task_ids: Vec<crate::durable::TaskId>,
@@ -229,7 +231,7 @@ fn session_attention(session: &crate::session::SessionSummary) -> Option<Session
 pub enum SessionFlowMembership {
     Step {
         flow: String,
-        invocation_id: String,
+        flow_process_lfid: String,
         step: String,
         /// Exact graph occurrence, unavailable for older capture manifests.
         node: Option<u32>,
@@ -377,12 +379,12 @@ pub(crate) async fn list(
 /// Where a Session's step stands in its Flow: the last one a still-open driver
 /// launched, an earlier one, or part of a Flow whose driver has exited.
 fn flow_occurrence(
-    state: crate::session::FlowSummaryState,
+    state: crate::session::FlowProcessSummaryState,
     latest_step: bool,
 ) -> SessionFlowOccurrence {
     match (state, latest_step) {
-        (crate::session::FlowSummaryState::Current, true) => SessionFlowOccurrence::Current,
-        (crate::session::FlowSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
+        (crate::session::FlowProcessSummaryState::Current, true) => SessionFlowOccurrence::Current,
+        (crate::session::FlowProcessSummaryState::Current, false) => SessionFlowOccurrence::Earlier,
         _ => SessionFlowOccurrence::Past,
     }
 }
@@ -408,14 +410,14 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             },
         }
     });
-    let flow_membership = match (&session.flow_id, &session.flow) {
+    let flow_membership = match (&session.flow_process_lfid, &session.flow) {
         (None, _) if session.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            invocation_id: id.clone(),
+            flow_process_lfid: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -467,6 +469,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
     SessionRecord {
         primary_scope: session.primary_scope.clone(),
         attention: session_attention(session),
+        program_status: session.program_status.clone(),
+        provider_generation: session.provider_generation,
         task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
@@ -904,14 +908,14 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata, !clients.is_empty());
     let actions = session_actions(state);
-    let flow_membership = match (&session.flow_id, &metadata.flow) {
+    let flow_membership = match (&session.flow_process_lfid, &metadata.flow) {
         (None, _) if metadata.independent => SessionFlowMembership::Independent,
         (None, _) => SessionFlowMembership::Unknown {
             reason: "Flow membership was not recorded".into(),
         },
         (Some(id), Some(flow)) => SessionFlowMembership::Step {
             flow: flow.name.clone(),
-            invocation_id: id.clone(),
+            flow_process_lfid: id.clone(),
             step: session.skill.clone().unwrap_or_default(),
             node: session.node,
             iterations: session.iterations.clone(),
@@ -924,6 +928,8 @@ async fn surface(store: &SharedStore, session: &AgentSession) -> Result<SessionR
     let mut reading = SessionRecord {
         primary_scope: metadata.primary_scope.clone(),
         attention: session_attention(&metadata),
+        program_status: metadata.program_status.clone(),
+        provider_generation: metadata.provider_generation,
         task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
@@ -1304,6 +1310,143 @@ fn active_session_token() -> Result<HumanSessionToken> {
     serde_json::from_str(&raw).context("active session token is invalid")
 }
 
+/// The observer owns only this input stream, never the Session or its provider.
+/// A replacement observer fences the previous stream even on the same provider.
+pub(crate) async fn observe_program_status(
+    store: &SharedStore,
+    id: &str,
+    terminal: &str,
+    generation: i64,
+) -> Result<()> {
+    let session = find_session(store, id, false)
+        .await?
+        .context("Session not found")?;
+    let current = store
+        .sqlite
+        .session_summary(
+            &session.id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?
+        .context("Session disappeared")?;
+    anyhow::ensure!(
+        current.provider_generation == generation,
+        "Session provider changed"
+    );
+    // Re-read capture after the generation witness. A replacement before or
+    // during client inspection then fails the transactional generation check.
+    let session = store
+        .sqlite
+        .session(&session.id)?
+        .context("Session disappeared")?;
+    let native = NativeSession::of(&session)?;
+    let clients = native
+        .clients()?
+        .into_iter()
+        .filter(|client| client.terminal_id.as_deref() == Some(terminal))
+        .count();
+    anyhow::ensure!(clients == 1, "terminal has no unique active Session client");
+    let stream = uuid::Uuid::new_v4().to_string();
+    anyhow::ensure!(
+        store
+            .sqlite
+            .begin_program_status(&session.id, generation, &stream)?,
+        "Session provider changed"
+    );
+    let mut last = None;
+    let mut sequence = 0;
+    let mut pending = None;
+    let mut next_write = std::time::Instant::now();
+    let mut bytes = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = read_observation_chunk(&mut chunk)?;
+        if count == Some(0) {
+            anyhow::ensure!(bytes.is_empty(), "incomplete Program Status snapshot");
+            break;
+        }
+        for byte in &chunk[..count.unwrap_or(0)] {
+            if *byte == b'\n' {
+                let records: crate::program_status::Records = serde_json::from_slice(&bytes)?;
+                bytes.clear();
+                anyhow::ensure!(
+                    records.seen && records.validate(),
+                    "invalid Program Status snapshot"
+                );
+                pending = Some(records);
+            } else {
+                anyhow::ensure!(
+                    bytes.len() < 512 * 1024,
+                    "Program Status snapshot exceeds limit"
+                );
+                bytes.push(*byte);
+            }
+        }
+        if std::time::Instant::now() >= next_write {
+            if let Some(records) = pending.take().filter(|r| last.as_ref() != Some(r)) {
+                sequence += 1;
+                anyhow::ensure!(
+                    store.sqlite.record_program_status(
+                        &session.id,
+                        generation,
+                        &stream,
+                        sequence,
+                        &records
+                    )?,
+                    "Program Status stream replaced"
+                );
+                last = Some(records);
+                next_write = std::time::Instant::now() + std::time::Duration::from_millis(250);
+            }
+        }
+    }
+    if let Some(records) = pending.filter(|r| last.as_ref() != Some(r)) {
+        anyhow::ensure!(
+            store.sqlite.record_program_status(
+                &session.id,
+                generation,
+                &stream,
+                sequence + 1,
+                &records
+            )?,
+            "Program Status stream replaced"
+        );
+    }
+    Ok(())
+}
+
+// This command is the sole stdin reader. Polling avoids a blocking stdin worker
+// that could survive a replaced observer and keep the process alive indefinitely.
+#[cfg(unix)]
+fn read_observation_chunk(bytes: &mut [u8]) -> std::io::Result<Option<usize>> {
+    let mut fd = libc::pollfd {
+        fd: libc::STDIN_FILENO,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: fd points to one initialized pollfd for the process's stdin.
+    let ready = unsafe { libc::poll(&mut fd, 1, 250) };
+    if ready < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if ready == 0 {
+        return Ok(None);
+    }
+    // SAFETY: bytes is writable for its stated length; this is the only reader.
+    let count = unsafe { libc::read(fd.fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+    if count < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(Some(count as usize))
+    }
+}
+#[cfg(not(unix))]
+fn read_observation_chunk(_: &mut [u8]) -> std::io::Result<Option<usize>> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "terminal observation requires Unix",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1335,6 +1478,8 @@ mod tests {
         let task = TaskId::new();
         let wave = crate::id::WaveId::new();
         let mut summary = crate::session::SessionSummary {
+            program_status: None,
+            provider_generation: 0,
             primary_scope: None,
             driver_outcome: None,
             waiting: false,
@@ -1351,7 +1496,7 @@ mod tests {
             interactive: true,
             task_id: Some(task.clone()),
             wave_id: Some(wave.clone()),
-            flow_id: Some("flow".into()),
+            flow_process_lfid: Some("flow".into()),
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
@@ -1359,10 +1504,10 @@ mod tests {
             node: Some(2),
             iterations: None,
             flow_step_latest: false,
-            flow: Some(crate::session::FlowSummary {
+            flow: Some(crate::session::FlowProcessSummary {
                 id: "flow".into(),
                 name: "retained".into(),
-                state: crate::session::FlowSummaryState::Current,
+                state: crate::session::FlowProcessSummaryState::Current,
                 task_id: Some(task.clone()),
                 wave_id: Some(wave.clone()),
                 updated_at: 1,
@@ -1393,7 +1538,7 @@ mod tests {
                 ..
             }
         ));
-        summary.flow.as_mut().unwrap().state = crate::session::FlowSummaryState::Stopped;
+        summary.flow.as_mut().unwrap().state = crate::session::FlowProcessSummaryState::Stopped;
         let row = super::summary_surface(&summary);
         assert!(matches!(
             row.flow_membership,
@@ -1407,7 +1552,7 @@ mod tests {
             super::SessionState::Unknown,
             "Flow completion is not Session/process completion"
         );
-        summary.flow_id = None;
+        summary.flow_process_lfid = None;
         assert!(matches!(
             super::summary_surface(&summary).flow_membership,
             super::SessionFlowMembership::Unknown { .. }
@@ -1646,7 +1791,7 @@ mod tests {
             iterations: None,
             task_id,
             wave_id: Some(wave.id().clone()),
-            flow_id: None,
+            flow_process_lfid: None,
             work_source: None,
             bound_at: None,
             interactive: true,
@@ -1818,13 +1963,16 @@ mod tests {
         .unwrap();
         for session in sessions {
             if let super::SessionFlowMembership::Step {
-                invocation_id,
+                flow_process_lfid,
                 step,
                 node: Some(node),
                 ..
             } = session.flow_membership
             {
-                assert_eq!(graphs[&invocation_id].node_at(node).unwrap().label, step);
+                assert_eq!(
+                    graphs[&flow_process_lfid].node_at(node).unwrap().label,
+                    step
+                );
             }
         }
     }

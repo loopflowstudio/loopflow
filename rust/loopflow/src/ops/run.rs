@@ -57,11 +57,14 @@ pub(crate) fn render_task_context(
 
 fn render_wave_context(repo: &Path, wave: &str, metric_context: &str) -> String {
     // Authored goals and memory enter once through the prompt document gatherer.
-    let flows = crate::engine::available_flow_names(repo)
-        .iter()
-        .map(|flow| format!("- {flow}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let flows = match crate::engine::available_flow_names(repo) {
+        Ok(names) => names
+            .iter()
+            .map(|flow| format!("- {flow}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Err(error) => format!("Flow catalog unavailable: {error}"),
+    };
     format!(
         "Drive the '{wave}' Wave's goal forward using its checkout-local files.\n\n<lf:goal-context>\nAvailable flows:\n{flows}\n</lf:goal-context>\n\n{metric_context}\n\n<lf:wave-executive-loop>\n1. What is most important?\n2. What signals are arriving?\n3. What works?\n4. What does not?\n5. What is the current strategy?\n6. How should strategy adjust?\n\nTreat metrics as evidence, never as automatic KR completion or a composite Wave score.\n</lf:wave-executive-loop>"
     )
@@ -782,7 +785,7 @@ mod tests {
                 }),
                 task_id,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 bound_at: None,
                 interactive: false,
                 repo: None,

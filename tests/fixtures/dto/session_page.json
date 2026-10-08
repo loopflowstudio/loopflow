@@ -42,19 +42,34 @@
       "flow_membership": {
         "kind": "step",
         "flow": "task-design",
-        "invocation_id": "00000000-0000-0000-0000-00000000f10w",
         "step": "review-design",
         "occurrence": "current",
         "node": 1,
         "iterations": [
           []
-        ]
+        ],
+        "flow_process_lfid": "00000000-0000-0000-0000-00000000f10w"
       },
       "interactive": true,
       "workspace": null,
       "primary_scope": null,
       "attention": "waiting",
-      "task_primary": false
+      "task_primary": false,
+      "program_status": {
+        "seen": true,
+        "records": [
+          {
+            "state": "blocked",
+            "id": "worker",
+            "kind": "question",
+            "progress": null,
+            "app": "example",
+            "title": null,
+            "msg": "Use **literal** text?"
+          }
+        ]
+      },
+      "provider_generation": 1
     }
   ],
   "next": null

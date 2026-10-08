@@ -60,7 +60,7 @@ fn read_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoreResult<AgentSe
                 .map(|id| crate::id::WaveId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,
-            flow_id: row.get(12)?,
+            flow_process_lfid: row.get(12)?,
             work_source: row
                 .get::<_, Option<String>>(13)?
                 .map(|source| serde_json::from_value(serde_json::Value::String(source)))
@@ -101,16 +101,19 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<Agen
     .transpose()
 }
 
-/// Whether agent_sessions row `session` waits on a person at `now`: its
-/// current driver's reading shows an unanswered question, or no unresolved
-/// tool call and either an interactive turn handed back or a quiet stream.
-/// No reading, or one from a driver that has let go, is not Waiting.
+/// Reported status wins within the provider generation; otherwise use the
+/// current driver's input/hand-back/quiet reading. Filter before pagination.
 fn waiting_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act WHERE act.session_id={session}.id
-            AND {session}.completed_at IS NULL AND act.driver_generation={session}.driver_generation
-            AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
-                OR {now}-act.observed_at>={quiet}))))",
+            AND {session}.completed_at IS NULL AND act.provider_generation={session}.provider_generation
+            AND CASE WHEN act.program_status IS NOT NULL THEN
+                EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                    WHERE json_extract(r.value,'$.state')='blocked'
+                    OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
+            ELSE act.driver_generation={session}.driver_generation
+                AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
+                    OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::WAITING_QUIET_SECONDS
     )
 }
@@ -210,7 +213,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
             WHERE e.session_id=s.id AND e.receipt_key='driver:'||(a.driver_generation-1)||':exit' AND e.kind='observed'),
         {waiting},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id)
+        EXISTS(SELECT 1 FROM tasks p WHERE p.primary_session_id=s.id),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.provider_generation=a.provider_generation),a.provider_generation
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN flow_process_steps fs ON fs.process_lfid=captured.process_lfid
@@ -241,10 +245,10 @@ fn read_summary(
             Some(driver) => {
                 let completed: Option<i64> = row.get(20)?;
                 let name: String = row.get(18)?;
-                Some(crate::session::FlowSummary {
+                Some(crate::session::FlowProcessSummary {
                     id: driver,
                     name,
-                    state: crate::session::FlowSummaryState::of_driver(
+                    state: crate::session::FlowProcessSummaryState::of_driver(
                         row.get::<_, Option<String>>(19)?.as_deref(),
                         completed,
                     ),
@@ -263,6 +267,11 @@ fn read_summary(
             primary_scope: row.get(27)?,
             driver_outcome: row.get(28)?,
             waiting: row.get(29)?,
+            program_status: row
+                .get::<_, Option<String>>(32)?
+                .map(|json| serde_json::from_str(&json))
+                .transpose()?,
+            provider_generation: row.get(33)?,
             task_terminal: row.get(30)?,
             task_primary: row.get(31)?,
             captured: row.get(16)?,
@@ -276,7 +285,7 @@ fn read_summary(
             interactive: row.get(6)?,
             task_id,
             wave_id,
-            flow_id: row.get(9)?,
+            flow_process_lfid: row.get(9)?,
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
@@ -1343,7 +1352,7 @@ impl SqliteStore {
                 iterations: None,
                 task_id: None,
                 wave_id: None,
-                flow_id: None,
+                flow_process_lfid: None,
                 work_source: None,
                 bound_at: None,
                 interactive: true,
@@ -1368,7 +1377,7 @@ mod metadata_tests {
 
     use super::SqliteStore;
 
-    use crate::session::{FlowSummaryState, SessionFilter};
+    use crate::session::{FlowProcessSummaryState, SessionFilter};
 
     #[test]
     fn input_replacement_retains_workspace_and_task_membership() {
@@ -1582,11 +1591,11 @@ mod metadata_tests {
             .session_summaries(&SessionFilter::default(), 0)
             .unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].flow_id.as_deref(), Some(driver.as_str()));
+        assert_eq!(rows[0].flow_process_lfid.as_deref(), Some(driver.as_str()));
         let flow = rows[0].flow.as_ref().unwrap();
         assert_eq!(
             (flow.name.as_str(), flow.state),
-            ("retained", FlowSummaryState::Current)
+            ("retained", FlowProcessSummaryState::Current)
         );
         assert!(rows[0].flow_step_latest);
         assert_eq!(
@@ -1594,7 +1603,7 @@ mod metadata_tests {
                 .session("session")
                 .unwrap()
                 .unwrap()
-                .flow_id
+                .flow_process_lfid
                 .as_deref(),
             Some(driver.as_str())
         );
@@ -1617,7 +1626,7 @@ mod metadata_tests {
             .unwrap()
             .flow
             .unwrap();
-        assert_eq!(flow.state, FlowSummaryState::Completed);
+        assert_eq!(flow.state, FlowProcessSummaryState::Completed);
     }
 
     #[test]

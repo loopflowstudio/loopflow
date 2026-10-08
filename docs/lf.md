@@ -86,9 +86,13 @@ you choose again or `lf task move EXP-12 <node>` puts it at a node outright. `lf
 its start. See [workflows](authoring.md#workflows).
 
 ```bash
-lf flow list                   # Flows and workflows, with source and validity
-lf flow customize feature      # write the builtin to .lf/ and print its path
-lf update-plan --wave exports --workflow code   # change only the Project's workflow
+lf project workflow list                 # Workflow definitions and validity
+lf project workflow set PROJECT code     # selection for future Tasks
+lf project workflow customize feature    # print its local source path
+lf task workflow show EXP-12             # captured graph, position and history
+lf task workflow restart EXP-12          # move to start; retain graph and history
+lf flow list                             # autonomous Flow definitions
+lf flow customize pursue                 # print its local source path
 ```
 
 A Flow whose driver died leaves its Processes as history. No command resumes it. To change direction or recover:
@@ -96,7 +100,7 @@ A Flow whose driver died leaves its Processes as history. No command resumes it.
 ```bash
 lf task interrupt EXP-12             # end the active provider turn
 lf task status EXP-12                # the latest Flow and all Task work
-lf flow show ID --sessions --json    # one Flow's steps, by its Flow process ID
+lf flow show ID --processes --json    # one Flow's steps, by its Flow process ID
 lf -b task run EXP-12       # run fresh work
 ```
 
@@ -325,8 +329,8 @@ lf roadmap --task LOO-303 --all --json
 
 Task links open details without starting work, including retained and completed
 Tasks. Add a percent-encoded `repo` query to narrow duplicate issue identifiers.
-Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow templates.
-Task destinations open details; selecting a Flow opens its folded template.
+Press ⌘K in the desktop to search Waves, Tasks, Sessions and Flow and Workflow definitions.
+Task destinations open details; selecting a Flow opens its folded graph.
 
 ### Inspect all work in a Task
 
@@ -336,11 +340,19 @@ lf session list --task LOO-358 --interactive all --history
 ```
 
 `lf session list` defaults to unfinished interactive conversations.
-`--waiting` narrows that selection to conversations waiting on you: one that
-asked a question, handed its turn back, or went quiet for two minutes with no
-tool call outstanding. A long silent step can show up there. Waiting is read
-from a provider stream `lf` drives: a conversation in a native `claude` or
-`opencode` terminal never shows it.
+`--waiting` narrows that selection to conversations waiting on you. In Desktop,
+a program's OSC 7501 report takes precedence: any blocked record means Waiting,
+as does idle for an interactive Session. Working, done, error and explicit clear
+suppress the quiet-time inference for that provider generation. A blocked child
+still counts when its parent reports working.
+
+Without reports, the existing provider stream supplies questions, hand-back and
+the two-minute quiet rule when no tool call remains open. A long silent step can
+still show up there. Plain shell panes show their own reports without creating a
+Session. The focused pane's report appears in the workspace breadcrumb header
+and pane strip; its message is literal text. Reports never complete work.
+Desktop must be observing the terminal; detached relay observation and lf's own
+terminal emission remain follow-up work.
 `--all` changes repository scope, `--interactive all` includes background work,
 and `--history` includes completed conversations and historical reviews.
 

@@ -1,9 +1,34 @@
 # infrastructure wave memory
 
+## Program Status direction (LOO-398, 2026-10-07)
+
+Jack Heart selected every-pane Desktop reading, unchanged native passthrough and
+lf writing only for pipe-driven work/Flow position. Reports override inference
+in Rust's single Waiting judgment; they grant no execution authority.
+Implement from the spec. LOO-384 remains for non-reporters; provider adoption is
+unverified. LOO-402 owns broader presentation.
+Jack authorized build and publication for review, not landing, and made LOO-394's
+absent relay a named follow-up. Its #1484 covers naming only.
+
+Jack approved the embedded patch at `a60e9e2a…`; both earlier patches survive
+in immutable lf2, verified by public checksum and SwiftPM
+linking. Literal state/kind/message appears in the breadcrumb header and pane
+strip; Task-header intent remains for review. SQL/CLI/DTO/Swift proofs establish
+separate boundaries, not installed or composed native-pane acceptance. Provider
+generation and surface incarnation fence observations; viewer absence is not death.
+
+Live emission remains unfinished: a PTY short-wrote 62 of 74 OSC bytes, and the
+existing independent output paths cannot safely finish the escape before normal
+text. Flow children inherit terminal descriptors; a parent mutex cannot serialize
+them, and piping native children changes terminal behavior. Extending this Task
+with PTY transport or deferring emission to LOO-394 remains an unresolved choice,
+not Jack's scope decision. Details and acceptance: `scratch/read-and-write-program-status.md`;
+original design is preserved at `c62c19f5c:scratch/read-and-write-program-status.md`.
+
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
 Jack Heart authorized rename PR #1484 and stacked machine-record LOO-411 through
-publication and review; LOO-411 has no landing or later-slice authority. A machine
+publication and review, later superseded by the landing request below. A machine
 is one OS user and Loopflow data directory. `LF_HOME`, provider/account homes,
 opaque `home_…` IDs, cron plist and Desktop selection keys retain their meanings/bytes.
 Jack chose to discard version-1 Desktop caches and name install scope `installation`
@@ -36,7 +61,9 @@ establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
 selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
 alias or per-call repository override remains.
-Republish for review and stop; no landing or later-slice authority.
+Jack Heart later requested landing for LOO-411; its sync repair was limited to
+syncing main, focused verification and publication, then stopping. That request
+does not authorize later slices or LOO-413 landing.
 
 ## Resident machine logins (LOO-413, 2026-10-07)
 
@@ -66,12 +93,21 @@ but cannot veto an authorized completion or cancellation. Per-Exec acceptance is
 
 Installed 0.13.9 reproduces LOO-353's five pending turns, one reserved input and
 two unknown processes despite its merged PR's completion intent. Source fixtures
-prove preservation. PR #1483's Process/LFID vocabulary and migration are integrated
-without another draft; installed acceptance awaits published repair. Current
-Infrastructure reads retain LOO-285's unattended settlement proof, LOO-304's
-performance/soak acceptance, LOO-375's installed timing and LOO-390's prevention
-measurement. Their merge status alone proves none of those outcomes. Legacy
-keep-open requests without explicit remaining work need scope reconciliation.
+prove preservation. PR #1488 merged as `cead4c952`, including PR #1483's
+Process/LFID vocabulary and migration without another draft. Installed acceptance
+awaits the first published release containing #1488 and preservation readback.
+LOO-285's unattended settlement and LOO-390's storage-prevention evidence remain
+distinct from merge. Legacy keep-open requests need scope reconciliation.
+
+Jack Heart's comment `cf9e2775-154a-4f37-86b1-79a42cd5cf49` retires arbitrary
+numeric performance targets, soak requirements and deeper optimization while the
+product surface changes. LOO-304 closed successfully. Add supported settlement
+of LOO-371/376/375 to LOO-408's installed acceptance, retaining respectively
+Session `session_ccab7b1eafea4370a16b799dd1705737`'s unresolved turn, read-only
+Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
+`6fbaec2a-3031-4c26-aae0-7aa1231005ca`. Their briefs retire performance acceptance;
+closure is not yet observed. LOO-378 is explicitly paused with substantial
+unpublished code retained, without deletion or delivery authorization.
 
 ## Process vocabulary (LOO-400, 2026-10-07)
 
@@ -369,7 +405,7 @@ automatic shared failover. Isolated agents retain their own account/fallback.
 The updated Linear brief owns the current scope; stop-bundling's branch evidence
 does not yet establish shipment.
 
-Renamed from `systems` on 2026-07-08; current schedules supersede historical ones.
+Renamed from `systems` July 8; current schedules supersede history.
 
 The 2026-09-30 [LOO-298 decisions](#data-model-and-performance-decisions-reconciled-2026-09-30)
 supersede older Run-owner, historical-import, pinned-development-Home and
@@ -529,7 +565,7 @@ Flow steps and agent tools use the installed CLI and `~/.lf`; an explicit
 changes. [PR #1381](https://github.com/loopflowstudio/loopflow/pull/1381) merged
 at `6c73356074c4`; installed routing acceptance passed on v0.12.31 and the Task
 reads done (see the 2026-10-04 entry above). Current behavior belongs in
-[CLI docs](../../docs/lf.md#use-one-machine) and [Homes](../../docs/architecture/machines.md#one-main-machine).
+[CLI docs](../../docs/lf.md#use-one-machine) and [Machines](../../docs/architecture/machines.md#one-main-machine).
 The dated cleanup receipts, v0.12.29–v0.12.31 release recovery and the exact
 configured checks are in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/cd344891b611914adf44eeb53844193d7a987d2c/wave/infrastructure/MEMORY.md#one-main-home-loo-342-branch-evidence-2026-09-30).
 
@@ -543,36 +579,24 @@ identities, signals and paths); seven earlier snapshots remain at
 `~/.lf-retired/20261002T191224Z/worktrees/`. `~/.lf-dev` no longer exists and the main Home
 identity is unchanged. [Method and verification](https://github.com/loopflowstudio/loopflow/blob/c418953634bd101f51878d2be2b40fb3facafabd/wave/infrastructure/MEMORY.md#legacy-retirement-completed-2026-10-04).
 
-## Worktree listing and fenced dispatch (LOO-375, 2026-10-05)
+## Worktree listing and fenced dispatch (LOO-375, reconciled 2026-10-07)
 
-Jack Heart reported `lf wt list` at 44 s, 17 s after a deadlocked writer was
-killed. PR 1 shipped in v0.13.3; PR #1456 merged October 6, after v0.13.5,
-and shipped in v0.13.6 on October 6. Installed validation on 54 worktrees returned
-20/20 successful samples per surface: external text median/p95 1.465/1.511 s,
-JSON 1.387/1.443 s. Both miss the one-second aim. Production timing is installed;
-local Git is the larger phase, with no measured hard lower bound. Numbers and method:
-[report](../../scripts/benchmarks/wt-list/README.md).
+PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
+[report](../../scripts/benchmarks/wt-list/README.md),
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading.
 
-- **Process count, not Git work, was the listing cost** (PR 1): about 370 serial
-  Git processes became about 70 through batched ref reads, concurrent `status`,
-  one GitHub call and per-commit-pair answers in `.git/lf-commit-facts`.
-- Historical GitHub batching and retained-read mutex measurements remain at
-  `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/MEMORY.md`
-  under this heading; these branch observations establish no latency floor.
 - Store opens validate ledger/schema, leaving full integrity scans to migration,
   doctor and install. Keep the Session fence outside runtime waits; OpenCode's
   fenced post remains bounded at 10 s. Exec observation waits 15 s, then warns
   and runs unrecorded. Exact measurements and counterexamples remain in the
-  same `6448e3c9e7` archive above; current timings live under `<Home>/perf/`.
-- **Jack Heart's delivery contract:** land after autonomous checks and honest
-  benchmarks; installed timing is post-merge validation, so the Task stays
-  open. Installed 0.13.6: 1.47 s text, 1.39 s JSON median over 20 pairs; ≤1 s
-  warm p95 online is unmet.
+  `6448e3c9e7:wave/infrastructure/MEMORY.md` archive; current timings live under
+  `<Home>/perf/`.
+- Jack Heart retired further performance acceptance. Only supported settlement
+  preserving the interrupted research Process remains; LOO-408 owns it after installation.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
-- **A closed Session with a confirmed-dead provider no longer blocks Task
-  admission or completion** without a completion receipt (Jack authorized).
-  Live or unknown providers still block.
+- Task decisions no longer depend on historical execution; checkout cleanup
+  still retains live or unknown providers. LOO-408 owns the installed proof.
 
 ## Environment variables (LOO-341, reconciled 2026-10-07)
 
@@ -599,9 +623,8 @@ Earlier details: `6448e3c9e7e519585378feaffe04606bc1b55d3e:wave/infrastructure/M
 
 ## Synced planning integration (LOO-334, 2026-09-30)
 
-Main's landed cutover supersedes the intermediate-schema bridge. Retained
-integration detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
-Planning preserves Task/PR identity without inferring execution progress.
+The landed cutover supersedes the bridge; planning preserves Task/PR identity,
+not execution progress. Detail: `57ac8b09fbbff3f3b7c82c00ecf9032f0cb792b1:wave/infrastructure/MEMORY.md`.
 
 ## Planning and launch preservation (curated 2026-10-02)
 
@@ -817,26 +840,12 @@ Provider stubs must contain conflict-agent launches: one bad fixture launched
 real credentials whose effects were not audited. Dense CLI timing and configured
 continuity remained unfinished in that dated evidence.
 
-Performance (instrumentation implemented in LOO-291; LOO-300 continues): `os_signpost`
-intervals under `studio.loopflow`/`perf` for cold start, navigation, Wave/Task/
-Session paint, every `lf` read, Markdown parse and terminal key-to-draw;
-`scripts/benchmarks/desktop-performance/record_live.py` records local usage
-without telemetry. The retained [90-second idle recording](../../scripts/benchmarks/desktop-performance/20260926-demo-app/report.md)
-measured `session list` at p50 809 ms and `roadmap --all` at 3.49 s; `ps --json`
-was 274 ms, so not every read exceeded the proposed 300 ms budget. It recorded
-zero hitches but one 1.85 s potential hang and nearly flat RSS. The earlier
-installed build's six-second probe measured 51 ms/s hitches; these different
-windows/builds do not prove a causal improvement. Republishing identical readings
-was found in source and removed; remaining hang causes need profiling.
-
-LOO-300 owns Session streaming, projection caching and the density harness after
-the data-model work. The handoff records passes only for cold-start-to-outline
-and terminal-key-to-echo. `PerformanceCatalogueTests` also retains a filter test
-that can skip when SwiftUI exposes no NSTextField; six other tests were removed
-after mounted paint hooks failed to fire. Missing results remain proof gaps.
-Key-to-next-draw and PTY echo are proxies, not glyph presentation. Click ≤100 ms,
-`lf` read ≤300 ms off the main actor and idle ≤5 ms/s hitches remain proposed
-targets until comparable measurements support published budgets.
+Jack Heart retired numeric performance targets, soak and deeper optimization
+on October 7. LOO-291/300 evidence and instrumentation:
+`07bbd801e:wave/infrastructure/MEMORY.md` under this heading and in
+[scripts/benchmarks/desktop-performance](../../scripts/benchmarks/desktop-performance).
+Different recording windows prove no causal improvement; PTY echo and next draw
+are not glyph presentation. Those historical gaps are not open acceptance requirements.
 
 The earlier S5 active-PR resolver left landed branches unbound. That is historical
 failure evidence, not binding policy: current Session rows own attribution and

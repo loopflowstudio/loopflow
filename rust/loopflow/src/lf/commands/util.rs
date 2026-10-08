@@ -53,6 +53,7 @@ pub(crate) struct SessionCommand {
     pub(crate) cwd: PathBuf,
 }
 
+#[allow(clippy::too_many_arguments)] // Provider inputs plus native skill flags and context file.
 pub(crate) fn launch_session(
     harness: &str,
     model: Option<&str>,
@@ -61,10 +62,17 @@ pub(crate) fn launch_session(
     environment: &BTreeMap<String, String>,
     provider_session_id: Option<&str>,
     flags: &[String],
+    context_file: Option<&Path>,
 ) -> Result<()> {
     let worktree = absolute_path(worktree);
-    let mut command =
-        build_session_command(harness, model, &worktree, prompt, provider_session_id)?;
+    let mut command = build_session_command(
+        harness,
+        model,
+        &worktree,
+        prompt,
+        provider_session_id,
+        context_file,
+    )?;
     command.args.splice(0..0, flags.iter().cloned());
     spawn_session_command_with_env(&command, environment, provider_session_id, None, None)
 }
@@ -75,6 +83,7 @@ pub(crate) fn build_session_command(
     worktree: &Path,
     prompt: &str,
     provider_session_id: Option<&str>,
+    context_file: Option<&Path>,
 ) -> Result<SessionCommand> {
     let worktree_arg = worktree.to_string_lossy().to_string();
 
@@ -90,6 +99,13 @@ pub(crate) fn build_session_command(
                 args.push(dir.to_string_lossy().to_string());
             }
             args.extend(codex_permission_args(Some(worktree), false, false));
+            if let Some(path) = context_file {
+                args.push("-c".to_string());
+                args.push(format!(
+                    "model_instructions_file={}",
+                    serde_json::to_string(&path.to_string_lossy())?
+                ));
+            }
             // Ported skill frontmatter starts with `---`, which is prompt data.
             args.push("--".to_string());
             args.push(prompt.to_string());
@@ -108,6 +124,10 @@ pub(crate) fn build_session_command(
             if let Some(provider_session_id) = provider_session_id {
                 args.push("--session-id".to_string());
                 args.push(provider_session_id.to_string());
+            }
+            if let Some(path) = context_file {
+                args.push("--append-system-prompt-file".to_string());
+                args.push(path.to_string_lossy().to_string());
             }
             // Claude's variadic --add-dir otherwise consumes the positional prompt.
             args.push("--".to_string());
@@ -1455,7 +1475,7 @@ mod tests {
 
     #[test]
     fn session_launch_tui_codex_sets_worktree_model_and_prompt() {
-        let launch = build_session_command("codex", Some("o3"), &path(), "fix it", None)
+        let launch = build_session_command("codex", Some("o3"), &path(), "fix it", None, None)
             .expect("build launch");
 
         assert_eq!(launch.program, "codex");
@@ -1475,8 +1495,9 @@ mod tests {
     fn bare_tui_harnesses_do_not_select_a_model() {
         for agent in ["claude", "codex", "opencode"] {
             let (harness, model) = crate::engine::parse_agent(agent);
-            let launch = build_session_command(&harness, model.as_deref(), &path(), "test", None)
-                .expect("build bare harness launch");
+            let launch =
+                build_session_command(&harness, model.as_deref(), &path(), "test", None, None)
+                    .expect("build bare harness launch");
             assert!(
                 !launch
                     .args
@@ -1492,8 +1513,8 @@ mod tests {
     fn session_launch_tui_codex_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch =
-            build_session_command("codex", None, &worktree, "fix it", None).expect("build launch");
+        let launch = build_session_command("codex", None, &worktree, "fix it", None, None)
+            .expect("build launch");
 
         let idx = launch
             .args
@@ -1508,7 +1529,7 @@ mod tests {
 
     #[test]
     fn session_launch_tui_claude_runs_in_worktree_with_model_and_prompt() {
-        let launch = build_session_command("claude", Some("sonnet"), &path(), "fix it", None)
+        let launch = build_session_command("claude", Some("sonnet"), &path(), "fix it", None, None)
             .expect("build launch");
 
         assert_eq!(
@@ -1529,6 +1550,7 @@ mod tests {
             &path(),
             "test",
             Some("01234567-89ab-cdef-0123-456789abcdef"),
+            None,
         )
         .expect("build launch");
 
@@ -1736,8 +1758,9 @@ mod tests {
     fn session_launch_tui_claude_adds_main_repo_for_worktree_metadata() {
         let (_tmp, main, worktree) = git_worktree_fixture();
 
-        let launch = build_session_command("claude", Some("sonnet"), &worktree, "fix it", None)
-            .expect("build launch");
+        let launch =
+            build_session_command("claude", Some("sonnet"), &worktree, "fix it", None, None)
+                .expect("build launch");
 
         let idx = launch
             .args
@@ -1815,6 +1838,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &[],
+            None,
         )
         .unwrap();
 
@@ -1897,6 +1921,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &[],
+            None,
         )
         .unwrap();
 
@@ -1933,6 +1958,7 @@ mod tests {
             &BTreeMap::new(),
             None,
             &[],
+            None,
         )
         .unwrap();
     }
@@ -1944,6 +1970,7 @@ mod tests {
             Some("moonshotai/kimi-k2"),
             &path(),
             "fix it",
+            None,
             None,
         )
         .expect("build launch");

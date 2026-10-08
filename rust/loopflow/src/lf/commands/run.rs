@@ -1,7 +1,7 @@
 use crate::engine::{
     check_cli_available, missing_agent_message, parse_agent, prepare_process_prompt, run_agent,
-    write_prompt_log, AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig,
-    ProcessPromptInput, PromptComponents, StreamFormat, Surface,
+    AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig, ProcessPromptInput,
+    PromptComponents, StreamFormat, Surface,
 };
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -539,12 +539,22 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
-            let (flags, prompt) = config
-                .skill_invocation
-                .as_ref()
-                .map(|skill| skill.terminal_input(&built.harness, &config))
-                .transpose()?
-                .unwrap_or_else(|| (Vec::new(), built.prompt.clone()));
+            let (flags, prompt, context_file) = if let Some(skill) = &config.skill_invocation {
+                let (flags, prompt) = skill.terminal_input(&built.harness, &config)?;
+                (flags, prompt, None)
+            } else {
+                let context_file = if matches!(built.harness.as_str(), "claude" | "codex") {
+                    crate::engine::agent::write_system_prompt_file(&config, &built.log_name)?
+                } else {
+                    None
+                };
+                let prompt = if context_file.is_some() {
+                    config.task_prompt.clone()
+                } else {
+                    built.prompt.clone()
+                };
+                (Vec::new(), prompt, context_file)
+            };
             launch_session(
                 &built.harness,
                 built.model.as_deref(),
@@ -553,6 +563,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
                 &environment,
                 provider_session_id.as_deref(),
                 &flags,
+                context_file.as_deref(),
             )
         })();
         if let Some(provider_session) =
@@ -582,11 +593,9 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
     );
 
     let agent_config = built.agent_config.clone();
-    let effective_system =
-        crate::engine::agent::system_prompt_with_structured_replies(&agent_config);
     let capture = begin_capture(built, "headless", &agent_config, cli.resume.as_deref())?;
 
-    let result = run_headless_prompt(built, &capture, &effective_system, &agent_config);
+    let result = run_headless_prompt(built, &capture, &agent_config);
     let outcome = if result.is_ok() {
         "completed"
     } else {
@@ -606,21 +615,11 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<FinalAnswer>> {
 fn run_headless_prompt(
     built: &PromptBuild,
     capture: &CaptureHandle,
-    effective_system: &str,
     prepared_config: &AgentConfig,
 ) -> Result<()> {
-    // Codex rejects an empty `model_instructions_file`.
     let context_file_start = Instant::now();
-    let context_file = if effective_system.trim().is_empty() {
-        None
-    } else {
-        Some(write_prompt_log(
-            &built.repo_root,
-            effective_system,
-            &format!("{}.context", built.log_name),
-            None,
-        )?)
-    };
+    let context_file =
+        crate::engine::agent::write_system_prompt_file(prepared_config, &built.log_name)?;
     debug!(
         elapsed_ms = context_file_start.elapsed().as_millis(),
         "wrote context log"
@@ -828,7 +827,9 @@ pub(crate) fn attributed_context(
     );
     if let Some(wave) = &components.wave {
         let open = format!("<lf:wave name=\"{wave}\">");
-        let goal = tagged_block(task_prompt, &open, "</lf:wave>").unwrap_or(open.as_str());
+        let goal = tagged_block(system_prompt, &open, "</lf:wave>")
+            .or_else(|| tagged_block(task_prompt, &open, "</lf:wave>"))
+            .unwrap_or(open.as_str());
         push(goal, Kind::Goal, Scope::Wave, wave.clone(), None, "wave");
     }
     for document in &components.docs {
@@ -1184,7 +1185,7 @@ mod tests {
                     built.prompt.matches("<lf:user>").count(),
                     usize::from(!context.is_empty())
                 );
-                assert!(built.agent_config.task_prompt.contains(&context));
+                assert!(built.agent_config.system_prompt.contains(&context));
                 assert!(!built
                     .prompt
                     .contains("display name is \"Repository Owner\""));
@@ -1216,7 +1217,7 @@ mod tests {
             std::env::set_var("LF_USER_NAME", caller);
             let built = build_bound_prompt_at(None, "continue", "", &cli, repo.path()).unwrap();
             assert_eq!(built.components.user_name.as_deref(), Some(expected));
-            assert!(built.agent_config.task_prompt.contains(expected));
+            assert!(built.agent_config.system_prompt.contains(expected));
             assert_eq!(built.agent_config.env["LF_USER_NAME"], expected);
         }
         std::env::set_var("LF_USER_NAME", "Jack");
@@ -1310,9 +1311,7 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         let manifest = std::fs::read_to_string(run_dir.join("manifest.json")).unwrap();
         assert!(manifest.contains("task:LOO-265"));
         assert!(!run_dir.join("terminal.json").exists());
-        let effective_system =
-            crate::engine::agent::system_prompt_with_structured_replies(&built.agent_config);
-        let result = run_headless_prompt(&built, &capture, &effective_system, &built.agent_config);
+        let result = run_headless_prompt(&built, &capture, &built.agent_config);
         capture
             .finish(if result.is_ok() {
                 "completed"
@@ -1505,11 +1504,11 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             build_bound_prompt_at(Some("proof"), "reconcile", "", &cli, repo.path()).unwrap();
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("runtime evidence bytes"));
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("handoff evidence bytes"));
     }
 
@@ -1532,23 +1531,37 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
         let committed = built
             .agent_config
-            .task_prompt
+            .system_prompt
             .find("committed evidence bytes")
             .unwrap();
         let untracked = built
             .agent_config
-            .task_prompt
+            .system_prompt
             .find("untracked evidence bytes")
             .unwrap();
         assert!(committed < untracked);
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/a-committed.md")
-        }));
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
-        }));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/a-committed.md")
+            }));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/z-untracked.md")
+            }));
     }
 
     #[test]
@@ -1639,21 +1652,28 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
 
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("runtime evidence bytes"));
         assert!(!built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("evidence published after launch"));
         assert!(built
             .agent_config
-            .task_prompt
+            .system_prompt
             .contains("inspect the complete basis"));
-        assert!(built.agent_config.task_prompt.contains("Task seed"));
-        assert!(built.context.task.assets.iter().any(|asset| {
-            asset.kind == ContextAssetKind::Scratch
-                && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
-        }));
+        assert!(built.agent_config.system_prompt.contains("Task seed"));
+        assert!(built
+            .context
+            .system
+            .as_ref()
+            .unwrap()
+            .assets
+            .iter()
+            .any(|asset| {
+                asset.kind == ContextAssetKind::Scratch
+                    && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
+            }));
     }
 
     #[test]
@@ -1739,11 +1759,13 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         )
         .unwrap();
 
-        assert_eq!(built.agent_config.task_prompt.matches(goal).count(), 1);
+        assert_eq!(built.agent_config.system_prompt.matches(goal).count(), 1);
         assert_eq!(built.prompt.matches(goal).count(), 1);
         assert!(built
             .context
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .any(|asset| { asset.source_path.as_deref() == Some("wave/release/GOAL.md") }));
@@ -1767,20 +1789,26 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             message: Some("Build it.\n<lf:steers>Jack wrote $kickoff.</lf:steers>".into()),
             ..Default::default()
         };
-        let task = crate::engine::format_claude_task_prompt(&components);
-        let prepared = attributed_context(&components, "", &task, &[]);
-        assert_eq!(prepared.task.text, task);
+        let system = crate::engine::format_prompt(&components);
+        let prepared = attributed_context(&components, &system, "", &[]);
+        assert_eq!(prepared.system.as_ref().unwrap().text, system);
         for (kind, expected) in [
             (ContextAssetKind::Scratch, "> &#36;kickoff"),
             (ContextAssetKind::Memory, "Earlier &#36;design"),
             (ContextAssetKind::UserMessage, "Build it."),
         ] {
             assert!(
-                prepared.task.assets.iter().any(|asset| {
-                    asset.kind == kind
-                        && task[asset.byte_start as usize..asset.byte_end as usize]
-                            .contains(expected)
-                }),
+                prepared
+                    .system
+                    .as_ref()
+                    .unwrap()
+                    .assets
+                    .iter()
+                    .any(|asset| {
+                        asset.kind == kind
+                            && system[asset.byte_start as usize..asset.byte_end as usize]
+                                .contains(expected)
+                    }),
                 "missing attribution for {kind:?}"
             );
         }
@@ -1809,24 +1837,28 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             steers,
             ..Default::default()
         };
-        let task = crate::engine::format_claude_task_prompt(&components);
-        let prepared = attributed_context(&components, "", &task, &[]);
+        let system = crate::engine::format_prompt(&components);
+        let prepared = attributed_context(&components, &system, "", &[]);
 
         let block = prepared
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .find(|asset| asset.kind == ContextAssetKind::Steer)
             .expect("steers are their own asset");
-        let text = &task[block.byte_start as usize..block.byte_end as usize];
+        let text = &system[block.byte_start as usize..block.byte_end as usize];
         assert!(text.contains("keep the API stable") && text.ends_with("</lf:steers>"));
         assert!(prepared
-            .task
+            .system
+            .as_ref()
+            .unwrap()
             .assets
             .iter()
             .filter(|asset| asset.kind == ContextAssetKind::Goal)
             .all(
-                |asset| !task[asset.byte_start as usize..asset.byte_end as usize]
+                |asset| !system[asset.byte_start as usize..asset.byte_end as usize]
                     .contains("keep the API stable")
             ));
         let recorded = prepared

@@ -30,9 +30,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{client_async, tungstenite::Message};
 
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
-use crate::engine::agent::{
-    build_codex_thread_start_params, system_prompt_with_structured_replies, AgentConfig,
-};
+use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::lf_tag::LfTagParser;
@@ -845,10 +843,6 @@ impl Harness for CodexHarness {
             self.should_seed_prompt = false;
             if let Some(launch) = &self.launch {
                 let mut parts = Vec::new();
-                let system_prompt = system_prompt_with_structured_replies(launch);
-                if !system_prompt.trim().is_empty() {
-                    parts.push(system_prompt.trim().to_string());
-                }
                 if !launch.task_prompt.trim().is_empty() {
                     parts.push(launch.task_prompt.trim().to_string());
                 }
@@ -1536,14 +1530,15 @@ impl CodexHarness {
 
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_provider_session_id.as_deref());
-        thread_params.insert(
-            "config".into(),
-            json!({
-                "shell_environment_policy.set": tool_environment,
-                "allow_login_shell": false,
-                "features.shell_snapshot": false,
-            }),
-        );
+        let mut config = json!({
+            "shell_environment_policy.set": tool_environment,
+            "allow_login_shell": false,
+            "features.shell_snapshot": false,
+        });
+        if let Some(path) = crate::engine::agent::write_system_prompt_file(launch, "session")? {
+            config["model_instructions_file"] = json!(path.to_string_lossy());
+        }
+        thread_params.insert("config".into(), config);
         // The thread params include Loopflow's conservative defaults only when
         // Codex config is missing or less permissive. More permissive user or
         // repo config, such as danger-full-access, is left alone.

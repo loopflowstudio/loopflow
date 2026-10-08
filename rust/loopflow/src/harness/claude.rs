@@ -106,7 +106,9 @@ impl ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let args = build_claude_stream_session_args(config, resume_id.as_deref());
+        let context_file = crate::engine::agent::write_system_prompt_file(config, "session")?;
+        let args =
+            build_claude_stream_session_args(config, resume_id.as_deref(), context_file.as_deref());
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         super::configure_agent_env(&mut cmd, config);
@@ -674,8 +676,6 @@ mod tests {
             assert!(start > 0);
         }
     }
-
-    // build_claude_session_turn_args coverage lives in engine::agent::tests.
 
     #[tokio::test]
     async fn send_input_spawn_failure_releases_turn_guard() {

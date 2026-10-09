@@ -123,8 +123,12 @@ all mutations for reconciliation. `planning_peer_observed` retains source mutati
 IDs only after scalar/content projection succeeds in its savepoint; import creates
 no echo edit. Local capture consumes and advances that accepted frontier, so a
 rejected or held import cannot become the next save's causal parent. Receipt-owned
-ordering, deletion and provider evidence keep their separate protocols. This does
-not release association holds or implement joint cross-origin projection.
+ordering, deletion and provider evidence keep their separate protocols. Explicitly
+associated origins share scalar winner selection on their local owner. Causal
+ancestry retires observed predecessors before concurrent-head ranking; retained
+per-origin heads alone cannot make that decision. Accepted source IDs commit on
+the local owner, including foreign peer-authored IDs, without an echo mutation.
+Association exchange/effect holds remain until receipt composition is complete.
 
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
@@ -150,29 +154,34 @@ The incoming scalar journal must retain one provider mapping matching the existi
 local Work. Names, titles and attempted creation inputs do not establish it.
 Physical rows remain their own owners; lookup rechecks the local mapping,
 repository and contradictory incoming scalar mappings.
-Association changes no sharing membership and leaves joint projection/effects held.
+Association changes no sharing membership. Joint scalar projection requires every
+origin and its retained references in the same selection; exchange/effects stay held.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
 Common `planning_creations` separates the original Work ID from its local
 Task/Project projection, retaining each origin's input and uncertain attempts.
 After correspondence, ordinary import retains creation receipts on that local
-owner even while joint projection is held. It preserves captured inputs, merges
+owner even when private selection holds scalar projection. It preserves inputs, merges
 attempts per origin and creates no new journal edits or sharing membership.
 Contradictory receipts stay held with their original journal values. Common
 acquisition can settle the exact origin without releasing new effects; it never
-replaces an existing different provider mapping. Cross-origin field projection
-and relationship recovery remain unfinished.
+replaces an existing different provider mapping.
 Correspondence alone is not causal acknowledgement. Common scalar/content
-acquisition can link an exact Linear fact across associated origins in the existing
-journal. Validation requires the same kind, field, value and provider body, not
-merely equal text or a local alias. Later saves retain that observed predecessor;
-delivery baselines traverse it. Heads remain per-origin, so a foreign child cannot
-erase another origin's complete record. Export validates causal dependency closure
-but holds unselected origins and dependents without sharing their history.
-Joint winner projection must still account for those links; peer-authored winners,
-relationships and non-creation receipts remain unfinished. Retaining the journal
-does not release projection or effect holds.
+acquisition can link an exact Linear fact even before joint import; accepted
+projection records the selected source IDs directly. Later saves and provider
+acquisitions retain those predecessors, including peer-authored sources. Portable
+links require the same kind and scalar field with ascending clocks, not equal
+values. Links establish observation only: they never infer correspondence, import
+execution, or grant provider priority. Linear bodies retain their own validation.
+Heads remain per-origin; joint projection traverses ancestry across the resolved
+group before ranking its frontier. Delivery baselines traverse the same links.
+Export validates causal closure but holds unselected origins and dependents.
+Scalar Task/Project and comment references resolve only at projection; original
+journal values and captured delivery inputs remain unchanged. Associated order
+or deletion histories retain a projection conflict rather than partially applying
+them. Relationship, state and non-creation receipt composition still needs its
+remaining implementation and public proof; retained history is not convergence.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

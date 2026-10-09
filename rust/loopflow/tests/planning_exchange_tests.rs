@@ -282,8 +282,8 @@ fn cross_origin_observation_retains_portable_causality_without_redirecting_ident
     );
     assert_eq!(snapshot.merge(&exchanged).unwrap(), snapshot);
 
-    // Neither equal values nor another provider/revision can grant cross-origin
-    // causality. The exact accepted fact is the proof, not the local association.
+    // Provider identity/revision is not an alias. Even an observed successor
+    // with another provider fact leaves both original identities intact.
     for field in ["id", "revision"] {
         let mut unrelated = snapshot.clone();
         unrelated
@@ -298,11 +298,29 @@ fn cross_origin_observation_retains_portable_causality_without_redirecting_ident
         } else {
             "another-provider"
         });
-        assert!(unrelated.to_bytes().is_err());
+        let unrelated = PlanningSnapshot::from_bytes(&unrelated.to_bytes().unwrap()).unwrap();
+        assert_eq!(unrelated.winners().count(), 2);
     }
-    let mut unobserved = snapshot.clone();
-    unobserved.changes.get_mut("observed-here").unwrap().linear = None;
-    assert!(unobserved.to_bytes().is_err());
+    // A peer-authored save can explicitly follow the accepted source ID without
+    // claiming a Linear observation. This link still does not merge identities.
+    let mut saved = snapshot.clone();
+    let save = saved.changes.get_mut("observed-here").unwrap();
+    save.linear = None;
+    save.value = json!("Peer-authored successor");
+    let saved = PlanningSnapshot::from_bytes(&saved.to_bytes().unwrap()).unwrap();
+    assert_eq!(saved.heads().count(), 2);
+    let mut wrong_field = saved.clone();
+    wrong_field.changes.get_mut("observed-here").unwrap().field = "issue_description".into();
+    assert!(wrong_field.to_bytes().is_err());
+    let mut wrong_kind = saved;
+    wrong_kind
+        .changes
+        .get_mut("observed-here")
+        .unwrap()
+        .object
+        .kind = PlanningKind::Project;
+    wrong_kind.changes.get_mut("observed-here").unwrap().field = "project_name".into();
+    assert!(wrong_kind.to_bytes().is_err());
     let mut missing = snapshot;
     missing.changes.remove("peer");
     assert!(missing.to_bytes().is_err());

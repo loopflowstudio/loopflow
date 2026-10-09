@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
-    winning_heads, LinearObservation, PlanningKind, PlanningMutation, PlanningObject,
+    winning_heads_by, LinearObservation, PlanningKind, PlanningMutation, PlanningObject,
     PlanningSnapshot,
 };
 use crate::engine::planning_git::PlanningDestination;
@@ -20,7 +20,7 @@ use super::planning::ProviderEvidence;
 use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
-const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; joint planning projection is unfinished; selection and effects remain held";
+const ASSOCIATION_PROJECTION_PENDING: &str = "correspondence retained; relationship and receipt composition is unfinished; exchange and effects remain held";
 
 const SHARING_PROJECTION_PENDING: &str = "peer projection skipped by sharing hold; import required";
 
@@ -34,7 +34,8 @@ type WinningFields<'a> = BTreeMap<&'a str, (&'a str, &'a PlanningMutation)>;
 struct ObjectChanges<'a> {
     winners: WinningFields<'a>,
     observations: Vec<&'a LinearObservation>,
-    creation: Vec<&'a Value>,
+    creation: BTreeMap<&'a PlanningObject, (&'a Value, Vec<&'a Value>)>,
+    observed: Vec<(&'a str, &'a PlanningMutation)>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
     orders: BTreeMap<&'a str, FieldHistory<&'a Value>>,
     evidence: BTreeMap<&'a str, FieldHistory<ProviderEvidence>>,
@@ -115,25 +116,67 @@ pub(super) fn require_projected_effects(
     Ok(())
 }
 
-fn changes_by_object(
-    snapshot: &PlanningSnapshot,
-) -> StoreResult<BTreeMap<&PlanningObject, ObjectChanges<'_>>> {
+fn changes_by_object<'a>(
+    snapshot: &'a PlanningSnapshot,
+    owners: &'a BTreeMap<PlanningObject, PlanningObject>,
+) -> StoreResult<BTreeMap<PlanningObject, ObjectChanges<'a>>> {
+    let mut fields = BTreeMap::<_, BTreeSet<_>>::new();
+    for change in snapshot.changes.values() {
+        fields
+            .entry(&change.object)
+            .or_default()
+            .insert(change.field.as_str());
+    }
+    for (origin, fields) in fields {
+        if !origin
+            .kind
+            .fields()
+            .iter()
+            .all(|field| fields.contains(field))
+        {
+            return Err(invalid(format!("incomplete planning record {}", origin.id)));
+        }
+    }
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
     let heads: BTreeMap<_, _> = snapshot.heads().collect();
-    for (id, change) in winning_heads(heads.iter().map(|(&id, &change)| (id, change))) {
+    let frontier = snapshot.frontier_by(|object| &owners[object]);
+    for (id, change) in winning_heads_by(frontier.iter().copied(), |change| &owners[&change.object])
+    {
         objects
-            .entry(&change.object)
+            .entry(owners[&change.object].clone())
             .or_default()
             .winners
             .insert(change.field.as_str(), (id, change));
     }
+    for (id, change) in frontier {
+        objects
+            .get_mut(&owners[&change.object])
+            .expect("frontier has an owner")
+            .observed
+            .push((id, change));
+    }
+    for (_, change) in snapshot
+        .winners()
+        .filter(|(_, change)| change.field == "creation")
+    {
+        objects
+            .get_mut(&owners[&change.object])
+            .expect("creation has an owner")
+            .creation
+            .insert(&change.object, (&change.value, Vec::new()));
+    }
     for (id, change) in &snapshot.changes {
         let is_head = heads.contains_key(id.as_str());
         let object = objects
-            .get_mut(&change.object)
+            .get_mut(&owners[&change.object])
             .expect("every retained object has a winning field");
         if change.field == "creation" {
-            object.creation.push(&change.value);
+            object
+                .creation
+                .get_mut(&change.object)
+                .expect("creation has a frontier")
+                .1
+                .push(&change.value);
         }
         if let Some(receipt) = change.deletion_receipt() {
             object
@@ -218,10 +261,12 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
     while let Some(row) = rows.next()? {
         heads.insert(row.get(7)?, read_mutation(row)?);
     }
-    let winners: BTreeMap<_, _> =
-        winning_heads(heads.iter().map(|(id, change)| (id.as_str(), change)))
-            .map(|(_, c)| (c.field.as_str(), c))
-            .collect();
+    let winners: BTreeMap<_, _> = winning_heads_by(
+        heads.iter().map(|(id, change)| (id.as_str(), change)),
+        |_| (),
+    )
+    .map(|(_, c)| (c.field.as_str(), c))
+    .collect();
     // Journal the saved canonical representation, not the caller's untrimmed
     // Markdown inputs. Import has already returned without parsing or echoing it.
     let fields = serde_json::to_value(super::project_content::read_content(conn, project)?)?;
@@ -256,7 +301,8 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
             SELECT lower(hex(randomblob(16))),'project',?1,?2,?3,
                 max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),?4,
                 (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
-                    WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND (h.origin_id=?1 OR ?4 IS NOT NULL))",
+                    WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2
+                        AND (h.accepted OR ?4 IS NOT NULL))",
             params![project.as_str(),field,value.to_string(),linear.map(serde_json::to_string).transpose()?])?;
     }
     Ok(())
@@ -422,8 +468,8 @@ impl SqliteStore {
                 params![origin.kind.as_str(),origin.id,repo,provider_id,local_id],
             )?;
         }
-        // Correspondence enables lookup, not joint projection. Keep incomplete
-        // receipt composition visibly held instead of clearing mapping conflicts.
+        // Lookup alone never settles retained effects. Import must project the
+        // joint frontier before it can clear this conflict.
         retain_projection_conflict(&tx, repo, origin, SHARING_PROJECTION_PENDING)?;
         tx.commit()?;
         Ok(())
@@ -751,20 +797,32 @@ impl SqliteStore {
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
-        let mut objects = changes_by_object(&merged)?;
-        let held = selection_conflicts(&tx, repo, destination, &merged)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
         retain_mutations(&tx, &saved, incoming)?;
-        for (object, changes) in &objects {
-            // Validated mutations have known fields and one winner per field.
-            if !object
-                .kind
-                .fields()
-                .iter()
-                .all(|field| changes.winners.contains_key(field))
-            {
-                return Err(invalid(format!("incomplete planning record {}", object.id)));
+        let owners = merged
+            .objects()
+            .into_iter()
+            .map(|origin| {
+                Ok((
+                    origin.clone(),
+                    PlanningObject {
+                        kind: origin.kind,
+                        id: associated_local_id(&tx, origin.kind, &origin.id, Some(repo))?
+                            .unwrap_or_else(|| origin.id.clone()),
+                    },
+                ))
+            })
+            .collect::<StoreResult<BTreeMap<_, _>>>()?;
+        let mut objects = changes_by_object(&merged, &owners)?;
+        let mut held = selection_conflicts(&tx, repo, destination, &merged, false)?;
+        // One rejected or private origin holds the entire projection, not only
+        // that origin's winner. Association never enrolls its local owner.
+        for (origin, local) in &owners {
+            if let Some(reason) = held.get(origin).cloned() {
+                held.insert(local.clone(), reason);
             }
+        }
+        for object in objects.keys() {
             match object.kind {
                 PlanningKind::Wave => {
                     crate::id::WaveId::parse(&object.id).map_err(invalid)?;
@@ -778,19 +836,19 @@ impl SqliteStore {
                 PlanningKind::Comment => {}
             }
         }
-        // Correspondence can retain each creation origin on its local owner
-        // before joint scalar projection is available. This releases no effect:
-        // the sharing/projection conflict below still fences every new attempt.
+        // Correspondence retains creation origins even when private selection
+        // holds scalar projection. This releases no effect: the retained
+        // sharing/projection conflict still fences every new attempt.
         // Import suppression keeps private local edits out of the peer journal.
         for (object, changes) in &objects {
-            if !held.contains_key(*object) || changes.creation.is_empty() {
+            if !held.contains_key(object) || changes.creation.is_empty() {
                 continue;
             }
-            let Some(local) = associated_local_id(&tx, object.kind, &object.id, Some(repo))? else {
+            if !exists(&tx, object)? {
                 continue;
-            };
+            }
             let receipt = tx.savepoint()?;
-            match project_creation(&receipt, object, &local, changes) {
+            match project_creation(&receipt, object, changes) {
                 Ok(()) => receipt.commit()?,
                 // Contradictory captured operations remain in the journal and
                 // behind the existing hold; never replace the retained receipt.
@@ -801,7 +859,7 @@ impl SqliteStore {
         let mut pending = objects
             .iter_mut()
             .filter(|(object, _)| !held.contains_key(*object))
-            .map(|(&object, changes)| {
+            .map(|(object, changes)| {
                 changes.observations = latest_observations(changes.observations.iter().copied())?;
                 Ok((object, &*changes))
             })
@@ -861,7 +919,7 @@ impl SqliteStore {
         };
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
-        for (&object, changes) in &objects {
+        for (object, changes) in &objects {
             if object.kind != PlanningKind::Wave
                 || held.contains_key(object)
                 || !exists(&tx, object)?
@@ -876,7 +934,7 @@ impl SqliteStore {
                     &changes.winners["current_project_id"].1.value,
                 )),
             ) {
-                Ok(()) => observe_projected_fields(&tx, object, &["current_project_id"])?,
+                Ok(()) => observe_projected_fields(&tx, object, changes, &["current_project_id"])?,
                 Err(error) if projection_conflict(&error) => {
                     conflicts.insert((object.clone(), error.to_string()));
                 }
@@ -886,8 +944,8 @@ impl SqliteStore {
         // Project lists can refer to Tasks first created by this import. Apply
         // only after their projection; no receipt is settled by this pass.
         for object in objects.keys().filter(|o| o.kind == PlanningKind::Project) {
-            if !held.contains_key(*object)
-                && !conflicts.iter().any(|(failed, _)| failed == *object)
+            if !held.contains_key(object)
+                && !conflicts.iter().any(|(failed, _)| failed == object)
                 && exists(&tx, object)?
             {
                 super::planning_order::project_pending(&tx, &ProjectId::from_raw(&object.id))?;
@@ -899,7 +957,8 @@ impl SqliteStore {
         // The receipt records skipped projection, not its current cause. Status
         // derives the specific hold; diagnostic wording never chooses authority.
         conflicts.extend(
-            held.into_keys()
+            selection_conflicts(&tx, repo, destination, &merged, true)?
+                .into_keys()
                 .map(|object| (object, SHARING_PROJECTION_PENDING.into())),
         );
         reconcile_conflicts(&tx, repo, destination, &conflicts)?;
@@ -1133,6 +1192,7 @@ fn selection_conflicts(
     repo: &str,
     destination: &str,
     snapshot: &PlanningSnapshot,
+    hold_associations: bool,
 ) -> StoreResult<BTreeMap<PlanningObject, String>> {
     let mut dependents: BTreeMap<PlanningObject, BTreeSet<&PlanningObject>> = BTreeMap::new();
     for change in snapshot.changes.values() {
@@ -1162,15 +1222,37 @@ fn selection_conflicts(
             held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
             pending.insert(object.clone());
         }
-        let associated: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
-             AND (origin_id=?3 OR COALESCE(task_id,project_id)=?3))",
-            params![object.kind.as_str(), repo, object.id],
-            |row| row.get(0),
-        )?;
-        if associated {
-            held.insert(object.clone(), ASSOCIATION_PROJECTION_PENDING.into());
-            pending.insert(object.clone());
+        if let Some(local) = associated_local_id(conn, object.kind, &object.id, Some(repo))? {
+            let local = PlanningObject {
+                kind: object.kind,
+                id: local,
+            };
+            dependents.entry(local.clone()).or_default().insert(object);
+            if let Some(local) = snapshot
+                .objects()
+                .into_iter()
+                .find(|other| **other == local)
+            {
+                dependents.entry(object.clone()).or_default().insert(local);
+            }
+            if member_destination(conn, repo, &local)?.as_deref() != Some(destination) {
+                held.insert(object.clone(), "planning exchange held: associated local Work is outside this selection; private history is retained".into());
+                pending.insert(object.clone());
+            }
+        }
+        // Selected groups can project their scalar frontier now. Exchange and
+        // new effects remain held until relationship/receipt composition is complete.
+        if hold_associations {
+            let associated: bool = conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
+                 AND (origin_id=?3 OR COALESCE(task_id,project_id)=?3))",
+                params![object.kind.as_str(), repo, object.id],
+                |row| row.get(0),
+            )?;
+            if associated {
+                held.insert(object.clone(), ASSOCIATION_PROJECTION_PENDING.into());
+                pending.insert(object.clone());
+            }
         }
     }
     // Follow each dependency once, including Wave/selected-Project cycles,
@@ -1245,7 +1327,7 @@ fn export_selected(
     destination: &str,
 ) -> StoreResult<(PlanningSnapshot, BTreeMap<PlanningObject, String>)> {
     let mut snapshot = export_in(conn, repo, destination)?;
-    let held = selection_conflicts(conn, repo, destination, &snapshot)?;
+    let held = selection_conflicts(conn, repo, destination, &snapshot, true)?;
     snapshot
         .changes
         .retain(|_, change| !held.contains_key(&change.object));
@@ -1375,10 +1457,20 @@ fn insert_and_project(
     snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
     let winners = &changes.winners;
+    if changes
+        .observed
+        .iter()
+        .any(|(_, change)| change.object != *object)
+        && (!changes.orders.is_empty() || !changes.deletions.is_empty())
+    {
+        return Err(StoreError::PlanningReceiptConflict {
+            effect: "associated ordering or deletion",
+        });
+    }
     if object.kind == PlanningKind::Comment {
         project_comment(conn, object, changes)?;
         require_repository(conn, object, repo)?;
-        return observe_projected_fields(conn, object, object.kind.fields());
+        return observe_projected_fields(conn, object, changes, object.kind.fields());
     }
     if !exists(conn, object)? {
         let required = |key: &str| {
@@ -1404,7 +1496,7 @@ fn insert_and_project(
                 // New planning records have no placement. Initialize local required
                 // fields just as the common writer does; never import these values.
                 conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,created_at,updated_at,workspace_slug) VALUES(?1,?2,?3,unixepoch(),unixepoch(),'')",
-                    params![object.id,required("project_id")?,required("issue_identifier")?])?;
+                    params![object.id,projected_value(conn, "project_id", &winners["project_id"].1.value)?.as_str(),required("issue_identifier")?])?;
             }
             PlanningKind::Comment => unreachable!("comments use the common thread writer"),
         }
@@ -1412,7 +1504,7 @@ fn insert_and_project(
     if object.kind == PlanningKind::Wave {
         validate_wave(conn, object, winners, repo)?;
     }
-    project_creation(conn, object, &object.id, changes)?;
+    project_creation(conn, object, changes)?;
     if object.kind == PlanningKind::Task {
         for (receipt, history) in &changes.deletions {
             super::planning_changes::import_peer_deletion(
@@ -1446,7 +1538,8 @@ fn insert_and_project(
         super::planning_changes::reconcile_deletion(conn, &TaskId::from_raw(&object.id))?;
     }
     let pending_order = if object.kind == PlanningKind::Task {
-        let project = winners["project_id"].1.value.as_str();
+        let project = projected_value(conn, "project_id", &winners["project_id"].1.value)?;
+        let project = project.as_str();
         conn.query_row("SELECT EXISTS(SELECT 1 FROM project_changes c JOIN planning_order_current o ON o.id=c.id
             WHERE o.project_id=?1 AND c.acknowledged=0 AND c.conflict_json IS NULL)", [project], |row| row.get::<_, bool>(0))?
     } else {
@@ -1497,7 +1590,7 @@ fn insert_and_project(
         }
     }
     require_repository(conn, object, repo)?;
-    observe_projected_fields(conn, object, &projected)
+    observe_projected_fields(conn, object, changes, &projected)
 }
 
 /// Retain the evaluated frontier without synthesizing a local edit. Keeping all
@@ -1506,8 +1599,10 @@ fn insert_and_project(
 fn observe_projected_fields(
     conn: &Connection,
     object: &PlanningObject,
+    changes: &ObjectChanges<'_>,
     fields: &[&str],
 ) -> StoreResult<()> {
+    let projected = fields;
     let fields = serde_json::to_string(fields)?;
     conn.execute(
         "DELETE FROM planning_peer_observed WHERE object_id=?1 AND EXISTS (
@@ -1515,37 +1610,38 @@ fn observe_projected_fields(
                 AND c.kind=?2 AND c.field IN (SELECT value FROM json_each(?3)))",
         params![object.id, object.kind.as_str(), fields],
     )?;
-    conn.execute(
-        "INSERT INTO planning_peer_observed(object_id,id)
-         SELECT object_id,id FROM planning_peer_heads WHERE object_id=?1 AND kind=?2
-             AND field IN (SELECT value FROM json_each(?3))",
-        params![object.id, object.kind.as_str(), fields],
-    )?;
+    for (id, change) in &changes.observed {
+        if projected.contains(&change.field.as_str()) {
+            conn.execute(
+                "INSERT INTO planning_peer_observed(object_id,id) VALUES(?1,?2)",
+                params![object.id, id],
+            )?;
+        }
+    }
     Ok(())
 }
 
 fn project_creation(
     conn: &Connection,
-    origin: &PlanningObject,
-    local: &str,
+    local: &PlanningObject,
     changes: &ObjectChanges<'_>,
 ) -> StoreResult<()> {
-    let Some((_, winner)) = changes.winners.get("creation") else {
-        return Ok(());
-    };
-    let task = TaskId::from_raw(local);
-    let project = ProjectId::from_raw(local);
-    super::planning_export::import_peer_receipts(
-        conn,
-        origin,
-        match origin.kind {
-            PlanningKind::Task => PlanningChanges::Task(&task),
-            PlanningKind::Project => PlanningChanges::Project(&project),
-            _ => return Err(invalid("creation requires a Task or Project")),
-        },
-        &winner.value,
-        &changes.creation,
-    )
+    let task = TaskId::from_raw(&local.id);
+    let project = ProjectId::from_raw(&local.id);
+    for (origin, (winner, history)) in &changes.creation {
+        super::planning_export::import_peer_receipts(
+            conn,
+            origin,
+            match local.kind {
+                PlanningKind::Task => PlanningChanges::Task(&task),
+                PlanningKind::Project => PlanningChanges::Project(&project),
+                _ => return Err(invalid("creation requires a Task or Project")),
+            },
+            winner,
+            history,
+        )?;
+    }
+    Ok(())
 }
 
 fn project_comment(
@@ -1555,9 +1651,7 @@ fn project_comment(
 ) -> StoreResult<()> {
     let winners = &changes.winners;
     let task = TaskId::from_raw(
-        winners["task_id"]
-            .1
-            .value
+        projected_value(conn, "task_id", &winners["task_id"].1.value)?
             .as_str()
             .ok_or_else(|| invalid("comment requires a Task"))?,
     );
@@ -2256,6 +2350,22 @@ fn validate_wave(
     })
 }
 
+/// Resolve a planning reference only at the local projection boundary. Journal
+/// values and captured delivery inputs keep their original identities.
+fn projected_value(conn: &Connection, field: &str, value: &Value) -> StoreResult<Value> {
+    let kind = match field {
+        "project_id" | "current_project_id" => PlanningKind::Project,
+        "task_id" => PlanningKind::Task,
+        _ => return Ok(value.clone()),
+    };
+    let Some(origin) = value.as_str() else {
+        return Ok(value.clone());
+    };
+    Ok(associated_local_id(conn, kind, origin, None)?
+        .map(Value::String)
+        .unwrap_or_else(|| value.clone()))
+}
+
 fn project_fields<'a>(
     conn: &Connection,
     object: &PlanningObject,
@@ -2270,10 +2380,10 @@ fn project_fields<'a>(
                     .as_object()
                     .expect("validated planning field group")
                     .iter()
-                    .map(|(key, value)| (key.as_str(), value)),
+                    .map(|(key, value)| (key.as_str(), value.clone())),
             );
         } else {
-            columns.insert(field, value);
+            columns.insert(field, projected_value(conn, field, value)?);
         }
     }
     let assignments = columns
@@ -7531,6 +7641,280 @@ mod tests {
                 }
             )
             .unwrap());
+        }
+    }
+
+    #[test]
+    fn associated_import_observes_joint_frontier_before_local_save_and_return_import() {
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        for reverse in [false, true] {
+            let (_source_home, source) = store();
+            let (wave, mut row, source_task) = linear_seed(&source);
+            let source_project = source.task(&source_task).unwrap().unwrap().project_id;
+            let before = export(&source, "/source");
+            let (_target_home, target) = store();
+            target
+                .create_wave(&Wave::new(
+                    wave.clone(),
+                    "planning".into(),
+                    "/target".into(),
+                ))
+                .unwrap();
+            target.put_pm_snapshot(&row).unwrap();
+            let local = target
+                .task_by_issue(&row.snapshot.items[0].id)
+                .unwrap()
+                .unwrap();
+            assert_ne!(local.id, source_task);
+            assert_ne!(local.project_id, source_project);
+            target
+                .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+                .unwrap();
+            preserve_execution(&target, &wave, &local.id);
+            preserve_execution(&source, &wave, &source_task);
+            let source_execution = execution_rows(&source);
+            let target_execution = execution_rows(&target);
+            edit_title(&target, &local.id, "Uncertain losing title");
+            let uncertain = target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .into_iter()
+                .find(|change| change.field == "name")
+                .unwrap();
+            assert!(target
+                .attempt_planning_field(
+                    super::PlanningChanges::Task(&local.id),
+                    &uncertain,
+                    row.snapshot.items[0].revision.as_deref()
+                )
+                .unwrap());
+
+            row.snapshot.items[0].name = "Observed peer title".into();
+            row.snapshot.items[0].revision = Some("2026-10-09T12:00:00Z".into());
+            row.snapshot.projects[0].name = "Observed peer project".into();
+            row.snapshot.projects[0].workflow = "review".into();
+            row.snapshot.projects[0].revision = Some("2026-10-09T12:00:00Z".into());
+            row.synced_at += 1;
+            source.put_pm_snapshot(&row).unwrap();
+            let after = export(&source, "/source");
+            let snapshots = if reverse {
+                [&after, &before]
+            } else {
+                [&before, &after]
+            };
+            import(&target, "/target", "before-association", snapshots[0]);
+            for (kind, origin, owner, provider) in [
+                (
+                    PlanningKind::Task,
+                    source_task.as_str(),
+                    local.id.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                ),
+                (
+                    PlanningKind::Project,
+                    source_project.as_str(),
+                    local.project_id.as_str(),
+                    row.snapshot.projects[0].id.as_str(),
+                ),
+            ] {
+                for _ in 0..2 {
+                    target
+                        .associate_peer_planning(
+                            "/target",
+                            &PlanningObject {
+                                kind,
+                                id: origin.into(),
+                            },
+                            owner,
+                            provider,
+                        )
+                        .unwrap();
+                }
+            }
+            import(&target, "/target", "joint", snapshots[1]);
+            import(&target, "/target", "repeat", &after);
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().plan.title,
+                "Observed peer title"
+            );
+            assert_eq!(
+                target
+                    .project(&local.project_id)
+                    .unwrap()
+                    .unwrap()
+                    .plan
+                    .name,
+                "Observed peer project"
+            );
+            assert_eq!(
+                super::super::project_content::read_content(
+                    &target.conn.lock().unwrap(),
+                    &local.project_id
+                )
+                .unwrap()
+                .workflow,
+                "review"
+            );
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().project_id,
+                local.project_id
+            );
+            assert!(target.task(&source_task).unwrap().is_none());
+            assert!(target.project(&source_project).unwrap().is_none());
+            let losing: (bool, bool, Option<String>) = target
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT attempted,acknowledged,conflict_json FROM task_changes WHERE id=?1",
+                    [&uncertain.id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            assert!(losing.0 && !losing.1 && losing.2.is_some());
+
+            edit_title(&target, &local.id, "Save after peer observation");
+            target
+                .edit_project(
+                    &local.project_id,
+                    Some("Project after peer observation"),
+                    None,
+                )
+                .unwrap();
+            target
+                .update_project_content(
+                    &local.project_id,
+                    &crate::pm::ProjectContent {
+                        workflow: "code".into(),
+                        krs: row.snapshot.projects[0].krs.clone(),
+                        metric_targets: row.snapshot.projects[0].metric_targets.clone(),
+                    },
+                )
+                .unwrap();
+            // Serialize retained history, not the public export: association
+            // effects/exchange stay held until all receipt protocols compose.
+            let returned =
+                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            let returned = PlanningSnapshot::from_bytes(&returned.to_bytes().unwrap()).unwrap();
+            for (origin, owner, field) in [
+                (source_task.as_str(), local.id.as_str(), "issue_title"),
+                (
+                    source_project.as_str(),
+                    local.project_id.as_str(),
+                    "project_name",
+                ),
+                (
+                    source_project.as_str(),
+                    local.project_id.as_str(),
+                    "workflow",
+                ),
+            ] {
+                let (_, saved) = returned
+                    .winners()
+                    .find(|(_, c)| c.object.id == owner && c.field == field)
+                    .unwrap();
+                assert!(saved.linear.is_none());
+                assert!(saved
+                    .parents
+                    .iter()
+                    .any(|id| returned.changes[id].object.id == origin));
+                let baseline = super::linear_predecessor(&returned, saved).unwrap();
+                assert_eq!(baseline["revision"], "2026-10-09T12:00:00Z");
+            }
+            import(&source, "/source", "return-before-association", &returned);
+            for (kind, origin, owner, provider) in [
+                (
+                    PlanningKind::Task,
+                    local.id.as_str(),
+                    source_task.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                ),
+                (
+                    PlanningKind::Project,
+                    local.project_id.as_str(),
+                    source_project.as_str(),
+                    row.snapshot.projects[0].id.as_str(),
+                ),
+            ] {
+                source
+                    .associate_peer_planning(
+                        "/source",
+                        &PlanningObject {
+                            kind,
+                            id: origin.into(),
+                        },
+                        owner,
+                        provider,
+                    )
+                    .unwrap();
+            }
+            for snapshot in [&returned, &before, &returned] {
+                import(&source, "/source", "return", snapshot);
+                assert_eq!(
+                    source.task(&source_task).unwrap().unwrap().plan.title,
+                    "Save after peer observation"
+                );
+                assert_eq!(
+                    source.project(&source_project).unwrap().unwrap().plan.name,
+                    "Project after peer observation"
+                );
+                assert_eq!(
+                    super::super::project_content::read_content(
+                        &source.conn.lock().unwrap(),
+                        &source_project
+                    )
+                    .unwrap()
+                    .workflow,
+                    "code"
+                );
+            }
+            for (table, owner_field, owner, field, value) in [
+                (
+                    "task_changes",
+                    "task_id",
+                    source_task.as_str(),
+                    "name",
+                    "Save after peer observation",
+                ),
+                (
+                    "project_changes",
+                    "project_id",
+                    source_project.as_str(),
+                    "workflow",
+                    "code",
+                ),
+            ] {
+                let base: String = source.conn.lock().unwrap().query_row(
+                    &format!("SELECT base_json FROM {table} WHERE {owner_field}=?1 AND field=?2 AND json_extract(value_json,'$')=?3 AND acknowledged=0 AND conflict_json IS NULL"),
+                    params![owner,field,value], |r| r.get(0)).unwrap();
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(&base).unwrap()["revision"],
+                    "2026-10-09T12:00:00Z"
+                );
+            }
+            // A later provider acquisition can follow the accepted peer-authored
+            // frontier too; it must not require inventing an equal-value bridge.
+            row.snapshot.items[0].name = "Later Linear title".into();
+            row.snapshot.items[0].revision = Some("2026-10-09T13:00:00Z".into());
+            row.snapshot.projects[0].workflow = "review".into();
+            row.snapshot.projects[0].revision = Some("2026-10-09T13:00:00Z".into());
+            row.synced_at += 1;
+            source.put_pm_snapshot(&row).unwrap();
+            let acquired =
+                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            acquired.to_bytes().unwrap();
+            import(&target, "/target", "provider-after-peer", &acquired);
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().plan.title,
+                "Later Linear title"
+            );
+            assert_eq!(execution_rows(&target), target_execution);
+            assert_eq!(execution_rows(&source), source_execution);
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o.id == local.id.as_str() || o.id == source_task.as_str()));
         }
     }
 

@@ -85,10 +85,10 @@ END;
 -- Both capture writers use missing_parent to retain a newly observed origin even
 -- when their value is unchanged. Local and associated rows cannot overlap.
 CREATE VIEW planning_peer_capture_heads AS
-SELECT c.kind,o.object_id,c.field,c.id,c.object_id AS origin_id,0 AS missing_parent
+SELECT c.kind,o.object_id,c.field,c.id,1 AS accepted,0 AS missing_parent
 FROM planning_peer_observed o JOIN planning_peer_changes c ON c.id=o.id
 UNION ALL
-SELECT c.kind,COALESCE(a.task_id,a.project_id),c.field,c.id,c.object_id,
+SELECT c.kind,COALESCE(a.task_id,a.project_id),c.field,c.id,0,
     NOT EXISTS(SELECT 1 FROM planning_peer_heads own
         JOIN planning_peer_changes saved ON saved.id=own.id
         JOIN json_each(saved.parents) parent ON parent.value=c.id
@@ -101,6 +101,8 @@ JOIN planning_peer_context ctx ON ctx.singleton=1
 LEFT JOIN tasks t ON t.id=a.task_id
 LEFT JOIN projects p ON p.id=a.project_id
 WHERE COALESCE(t.external_issue_id,p.external_project_id)=a.provider_id
+    AND NOT EXISTS(SELECT 1 FROM planning_peer_observed o
+        WHERE o.object_id=COALESCE(a.task_id,a.project_id) AND o.id=c.id)
     AND json_extract(ctx.observation,'$.body.id')=a.provider_id
     AND json_extract(c.linear,'$.body')=json_extract(ctx.observation,'$.body')
     AND c.field IN (SELECT key FROM json_each(ctx.fields))
@@ -239,7 +241,8 @@ BEGIN
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
             WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key
-            AND (h.origin_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
+            AND (h.accepted
+                OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j ;
 END;
 
@@ -254,7 +257,8 @@ BEGIN
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
             WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key
-            AND (h.origin_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
+            AND (h.accepted
+                OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j WHERE j.value IS NOT json_extract(json_object('wave_id',OLD.wave_id,'external_project_id',OLD.external_project_id,'project_slug',OLD.project_slug,'project_name',OLD.project_name,'project_summary',OLD.project_summary,'status',OLD.status,'planning_rank',OLD.planning_rank,'planning_initiatives',OLD.planning_initiatives,'planning_teams',OLD.planning_teams), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
@@ -282,7 +286,8 @@ BEGIN
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
-            AND (h.origin_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
+            AND (h.accepted
+                OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j ;
 END;
 
@@ -297,7 +302,8 @@ BEGIN
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
         (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
-            AND (h.origin_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
+            AND (h.accepted
+                OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j WHERE j.value IS NOT json_extract(json_object('project_id',OLD.project_id,'external_issue_id',OLD.external_issue_id,'issue_identifier',OLD.issue_identifier,'issue_title',OLD.issue_title,'issue_description',OLD.issue_description,'planning_rank',OLD.planning_rank,'planning_assignee',OLD.planning_assignee,'disposition',json_object('planning_completed',OLD.planning_completed,'planning_completed_at',OLD.planning_completed_at,'planning_state',OLD.planning_state),'planning_deleted_at',OLD.planning_deleted_at,'planning_url',OLD.planning_url,'planning_branch_name',OLD.planning_branch_name,'planning_team_id',OLD.planning_team_id), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)

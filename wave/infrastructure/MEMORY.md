@@ -629,13 +629,14 @@ Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchan
 stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
 
 `39dba32c1` retains creation origins; common acquisition owns exact readback.
-`8f3472eda`/`b5b491099` retain exact Linear parents and private selection without
-exporting correspondence. Equal text grants no causality. `dac02060a`–`96f714bd6`
-record accepted same-origin frontiers without echo; rejected/held heads cannot
-become save predecessors. Behavior is unverified. Winners still group by origin;
-joint projection, peer-authored links, relationships, non-creation receipts and
-public composition remain unfinished. Both associated origins stay held.
-History: `f2a5c94e8`, this heading. Plan: `scratch/work-on-another-machine-name.md`.
+The joint scalar cut reuses `dac02060a`–`96f714bd6`'s accepted-observation writer.
+Explicit correspondence groups local owners; causal ancestry precedes ranking.
+Portable peer-authored predecessors record observation, never identity or authority.
+Private references still hold the whole group. Relationship/non-creation receipt
+composition and public acceptance remain unfinished; association exchange/effects
+and mixed-provider exchange stay held. Source fixtures do not prove installed
+behavior. Earlier proofs: `163362aad`, this heading. Plan:
+`scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

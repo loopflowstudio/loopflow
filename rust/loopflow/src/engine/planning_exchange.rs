@@ -184,17 +184,13 @@ pub struct PlanningSnapshot {
 }
 
 impl PlanningMutation {
-    /// Only an exact provider fact can bridge two retained Work identities.
-    /// Association is machine-local; equal values, clocks or names are no proof.
-    fn observes_same_fact(&self, previous: &Self) -> bool {
+    /// Scalar predecessors record observation, not identity equivalence. Only
+    /// the receiving store's explicit correspondence can combine their owners.
+    /// Provider priority is independently validated against the child's body.
+    fn observes(&self, previous: &Self) -> bool {
         self.object.kind == previous.object.kind
             && matches!(self.object.kind, PlanningKind::Task | PlanningKind::Project)
-            && self.value == previous.value
-            && self
-                .linear
-                .as_ref()
-                .zip(previous.linear.as_ref())
-                .is_some_and(|(next, prior)| next.body == prior.body)
+            && self.object.kind.fields().contains(&self.field.as_str())
     }
 
     pub(crate) fn provider_evidence(&self) -> bool {
@@ -287,6 +283,34 @@ impl PlanningSnapshot {
         winning_heads(self.heads())
     }
 
+    /// Evaluate causality across explicitly resolved owners while retaining the
+    /// journal's per-origin heads. A parent edge is observation, not an alias.
+    pub(crate) fn frontier_by<'a>(
+        &'a self,
+        owner: impl Fn(&'a PlanningObject) -> &'a PlanningObject,
+    ) -> Vec<(&'a str, &'a PlanningMutation)> {
+        let heads: Vec<_> = self.heads().collect();
+        let mut retired = BTreeSet::new();
+        for (_, change) in &heads {
+            let mut pending: Vec<_> = change.parents.iter().map(String::as_str).collect();
+            let mut visited = BTreeSet::new();
+            while let Some(id) = pending.pop() {
+                if !visited.insert(id) {
+                    continue;
+                }
+                let parent = &self.changes[id];
+                if owner(&parent.object) == owner(&change.object) {
+                    retired.insert(id);
+                }
+                pending.extend(parent.parents.iter().map(String::as_str));
+            }
+        }
+        heads
+            .into_iter()
+            .filter(|(id, _)| !retired.contains(id))
+            .collect()
+    }
+
     pub fn validate(&self) -> Result<(), PlanningExchangeError> {
         for (id, change) in &self.changes {
             if id.is_empty()
@@ -336,7 +360,7 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if (previous.object != change.object && !change.observes_same_fact(previous))
+                if (previous.object != change.object && !change.observes(previous))
                     || previous.field != change.field
                     || previous.clock >= change.clock
                 {
@@ -353,6 +377,13 @@ impl PlanningSnapshot {
 pub(crate) fn winning_heads<'a>(
     heads: impl IntoIterator<Item = (&'a str, &'a PlanningMutation)>,
 ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
+    winning_heads_by(heads, |change| &change.object)
+}
+
+pub(crate) fn winning_heads_by<'a, K: Ord>(
+    heads: impl IntoIterator<Item = (&'a str, &'a PlanningMutation)>,
+    owner: impl Fn(&'a PlanningMutation) -> K,
+) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
     let mut fields = BTreeMap::new();
     for (id, change) in heads {
         let priority = (
@@ -365,7 +396,7 @@ pub(crate) fn winning_heads<'a>(
             id,
         );
         let winner = fields
-            .entry((&change.object, change.field.as_str()))
+            .entry((owner(change), change.field.as_str()))
             .or_insert((priority, (id, change)));
         if priority > winner.0 {
             *winner = (priority, (id, change));

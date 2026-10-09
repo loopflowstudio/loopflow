@@ -229,11 +229,12 @@ Freeze Work/capture before native requests, never from delayed starts or launch
 capture. `a563794b7` preserves matching origins and rejects conflicting repeats.
 Late history grants no control; broadcasts cannot borrow newer input.
 
-Codex/OpenCode gate exec on identity persistence, still in Session columns. `Command::spawn` waits for exec, so recording needs another parent
-thread, never SQLite after fork.
-FIFO holders outlive transfer; both death orders need record-based proof. Inventory
-must include detached providers. Retain native terminals, dash-compatible signals
-and throwaway tests. Records, rename, DTOs and installed outcomes remain unproved.
+`ce80dc3e3`: Codex/OpenCode record before exec only with attachments.
+`Command::spawn` waits for exec: record on a parent thread, never after fork.
+Cover launches and detached providers. FIFO holders outlive transfer;
+prove both death orders. Retain native terminals, dash-compatible signals and
+throwaway tests. Records, rename, DTOs, two-second removal and installation
+remain unproved.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

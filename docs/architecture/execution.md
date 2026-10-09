@@ -81,7 +81,9 @@ Process does not reserve agent work or mark a Task Started.
 
 Headless Codex and OpenCode prepare their lifeline before spawning. The child
 establishes its process group, waits for watchdog readiness, then asks a parent
-thread to persist its OS identity before exec. Failed recording refuses exec;
+thread to run its recording callback before exec. For an attached Session, this
+persists OS identity in the Session columns; without an attachment it writes
+nothing. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. A reconnecting lf invocation holds
 the same FIFO. Writers remain held until OS exit, even after attachment transfer;

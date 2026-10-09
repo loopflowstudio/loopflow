@@ -929,7 +929,7 @@ fn peer_creation_readback_reconciles_attempt_after_mapping_only_import() {
         )
         .unwrap();
     assert!(acknowledged);
-    let retained: (bool, String, String) = conn
+    let retained: (bool, String, Option<String>) = conn
         .query_row(
             "SELECT acknowledged,value_json,conflict_json FROM task_changes WHERE id=?1",
             [&later.id],
@@ -941,12 +941,13 @@ fn peer_creation_readback_reconciles_attempt_after_mapping_only_import() {
         serde_json::from_str::<serde_json::Value>(&retained.1).unwrap(),
         "Later save"
     );
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&retained.2).unwrap()["value"],
-        "Captured title"
-    );
+    // This is the unchanged creation baseline, not a concurrent Linear edit.
+    // Its former conflict assertion hid the public two-store loss of later saves.
+    assert_eq!(retained.2, None);
     drop(conn);
-    assert_eq!(source.task_by_issue("NEW-1").unwrap().unwrap().id, task);
+    let saved = source.task_by_issue("NEW-1").unwrap().unwrap();
+    assert_eq!(saved.id, task);
+    assert_eq!(saved.plan.title, "Later save");
     assert_eq!(source.workflow(&task).unwrap(), workflow);
     assert_eq!(source.task_state(&task).unwrap(), state);
     assert_eq!(source.recent_task_events(&task, 100).unwrap(), events);

@@ -609,6 +609,10 @@ lost replies and independent propagation during rejected field delivery. The
 association cases add two stores and a disposable custom ref: public setup,
 correspondence, Git exchange, HTTPS readback, subsequent saves, older documents
 and private-origin holds preserve populated execution and losing receipts.
+The creation-origin case transfers lost creation/attachment receipts through Git,
+retains later saves and execution, and proves changed Linear fields still win.
+The synthetic provider rejects duplicate UUIDs; a request can race peer receipt
+acquisition, but settled reconnect must send no further creation requests.
 Only attempted effects acknowledge; equal-desired provider readback can instead
 retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.

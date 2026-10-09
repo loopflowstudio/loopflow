@@ -148,6 +148,9 @@ this heading. Keep these replacements deleted:
   the common receipt writers still own merges and conflicts. Snapshot validation
   rejects malformed input before retention. Scalar ranking excludes receipts and
   independent provider evidence; their separate protocols and origins survive.
+- First creation readback's unchanged captured-field promotion to a competing
+  Linear head. Keep exact capture identity, provider bodies and changed-field
+  priority; no global winner-ranking exception replaces it.
 - Common reconciliation's equal-desired exception after a changed provider baseline:
   adopt the observed value without acknowledging an unattempted local effect.
 - Project operations' physical-ID-only scan: full IDs now use the common
@@ -234,8 +237,8 @@ association proof; `5dbe92966` groups its scalar frontier once per resolved owne
 The latter's 78 storage passes include repaired #1499 placement/reopening fixtures,
 not a rerun of public transport. No new planner or blanket provider hold is needed.
 
-Remaining work separates **missing composed regressions** (creation/link origins,
-negative-evidence/order interaction and native reconnect) from **existing checks
+Remaining work separates **missing composed regressions** (associated creation
+origins, negative-evidence/order interaction and native reconnect) from **existing checks
 awaiting gate** (taskless lifetimes, cold-worker dispatch and materialized suites).
 Items 2–6 retain those boundaries; public fixtures may expose further repairs.
 Private or failed groups never advance observations.
@@ -347,19 +350,10 @@ Keep their counterexamples and acceptance limits; no second implementation is ne
   SSH or installed acceptance follows. Per-Work selection, authorship/assignees
   and losing-edit recovery now use the common journal-derived recovery view.
 
-`5bed3a211` integrated main `3a0aa5ca4` (#1510), after common writer `d20c56daf`;
-`ce1750393` integrated #1512. These add chat recipes/hierarchical names and driver
-recovery, not provider-frontier acceptance. Combined launch/Flow verification
-remains with gate. The single remaining-work list below owns association,
-public composition and recovery review; retained conflicts are not convergence.
-
-Mixed-provider exchange uses the common selected-import and effect owners.
-Private-selection holds remain intact. Combined verification belongs
-to gate; publication still requires the acceptance below, with no landing authority.
-Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
-**Remaining integration**.
-
-Earlier acquisition-age/readiness and integration proofs: `610b13869:scratch/work-on-another-machine-name.md`, **Remaining integration**. Planning remains unplaced; observations, not errors, settle effects.
+Earlier common-writer, driver and selected-import integration details remain at
+`9d3d2ba90:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+They establish no combined native lifetime or installed acceptance. Private holds,
+local placement and the review-only publication boundary remain unchanged.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -424,13 +418,15 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    presentation now exists in the common status view.
    No automatic turn/Flow retry exists.
 
-3. Finish public creation/link-origin HTTPS recovery and combined negative-evidence/
-   ordering composition. The existing `public_watch_exports_peer_born_plans_and_recovers_mapped_receipts`
-   case seeds a Store import and SQL mapping updates; it does not carry distinct
-   creation/attachment origins between two stores over Git. That composed regression
-   remains to be built: lost create/link replies, exact-origin readback, later saves,
-   duplicate suppression and preserved execution. The existing public export case
-   remains useful lower-bound coverage, not a replacement for this proof.
+3. Finish associated creation-origin and negative-evidence/ordering composition.
+   `public_git_linear_creation_origins_recover_without_duplicate_effects` now
+   creates a Task through the source CLI and transfers Project/Task receipts through
+   Git. Creation and attachment lose replies on different stores; exact readback
+   settles both, preserves later saves and populated execution, and leaves the
+   receiver unplaced. Reconnect sends no further settled creation requests. Changed
+   Linear titles still win with losing saves retained. The older mapping-only
+   export case remains lower-bound coverage. Divergent associated creation origins
+   still need public composition; this fixture has one original ID per object.
    `81df09092` proves scalar association through ordinary
    Git exchange, HTTPS readback and subsequent local-save exchange, including
    reversed/repeated imports, populated execution and private-origin holds.
@@ -452,42 +448,32 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    migrate directly into the final draft; obsolete per-kind columns/writers stay
    deleted. Detailed cut: `1cbbba625:scratch/work-on-another-machine-name.md`, item 3.
 
-   Creation-origin composition and its exact-readback fixture are retained at
-   `90a37ab79:scratch/work-on-another-machine-name.md`, item 3, **October 9 receipt
-   composition**. Ordinary import retains every origin and captured input under
-   its local owner, even when private selection holds scalar projection; no
-   identity, selection or execution is reassigned. Focused storage proof covers
-   reversed/repeated imports, uncertain origins, private membership and exact
-   acquisition. This is not public Git/HTTPS acceptance.
+   Earlier receipt-origin, association and joint-scalar cuts and their lower-level
+   proofs remain at `9d3d2ba90:scratch/work-on-another-machine-name.md`, item 3.
+   Preserve per-origin uncertainty, exact captured inputs, private dependency holds,
+   repository-scoped correspondence and accepted-source capture. Association alone
+   grants neither enrollment nor effect authority; public composition is below.
 
-   `planning associate <incoming-id> --with <local-id> --linear <provider-id>`
-   now records a machine-local correspondence using the incoming journal's
-   unambiguous scalar mapping and the existing local row's same exact mapping.
-   It refuses redirecting an existing physical row. The common Task resolver and
-   Project selector resolve associated full IDs only; direct identity readers
-   remain exact. Membership, captured effects and execution foreign keys do not
-   change. Lookup rechecks mapping/repository. Selected origins jointly project fields and receipts. Association alone retains
-   its projection conflict; successful import releases it, not private or failed
-   groups. Common receipt composition remains the only effect owner.
+   **October 9 creation-readback counterexample.** The new two-store Git/HTTPS
+   fixture creates on one store, loses creation/attachment responses, then recovers
+   on the other. Receipts settle once, but the first unchanged Task readback on the
+   original store creates a new Linear-priority title head concurrent with a later
+   peer title save. Return import wrongly retires that save. Common receipt
+   rebasing alone did not preserve later saves across independent acquisition.
+   The capture owner now retains an unchanged field's exact captured heads instead
+   of minting a competing Linear field edit. Mapping/metadata retain the full
+   provider body; changed fields and heads outside the capture remain ordinary
+   observations. The old storage regression incorrectly required the later save
+   to conflict; it now requires the saved title and pending receipt to survive.
+   No ordering override, second journal, migration or acquisition lock is added.
 
-   The Store correspondence fixture imports older/newer snapshots in both orders,
-   repeats association and resolves both IDs. It asserts unchanged private planning,
-   local uncertain field receipts and populated execution; it does not project a
-   cross-origin winner. The CLI fixture seeds/imports through Store APIs, then runs
-   public association and Task status (not Git acquisition or provider readback).
-   The recorded 11-test pass includes this public association case after
-   `521c7040f` corrected its hold diagnostic; it is not public Git/HTTPS acceptance.
-
-   Portable-observation rationale and the same-object counterexample remain at
-   `01769ea0d:scratch/work-on-another-machine-name.md`, item 3, **October 9 portable
-   observation cut**. Exact provider equality still governs unobserved sources;
-   the joint cut below supersedes its Linear-only parent validation. Private
-   dependency serialization proves no public exchange.
-
-   Joint-scalar projection, accepted-source capture and portable-observation
-   rationale: `f55d6c5b7:scratch/work-on-another-machine-name.md`, item 3,
-   **October 9 joint scalar cut**. Per-origin journals, uncertainty, private groups
-   and exact provider-equality rules remain; public composition is below.
+   The same public run observed a second attachment request before the receiving
+   store acquired its peer's uncertain receipt. Both requests used the captured
+   attachment UUID. The synthetic provider now models unique creation/attachment
+   IDs and rejects duplicates rather than overwriting an existing object. Request
+   counters retain their old meaning. This proves stable-effect identity and no
+   replay after settlement, not cross-machine exactly-once requests or provider
+   atomicity. Existing single-store export checks still require one request each.
 
    **Implemented association boundaries — reconciled October 9.**
    `79e478550`/`521c7040f` supply membership composition.
@@ -547,9 +533,8 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    The public regression checks both full IDs, Task/Project causal baselines,
    uncertain losing receipts, populated execution, repeated association, older and
    repeated Git documents, and private associated origins. Exact
-   creation/link-origin HTTPS recovery and combined negative-evidence/ordering
-   composition still need their public proof; existing storage fixtures are not
-   that proof. Gate owns combined command/lifetime verification afterward; Jack
+   associated creation-origin and combined negative-evidence/ordering composition
+   still need public proof; same-origin recovery above does not establish them. Gate owns combined command/lifetime verification afterward; Jack
    Heart's review-only boundary is unchanged.
 
    CLI/Desktop share destination-scoped conflicts. Malformed journals report
@@ -701,7 +686,7 @@ Those results predate #1499 integration and prove no combined native launch path
 
 Earlier optional-PR/due-date checks:
 `b888518a5:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-Check: `git diff --check` and `lf context --skill realign` pass (prose only); prior fmt/Clippy/build/78-test results remain at `45780d937`, this heading; gate owns materialized/public/lifetime checks, review owns recovery UX.
+Check: fmt/Clippy, Ruff, two focused Linux public creation/export checks and five `peer_creation_` storage tests pass; gate owns associated origins, negative-evidence/order, native/combined lifetimes and materialized suites; review owns recovery UX. Linux-only Clippy awaits CI (component unavailable).
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

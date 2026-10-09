@@ -635,15 +635,18 @@ losers and exact receipt origins. Correspondence grants no identity or authority
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-`af7730926` recovers journal values through ordinary edits, without author inference
-or enrollment. `81df09092` proves scalar Git/HTTPS association, not atomicity:
-changed baselines retire unattempted intentions; unchanged baselines preserve saves/private holds.
-#1499 separates checkout branches from PRs and adds due dates; exact creation
-inputs survive, completion requests stay local.
-`5dbe92966` passes 78 storage checks after fixture repair: compare execution rows
-and placement, not the whole Task whose planning state legitimately changes.
-Creation/link-origin transport, combined lifetimes and installed acceptance remain
-unproved. Plan: `scratch/work-on-another-machine-name.md`.
+Earlier scalar Git/HTTPS association, recovery, ordering and #1499 proofs:
+`9d3d2ba90:wave/infrastructure/MEMORY.md`, this heading. Due dates synchronize;
+completion requests, placements and execution remain local.
+
+Public two-store creation/link recovery exposed an unchanged creation readback
+incorrectly defeating a later peer save. Capture now preserves exact baseline
+heads; changed Linear facts still win. The old storage assertion required the
+wrong conflict. An attachment request can race peer receipt acquisition using the
+same UUID; synthetic rejection proves no exactly-once requests. Associated origins,
+negative-evidence/order, native lifetimes and installed acceptance remain unproved.
+Plan:
+`scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

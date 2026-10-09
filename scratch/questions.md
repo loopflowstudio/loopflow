@@ -142,3 +142,9 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   unchanged baselines preserve saves. Due dates use the peer journal; completion
   requests stay local. Captured optional null inputs retain their exact bytes.
   Earlier detail: `b888518a5:scratch/questions.md`, final two October 9 entries.
+
+- October 9 public creation recovery exposed an unchanged first provider readback
+  defeating a later peer save. The design records the counterexample and bounded
+  capture-owner repair and pre-acquisition duplicate-request limit. This applies
+  the unchanged-baseline rule; changed Linear facts still win. The fixture rejects
+  duplicate provider UUIDs without claiming cross-machine exactly-once requests.

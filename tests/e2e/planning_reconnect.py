@@ -81,8 +81,11 @@ class Handler(BaseHTTPRequestHandler):
             if "query ListProjectIssues" in query and variables["projectId"] != project["id"]:
                 return {"data": {"project": {"issues": _page([])}}}
             if "mutation DeliverProjectCreation" in query:
-                exports["project_writes"] += 1
                 value = variables["input"]
+                exports.setdefault("writes", []).append(("project", value["id"]))
+                exports["project_writes"] += 1
+                if exports.get("project", {}).get("id") == value["id"]:
+                    return {"errors": [{"message": "project id already exists"}]}
                 exports["project"] = {
                     **copy.deepcopy(project),
                     "id": value["id"],
@@ -94,12 +97,20 @@ class Handler(BaseHTTPRequestHandler):
                 }
                 return {"errors": [{"message": "lost project creation response"}]}
             if "mutation DeliverProjectAttachment" in query:
+                identity = variables["input"]["id"]
+                exports.setdefault("writes", []).append(("link", identity))
                 exports["link_writes"] += 1
+                if identity in exports.setdefault("links", []):
+                    return {"errors": [{"message": "attachment id already exists"}]}
+                exports["links"].append(identity)
                 exports["initiative"] = variables["input"]["initiativeId"]
                 return {"errors": [{"message": "lost attachment response"}]}
             if "mutation DeliverTaskCreation" in query:
-                exports["task_writes"] += 1
                 value = variables["input"]
+                exports.setdefault("writes", []).append(("task", value["id"]))
+                exports["task_writes"] += 1
+                if exports.get("issue", {}).get("id") == value["id"]:
+                    return {"errors": [{"message": "issue id already exists"}]}
                 exports["issue"] = {
                     **copy.deepcopy(state["issues"][0]),
                     "id": value["id"],
@@ -659,6 +670,213 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         db.close()
 
 
+def _exercise_creation_origins(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
+    peer = {**fixture, **fixture["peer"]}
+    peer_env = {
+        **env,
+        "HOME": peer["home"],
+        "LF_HOME": peer["home"],
+        "CLAUDE_CONFIG_DIR": str(Path(peer["home"]) / "claude"),
+        "CODEX_HOME": str(Path(peer["home"]) / "codex"),
+    }
+    sides = [(fixture, env), (peer, peer_env)]
+    databases = [sqlite3.connect(Path(f["home"]) / "loopflow.db", timeout=5) for f, _ in sides]
+    processes = ("00000000-0000-4000-8000-000000000001",)
+
+    def run(side: int, *args: str) -> str:
+        result = subprocess.run(
+            [fixture["lf"], *args],
+            cwd=sides[side][0]["repo"],
+            env=sides[side][1],
+            capture_output=True,
+            text=True,
+            timeout=45,
+        )
+        assert result.returncode == 0, (args, result.stdout, result.stderr)
+        return result.stdout
+
+    def receipt(side: int, kind: str) -> tuple | None:
+        return (
+            databases[side]
+            .execute(
+                "SELECT export_attempted,export_link_attempted,export_acknowledged,export_json "
+                "FROM planning_creations WHERE kind=? AND origin_id=?",
+                (kind, peer[kind]),
+            )
+            .fetchone()
+        )
+
+    def published(side: int) -> bool:
+        reading = json.loads(run(side, "planning", "status", "--json"))["destinations"][0]
+        return reading["publication_state"] == "confirmed" and reading["pending_local"] is False
+
+    def exchange(side: int, predicate) -> None:
+        watch = Watch(*sides[side])
+        try:
+            watch.scope(sides[side][0]["repo"])
+            _await(predicate, f"side {side} did not recover creation origins")
+            _await(lambda: published(side), f"side {side} did not publish receipts")
+        finally:
+            watch.close()
+
+    with server.lock:
+        server.state["exports"] = dict(
+            project_writes=0,
+            task_writes=0,
+            link_writes=0,
+            project_visible=False,
+            task_visible=False,
+        )
+        exports = server.state["exports"]
+    for side, (selected, _) in enumerate(sides):
+        repo = Path(selected["repo"])
+        subprocess.run(["git", "remote", "add", "plans", fixture["remote"]], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", "https://github.com/loopflowstudio/fixture.git"],
+            cwd=repo,
+            check=True,
+        )
+        config = repo / ".lf" / "config.yaml"
+        config.parent.mkdir(exist_ok=True)
+        config.write_text("pm:\n  provider: linear\n  linear_team: team-task-pr-tests\n")
+        goal = repo / "wave" / peer["wave_name"] / "GOAL.md"
+        goal.parent.mkdir(parents=True, exist_ok=True)
+        goal.write_text(
+            f"---\nid: {peer['wave']}\npm:\n  linear_initiative: initiative-peer\n---\n"
+            "Creation recovery\n"
+        )
+        destination = run(
+            side, "planning", "connect", "--remote", "plans", "--shared", "origins"
+        ).strip()
+        if side == 1:
+            run(side, "wave", "edit", peer["wave_name"], "--goal", str(goal))
+            run(side, "planning", "select", destination, "--wave", peer["wave"])
+    before = [_execution_rows(db, processes) for db in databases]
+    assert (
+        databases[0].execute("SELECT id FROM tasks WHERE id=?", (peer["task"],)).fetchone() is None
+    )
+    try:
+        # Source creates; receiver attaches; source creates the Task. Each reply
+        # is lost, so the opposite store must recover the original effect receipt.
+        exchange(1, lambda: exports["project_writes"] == 1)
+        captured_project = receipt(1, "project")[3]
+        exchange(0, lambda: receipt(0, "project") is not None)
+        assert receipt(0, "project")[:3] == (1, 0, 0)
+        assert receipt(0, "project")[3] == captured_project
+        # Imported planning is unplaced; local saved Wave definitions are an
+        # explicit configuration operation, not inferred from files on disk.
+        run(
+            0,
+            "wave",
+            "edit",
+            peer["wave_name"],
+            "--goal",
+            str(Path(fixture["repo"]) / "wave" / peer["wave_name"] / "GOAL.md"),
+        )
+        with server.lock:
+            exports["project_visible"] = True
+        exchange(0, lambda: exports["link_writes"] == 1)
+        assert receipt(0, "project")[:3] == (1, 1, 0)
+        run(0, "project", "edit", peer["project"], "--summary", "Saved after creation")
+        exchange(1, lambda: receipt(1, "project")[:3] == (1, 1, 0))
+        with server.lock:
+            exports["project"]["initiatives"] = _page([{"id": exports["initiative"]}])
+        exchange(1, lambda: exports["task_writes"] == 1)
+        captured_task = receipt(1, "task")[3]
+        exchange(0, lambda: receipt(0, "task") is not None and receipt(0, "task")[0] == 1)
+        assert receipt(0, "task")[3] == captured_task
+        run(0, "task", "edit", peer["task"], "--title", "Saved after task creation")
+        with server.lock:
+            exports["task_visible"] = True
+        exchange(0, lambda: receipt(0, "task")[2] == 1)
+        exchange(1, lambda: receipt(1, "task")[2] == 1)
+        writes_after_settlement = list(exports["writes"])
+        assert set(writes_after_settlement) == {
+            ("project", json.loads(captured_project)["id"]),
+            ("link", json.loads(captured_project)["link_id"]),
+            ("task", json.loads(captured_task)["id"]),
+        }
+        for side, db in enumerate(databases):
+            assert receipt(side, "project") == (1, 1, 1, captured_project)
+            assert receipt(side, "task") == (1, 0, 1, captured_task)
+            for table, owner, identity, field, value in [
+                ("task_changes", "task_id", peer["task"], "name", "Saved after task creation"),
+                (
+                    "project_changes",
+                    "project_id",
+                    peer["project"],
+                    "summary",
+                    "Saved after creation",
+                ),
+            ]:
+                assert db.execute(
+                    f"SELECT count(*) FROM {table} WHERE {owner}=? AND field=? AND value_json=? "
+                    "AND acknowledged=0 AND conflict_json IS NULL",
+                    (identity, field, json.dumps(value)),
+                ).fetchone() == (1,)
+            assert db.execute(
+                "SELECT issue_title FROM tasks WHERE id=?", (peer["task"],)
+            ).fetchone() == ("Saved after task creation",)
+            assert db.execute(
+                "SELECT count(*) FROM tasks WHERE external_issue_id=?", (exports["issue"]["id"],)
+            ).fetchone() == (1,)
+            _assert_execution_unchanged(db, before[side], processes)
+            # Reconnect after settlement; neither Git replay nor HTTPS readback
+            # can repeat a creation/attachment or allocate receiver execution.
+            exchange(side, lambda: receipt(side, "task")[2] == 1)
+            _assert_execution_unchanged(db, before[side], processes)
+        assert exports["writes"] == writes_after_settlement
+        # Changed provider fields still win; baseline preservation is not a
+        # permanent preference for locally created planning.
+        with server.lock:
+            exports["issue"].update(title="Later Linear title", updatedAt="2026-10-08T12:00:01Z")
+        for side, db in enumerate(databases):
+            exchange(
+                side,
+                lambda: (
+                    db.execute(
+                        "SELECT issue_title FROM tasks WHERE id=?", (peer["task"],)
+                    ).fetchone()
+                    == ("Later Linear title",)
+                ),
+            )
+            assert db.execute(
+                "SELECT count(*) FROM task_changes WHERE task_id=? AND field='name' "
+                "AND value_json=? AND conflict_json IS NOT NULL AND acknowledged=0",
+                (peer["task"], json.dumps("Saved after task creation")),
+            ).fetchone() == (1,)
+            _assert_execution_unchanged(db, before[side], processes)
+        with server.lock:
+            assert exports["links"] == [json.loads(captured_project)["link_id"]]
+            assert exports["writes"] == writes_after_settlement
+            assert not server.state["unexpected"], server.state["unexpected"]
+    except Exception as error:
+        raise AssertionError(
+            {
+                "writes": exports.get("writes"),
+                "receipts": [
+                    [receipt(side, kind) for kind in ("project", "task")] for side in range(2)
+                ],
+                "changes": [
+                    [
+                        db.execute(
+                            "SELECT field,value_json,base_json,attempted,"
+                            "acknowledged,conflict_json "
+                            f"FROM {kind}_changes WHERE {kind}_id=?",
+                            (peer[kind],),
+                        ).fetchall()
+                        for kind in ("project", "task")
+                    ]
+                    for db in databases
+                ],
+                "unexpected": server.state["unexpected"],
+            }
+        ) from error
+    finally:
+        for db in databases:
+            db.close()
+
+
 def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
     db = sqlite3.connect(Path(fixture["home"]) / "loopflow.db", timeout=5)
 
@@ -1101,6 +1319,8 @@ printf '%s\\n' '{"type":"result","subtype":"success","result":"Done"}'
         try:
             if sys.argv[2] in ("associations", "association-private"):
                 _exercise_associations(fixture, env, server)
+            elif sys.argv[2] == "creation-origins":
+                _exercise_creation_origins(fixture, env, server)
             elif sys.argv[2] == "exports":
                 _exercise_exports(fixture, env, server)
             elif sys.argv[2] == "effects":

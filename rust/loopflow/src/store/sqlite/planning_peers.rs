@@ -339,6 +339,7 @@ pub(super) fn observe_task(
     };
     let mut fields = observation.fields(PlanningKind::Task)?;
     fields["project_id"] = Value::String(project.into());
+    retain_creation_baselines(conn, PlanningKind::Task, &observation, &mut fields)?;
     observe_in(conn, provider, &observation, &fields)
 }
 
@@ -352,8 +353,75 @@ pub(super) fn observe_project(
         body: serde_json::to_value(project)?,
         observed_at,
     };
-    let fields = observation.fields(PlanningKind::Project)?;
+    let mut fields = observation.fields(PlanningKind::Project)?;
+    retain_creation_baselines(conn, PlanningKind::Project, &observation, &mut fields)?;
     observe_in(conn, provider, &observation, &fields)
+}
+
+// A first readback of an unchanged captured creation field confirms its baseline;
+// it is not a concurrent Linear edit that can defeat a later peer save. Retain
+// the provider body on mapping/metadata fields, and ordinary priority for changed
+// values or heads outside the exact captured set. No journal history is rewritten.
+fn retain_creation_baselines(
+    conn: &Connection,
+    kind: PlanningKind,
+    observation: &LinearObservation,
+    fields: &mut Value,
+) -> StoreResult<()> {
+    let mut query = conn.prepare(
+        "SELECT COALESCE(task_id,project_id),export_json FROM planning_creations
+         WHERE kind=?1 AND export_attempted=1 AND json_extract(export_json,'$.id')=?2",
+    )?;
+    let receipts = query
+        .query_map(
+            params![kind.as_str(), observation.body["id"].as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut captured = BTreeSet::new();
+    let mut heads = BTreeMap::<String, Vec<(String, Value)>>::new();
+    for (owner, body) in receipts {
+        let export: super::planning_export::PlanningExport = serde_json::from_str(&body)?;
+        let mut query = conn.prepare(
+            "SELECT c.id,c.field,c.value FROM planning_peer_observed o
+             JOIN planning_peer_changes c ON c.id=o.id
+             WHERE o.object_id=?1 AND c.kind=?2",
+        )?;
+        for row in query.query_map(params![owner, kind.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })? {
+            let (id, field, value) = row?;
+            let Some(delivery) = delivery_field(kind, &field) else {
+                continue;
+            };
+            let value = serde_json::from_str::<Value>(&value)?;
+            if export.captured.contains(&format!("peer:{id}:{delivery}"))
+                && export
+                    .model
+                    .get(delivery)
+                    .is_some_and(|baseline| baseline == &value)
+            {
+                captured.insert(id.clone());
+            }
+            heads.entry(field).or_default().push((id, value));
+        }
+    }
+    let fields = fields
+        .as_object_mut()
+        .expect("provider fields are an object");
+    fields.retain(|field, value| {
+        !heads.get(field).is_some_and(|heads| {
+            !heads.is_empty()
+                && heads
+                    .iter()
+                    .all(|(id, baseline)| captured.contains(id) && baseline == value)
+        })
+    });
+    Ok(())
 }
 
 pub(super) fn observe_comment(

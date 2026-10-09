@@ -77,9 +77,8 @@ pub fn resolve_builtin_skill(name: &str) -> Option<&'static str> {
     resolve_shortcut(name, BUILTIN_SKILLS_SHORTCUTS)
 }
 
-/// Resolve a bare name to its builtin flow key. Returns the exact match if one
-/// exists; otherwise, if exactly one namespaced key ends with `/{name}`, returns
-/// that key. Returns `None` for no match or ambiguous matches.
+/// Resolve a canonical or slash spelling, then a unique source-namespace shortcut.
+/// Hyphen suffixes do not create shortcuts. Absent or ambiguous names return `None`.
 pub fn resolve_builtin_flow(name: &str) -> Option<&'static str> {
     if let Some((key, _)) = BUILTIN_FLOWS.get_key_value(definition_key(name).as_str()) {
         return Some(key);

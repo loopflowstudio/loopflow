@@ -270,7 +270,6 @@ pub(crate) fn is_generated(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{SkillCatalog, SkillDialect};
-    use crate::engine::skill_invocation::SkillInvocation;
     use std::{fs, path::Path};
     use tempfile::TempDir;
 
@@ -387,14 +386,7 @@ mod tests {
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         let skill = catalog.resolve("audit").unwrap().load().unwrap();
         assert_eq!(skill.content.as_deref(), Some("Run this unfamiliar skill."));
-        assert_eq!(
-            SkillInvocation {
-                skill,
-                arguments: String::new(),
-            }
-            .source_text(),
-            content
-        );
+        assert_eq!(skill.source_text(), content);
         write(repo.path(), ".lf/skills/audit.md", content);
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         assert!(matches!(

@@ -2,7 +2,6 @@
 use crate::engine::definition_name::definition_key;
 use crate::engine::flow::return_target;
 use crate::engine::flow_output::FlowOutput;
-use crate::engine::skill_invocation::SkillInvocation;
 use crate::engine::{ConcreteStep, LoadError, Skill};
 
 pub fn render_flow_instructions(name: &str, steps: &[ConcreteStep]) -> Result<String, LoadError> {
@@ -31,31 +30,25 @@ The current model performs the work. Agent preferences and native declarations b
         if skill.agent.is_some() || skill.default_agent.is_some() || skill.action_style.is_some() {
             output.push_str(&format!("Authored preferences: agent={:?}, default_agent={:?}, action_style={:?}. These do not switch the current model.\n\n", skill.agent, skill.default_agent, skill.action_style));
         }
-        output.push_str(
-            &SkillInvocation {
-                skill: skill.clone(),
-                arguments: String::new(),
-            }
-            .source_text(),
-        );
+        output.push_str(&skill.source_text());
         output.push('\n');
     }
     Ok(output)
 }
 
-fn body_number(skill: &Skill, bodies: &mut Vec<Skill>) -> usize {
-    if let Some(index) = bodies.iter().position(|body| body == skill) {
+fn body_number<'a>(skill: &'a Skill, bodies: &mut Vec<&'a Skill>) -> usize {
+    if let Some(index) = bodies.iter().position(|body| *body == skill) {
         index + 1
     } else {
-        bodies.push(skill.clone());
+        bodies.push(skill);
         bodies.len()
     }
 }
 
-fn render_steps(
-    steps: &[ConcreteStep],
+fn render_steps<'a>(
+    steps: &'a [ConcreteStep],
     prefix: &str,
-    bodies: &mut Vec<Skill>,
+    bodies: &mut Vec<&'a Skill>,
     output: &mut String,
 ) -> Result<(), LoadError> {
     for (index, step) in steps.iter().enumerate() {

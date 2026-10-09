@@ -54,7 +54,7 @@ impl SkillInvocation {
 
     fn unchanged_source(&self) -> bool {
         self.skill.source.as_ref().is_some_and(|source| {
-            std::fs::read_to_string(&source.path).ok().as_deref() == Some(&self.source_text())
+            std::fs::read_to_string(&source.path).ok().as_deref() == Some(&self.skill.source_text())
         })
     }
 
@@ -234,22 +234,9 @@ impl SkillInvocation {
         )
     }
 
-    pub fn source_text(&self) -> String {
-        let body = self.skill.content.as_deref().unwrap_or_default();
-        match self
-            .skill
-            .source
-            .as_ref()
-            .and_then(|source| source.frontmatter.as_ref())
-        {
-            Some(frontmatter) => format!("---{frontmatter}---\n{body}"),
-            None => body.to_string(),
-        }
-    }
-
     pub(crate) fn instruction_text(&self, harness: &str) -> String {
         if self.native_for(harness) {
-            self.source_text()
+            self.skill.source_text()
         } else {
             self.ported_text(harness)
         }
@@ -381,6 +368,7 @@ impl SkillInvocation {
             .and_then(|source| source.path.parent())
             .unwrap_or(Path::new("."));
         let mut text = self
+            .skill
             .source_text()
             .replace("${CLAUDE_SKILL_DIR}", &original.display().to_string());
         text.push_str(&format!("\n\nResolve supporting files and parent-relative paths from the original skill directory: {}\n", original.display()));
@@ -490,7 +478,7 @@ mod tests {
             skill: catalog.resolve("audit").unwrap().load().unwrap(),
             arguments: "  exact \"arguments\"\nsecond line  ".into(),
         };
-        assert_eq!(invocation.source_text(), original);
+        assert_eq!(invocation.skill.source_text(), original);
         assert_eq!(
             invocation.command("/audit"),
             "/audit   exact \"arguments\"\nsecond line  "
@@ -498,7 +486,7 @@ mod tests {
         std::fs::write(bundle.join("SKILL.md"), "replacement").unwrap();
         assert_ne!(
             std::fs::read_to_string(bundle.join("SKILL.md")).unwrap(),
-            invocation.source_text()
+            invocation.skill.source_text()
         );
         let snapshot = repo.path().join("snapshot");
         invocation.materialize_claude(&snapshot, None).unwrap();

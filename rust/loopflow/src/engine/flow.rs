@@ -27,6 +27,18 @@ pub struct Skill {
 }
 
 impl Skill {
+    pub fn source_text(&self) -> String {
+        let body = self.content.as_deref().unwrap_or_default();
+        match self
+            .source
+            .as_ref()
+            .and_then(|source| source.frontmatter.as_ref())
+        {
+            Some(frontmatter) => format!("---{frontmatter}---\n{body}"),
+            None => body.to_string(),
+        }
+    }
+
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -363,35 +375,15 @@ impl<'a> DefinitionLoader<'a> {
     }
 
     fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
-        let (resolved_name, content) = match find_flow_path(name, self.repo) {
-            Ok(path) => {
-                let root = self.repo.join(".lf/flows");
-                let key = definition_key(
-                    &path
-                        .strip_prefix(root)
-                        .expect("flow source under root")
-                        .with_extension("")
-                        .to_string_lossy(),
-                );
-                (key, fs::read_to_string(path)?)
-            }
-            Err(LoadError::FlowNotFound(_)) => {
+        let (resolved_name, content) = match find_repo_flow(name, self.repo)? {
+            Some((key, path)) => (key, fs::read_to_string(path)?),
+            None => {
                 let key = crate::engine::builtins::resolve_builtin_flow(name)
                     .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
-                // A namespaced repository definition overrides its builtin even
-                // when the caller selected it through the unique bare name.
-                let content = match find_flow_path(key, self.repo) {
-                    Ok(path) => fs::read_to_string(path)?,
-                    Err(LoadError::FlowNotFound(_)) => {
-                        crate::engine::builtins::get_builtin_flow(key)
-                            .expect("resolved builtin flow exists")
-                            .to_string()
-                    }
-                    Err(error) => return Err(error),
-                };
-                (key.to_string(), content)
+                let content = crate::engine::builtins::get_builtin_flow(key)
+                    .expect("resolved builtin flow exists");
+                (key.to_string(), content.to_string())
             }
-            Err(error) => return Err(error),
         };
         let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
@@ -438,7 +430,8 @@ fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize
     };
     let mut found = positions(&|skill| skill.id.as_deref() == Some(target));
     if found.is_empty() {
-        found = positions(&|skill| definition_key(&skill.skill.name) == definition_key(target));
+        let target_key = definition_key(target);
+        found = positions(&|skill| definition_key(&skill.skill.name) == target_key);
     }
     match found[..] {
         [index] => Ok(preceding.len() - index),
@@ -582,17 +575,16 @@ fn repo_flow_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError
 }
 
 pub fn find_flow_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
-    let sources = repo_flow_sources(repo)?;
-    Ok(sources
-        .get(&definition_key(name))
-        .or_else(|| {
-            crate::engine::builtins::resolve_builtin_flow(name).and_then(|key| sources.get(key))
-        })
-        .cloned())
+    Ok(find_repo_flow(name, repo)?.map(|(_, path)| path))
 }
 
-fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    find_flow_source_path(name, repo)?.ok_or_else(|| LoadError::FlowNotFound(name.to_string()))
+fn find_repo_flow(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
+    let mut sources = repo_flow_sources(repo)?;
+    // A repository override also wins when selected through a builtin shortcut.
+    Ok(sources.remove_entry(&definition_key(name)).or_else(|| {
+        crate::engine::builtins::resolve_builtin_flow(name)
+            .and_then(|key| sources.remove_entry(key))
+    }))
 }
 
 // -----------------------------------------------------------------------------
@@ -935,10 +927,8 @@ fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Result<Skill, LoadErro
 }
 
 fn validate_flow_nesting(sources: &[String], name: &str) -> Result<(), LoadError> {
-    if sources
-        .iter()
-        .any(|parent| definition_key(parent) == definition_key(name))
-    {
+    let key = definition_key(name);
+    if sources.iter().any(|parent| definition_key(parent) == key) {
         return Err(LoadError::InvalidFlow(format!(
             "flow cycle detected: {} -> {name}",
             sources.join(" ")
@@ -1066,6 +1056,23 @@ mod tests {
                 "{error}"
             );
             assert!(super::customize(name, repo.path()).is_err());
+        }
+    }
+
+    #[test]
+    fn portable_repository_flow_overrides_builtin_in_either_layout() {
+        for layout in ["task/design.yaml", "task-design.yaml"] {
+            let repo = TempDir::new().unwrap();
+            let path = repo.path().join(".lf/flows").join(layout);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "- cmd: sync\n").unwrap();
+            for name in ["task/design", "task-design"] {
+                let flow = super::load_authored_flow(name, repo.path()).unwrap();
+                assert_eq!(flow.name, "task-design");
+                let steps = compile_flow(&flow, repo.path()).unwrap();
+                assert!(matches!(&steps[..], [ConcreteStep::Command(_)]));
+                assert_eq!(super::customize(name, repo.path()).unwrap(), path);
+            }
         }
     }
 

@@ -622,29 +622,32 @@ acceptance remain at
 ## Tasks across machines (LOO-412, 2026-10-08)
 
 Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
-storage/Linear. Plan ownership above governs sharing and execution exclusion.
+storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Causal ordering retains losers. Provider identity/body/revision/age replaces the origin boolean.
-Capture/validation share a field map; pending local values gain no Linear priority.
-Equal-value acquisitions retain frontiers. Peer projection reuses common acquisition;
-scalar receipt baselines retain provider revision. Task/Project stale/equal-read,
-uncertain-receipt and no-echo regressions are authored, not executed. Grouped
-receipts, other provider paths and legacy association remain. This does not solve
-LOO-406's unseen-write race or order Project relationships by entity revision.
+`e608b0d2d` retains provider identity/body/revision/age, replacing origin flags.
+Pending local values gain no Linear priority. Equal-value facts retain frontiers;
+scalar receipts retain revisions and losers. Task/Project regressions are unexecuted;
+the design distinguishes coverage. Grouped receipts, alternate acquisition, legacy
+association and Desktop remain.
 
-Joining publishes nothing. Taskless/reconnect and post-save exchange are authored;
-mixed Linear exchange remains disabled pending composition, not a product limit.
-Import retains facts; export alone selects publishable history. Fetch/import/publication
-stay separate; readback settles only the attempted save. Effect locks survive
-cancellation without blocking acquisition/saves. Damaged journals break status, not exchange. CLI holds exist; Desktop remains.
-Rust execution, native reconnect and installed acceptance remain unproved.
+Provider-cache rejection is not projection preservation: at `a30e831f4`, peer
+fields precede acquisition, whose removal/archive refusal leaves those writes.
+Peer Project membership validation also rolls back its unresolved marker on error,
+unlike ordinary acquisition. Remaining composition must retain contrary evidence
+and independent imports; entity revisions cannot order relationships. These are
+source findings, not executed counterexamples. Design: `scratch/work-on-another-machine-name.md`.
+
+Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
+not by product policy. Fetch/import/publication stay separate; readback settles
+only the attempted save.
+Effect locks survive cancellation without blocking acquisition/saves. Damaged journals
+break status, not independent exchange. Rust/native/installed proof remains.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.
 Holds omit private history/dependents, including retained Git documents, until
-explicit selection. Independent exchange proceeds; omission is not convergence.
-Recovery UX needs review. Design: `scratch/work-on-another-machine-name.md`;
-prior details: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
+explicit selection. Omission is not convergence. CLI holds exist; recovery UX needs
+review. Prior detail: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

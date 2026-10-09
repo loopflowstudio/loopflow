@@ -244,8 +244,8 @@ Task resolution acquires before placement. No resident or turn retry runs.
 Status separates fetched revisions, retained imports, pending local edits and
 pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,
 not future edits or held records. Import retention is not convergence. Git exchange
-in Linear-connected repositories awaits provider-frontier and grouped-receipt
-integration; it reports that limitation without changing local plans.
+in Linear-connected repositories awaits complete provider acquisition and delivery
+receipt integration; it reports that limitation without changing local plans.
 
 Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
 explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing

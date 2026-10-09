@@ -140,11 +140,13 @@ lifeline writer or hold provider stdout/stderr open.
 
 The attachment slice replaces arithmetic exit lookup with an exact event-sequence
 reference, leaving old event keys and payloads unchanged. Claim clears the current
-exit reference; finish saves it with revocation. Historical turn endings read both
-retained old receipts and new attachment exits. Passive Program Status retains its
-provider-generation fence and cannot claim attachment. No Rust/Swift wire field
-changed in this internal slice; the AgentProcess DTO cut remains below.
-
+exit reference; finish saves the insert's returned primary key with revocation,
+without reconstructing and querying the receipt key again. One history-query CTE
+recognizes retained old receipts and new attachment exits for captured and native
+turns. Plain observation lookup replaces `session_driver_exit`'s now-unused outcome
+expression index. Attachment exit still does not invent provider completion.
+Passive Program Status retains its provider-generation fence and cannot claim
+attachment. No Rust/Swift wire field changed; the AgentProcess DTO cut remains open.
 
 Review found that CLOEXEC alone leaves the launching child holding its own
 lifeline until provider exec. The pre-exec hook now closes that inherited writer
@@ -158,4 +160,4 @@ These are launch proofs, not process-record or installed acceptance. Release's
 child memory reinforces operation-entry verification: helper success cannot
 establish top, Task status or scheduled orphan settlement.
 
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; `cargo test -p loopflow --lib -- attachment_tests store::sqlite::program_status::tests store::sqlite::revisions::tests store::sqlite::session_events::tests --test-threads=1` passed 21 after fixing the migration fixture's omitted `input_published`; full Rust/Swift/DTO, Linux lifeline and installed acceptance remain gate/CI-owned.
+Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; `uv run python scripts/test_network.py cargo test -p loopflow --lib -- attachment_tests store::sqlite::program_status::tests store::sqlite::revisions::tests store::sqlite::session_events::tests --test-threads=1` passed 22; full Rust/Swift/DTO and Linux lifeline checks remain gate/CI-owned, installed acceptance remains open.

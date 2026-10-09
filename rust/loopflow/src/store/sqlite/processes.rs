@@ -719,11 +719,13 @@ impl SqliteStore {
         let payload = serde_json::json!({
             "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
         });
-        tx.execute(
+        let exit_seq: i64 = tx.query_row(
             "INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
-             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1",
+             SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
+             RETURNING seq",
             params![session, format!("attachment:{}:exit", expected.token), expected.process_lfid,
                 now, payload.to_string()],
+            |row| row.get(0),
         )?;
         // Ordinary disposable conversations retire on an observed exit. Primary
         // conversations, Wave conversations, Task work and Flow reviews stay open.
@@ -741,9 +743,9 @@ impl SqliteStore {
         )?;
         tx.execute(
             "UPDATE agent_sessions SET attached_process_lfid=NULL,attachment_token=?3,
-                attachment_exit_seq=(SELECT seq FROM session_events WHERE session_id=?1 AND receipt_key=?4),
+                attachment_exit_seq=?4,
                 provider_endpoint=CASE WHEN ?2 THEN NULL ELSE provider_endpoint END WHERE id=?1",
-            params![session, closed, AttachmentToken::new(), format!("attachment:{}:exit", expected.token)],
+            params![session, closed, AttachmentToken::new(), exit_seq],
         )?;
         tx.commit()?;
         Ok(())

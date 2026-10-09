@@ -11,6 +11,11 @@ UPDATE agent_sessions SET attachment_exit_seq = (
     SELECT seq FROM session_events e WHERE e.session_id=agent_sessions.id
       AND e.kind='observed' AND e.receipt_key='driver:'||(agent_sessions.driver_generation-1)||':exit'
 );
+-- Current outcomes now use the event's primary key, not a counter-derived key.
+-- Keep observation lookup without indexing an exit outcome for every observation.
+DROP INDEX session_driver_exit;
+CREATE INDEX session_observation_receipt ON session_events(session_id,receipt_key)
+    WHERE kind='observed';
 ALTER TABLE session_activity ADD COLUMN attachment_token TEXT;
 UPDATE session_activity SET attachment_token = (
     SELECT s.attachment_token FROM agent_sessions s WHERE s.id=session_activity.session_id

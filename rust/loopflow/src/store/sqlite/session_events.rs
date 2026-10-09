@@ -739,6 +739,55 @@ mod tests {
     }
 
     #[test]
+    fn retained_and_current_attachment_exits_end_captured_and_native_history() {
+        for receipt in ["driver:7:exit", "attachment:claim:exit"] {
+            for captured in [true, false] {
+                let home = tempfile::tempdir().unwrap();
+                let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+                store.test_session("conversation", "run_00000000000000000000000000000001");
+                {
+                    let conn = store.conn.lock().unwrap();
+                    conn.execute("UPDATE agent_sessions SET input_published=?1", [captured])
+                        .unwrap();
+                    conn.execute(
+                        "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event)
+                         SELECT id,'thread','turn','started','',10,'{}',CASE WHEN ?1 THEN current_capture END
+                         FROM agent_sessions",
+                        [captured],
+                    ).unwrap();
+                }
+                let completed_since = || {
+                    store
+                        .conversation_history(None, None, None, None, 20, true)
+                        .unwrap()
+                };
+                assert!(completed_since().is_empty());
+                // Similar receipts and payloads are not attachment exits.
+                store.conn.lock().unwrap().execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                     VALUES('conversation','observed','provider:7:exit',30,'{}'),
+                           ('conversation','observed','attachment:claim:exit-pending',30,'{}')",
+                    [],
+                ).unwrap();
+                assert!(completed_since().is_empty());
+                store.conn.lock().unwrap().execute(
+                    "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+                     VALUES('conversation','observed',?1,30,'{}')",
+                    [receipt],
+                ).unwrap();
+                let history = completed_since();
+                assert_eq!(history.len(), 1, "{receipt}, captured={captured}");
+                assert_eq!(history[0].captured.is_some(), captured);
+                assert_eq!(history[0].providers.len(), 1);
+                assert!(
+                    history[0].providers[0].outcome.is_none(),
+                    "attachment exit is not provider completion"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn aggregate_history_discovers_unattributed_native_receipts_without_a_capture() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();

@@ -84,18 +84,19 @@ final class WorkLinkRouter {
         let id = UUID()
         repositoryOpenings[path] = RepositoryOpening(id: id, repository: nil,
             receipt: DesktopOpening(url: url.absoluteString, status: .opening, reason: nil))
+        let observed = workspaces
         do {
             let resolved = try await Self.readRepository(path: path, query: query)
             try Task.checkCancellation()
             guard repositoryOpenings[path]?.id == id else { throw CancellationError() }
-            let workspace = retainScene(resolved)
+            let workspace = retainScene(resolved, observed: observed)
             var destination = link
             if let link {
                 let target = try TaskLink(url: link)
                 destination = TaskLink(issue: target.issue, repo: workspace.path, session: target.session, diff: target.diff).url
             }
             repositoryOpenings[path]?.repository = workspace.id
-            if deliver(destination, repository: resolved.identity.id) {
+            if deliver(destination, scene: workspace.id) {
                 finishRepositoryOpening(path, id: id, status: .usable)
             } else {
                 openWindow(workspace)
@@ -141,12 +142,7 @@ final class WorkLinkRouter {
             // A second restored locator can resolve while the first scene is
             // still mounting. Reserve its existing scene before either registers.
             let scene = scene(for: resolved.identity) ?? workspace.id
-            if workspaces[scene] != observed[scene], let current = workspaces[scene] {
-                // Another locator completed a newer opening while this restored
-                // shell was reading. Use that observation; never roll it back.
-                return RepositoryWorkspace(id: scene, path: current.path)
-            }
-            return retainScene(resolved, scene: scene)
+            return retainScene(resolved, scene: scene, observed: observed)
         } catch {
             guard workspaceRequests(workspace.id) == requests else { throw CancellationError() }
             for (path, request) in repositoryOpenings where requests.contains(request.id) {
@@ -167,11 +163,19 @@ final class WorkLinkRouter {
 
     /// The common store proves association; paths, clone names and remotes do not.
     private func scene(for identity: RepositoryIdentity) -> String? {
-        workspaces.keys.first { identity.locators.contains($0) }
+        workspaces.first { scene, reading in
+            identity.locators.contains(scene) || reading.identity.locators.contains(identity.id)
+        }?.key
     }
 
-    private func retainScene(_ reading: RepositoryReading, scene: String? = nil) -> RepositoryWorkspace {
+    private func retainScene(_ reading: RepositoryReading, scene: String? = nil,
+                             observed: [String: RepositoryReading]) -> RepositoryWorkspace {
         let scene = scene ?? self.scene(for: reading.identity) ?? reading.identity.id
+        if workspaces[scene] != observed[scene], let current = workspaces[scene] {
+            // Another locator completed an observation during this lookup.
+            // Opening and restoration both retain it, including A → B → A.
+            return RepositoryWorkspace(id: scene, path: current.path)
+        }
         if let previous = workspaces[scene], previous.identity.id != reading.identity.id {
             // Renew only the targeting capability, not the native receiver or its
             // delivery lifetime. Even binding back cannot revive an old target.
@@ -236,7 +240,10 @@ final class WorkLinkRouter {
     /// False means the caller should request the identity-keyed SwiftUI window.
     @discardableResult
     func deliver(_ url: URL?, repository: String) -> Bool {
-        let scene = scene(for: repository) ?? repository
+        deliver(url, scene: scene(for: repository) ?? repository)
+    }
+
+    private func deliver(_ url: URL?, scene: String) -> Bool {
         if let url { pending[scene, default: []].append(url) }
         guard let target = targets[scene] else { return false }
         target.focus()

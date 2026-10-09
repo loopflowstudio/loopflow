@@ -95,27 +95,25 @@ freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 
 October 9: `d4fbca0ae` associates established roots; `a73198197` scopes Task
 lookup through retained repository locators. Binding retains existing Work, mappings, effects and execution, publishing nothing.
-Journals exclude RepositoryId/delegation; imports allocate identity. Desktop consumes
-atomic locator readings, retaining native owners and renewing input targets. Scene equality cannot fence observations: A→B→A is still a newer
-binding. Headless fixtures retain drafts/views and reject delayed alias rollback,
-not native usability.
+Journals exclude RepositoryId/delegation; imports allocate identity. Desktop reads locators atomically, retaining native owners and renewing targets. Scene equality cannot fence observations: A→B→A is still a newer
+binding. Per-path request IDs also miss concurrent filesystem locators; opening
+and restoration must share the observation fence. Headless fixtures retain
+drafts/views and reject stale reads, not native usability.
 
-Repository association does not associate divergent Task/Project provider IDs.
-**Unmapping is not association.** `d378f31ae` composes LOO-412's cross-ID provider
-claims and origin-keyed creation effects through `19e31f64d`. Correspondence remains
-unfinished; mixed exchange stays disabled. Transfer/preparing resolution stays
-deleted, preserving Jack Heart's recorded-Machine retention and effect-free
-selection. Peer reads use Machine/repository keys. Sharing/recovery and remote/native
-acceptance remain unproved.
+**Unmapping is not association:** it can make legacy Work eligible for duplicate
+creation. `d378f31ae` composes LOO-412 through `19e31f64d`. Newer `de3c84b08`
+(inspected, not integrated) adds provider correspondence/full-ID lookup, not joint
+projection. Grouping winners cannot establish cross-origin causality; parent capture,
+relationships and exact-origin settlement remain, preserving private selection and
+execution. Store-seeded lookup proves no Git acquisition. Mixed exchange stays
+disabled; TaskSource stays deleted. Remote/native and exclusive-start proof remain.
 
-Integrated #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts a
-fresh engine on native history. Peer proof must separate local resume from
-import-triggered launch; installed/native acceptance remains.
+#1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine
+on native history. Local resume is not import-triggered launch; native proof remains.
 
-October 9 (`e3ca861b1`): MultiplexerStore observes visibility before Session readings;
-a callback had masked closure. Receipts expose pre-registration failures; plain Task
-links await mounted content. IDs, not URLs, fence registration—not later arrivals.
-Headless callbacks prove no native/compositor usability.
+October 9 (`e3ca861b1`): observe visibility before Session readings; callbacks
+masked closure. Expose pre-registration failures; Task links await mounted pages.
+Request IDs fence registration, not later arrivals. No native/compositor proof.
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters
@@ -526,10 +524,9 @@ authorize an automatic Project reset, Task cancellation or claims of measured ga
 
 ## CI watcher decisions (2026-10-01)
 
-Jack Heart's LOO-365 optional watcher and retired cron-repair decisions:
-`6c1bc2029:wave/product/MEMORY.md`, this heading. Unreviewed: taskless landing
-repairs, unarmed Task PRs only report, Desktop lacks a watcher view. No real
-failing landing was proved.
+Jack’s LOO-365: `6c1bc2029:wave/product/MEMORY.md`, this heading. Taskless repairs,
+unarmed-PR reporting and missing Desktop watcher view remain unreviewed;
+no real failing landing was proved.
 
 ## Skill reduction decisions (2026-09-28)
 

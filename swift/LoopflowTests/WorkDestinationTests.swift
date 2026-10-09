@@ -1098,6 +1098,52 @@ struct WorkDestinationTests {
         #expect(router.inspect().windows.first?.window == (reboundWindow ?? window.uuidString))
     }
 
+    @Test(arguments: [false, true])
+    func delayedLocatorOpenCannotUndoRepositoryAssociation(alreadyOpen: Bool) async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let parent = directory.appendingPathComponent("parent")
+        let repository = URL(fileURLWithPath: path)
+        try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: repository.deletingLastPathComponent())
+        let alias = parent.appendingPathComponent(repository.lastPathComponent)
+        try #require(RepoScanner().mainRepository(alias) != nil)
+        let window = UUID()
+        var received: [URL] = []
+        let register: (RepositoryWorkspace) -> Void = { scene in
+            router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id),
+                focus: {}, inspect: windowInspection,
+                controlPane: { _ in }, readText: { _ in throw RegistryQueryError("No terminal") }) { received.append($0) }
+        }
+        if alreadyOpen {
+            _ = try await router.openRepository(path: path, link: nil,
+                query: RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }, openWindow: register)
+        }
+        let link = try #require(TaskLink(issue: "PENDING", repo: alias.path).url)
+        let delayed = Task {
+            try await router.openRepository(path: alias.path, link: link, query: RegistryQuery { _, _ in
+                await barrier.wait("alias")
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
+            }) { _ in Issue.record("A locator must reuse its repository window") }
+        }
+        while !(await barrier.contains("alias")) { await Task.yield() }
+        let scene = try await router.openRepository(path: path, link: nil,
+            query: RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }) { workspace in
+                if alreadyOpen { Issue.record("Association must reuse the existing window") }
+                register(workspace)
+            }
+        let rebound = router.inspect().windows
+        await barrier.release("alias")
+        try #require(try await delayed.value == scene)
+        #expect(router.inspect().windows == rebound)
+        try #require(router.inspect().windows.count == 1)
+        while received.isEmpty { await Task.yield() }
+        #expect(received == [TaskLink(issue: "PENDING", repo: scene.path).url])
+        #expect(router.inspect().openings.allSatisfy { $0.status == .usable })
+    }
+
     private func repositoryFixturePath() -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
     }

@@ -56,7 +56,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
             cmd: TaskCommand::Checkout {
                 issue, stack_on, ..
             },
-        }) => (Some(issue), stack_on.as_mut()),
+        }) => (issue.as_mut(), stack_on.as_mut()),
         Some(Commands::Task { cmd }) => (cmd.selector_mut(), None),
         Some(Commands::Context { task, .. }) => (task.as_mut(), None),
         _ => (None, None),
@@ -103,7 +103,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         }) => issue.as_deref().or(cli.task.as_deref()),
         Some(Commands::Task {
             cmd: TaskCommand::Checkout { issue, .. },
-        }) => Some(issue),
+        }) => issue.as_deref().or(cli.task.as_deref()),
         _ => cli.task.as_deref(),
     }
 }

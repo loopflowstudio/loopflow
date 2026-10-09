@@ -2785,3 +2785,306 @@ fn task_planning_explain_save_validates_draft_without_changing_files_or_storage(
     assert!(!repo.path().join(".git/loopflow-file-recovery").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
 }
+
+#[test]
+fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("checkout-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "checkout-proof",
+        &repo.head_sha(),
+    );
+    repo.create_file("draft.txt", "unfinished draft");
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let git_before = checkout_snapshot(&repo.path().join(".git"));
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let explicit = read(&["task", "checkout", "INF-123", "--explain", "--json"]);
+    assert_eq!(
+        explicit["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
+    assert_eq!(explicit["action"]["behavior"], "reuse");
+    assert_eq!(explicit["impediments"], serde_json::json!([]));
+    for args in [
+        vec!["task", "checkout", "--explain", "--json"],
+        vec![
+            "--task",
+            "INF-123",
+            "task",
+            "checkout",
+            "--explain",
+            "--json",
+        ],
+    ] {
+        let report = read(&args);
+        assert_eq!(report["action"], explicit["action"]);
+        assert_eq!(report["impediments"], explicit["impediments"]);
+        assert_eq!(
+            report["resolution"]["task"]["value"],
+            explicit["resolution"]["task"]["value"]
+        );
+    }
+    let text = success(
+        command(home.path(), repo.path(), &["task", "checkout", "--explain"])
+            .output()
+            .unwrap(),
+    );
+    assert!(text.contains("reuse recorded"), "{text}");
+    for (flag, value, reason) in [
+        ("--name", "other-workspace", "already uses workspace name"),
+        ("--directive", "new direction", "already exists"),
+        ("--stack-on", "UNKNOWN-1", "has no Task"),
+    ] {
+        let report = read(&[
+            "task",
+            "checkout",
+            "INF-123",
+            flag,
+            value,
+            "--explain",
+            "--json",
+        ]);
+        assert!(
+            report["impediments"].to_string().contains(reason),
+            "{report}"
+        );
+    }
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    assert_eq!(
+        fs::read_to_string(repo.path().join("draft.txt")).unwrap(),
+        "unfinished draft"
+    );
+    // Execution consumes the same inferred target, without launching a Flow.
+    for args in [
+        vec!["task", "checkout", "--json"],
+        vec!["--task", "INF-123", "task", "checkout", "--json"],
+    ] {
+        let checkout = read(&args);
+        assert_eq!(
+            checkout["task_id"],
+            registered.task.id.as_str(),
+            "{checkout}"
+        );
+    }
+}
+
+#[test]
+fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "restore-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let checkout = repo.path().join("missing-checkout");
+    db.execute("UPDATE tasks SET worktree=?1", [checkout.to_str().unwrap()])
+        .unwrap();
+    let store = SqliteStore::new(&path).unwrap();
+    let local = store.local_machine().unwrap().id;
+    for condition in ["absent", "occupied", "terminal", "unknown", "remote"] {
+        db.execute(
+            "UPDATE tasks SET planning_state=NULL,checkout_machine_id=?1",
+            [local.as_str()],
+        )
+        .unwrap();
+        match condition {
+            "occupied" => fs::create_dir(&checkout).unwrap(),
+            "terminal" => {
+                db.execute("UPDATE tasks SET planning_state='canceled'", [])
+                    .unwrap();
+            }
+            "unknown" => {
+                db.execute("UPDATE tasks SET checkout_machine_id=NULL", [])
+                    .unwrap();
+            }
+            "remote" => {
+                let peer = loopflow::durable::MachineId::new();
+                store
+                    .add_machine(&peer, "must-not-contact.invalid", "peer", "/repo")
+                    .unwrap();
+                db.execute("UPDATE tasks SET checkout_machine_id=?1", [peer.as_str()])
+                    .unwrap();
+            }
+            _ => {}
+        }
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        let before = fs::read(&path).unwrap();
+        let git_before = checkout_snapshot(&repo.path().join(".git"));
+        let report: serde_json::Value = serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &[
+                    "task",
+                    "checkout",
+                    registered.task.id.as_str(),
+                    "--explain",
+                    "--json",
+                ],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap();
+        match condition {
+            "absent" => {
+                assert_eq!(report["action"]["behavior"], "restore");
+                assert_eq!(report["impediments"], serde_json::json!([]));
+                assert!(
+                    report["unavailable"].to_string().contains("must fetch"),
+                    "{report}"
+                );
+                assert!(!checkout.exists());
+            }
+            "occupied" => assert!(
+                report["impediments"].to_string().contains("occupied"),
+                "{report}"
+            ),
+            "terminal" => assert!(
+                report["impediments"]
+                    .to_string()
+                    .contains("terminal planning"),
+                "{report}"
+            ),
+            "unknown" => assert_eq!(
+                report["resolution"]["execution_machine"]["state"],
+                "unavailable"
+            ),
+            "remote" => assert!(
+                report["unavailable"].to_string().contains("no peer read"),
+                "{report}"
+            ),
+            _ => unreachable!(),
+        }
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    }
+}
+
+#[test]
+fn task_checkout_explain_proposes_unallocated_work_and_preserves_missing_storage() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let path = home.path().join(".lf/loopflow.db");
+    let absent: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "checkout", "UNKNOWN-1", "--explain", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert!(absent["action"].is_null());
+    assert!(!path.exists());
+    let created: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "create", "--title", "Proposed checkout", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let git_before = checkout_snapshot(&repo.path().join(".git"));
+    let report: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "checkout", id, "--explain", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(report["action"]["behavior"], "prepare", "{report}");
+    assert_eq!(report["impediments"], serde_json::json!([]));
+    assert!(!Path::new(report["action"]["path"].as_str().unwrap()).exists());
+    assert!(report["unavailable"]
+        .to_string()
+        .contains("local Git facts"));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    assert!(SqliteStore::new(&path)
+        .unwrap()
+        .task_by_issue(id)
+        .unwrap()
+        .unwrap()
+        .worktree
+        .is_none());
+    // Explicitly selected Git planning still cannot authorize first start.
+    db.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES(?1,'fixture','file:///unavailable','refs/loopflow/planning/users/fixture')",
+        [repo.path().to_str().unwrap()]).unwrap();
+    db.execute("INSERT INTO planning_members(kind,object_id,repo,destination) VALUES('task',?1,?2,'fixture')",
+        rusqlite::params![id,repo.path().to_str().unwrap()]).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "checkout", id, "--explain", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert!(report["action"].is_null());
+    assert!(
+        report["impediments"]
+            .to_string()
+            .contains("first-start admission is unavailable"),
+        "{report}"
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), before);
+    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+    let refused = command(home.path(), repo.path(), &["task", "checkout", id])
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("first-start admission is unavailable")
+    );
+    assert_eq!(checkout_snapshot(&repo.path().join(".git")), git_before);
+}
+
+fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    for entry in fs::read_dir(root).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(checkout_snapshot(&path));
+        } else {
+            files.insert(path.clone(), fs::read(path).unwrap());
+        }
+    }
+    files
+}

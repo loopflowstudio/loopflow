@@ -135,10 +135,10 @@ They prove neither configured SSH nor exclusive start.
 Identity is not action validation. Shared validators recheck writes; `--context`
 rejects non-agent commands before stdin. Refile resolves IDs before initialization;
 preview never locks. Save shares pinned-path/revision/draft checks, not recovery
-writes. Creation stays unplaced; provenance follows selection. Refresh stays in
-execution; initialization/authorship remain unavailable. Checkout/abandon/delete/
-interrupt remain identity-only. No preview endpoint probes, takeover or end-intent
-completion/cleanup; native proof remains.
+writes. Creation stays unplaced; initialization/authorship remain unavailable.
+Checkout shares preparation checks without fetches/leases; missing checkout means
+restoration, not launch refusal. Abandon/delete/interrupt remain identity-only.
+No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 

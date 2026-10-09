@@ -69,6 +69,17 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func taskCheckoutExplanationsKeepProposalsSeparateFromAdmission() throws {
+        let data = try loadFixtureData("task_checkout_explanations.json")
+        let reports = try JSONDecoder().decode([TaskCheckoutExplanation].self, from: data)
+        #expect(reports[0].action?.behavior == .prepare)
+        #expect(reports[1].action?.behavior == .reuse)
+        #expect(reports[2].action?.behavior == .restore)
+        #expect(reports[3].action == nil)
+        #expect(!reports[0].unavailable.isEmpty)
+        #expect(try JSONDecoder().decode([TaskCheckoutExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+    }
+
     @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
         let data = try loadFixtureData("task_move_explanations.json")
         let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)

@@ -273,3 +273,29 @@ pub fn explain_task_planning(
         }
     }))
 }
+
+/// Inspect checkout preparation without acquiring a lease or fetching refs.
+pub fn explain_task_checkout(
+    task: Option<&str>,
+    options: &crate::ops::task::TaskProcessOptions,
+) -> Result<crate::ops::task::TaskCheckoutExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_checkout(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection {
+                        task,
+                        wave: options.wave.as_deref(),
+                    },
+                    options,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskCheckoutExplanation::unavailable(error),
+        }
+    }))
+}

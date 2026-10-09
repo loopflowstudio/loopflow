@@ -2,6 +2,10 @@ mod planning_explain;
 pub use planning_explain::{
     explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
 };
+mod checkout_explain;
+pub use checkout_explain::{
+    explain_task_checkout, TaskCheckoutAction, TaskCheckoutBehavior, TaskCheckoutExplanation,
+};
 mod explain;
 pub use explain::{
     explain_task_move, explain_task_run, TaskMoveAction, TaskMoveExplanation, TaskRunAction,
@@ -112,6 +116,7 @@ pub struct EndOptions {
 
 #[derive(Debug, Clone, Default)]
 pub struct TaskCheckoutOptions {
+    pub wave: Option<String>,
     pub name: Option<String>,
     pub stack_on: Option<String>,
     pub directive: Option<String>,
@@ -809,6 +814,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
         repo,
         issue,
         TaskProcessOptions {
+            wave: options.wave,
             name: options.name,
             stack_on: options.stack_on,
             directive: options.directive,
@@ -869,25 +875,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                 wave.slug()
             )));
         }
-        match task_work_status(&store, &task).await? {
-            WorkStatus::Done => {
-                return Err(task_error(format!(
-                    "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
-                    task.plan.identifier, task.plan.identifier
-                )))
-            }
-            WorkStatus::Abandoned => {
-                return Err(task_error(format!(
-                    "Task {} is abandoned; inspect its retained history with `lf task status {}`",
-                    task.plan.identifier, task.plan.identifier
-                )))
-            }
-            WorkStatus::Ready => {}
-        }
-        store
-            .sqlite
-            .validate_task_planning(&task)
-            .map_err(task_error)?;
+        validate_task_preparation(&store, &task).await?;
         options.validate_directive((!acquired).then_some(&task))?;
         options.validate_workspace_name(&task)?;
         let task = if task.worktree.is_none() {
@@ -913,6 +901,34 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     })
 }
 
+async fn validate_task_preparation(store: &SharedStore, task: &Task) -> OpsResult<()> {
+    validate_preparation_status(task, task_work_status(store, task).await?)?;
+    store
+        .sqlite
+        .validate_task_planning(task)
+        .map_err(task_error)?;
+    Ok(())
+}
+
+fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()> {
+    match status {
+        WorkStatus::Done => {
+            return Err(task_error(format!(
+                "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
+                task.plan.identifier, task.plan.identifier
+            )))
+        }
+        WorkStatus::Abandoned => {
+            return Err(task_error(format!(
+                "Task {} is abandoned; inspect its retained history with `lf task status {}`",
+                task.plan.identifier, task.plan.identifier
+            )))
+        }
+        WorkStatus::Ready => {}
+    }
+    Ok(())
+}
+
 async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()> {
     let pr = store
         .active_task_pr(&task.id)
@@ -923,34 +939,10 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
     let worktree = task.worktree()?;
     let _lease = crate::engine::git::acquire_worktree_lease(&repo, worktree, "Task checkout")?;
-    if worktree.join(".git").exists() {
+    if worktree.join(".git").try_exists()? {
         return finish_task_checkout(store, task, &pr).await;
     }
-    if worktree.symlink_metadata().is_ok() {
-        return Err(task_error(format!(
-            "Task checkout path {} is occupied; its contents were preserved",
-            worktree.display()
-        )));
-    }
-    let checkouts = crate::engine::worktrees::list_worktrees(&repo)?;
-    let destination = crate::store::canonicalize_with_missing_tail(worktree)?;
-    for other in checkouts
-        .iter()
-        .filter(|entry| entry.branch.as_deref() == Some(&pr.branch))
-    {
-        if crate::store::canonicalize_with_missing_tail(&other.path)? != destination {
-            return Err(task_error(format!(
-                "Task branch {} is registered at {}; preserve that checkout before restoring {}",
-                pr.branch,
-                other.path.display(),
-                worktree.display()
-            )));
-        }
-    }
-    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        return Err(task_error(blockers.join("; ")));
-    }
+    validate_checkout_restoration(store, task, &pr, &repo).await?;
     let mut args = vec!["worktree".to_string(), "add".into(), "--force".into()];
     // --force replaces only the stale registration at this absent exact path.
     // A different registered path was rejected above; no branch is reset.
@@ -979,6 +971,45 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     finish_task_checkout(store, task, &pr).await
+}
+
+async fn validate_checkout_restoration(
+    store: &SharedStore,
+    task: &Task,
+    pr: &TaskPr,
+    repo: &Path,
+) -> OpsResult<()> {
+    let worktree = task.worktree()?;
+    if match worktree.symlink_metadata() {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    } {
+        return Err(task_error(format!(
+            "Task checkout path {} is occupied; its contents were preserved",
+            worktree.display()
+        )));
+    }
+    let checkouts = crate::engine::worktrees::list_worktrees(repo)?;
+    let destination = crate::store::canonicalize_with_missing_tail(worktree)?;
+    for other in checkouts
+        .iter()
+        .filter(|entry| entry.branch.as_deref() == Some(&pr.branch))
+    {
+        if crate::store::canonicalize_with_missing_tail(&other.path)? != destination {
+            return Err(task_error(format!(
+                "Task branch {} is registered at {}; preserve that checkout before restoring {}",
+                pr.branch,
+                other.path.display(),
+                worktree.display()
+            )));
+        }
+    }
+    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
+    if !blockers.is_empty() {
+        return Err(task_error(blockers.join("; ")));
+    }
+    Ok(())
 }
 
 async fn finish_task_checkout(store: &SharedStore, task: &Task, pr: &TaskPr) -> OpsResult<()> {
@@ -1023,6 +1054,25 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
         .await
         .map_err(|error| task_error(error.to_string()))?
         .ok_or_else(|| task_error("existing Task has no active PR"))?;
+    let parent = select_existing_stack_parent(store, task, &active, requested).await?;
+    let _mutation = lock_task_pr_mutation(task.worktree()?)?;
+    store
+        .stack_task_pr(&active, &parent.id)
+        .await
+        .map_err(|error| task_error(error.to_string()))?;
+    eprintln!(
+        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
+        task.plan.identifier, parent.id, task.worktree()?.display()
+    );
+    Ok(())
+}
+
+async fn select_existing_stack_parent(
+    store: &SharedStore,
+    task: &Task,
+    active: &TaskPr,
+    requested: &str,
+) -> OpsResult<TaskPr> {
     let parent_task = store
         .get_task_by_issue(requested)
         .await
@@ -1041,16 +1091,7 @@ async fn stack_existing_task(store: &SharedStore, task: &Task, requested: &str) 
             task.plan.identifier, parent.id
         )));
     }
-    let _mutation = lock_task_pr_mutation(task.worktree()?)?;
-    store
-        .stack_task_pr(&active, &parent.id)
-        .await
-        .map_err(|error| task_error(error.to_string()))?;
-    eprintln!(
-        "Task {} selects parent PR {}. Checkout and GitHub are unchanged; run `lf sync` in {} to integrate it.",
-        task.plan.identifier, parent.id, task.worktree()?.display()
-    );
-    Ok(())
+    Ok(parent)
 }
 
 #[derive(Debug)]
@@ -1063,20 +1104,12 @@ struct TaskPlacement {
     directive: Option<String>,
 }
 
-async fn prepare_task_placement(
+fn plan_task_placement(
     main_repo: &Path,
     task: &Task,
     recorded_branch: Option<&str>,
     options: &TaskProcessOptions,
-) -> OpsResult<TaskPlacement> {
-    let directive = options
-        .directive
-        .as_deref()
-        .map(str::trim)
-        .map(str::to_string);
-    if directive.as_deref() == Some("") {
-        return Err(task_error("directive cannot be empty"));
-    }
+) -> OpsResult<(PlacementPlan, String)> {
     let uuid = task.id.as_str().trim_start_matches("task_");
     let title = derive_workspace_slug(&task.plan.title)?;
     let segment = match options.name.as_deref() {
@@ -1091,18 +1124,23 @@ async fn prepare_task_placement(
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
     let generated_branch = format!("lf/{uuid}/{}", title.as_str());
     let branch = recorded_branch.unwrap_or(&generated_branch);
-    fetch_task_refs(main_repo)?;
-    let mut plan = plan_branch_placement(main_repo, segment, Some(branch))
-        .map_err(|error| task_error(format!("failed to plan task worktree: {error}")))?;
+    let plan = plan_branch_placement(main_repo, segment, Some(branch))?;
     // Plan without touching an occupied checkout; restoration consumes the saved placement.
-    if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.exists() {
+    if plan.strategy != PlacementStrategy::UseExistingWorktree && plan.worktree_path.try_exists()? {
         return Err(task_error(format!(
             "worktree path already exists: {}",
             plan.worktree_path.display()
         )));
     }
-    let stack_parent = if let Some(parent_issue) = options.stack_on.as_deref() {
-        let store = task_store().await?;
+    Ok((plan, workspace_slug))
+}
+
+async fn select_new_stack_parent(
+    store: &SharedStore,
+    task: &Task,
+    requested: Option<&str>,
+) -> OpsResult<Option<TaskPr>> {
+    if let Some(parent_issue) = requested {
         let parent_task = store
             .get_task_by_issue(parent_issue)
             .await
@@ -1126,10 +1164,32 @@ async fn prepare_task_placement(
                 parent_task.worktree()?.display()
             )));
         }
-        Some(parent)
+        Ok(Some(parent))
     } else {
-        None
-    };
+        Ok(None)
+    }
+}
+
+async fn prepare_task_placement(
+    main_repo: &Path,
+    task: &Task,
+    recorded_branch: Option<&str>,
+    options: &TaskProcessOptions,
+) -> OpsResult<TaskPlacement> {
+    let directive = options
+        .directive
+        .as_deref()
+        .map(str::trim)
+        .map(str::to_string);
+    if directive.as_deref() == Some("") {
+        return Err(task_error("directive cannot be empty"));
+    }
+    let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
+    fetch_task_refs(main_repo)?;
+    let (mut plan, workspace_slug) =
+        plan_task_placement(main_repo, task, recorded_branch, options)?;
+    let store = task_store().await?;
+    let stack_parent = select_new_stack_parent(&store, task, options.stack_on.as_deref()).await?;
     let mut base_commit = match &stack_parent {
         Some(parent) => {
             let base_ref = format!("origin/{}", parent.branch);

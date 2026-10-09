@@ -54,7 +54,10 @@ without acquisition or delivery. Unknown initialization/provenance stays unavail
 `42a6cb7f7`/`8157583a9` add refile/save validation: destination identity/current
 Project and recorded-work restrictions, plus pinned path/revision/draft checks,
 without planning locks or file recovery writes. Unknown destination initialization
-remains unavailable. Checkout, abandon/delete, interrupt, `history show` and
+remains unavailable. Checkout now shares preparation status/planning, local placement
+proposal and restoration checks without fetch, lease or allocation. Explicit and
+inferred targets retain the same intent; stack mutation and remote recovery remain
+unperformed. Abandon/delete, interrupt, `history show` and
 skill/Flow/inline invocations still have identity-only `--explain`, not mutation
 validation or a complete action plan. Agent `--context` is a separate input preview. These source
 boundaries do not add native, configured-peer or installed acceptance.

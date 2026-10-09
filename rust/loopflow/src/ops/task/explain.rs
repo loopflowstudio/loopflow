@@ -300,7 +300,7 @@ async fn read_task_move(
 }
 
 // Workflow position stays on the execution Machine, never in portable planning.
-async fn read_local_task(
+pub(super) async fn read_local_task(
     store: &SharedStore,
     resolution: &mut ContextExplanation,
 ) -> anyhow::Result<crate::work::task::Task> {

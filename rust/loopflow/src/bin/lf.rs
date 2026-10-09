@@ -1022,24 +1022,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         TaskCommand::Repair { incident, launcher } => {
             Ok(loopflow::ops::pr_landing::run_repair(incident, launcher)?)
         }
-        TaskCommand::Checkout {
-            issue,
-            name,
-            stack_on,
-            directive,
-            json,
-        } => {
-            let task = loopflow::ops::task::task_checkout(
-                repo,
-                issue,
-                loopflow::ops::task::TaskCheckoutOptions {
-                    name: name.clone(),
-                    stack_on: stack_on.clone(),
-                    directive: directive.clone(),
-                },
-            )?;
-            print_task(&task, *json)
-        }
+        TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Workflow { cmd } => match cmd {
             loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
                 let workflow = loopflow::ops::task::workflow_show(issue)?;
@@ -1797,6 +1780,33 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Checkout {
+                name,
+                stack_on,
+                directive,
+                ..
+            },
+    }) = &cli.command
+    {
+        let report = loopflow::lf::commands::context::explain_task_checkout(
+            task,
+            &loopflow::ops::task::TaskProcessOptions {
+                wave: cli.wave.clone(),
+                name: name.clone(),
+                stack_on: stack_on.clone(),
+                directive: directive.clone(),
+                ..Default::default()
+            },
+        )?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", report.render());
+        }
+        return Ok(());
+    }
     let piped_notes;
     let file_draft;
     let planning = match &cli.command {
@@ -2045,7 +2055,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if matches!(
         &cli.command,
         Some(Commands::Task {
-            cmd: TaskCommand::Run { issue: None, .. }
+            cmd: TaskCommand::Run { issue: None, .. } | TaskCommand::Checkout { issue: None, .. }
         })
     ) && cli.task.is_none()
     {
@@ -2061,6 +2071,43 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
+    }
+    if let Some(Commands::Task {
+        cmd:
+            TaskCommand::Checkout {
+                issue,
+                name,
+                stack_on,
+                directive,
+                json,
+            },
+    }) = &cli.command
+    {
+        let issue = issue
+            .as_deref()
+            .or(cli.task.as_deref())
+            .context("No Task selected")?;
+        let directory = loopflow::repo::working_directory()?;
+        let repo = selected_task_repository(&cli, &directory, Some(issue))?;
+        let wave = cli
+            .wave
+            .as_deref()
+            .map(loopflow::work::wave::context::resolve_explicit_wave)
+            .transpose()?
+            .map(|wave| wave.slug().to_string());
+        return with_runtime(&repo, args, || {
+            let task = loopflow::ops::task::task_checkout(
+                &repo,
+                issue,
+                loopflow::ops::task::TaskCheckoutOptions {
+                    wave,
+                    name: name.clone(),
+                    stack_on: stack_on.clone(),
+                    directive: directive.clone(),
+                },
+            )?;
+            print_task(&task, *json)
+        });
     }
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE flow FLOW`.

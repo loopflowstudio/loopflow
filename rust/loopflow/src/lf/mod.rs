@@ -1053,7 +1053,7 @@ pub enum TaskCommand {
     Repair { incident: String, launcher: String },
     /// Ensure tracked Task Work and its worktree without launching a Flow
     Checkout {
-        issue: String,
+        issue: Option<String>,
         #[arg(long)]
         name: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -1249,11 +1249,11 @@ impl TaskCommand {
                     TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
-            Self::Status { issue, .. } | Self::Abandon { issue, .. } | Self::Run { issue, .. } => {
-                issue.as_deref()
-            }
-            Self::Checkout { issue, .. }
-            | Self::Sync { issue, .. }
+            Self::Status { issue, .. }
+            | Self::Abandon { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Checkout { issue, .. } => issue.as_deref(),
+            Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1281,11 +1281,11 @@ impl TaskCommand {
                     TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
-            Self::Status { issue, .. } | Self::Abandon { issue, .. } | Self::Run { issue, .. } => {
-                issue.as_mut()
-            }
-            Self::Checkout { issue, .. }
-            | Self::Sync { issue, .. }
+            Self::Status { issue, .. }
+            | Self::Abandon { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Checkout { issue, .. } => issue.as_mut(),
+            Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -2564,7 +2564,7 @@ mod tests {
         else {
             panic!("expected task checkout command");
         };
-        assert_eq!(issue, "INF-123");
+        assert_eq!(issue.as_deref(), Some("INF-123"));
         assert_eq!(name.as_deref(), Some("runtime-research"));
         assert_eq!(stack_on.as_deref(), Some("INF-122"));
         assert_eq!(directive.as_deref(), Some("collect both reports"));

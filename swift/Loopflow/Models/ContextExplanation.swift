@@ -229,3 +229,23 @@ public struct TaskPlanningExplanation: Codable, Equatable, Sendable {
     public let impediments: [String]
     public let unavailable: [String]
 }
+
+public struct TaskCheckoutAction: Codable, Equatable, Sendable {
+    public enum Behavior: String, Codable, Sendable { case prepare, reuse, restore }
+    public let behavior: Behavior
+    public let path: String
+    public let branch: String
+    public let stackOn: String?
+
+    enum CodingKeys: String, CodingKey {
+        case behavior, path, branch
+        case stackOn = "stack_on"
+    }
+}
+
+public struct TaskCheckoutExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let action: TaskCheckoutAction?
+    public let impediments: [String]
+    public let unavailable: [String]
+}

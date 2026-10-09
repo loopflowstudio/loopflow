@@ -92,3 +92,5 @@ takeover, shared legal actions and unavailable evidence without client acquisiti
 
 `task_planning_explanations.json` preserves creation, edit revision/fields, comment
 append versus provider refresh, effects and explicit refused input.
+
+`task_checkout_explanations.json` retains proposed, reused and restored checkout intent separately from admission and unavailable evidence.

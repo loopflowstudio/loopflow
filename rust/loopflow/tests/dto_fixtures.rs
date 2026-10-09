@@ -1037,3 +1037,23 @@ fn task_planning_explanations_preserve_intent_and_effects() {
     missing[0].as_object_mut().unwrap().remove("effects");
     assert!(serde_json::from_value::<Vec<TaskPlanningExplanation>>(missing).is_err());
 }
+
+#[test]
+fn task_checkout_explanations_keep_proposals_separate_from_admission() {
+    use loopflow::ops::task::{TaskCheckoutBehavior, TaskCheckoutExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_checkout_explanations.json");
+    let reports: Vec<TaskCheckoutExplanation> = serde_json::from_str(json).unwrap();
+    for (report, behavior) in reports.iter().zip([
+        TaskCheckoutBehavior::Prepare,
+        TaskCheckoutBehavior::Reuse,
+        TaskCheckoutBehavior::Restore,
+    ]) {
+        assert_eq!(report.action.as_ref().unwrap().behavior, behavior);
+        assert!(!report.unavailable.is_empty());
+    }
+    assert!(reports[3].action.is_none());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

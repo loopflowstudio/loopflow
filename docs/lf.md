@@ -573,6 +573,14 @@ not proof of peer-exclusive first start. Remote execution state is unavailable
 without reading that Machine. Completion, future checkout and provider checks are
 not fabricated; a real run checks them again.
 
+`task checkout [TASK] --explain` reports a proposed preparation, reuse or restoration
+of the recorded checkout, with the preparation owner's planning and path checks.
+Omit TASK to use `--task` or checkout inference. JSON separates `resolution`,
+`action`, `impediments` and `unavailable`. Local path/branch proposals reserve
+nothing: previews never fetch, allocate a checkout, take a lease, change a stack
+or contact a provider. Missing branch recovery and finalization remain unperformed;
+shared first-start admission stays refused.
+
 `task move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
 (including the exact prior node/edge, reason and force choice), `impediments` and

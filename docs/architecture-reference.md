@@ -160,12 +160,14 @@ These are the accepted product owners; see [cutover status](#cutover-status)
 for the current implementation boundary.
 
 ```text
-Wave --< Linear Project --< Task --< Flow (driver Process)
+Wave --< Linear Project --< Task --< Flow (LfProcess)
 
-Process --< Process                 one row per actual lf process, causal edges
-AgentSession --> Process         nullable current driver, with generation fence
-AgentSession --< history      immutable provider outcomes and usage
-driver Process --< step Process     FlowProcess: the driver's graph and each step's node; result is the step's exit
+LfProcess --< LfProcess             causal ancestry, not control authority
+LfProcess --< AgentProcess          immutable launching parent
+LfSession --> AgentProcess         nullable current provider; old rows survive
+AgentProcess --> LfProcess          nullable current attachment, fenced by token
+LfSession --< history              immutable provider outcomes and usage
+Flow LfProcess --< step LfProcess   FlowProcess graph; result is the step's exit
 ```
 
 | Concept | Owns |
@@ -176,11 +178,16 @@ driver Process --< step Process     FlowProcess: the driver's graph and each ste
 | Project | Linear status, Tasks, KRs, targets and the workflow |
 | Task | Worktree, serial PRs and every associated Session, Flow and Process; no Flow is privileged |
 | Flow | Reusable authored graph of agent/mechanical/router nodes; a running one is a driver Process and its step processes |
-| Process | One lf process's immutable causal ancestry and command completion |
-| AgentSession | Conversation identity, title, feedback, native thread and provider history |
+| LfProcess | One lf invocation's immutable causal ancestry and command completion |
+| AgentProcess | Provider OS identity, launching parent, served Session and current attachment |
+| LfSession | Conversation identity, title, feedback, native thread and provider history |
 | Machine | Store, payloads, credentials and exact local process authority |
 | Placement | Where Work executes; no authority over merely observed processes |
 | Steer | Ordered authored correction to Work |
+
+The LOO-441 rename is not integrated here: Rust still names lf invocations
+`Process` and conversations `AgentSession`; the common `Process` wire projection
+also carries agent rows. The table and diagram above use the accepted names.
 
 ## Definition and execution projections
 

@@ -88,12 +88,13 @@ attribution survive.
 ## Current implementation boundary (reconciled 2026-10-09)
 
 `446cfb2b5` supplies records and shared readers; `ea205e3d0` simplifies observation.
-The preceding feedback's first implementation step now exists in `6fe75717f`:
-captured Claude replacement advances the owner's snapshot without refreshing stale
-operations. `a81397932` shares fenced headless admission. Neither slice has runtime
-verification. Unconditional recording, takeover and public-entry acceptance remain
-open. Local main remains `3e1e6245c` (#1512); LOO-441 is not integrated, and no
-remote dependency state was inspected in this reconciliation.
+Captured Claude replacement (`6fe75717f`) advances the owner's snapshot without
+refreshing stale operations; `a81397932` shares fenced headless admission.
+`4f7d21ff7` replaces owned native post-spawn recording with pre-exec admission and
+immutable wait snapshots. `961677e04` shares owner lookup and releases SQLite during
+attachment close. These slices remain runtime-unverified; unconditional recording,
+takeover and public-entry acceptance remain open. Local main remains `3e1e6245c`
+(#1512); LOO-441 is not integrated, and no remote dependency state was inspected.
 
 `446cfb2b5` uses `processes.kind` (`lf` / `agent`). The Task's one draft
 backfills directly from the released Session shape, including original parent,
@@ -186,8 +187,10 @@ this internal slice is not complete Task acceptance or permission to publish.
    failed spawn is non-start evidence and uncertain spawn remains unknown. Native
    foreground orphan handling must preserve TTY/process-group behavior.
 2. Remove numeric provider generation from runtime caller/status fences in favor
-   of AgentProcess identity. Native request history and performed-work filters
-   must name the agent record, not derive ownership from mutable Session Work. Preserve origins;
+   of AgentProcess identity. Request correlation already freezes Process, Work and
+   capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
+   still stores provider generation, not AgentProcess identity. Preserve that
+   correlation while moving history and performed-work filters to the agent record;
    neither a delayed Started event nor a process's launch capture identifies a
    later request. Rewrite this same migration, never add another Task draft.
 3. Complete stop/release authority across providers, both takeover death orders,
@@ -195,7 +198,11 @@ this internal slice is not complete Task acceptance or permission to publish.
    Codex/OpenCode-only, noninteractive selection without applying headless group
    control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
-   unknown attachment liveness stays unknown. Resume must consult the AgentProcess
+   unknown attachment liveness stays unknown. Native client-publication and
+   interactive-open error branches in `lf/commands/util.rs` kill/wait their child
+   but omit AgentProcess exit recording, unlike the normal wait path. Preserve
+   the original error and record only a successful exact wait; failed waits stay
+   unknown. Resume must consult the AgentProcess
    before treating a detached attachment as replaceable. Unfinished rows with
    unknown PID remain diagnosable. Reconcile zombie and unknown-OS readings across gate/top.
 4. Replace remaining predecessor fixture assumptions and restore required
@@ -260,7 +267,14 @@ its waiter could detach a successfully admitted child. A throwaway-child fixture
 covers shared admission, stale-launch refusal and recoverable spawn failure; it
 remains unrun. Historical capacity evidence remains at `ea205e3d0`, this plan.
 
-October 9 reconciliation corrected dispatch's stale lock documentation: native
+October 9 reconciliation corrected the architecture diagram's obsolete direct
+Session-to-driver generation fence: the AgentProcess owns attachment/token, and
+the accepted LfProcess/LfSession names remain an unintegrated dependency. Local
+`main` and `origin/main` still name `3e1e6245c`; no remote freshness is claimed.
+Request correlation exists already; its AgentProcess identity conversion does not.
+Native failure-cleanup settlement is retained explicitly in remaining work.
+
+Earlier reconciliation corrected dispatch's stale lock documentation: native
 writes retain a per-Session OS lock, not SQLite's mutex/transaction. The store
 releases SQLite after validating attachment. `off_reactor` yields multithreaded
 workers but runs inline on a current-thread runtime; synchronous admission must
@@ -280,4 +294,4 @@ unrun. This follows the orphan-settlement boundary rather than adding an owner.
 A proposed eager typed-row conversion was discarded: parsing historical parent
 IDs before checking for an attachment token would change unclaimed-row reads.
 
-Check: `cargo fmt --all -- --check` and `git diff --check` pass; `resource_envelope.py --recover` refuses at 30.1/32 GiB and `UV_LOCK_TIMEOUT=0 uv cache prune` is busy. Build, `cargo clippy --all-targets -- -D warnings` and focused `attachment_close_keeps_transfer_fenced_without_blocking_store_writes` plus Claude/admission/native fixtures remain gate/CI-owned. Prior source: `4f7d21ff7`; no publication.
+Check: `git diff --check` passes (documentation-only reconciliation); prior fmt pass and 30.1/32 GiB reserve refusal remain at `961677e04`; build, Clippy and replacement/admission/native/close fixtures remain gate/CI-owned, not rerun here.

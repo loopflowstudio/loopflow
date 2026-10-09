@@ -227,13 +227,13 @@ Detached rows survive; duplicate PID/birth and late history grant no control.
 Tokens fence A → B → A.
 
 Claude/headless/native: `6fe75717f` / `a81397932` / `4f7d21ff7`.
-Native pre-exec keeps terminal groups; wait snapshots reject late exits.
-Runtime/close fixture untested; admission must survive cancellation without reactor dependence.
-Close/orphan settlement hold only the Session lock across I/O, then commit writes.
-Only Codex has FIFO handoff; live-orphan termination covers noninteractive Codex/OpenCode.
-Unfinished: optional launches, foreground cleanup, generations, death orders,
-public-entry agreement, two-second removal and installed settlement.
-Earlier proofs: `a55f5345b`.
+Native pre-exec retains TTY groups; wait snapshots reject late exits.
+`961677e04`: close/orphan I/O holds only the Session lock. Runtime proofs unrun;
+admission must survive cancellation without reactor progress. Request attribution
+still uses generations; native error cleanup omits exits. Only Codex has FIFO
+handoff; reaping covers noninteractive Codex/OpenCode. Unfinished: optional launches,
+foreground cleanup, generations, death orders, public-entry agreement, two-second
+removal and installed settlement. Earlier proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

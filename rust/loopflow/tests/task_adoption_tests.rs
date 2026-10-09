@@ -328,6 +328,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
                 ("moved", "no longer matches"),
+                ("team", "Team"),
                 ("removed", "deleted"),
             ]
             .into_iter()

@@ -26,7 +26,7 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
             tracing::debug!(%error, "planning export pending");
         }
     }
-    sync_follow_through_relations(store, Path::new(wave.repo())).await?;
+    sync_follow_through_relations(store, Path::new(repo)).await?;
     Ok(())
 }
 

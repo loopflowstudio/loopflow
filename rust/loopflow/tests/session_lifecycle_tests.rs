@@ -234,7 +234,16 @@ case "$*" in
     case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac ;;
   *--profile*)
     printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
-    printf '%s\n' '{"session_id":"terminal-fixture"}' | "$LF_BIN" __provider-session
+    python3 - "$@" <<'PYTHON'
+import os, pathlib, subprocess, sys, tomllib
+args = sys.argv[1:]
+home = pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex"))
+profile = home / (args[args.index("--profile") + 1] + ".config.toml")
+config = tomllib.loads(profile.read_text())
+for group in config["hooks"]["SessionStart"]:
+    for hook in group["hooks"]:
+        subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
+PYTHON
     exit $? ;;
   *) echo 'unexpected native provider command' >&2; exit 92 ;;
 esac

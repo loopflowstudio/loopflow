@@ -29,7 +29,8 @@
                     "slug": "provider-destination",
                     "status": "started",
                     "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
-                    "workflow": "feature"
+                    "workflow": "feature",
+                    "sync": null
                   }
                 ],
                 "state": "ok",
@@ -1593,7 +1594,8 @@
                     "slug": "provider-destination",
                     "status": "started",
                     "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
-                    "workflow": "feature"
+                    "workflow": "feature",
+                    "sync": null
                   }
                 ],
                 "state": "ok",
@@ -2948,7 +2950,8 @@
                     "slug": "provider-destination",
                     "status": "started",
                     "work_id": "proj_a0b7b80262214dc6b24c91242560d139",
-                    "workflow": "feature"
+                    "workflow": "feature",
+                    "sync": null
                   }
                 ],
                 "state": "ok",

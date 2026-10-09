@@ -47,23 +47,21 @@ and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
-Shared Work replaces pairing. Exact targets cannot protect drafts (LOO-387).
-
 October 8: LOO-427's checkout cut (`f5f742058`) leaves unknown location unavailable.
 Prototypes through `92cafe61d` remove copied placements, preserve legacy overrides
 and add plan identity plus known-Task SSH routing without rewriting Machine defaults.
-Inheritance remains unapproved; Rust compilation is unverified. Local absence
-cannot prove a peer never started a Task. Even fresh negative observation is no
-reservation: first-start admission must exclude a peer starting before allocation.
-One store's SQLite transaction cannot provide that guarantee; never synchronize
-runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
-control and composed proof remain.
+Inheritance remains unapproved; Rust compilation is unverified. Local absence or
+negative observation cannot reserve first start against a peer. One store's SQLite transaction cannot exclude peer allocation; never
+synchronize runtime to solve it. Peer exchange, observation/admission, complete
+routing, Desktop control and composed proof remain.
 
 LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
 Inspection separates Task/Session actions; Session time stays unknown. Saved/failed
-readings grant none. Hide/restore retains panes; Undo renews only closed-pane
-tokens. View identity grants no input authority. Seeded shared IDs prove routing,
-not exchange or exclusive start. Rust/Swift and native/remote proof remain.
+readings grant none. Arrangement moves retained leaves, never close/load: shell
+commands, surface keys and content occurrences survive. Undo renews only closed-pane
+tokens. Enlarging a pane must not mark it focused merely because the workspace is
+active. View identity grants no input authority. Seeded shared IDs prove routing,
+not exchange or exclusive start. Packaged Rust/Swift and native/remote proof remain.
 
 Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
 412 exchange. Imported completion cannot move local Workflow or clean execution.

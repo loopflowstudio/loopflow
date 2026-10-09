@@ -524,6 +524,53 @@ pub enum DesktopCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Focus an exact pane in its retained workspace (does not select Work)
+    Focus {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add an empty split beside an exact pane, retaining selection and clients
+    Split {
+        #[arg(long)]
+        target: String,
+        #[arg(long, value_enum)]
+        axis: commands::desktop::DesktopSplitAxis,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a retained pane after another pane in the same workspace
+    Move {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        destination: String,
+        #[arg(long, value_enum)]
+        axis: commands::desktop::DesktopSplitAxis,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resize the divider between two exact panes; ratio is the target side's share
+    Resize {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        toward: String,
+        #[arg(long)]
+        ratio: f64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Zoom an exact retained pane without changing selection; --off unzooms it
+    Zoom {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        off: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read actual windows and panes without launching, focusing, or acquiring clients
     Inspect {
         #[arg(long)]

@@ -21,20 +21,36 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func paneVisibilityRequiresEveryTargetComponent() throws {
-        let data = try loadFixtureData("desktop_pane_visibility.json")
-        let request = try JSONDecoder().decode(DesktopPaneVisibility.self, from: data)
-        #expect(request.hidden)
+    @Test func paneCommandRequiresEveryTargetComponent() throws {
+        let data = try loadFixtureData("desktop_pane_commands.json")
+        let requests = try JSONDecoder().decode([DesktopPaneCommand].self, from: data)
+        let original = try #require(JSONSerialization.jsonObject(with: data) as? NSArray)
+        let encoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(requests)) as? NSArray)
+        #expect(original == encoded)
+        for request in requests {
+            let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
+            let action = try #require(wire["action"] as? [String: Any])
+            for field in action.keys {
+                var missing = wire, payload = action
+                payload.removeValue(forKey: field)
+                missing["action"] = payload
+                #expect(throws: DecodingError.self) {
+                    try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
+                }
+            }
+        }
+        let request = try #require(requests.first)
+        #expect(request.action == .hide)
         #expect(request.target.incarnation == "occurrence-session-pane")
-        #expect(try JSONDecoder().decode(DesktopPaneVisibility.self, from: JSONEncoder().encode(request)) == request)
-        let wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONEncoder().encode(request)) == request)
+        let wire = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])
         for field in ["repository", "window", "machine_id", "worktree", "pane", "incarnation"] {
             var missing = wire
             var target = try #require(missing["target"] as? [String: Any])
             target.removeValue(forKey: field)
             missing["target"] = target
             #expect(throws: DecodingError.self) {
-                try JSONDecoder().decode(DesktopPaneVisibility.self, from: JSONSerialization.data(withJSONObject: missing))
+                try JSONDecoder().decode(DesktopPaneCommand.self, from: JSONSerialization.data(withJSONObject: missing))
             }
         }
     }

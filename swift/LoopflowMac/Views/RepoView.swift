@@ -70,7 +70,7 @@ struct RepoView: View {
             if let taskLinks, let repository {
                 WorkLinkReceiver(router: taskLinks, repository: repository, inspect: { incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
-                }, setVisibility: sessionWorkspaces.setVisibility) { url in
+                }, controlPane: sessionWorkspaces.controlPane) { url in
                     await model.openTaskLink(url)
                 }.frame(width: 0, height: 0)
             }

@@ -145,6 +145,10 @@ public indirect enum LayoutNode: Codable, Sendable, Equatable {
                     ratio: ratio.clampedSplitRatio
                 )
             }
+            if second.pane(for: firstPaneId) != nil,
+               first.pane(for: secondPaneId) != nil {
+                return .split(axis, first: first, second: second, ratio: (1 - ratio).clampedSplitRatio)
+            }
             return .split(
                 axis,
                 first: first.updatingRatio(

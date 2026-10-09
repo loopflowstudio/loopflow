@@ -118,17 +118,46 @@ final class SessionsWorkspaceRegistry {
         }
     }
 
-    func setVisibility(_ request: DesktopPaneVisibility) throws {
+    func controlPane(_ request: DesktopPaneCommand) throws {
         let target = request.target
+        let workspace = try retainedWorkspace(for: target)
+        let store = workspace.multiplexer
+        // Validate both ends before changing anything. Moving a view is not
+        // reassociating its Work or transferring a client to another checkout.
+        func peer(_ other: DesktopPaneTarget) throws {
+            guard other.repository == target.repository, other.window == target.window,
+                  other.machineId == target.machineId, other.worktree == target.worktree,
+                  other.pane != target.pane else {
+                throw RegistryQueryError("Choose two distinct panes in the same retained workspace; no pane was changed.")
+            }
+            _ = try retainedWorkspace(for: other)
+        }
+        switch request.action {
+        case .hide: workspace.setCollapsed(paneId: target.pane, collapsed: true)
+        case .restore: workspace.setCollapsed(paneId: target.pane, collapsed: false)
+        case .focus: store.setFocusedPane(target.pane)
+        case .split(let axis): _ = store.split(target.pane, axis: axis, focusNewPane: false)
+        case .move(let destination, let axis):
+            try peer(destination)
+            store.move(target.pane, beside: destination.pane, axis: axis)
+        case .resize(let toward, let ratio):
+            try peer(toward)
+            guard ratio.isFinite, (0.1...0.9).contains(ratio) else {
+                throw RegistryQueryError("Split ratio must be between 0.1 and 0.9; no pane was changed.")
+            }
+            store.updateRatio(between: target.pane, and: toward.pane, ratio: ratio)
+        case .zoom(let enabled): store.setZoom(target.pane, enabled: enabled)
+        }
+    }
+
+    private func retainedWorkspace(for target: DesktopPaneTarget) throws -> SessionsWorkspace {
         let identity = WorkspaceIdentity(machineId: target.machineId, worktree: target.worktree)
         guard let workspace = workspaces[identity],
               let pane = workspace.multiplexer.layout.pane(for: target.pane),
               pane.incarnation == target.incarnation else {
             throw RegistryQueryError("The pane content was removed or replaced. Inspect Desktop again; no pane was changed.")
         }
-        // Hide is not close: keep the tree, native surface, drafts and membership.
-        // Restore does not select another Task, focus a window or acquire a client.
-        workspace.setCollapsed(paneId: pane.id, collapsed: request.hidden)
+        return workspace
     }
 
     func path(containingShell id: String) -> WorkspaceIdentity? {
@@ -1085,7 +1114,7 @@ private struct MultiplexerView: View {
             if let zoomedPaneId, let pane = layout.pane(for: zoomedPaneId) {
                 SessionPaneView(
                     pane: pane,
-                    isFocused: !focusedPaneId.isEmpty,
+                    isFocused: pane.id == focusedPaneId,
                     workingDirectory: workingDirectory,
                     sessions: sessions,
                     store: store,

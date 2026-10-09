@@ -66,16 +66,16 @@ struct WorkLinkReceiver: NSViewRepresentable {
     let router: WorkLinkRouter
     let repository: String
     let inspect: (UUID) -> DesktopWindowInspection
-    let setVisibility: (DesktopPaneVisibility) throws -> Void
+    let controlPane: (DesktopPaneCommand) throws -> Void
     let receive: (URL) async -> Void
 
     func makeNSView(context: Context) -> Receiver {
-        Receiver(router: router, repository: repository, inspect: inspect, setVisibility: setVisibility, receive: receive)
+        Receiver(router: router, repository: repository, inspect: inspect, controlPane: controlPane, receive: receive)
     }
     func updateNSView(_ view: Receiver, context: Context) {
         view.receive = receive
         view.inspect = inspect
-        view.setVisibility = setVisibility
+        view.controlPane = controlPane
     }
     static func dismantleNSView(_ view: Receiver, coordinator: ()) {
         view.router.remove(view.id, repository: view.repository)
@@ -86,17 +86,17 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let router: WorkLinkRouter
         let repository: String
         var inspect: (UUID) -> DesktopWindowInspection
-        var setVisibility: (DesktopPaneVisibility) throws -> Void
+        var controlPane: (DesktopPaneCommand) throws -> Void
         var receive: (URL) async -> Void
 
         init(router: WorkLinkRouter, repository: String, inspect: @escaping (UUID) -> DesktopWindowInspection,
-             setVisibility: @escaping (DesktopPaneVisibility) throws -> Void,
+             controlPane: @escaping (DesktopPaneCommand) throws -> Void,
              receive: @escaping (URL) async -> Void) {
             self.router = router
             self.repository = repository
             self.receive = receive
             self.inspect = inspect
-            self.setVisibility = setVisibility
+            self.controlPane = controlPane
             super.init(frame: .zero)
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
@@ -105,9 +105,9 @@ struct WorkLinkReceiver: NSViewRepresentable {
             if let window {
                 router.register(id, repository: repository, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
-                }, inspect: inspect, setVisibility: { [weak self] request in
+                }, inspect: inspect, controlPane: { [weak self] request in
                     guard let self else { throw RegistryQueryError("The repository window is unavailable.") }
-                    try self.setVisibility(request)
+                    try self.controlPane(request)
                 }) { [weak self] link in
                     await self?.receive(link)
                 }

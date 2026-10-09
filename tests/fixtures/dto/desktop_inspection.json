@@ -12,7 +12,12 @@
       "supported_operations": [
         "inspect",
         "hide",
-        "restore"
+        "restore",
+        "focus",
+        "split",
+        "move",
+        "resize",
+        "zoom"
       ],
       "workspaces": [
         {
@@ -109,7 +114,12 @@
       "supported_operations": [
         "inspect",
         "hide",
-        "restore"
+        "restore",
+        "focus",
+        "split",
+        "move",
+        "resize",
+        "zoom"
       ],
       "workspaces": [],
       "layouts": [],

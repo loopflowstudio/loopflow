@@ -169,7 +169,7 @@ public struct DesktopWorktreeNode: Codable, Sendable, Equatable {
 }
 
 /// An exact retained view, never a selector that follows current focus.
-/// This authorizes visibility only, not input into a native terminal surface.
+/// This addresses arrangement only, not input into a native terminal surface.
 public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String
@@ -189,11 +189,62 @@ public struct DesktopPaneTarget: Codable, Sendable, Equatable {
     }
 }
 
-public struct DesktopPaneVisibility: Codable, Sendable, Equatable {
+public struct DesktopPaneCommand: Codable, Sendable, Equatable {
     public let target: DesktopPaneTarget
-    public let hidden: Bool
+    public let action: DesktopPaneAction
 
-    public init(target: DesktopPaneTarget, hidden: Bool) {
-        self.target = target; self.hidden = hidden
+    public init(target: DesktopPaneTarget, action: DesktopPaneAction) {
+        self.target = target; self.action = action
+    }
+}
+
+public enum DesktopPaneAction: Codable, Sendable, Equatable {
+    case hide, restore, focus
+    case split(axis: SplitAxis)
+    case move(destination: DesktopPaneTarget, axis: SplitAxis)
+    case resize(toward: DesktopPaneTarget, ratio: Double)
+    case zoom(enabled: Bool)
+
+    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled }
+    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .hide: self = .hide
+        case .restore: self = .restore
+        case .focus: self = .focus
+        case .split: self = .split(axis: try values.decode(SplitAxis.self, forKey: .axis))
+        case .move: self = .move(destination: try values.decode(DesktopPaneTarget.self, forKey: .destination),
+                                axis: try values.decode(SplitAxis.self, forKey: .axis))
+        case .resize: self = .resize(toward: try values.decode(DesktopPaneTarget.self, forKey: .toward),
+                                    ratio: try values.decode(Double.self, forKey: .ratio))
+        case .zoom: self = .zoom(enabled: try values.decode(Bool.self, forKey: .enabled))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        let kind: Kind
+        switch self {
+        case .hide: kind = .hide
+        case .restore: kind = .restore
+        case .focus: kind = .focus
+        case .split(let axis):
+            kind = .split
+            try values.encode(axis, forKey: .axis)
+        case .move(let destination, let axis):
+            kind = .move
+            try values.encode(destination, forKey: .destination)
+            try values.encode(axis, forKey: .axis)
+        case .resize(let toward, let ratio):
+            kind = .resize
+            try values.encode(toward, forKey: .toward)
+            try values.encode(ratio, forKey: .ratio)
+        case .zoom(let enabled):
+            kind = .zoom
+            try values.encode(enabled, forKey: .enabled)
+        }
+        try values.encode(kind, forKey: .kind)
     }
 }

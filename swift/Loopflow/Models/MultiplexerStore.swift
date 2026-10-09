@@ -76,7 +76,9 @@ public final class MultiplexerStore {
     }
 
     public func setFocusedPane(_ paneId: String) {
-        guard layout.pane(for: paneId) != nil, focusedPaneId != paneId else { return }
+        guard layout.pane(for: paneId) != nil else { return }
+        guard focusedPaneId != paneId || collapsedPaneIds.contains(paneId)
+            || (zoomedPaneId != nil && zoomedPaneId != paneId) else { return }
         collapsedPaneIds.remove(paneId)
         focusedPaneId = paneId
         if zoomedPaneId != nil { zoomedPaneId = paneId }
@@ -84,19 +86,32 @@ public final class MultiplexerStore {
     }
 
     @discardableResult
-    public func split(_ paneId: String, axis: SplitAxis) -> PaneState? {
-        _split(paneId, axis: axis, content: .empty)
+    public func split(_ paneId: String, axis: SplitAxis, focusNewPane: Bool = true) -> PaneState? {
+        _split(paneId, axis: axis, content: .empty, focusNewPane: focusNewPane)
     }
 
-    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent) -> PaneState? {
+    private func _split(_ paneId: String, axis: SplitAxis, content: PaneContent, focusNewPane: Bool = true) -> PaneState? {
         guard layout.pane(for: paneId) != nil else { return nil }
         let pane = PaneState(content: content)
         layout = layout.splitting(paneId, axis: axis, newPane: pane)
-        focusedPaneId = pane.id
-        zoomedPaneId = nil
+        if focusNewPane {
+            focusedPaneId = pane.id
+            zoomedPaneId = nil
+        }
         closedState = nil
         _notify()
         return pane
+    }
+
+    /// Relocate the leaf itself, retaining content occurrence and surface keys.
+    /// Never use close/load: those invalidate targets and may retire a shell.
+    public func move(_ paneId: String, beside destination: String, axis: SplitAxis) {
+        guard paneId != destination,
+              let pane = layout.pane(for: paneId), layout.pane(for: destination) != nil,
+              let remaining = layout.removing(paneId) else { return }
+        layout = remaining.splitting(destination, axis: axis, newPane: pane)
+        closedState = nil
+        _notify()
     }
 
     public func close(_ paneId: String) {
@@ -206,6 +221,19 @@ public final class MultiplexerStore {
         } else {
             _ = _split(focusedPaneId, axis: .vertical, content: content)
         }
+    }
+
+    /// Explicit arrangement changes visibility without selecting another Session.
+    public func setZoom(_ paneId: String, enabled: Bool) {
+        guard layout.pane(for: paneId) != nil else { return }
+        if enabled {
+            collapsedPaneIds.remove(paneId)
+            zoomedPaneId = paneId
+        } else if zoomedPaneId == paneId {
+            zoomedPaneId = nil
+        } else { return }
+        focusBeforeZoom = nil
+        _notify()
     }
 
     public func toggleZoom(_ paneId: String) {

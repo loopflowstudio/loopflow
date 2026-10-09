@@ -1,0 +1,113 @@
+[
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "hide"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "restore"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "focus"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "split",
+      "axis": "horizontal"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "move",
+      "destination": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "files-pane",
+        "incarnation": "occurrence-files-pane"
+      },
+      "axis": "vertical"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "resize",
+      "toward": {
+        "repository": "repo_22222222222222222222222222222222",
+        "window": "55555555-5555-5555-5555-555555555555",
+        "machine_id": "home_11111111111111111111111111111111",
+        "worktree": "/repo.task",
+        "pane": "files-pane",
+        "incarnation": "occurrence-files-pane"
+      },
+      "ratio": 0.6
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "zoom",
+      "enabled": true
+    }
+  }
+]

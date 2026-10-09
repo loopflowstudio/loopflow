@@ -559,8 +559,12 @@ than borrowing the UI snapshot time. This reports model state, not rendered
 usability or provider readiness.
 
 `lf desktop hide --target "$target"` and `lf desktop restore --target "$target"`
-change only retained pane visibility. The [CLI example](../docs/lf.md#desktop-navigation)
-extracts an exact target from inspection. Window and content incarnations reject
-stale requests; Machine/checkout keys never follow current focus. Hiding retains
-the layout and native surface. Restore does not navigate, leave zoom or acquire
-a client. Remaining arrangement, terminal I/O and composed opening are unfinished.
+change retained pane visibility. Focus, split, move, resize and zoom use that same
+exact-target path through the registry and multiplexer; see the
+[CLI examples](../docs/lf.md#desktop-navigation). Move retains the pane itself,
+including its content occurrence and surface key; it never closes/reopens a client.
+Split adds an empty pane. Arrangement preserves selection except explicit focus;
+zoom does not redirect input to an unselected pane. Window/content replacement
+rejects stale targets, including the second target of a move or resize. Replies
+are model readings, not native-rendering proof. Companion creation, terminal I/O
+and cross-machine composition remain unfinished.

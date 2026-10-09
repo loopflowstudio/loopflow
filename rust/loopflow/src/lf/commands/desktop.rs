@@ -1,4 +1,4 @@
-//! Passive control-plane reads use Desktop's existing Apple event boundary.
+//! Retained pane arrangement and passive reads use Desktop's existing Apple event boundary.
 //! No file-backed layout cache, socket server, or Work mutation participates.
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -99,9 +99,40 @@ pub struct DesktopPaneTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DesktopPaneVisibility {
+pub struct DesktopPaneCommand {
     pub target: DesktopPaneTarget,
-    pub hidden: bool,
+    pub action: DesktopPaneAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopPaneAction {
+    Hide,
+    Restore,
+    Focus,
+    Split {
+        axis: DesktopSplitAxis,
+    },
+    Move {
+        destination: DesktopPaneTarget,
+        axis: DesktopSplitAxis,
+    },
+    Resize {
+        toward: DesktopPaneTarget,
+        ratio: f64,
+    },
+    Zoom {
+        enabled: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopSplitAxis {
+    Horizontal,
+    Vertical,
 }
 
 // Raw event spelling avoids loading an installed scripting dictionary during
@@ -117,22 +148,69 @@ on run argv
             tell application id "com.loopflow.mac" to return «event CNRTinsp»
         else
             set request to item 1 of argv
-            tell application id "com.loopflow.mac" to return «event CNRTpvis» request
+            tell application id "com.loopflow.mac" to return «event CNRTpane» request
         end if
     end timeout
 end run
 "#;
 
-pub fn inspect(json: bool) -> Result<()> {
-    invoke(None, json)
+pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
+    use crate::lf::DesktopCommand;
+    // Check before decoding targets or looking up any Work/Machine.
+    super::open::require_supported()?;
+    let (target, action, json) = match command {
+        DesktopCommand::Inspect { json } => return invoke(None, *json),
+        DesktopCommand::Hide { target, json } => (target, DesktopPaneAction::Hide, json),
+        DesktopCommand::Restore { target, json } => (target, DesktopPaneAction::Restore, json),
+        DesktopCommand::Focus { target, json } => (target, DesktopPaneAction::Focus, json),
+        DesktopCommand::Split { target, axis, json } => {
+            (target, DesktopPaneAction::Split { axis: *axis }, json)
+        }
+        DesktopCommand::Move {
+            target,
+            destination,
+            axis,
+            json,
+        } => (
+            target,
+            DesktopPaneAction::Move {
+                destination: parse_target(destination)?,
+                axis: *axis,
+            },
+            json,
+        ),
+        DesktopCommand::Resize {
+            target,
+            toward,
+            ratio,
+            json,
+        } => {
+            if !ratio.is_finite() || !(0.1..=0.9).contains(ratio) {
+                bail!("Split ratio must be between 0.1 and 0.9");
+            }
+            (
+                target,
+                DesktopPaneAction::Resize {
+                    toward: parse_target(toward)?,
+                    ratio: *ratio,
+                },
+                json,
+            )
+        }
+        DesktopCommand::Zoom { target, off, json } => {
+            (target, DesktopPaneAction::Zoom { enabled: !off }, json)
+        }
+    };
+    let request = serde_json::to_string(&DesktopPaneCommand {
+        target: parse_target(target)?,
+        action,
+    })?;
+    invoke(Some(&request), *json)
 }
 
-pub fn set_visibility(target: &str, hidden: bool, json: bool) -> Result<()> {
-    super::open::require_supported()?;
-    let target = serde_json::from_str::<DesktopPaneTarget>(target)
-        .context("expected the exact pane target from `lf desktop inspect --json`")?;
-    let request = serde_json::to_string(&DesktopPaneVisibility { target, hidden })?;
-    invoke(Some(&request), json)
+fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
+    serde_json::from_str(target)
+        .context("expected the exact pane target from `lf desktop inspect --json`")
 }
 
 fn invoke(request: Option<&str>, json: bool) -> Result<()> {
@@ -143,8 +221,8 @@ fn invoke(request: Option<&str>, json: bool) -> Result<()> {
         .output()
         .context("contact Loopflow Desktop via macOS automation")?;
     if !output.status.success() {
-        // A lost reply does not prove the command had no effect. Visibility is
-        // idempotent; inspect again before deciding whether to repeat it.
+        // A lost reply does not prove the command had no effect. In particular,
+        // repeating a split allocates another pane; inspect before retrying.
         bail!("Desktop request failed: {}. Inspect again before retrying; `lf task status <task>` remains available in this terminal.", String::from_utf8_lossy(&output.stderr).trim());
     }
     let reading: DesktopInspection = serde_json::from_slice(&output.stdout)

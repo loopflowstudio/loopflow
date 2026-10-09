@@ -703,16 +703,32 @@ fn planning_sync_preserves_delivery_and_losing_values() {
 }
 
 #[test]
-fn desktop_pane_visibility_requires_an_exact_content_occurrence() {
-    use loopflow::lf::commands::desktop::DesktopPaneVisibility;
-    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_visibility.json");
-    let request: DesktopPaneVisibility = serde_json::from_str(json).unwrap();
-    assert!(request.hidden);
+fn desktop_pane_command_requires_an_exact_content_occurrence() {
+    use loopflow::lf::commands::desktop::DesktopPaneCommand;
+    let json = include_str!("../../../tests/fixtures/dto/desktop_pane_commands.json");
+    let requests: Vec<DesktopPaneCommand> = serde_json::from_str(json).unwrap();
+    assert_eq!(
+        serde_json::to_value(&requests).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    for request in &requests {
+        let wire = serde_json::to_value(request).unwrap();
+        for field in wire["action"].as_object().unwrap().keys() {
+            let mut missing = wire.clone();
+            missing["action"].as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
+        }
+    }
+    let request = &requests[0];
+    assert_eq!(
+        request.action,
+        loopflow::lf::commands::desktop::DesktopPaneAction::Hide
+    );
     assert_eq!(request.target.incarnation, "occurrence-session-pane");
     let wire = serde_json::to_value(request).unwrap();
     assert_eq!(
         wire,
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
+        serde_json::from_str::<serde_json::Value>(json).unwrap()[0]
     );
     for field in [
         "repository",
@@ -724,9 +740,9 @@ fn desktop_pane_visibility_requires_an_exact_content_occurrence() {
     ] {
         let mut missing = wire.clone();
         missing["target"].as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<DesktopPaneVisibility>(missing).is_err());
+        assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
     }
     let mut missing = wire;
-    missing.as_object_mut().unwrap().remove("hidden");
-    assert!(serde_json::from_value::<DesktopPaneVisibility>(missing).is_err());
+    missing.as_object_mut().unwrap().remove("action");
+    assert!(serde_json::from_value::<DesktopPaneCommand>(missing).is_err());
 }

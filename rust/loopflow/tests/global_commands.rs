@@ -459,7 +459,9 @@ fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
 #[test]
 fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation() {
     let home = tempfile::tempdir().unwrap();
-    for operation in ["inspect", "hide", "restore"] {
+    for operation in [
+        "inspect", "hide", "restore", "focus", "split", "move", "resize", "zoom",
+    ] {
         let output = command(
             home.path(),
             home.path(),
@@ -473,10 +475,26 @@ fn desktop_inspection_rejects_linux_before_machine_routing_or_work_preparation()
                 "--json",
             ],
         )
-        .args(if operation == "inspect" {
-            vec![]
-        } else {
-            vec!["--target", "invalid-json"]
+        .args(match operation {
+            "inspect" => vec![],
+            "split" => vec!["--target", "invalid-json", "--axis", "vertical"],
+            "move" => vec![
+                "--target",
+                "invalid-json",
+                "--destination",
+                "invalid-json",
+                "--axis",
+                "horizontal",
+            ],
+            "resize" => vec![
+                "--target",
+                "invalid-json",
+                "--toward",
+                "invalid-json",
+                "--ratio",
+                "0.6",
+            ],
+            _ => vec!["--target", "invalid-json"],
         })
         .output()
         .unwrap();

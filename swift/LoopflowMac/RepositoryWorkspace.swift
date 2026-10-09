@@ -22,7 +22,7 @@ final class WorkLinkRouter {
         let focus: () -> Void
         let receive: (URL) async -> Void
         let inspect: (UUID) -> DesktopWindowInspection
-        let setVisibility: (DesktopPaneVisibility) throws -> Void
+        let controlPane: (DesktopPaneCommand) throws -> Void
     }
     private var targets: [String: Target] = [:]
     private var pending: [String: [URL]] = [:]
@@ -35,12 +35,12 @@ final class WorkLinkRouter {
     func register(_ incarnation: UUID, repository: String,
                   focus: @escaping () -> Void,
                   inspect: @escaping (UUID) -> DesktopWindowInspection,
-                  setVisibility: @escaping (DesktopPaneVisibility) throws -> Void,
+                  controlPane: @escaping (DesktopPaneCommand) throws -> Void,
                   receive: @escaping (URL) async -> Void) {
         if targets[repository]?.incarnation != incarnation {
             delivering.removeValue(forKey: repository)?.task.cancel()
         }
-        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, setVisibility: setVisibility)
+        targets[repository] = Target(incarnation: incarnation, focus: focus, receive: receive, inspect: inspect, controlPane: controlPane)
         deliverPending(repository)
     }
 
@@ -52,12 +52,12 @@ final class WorkLinkRouter {
     }
 
     /// Validation and mutation stay in this MainActor turn; no focus fallback.
-    func setVisibility(_ request: DesktopPaneVisibility) throws -> DesktopInspection {
+    func controlPane(_ request: DesktopPaneCommand) throws -> DesktopInspection {
         guard let receiver = targets[request.target.repository],
               receiver.incarnation.uuidString == request.target.window else {
             throw RegistryQueryError("The repository window was closed or replaced. Inspect Desktop again; no pane was changed.")
         }
-        try receiver.setVisibility(request)
+        try receiver.controlPane(request)
         return inspect()
     }
 

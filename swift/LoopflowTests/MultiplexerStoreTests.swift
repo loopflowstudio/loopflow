@@ -4,6 +4,28 @@ import Testing
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
+    @Test("Explicit zoom preserves selection; focus reveals that same selected pane")
+    func explicitZoomPreservesSelection() {
+        let store = MultiplexerStore()
+        store.load(sessionId: "selected")
+        let selected = store.focusedPane
+        store.reveal(sessionId: "other")
+        let other = store.focusedPane
+        store.setFocusedPane(selected.id)
+        store.setZoom(other.id, enabled: true)
+        store.setZoom(other.id, enabled: true)
+        #expect(store.focusedPane == selected)
+        #expect(store.zoomedPaneId == other.id)
+        store.setZoom(selected.id, enabled: false)
+        #expect(store.zoomedPaneId == other.id)
+        store.setFocusedPane(selected.id)
+        #expect(store.zoomedPaneId == selected.id)
+        #expect(store.focusedPane == selected)
+        store.setZoom(selected.id, enabled: false)
+        #expect(store.zoomedPaneId == nil)
+        #expect(store.focusedPane == selected)
+    }
+
     @Test("Opening in the active pane preserves split geometry and other visible Sessions")
     func activePaneSelectionPreservesSplits() throws {
         let store = MultiplexerStore()

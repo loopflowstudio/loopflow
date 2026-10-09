@@ -502,8 +502,35 @@ The target stays attached to that window, Machine, checkout and content occurren
 while focus changes. Replaced windows/content reject the old target. Restore removes
 only the hidden flag: it does not select a Task, leave zoom, focus a window or acquire
 a client. Hidden shell commands and native surfaces remain retained. If a reply is
-lost, inspect again; repeating hide or restore is safe. Focus/split/move/resize/zoom,
-terminal I/O and composed Session-plus-diff opening remain implementation work.
+lost, inspect again; repeating hide or restore is safe.
+
+Arrange those retained panes through the same exact targets:
+
+```sh
+lf desktop focus --target "$target"
+lf desktop split --target "$target" --axis vertical
+# Extract another exact target into $other from the same workspace reading.
+lf desktop move --target "$target" --destination "$other" --axis horizontal
+lf desktop resize --target "$target" --toward "$other" --ratio 0.6
+lf desktop zoom --target "$target"
+lf desktop zoom --target "$target" --off
+```
+
+Vertical puts the new or moved pane to the right; horizontal puts it below.
+Split adds an empty pane. Move retains the original pane/content identity, within
+one Machine/checkout only. Resize changes the divider separating the two targets;
+0.6 gives the target's side 60%, regardless of its order (allowed range 0.1–0.9).
+Both targets are checked before a move or resize changes anything.
+Split, move, resize and zoom preserve pane selection and Work navigation. Focus
+reveals/selects the exact pane in its retained workspace; it does not select
+another Task or bring a background repository window forward. Zoom reveals its
+target without selecting it; `--off` only unzooms that target. These operations
+never close/reopen clients or write into a draft. Replies describe model state,
+not a completed render. A lost split reply is not safe to retry blindly: inspect
+first, since each split adds a pane.
+
+Companion creation, terminal I/O and composed Session-plus-diff opening remain
+implementation work.
 
 ```sh
 open 'loopflow://task/LOO-303'

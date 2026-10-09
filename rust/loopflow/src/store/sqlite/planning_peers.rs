@@ -226,7 +226,14 @@ impl SqliteStore {
         Ok(id)
     }
 
-    pub fn peer_planning_destination(
+    // Dispatch needs only routing, not the status projection of every journal.
+    // A broken destination must not prevent attempts against independent plans.
+    pub(crate) fn peer_planning_destination_ids(&self, repo: &str) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        destination_ids(&conn, repo)
+    }
+
+    pub(crate) fn peer_planning_destination(
         &self,
         repo: &str,
         id: &str,
@@ -415,13 +422,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
         let mut conflicts = projection_conflicts_in(&tx, repo)?;
-        let mut query =
-            tx.prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?;
-        let destinations = query
-            .query_map([repo], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(query);
-        for destination in destinations {
+        for destination in destination_ids(&tx, repo)? {
             let snapshot = export_in(&tx, repo, &destination)?;
             conflicts.extend(
                 selection_conflicts(&tx, repo, &destination, &snapshot)?
@@ -432,6 +433,15 @@ impl SqliteStore {
         tx.commit()?;
         Ok(conflicts)
     }
+}
+
+fn destination_ids(conn: &Connection, repo: &str) -> StoreResult<Vec<String>> {
+    let mut query =
+        conn.prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?;
+    let ids = query
+        .query_map([repo], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(ids)
 }
 
 fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {

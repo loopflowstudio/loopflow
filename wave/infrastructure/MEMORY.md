@@ -630,23 +630,24 @@ reads/equal-value observations remain unsafe, separately from the parent's unsee
 provider-write race. Grouped receipts and legacy association remain.
 
 Setup retains keys/empty bindings; future roots use selection, children inherit it.
-Joining publishes nothing. Repository-scoped `PlanningSync`
-now drives local-only Git exchange; cold resolution acquires first. Source dispatch
-checks pushed code before publishing planning; target-only dispatch needs no source
-repository. Rust/public proofs are unexecuted; SQL runs. Linear-connected exchange
-reports the provenance gap rather than activating it, not a final product limitation.
+Joining publishes nothing. Repository-scoped `PlanningSync` drives local-only
+exchange and cold acquisition. Dispatch checks pushed code before publishing.
+Target-only dispatch needs no source repository. Rust/public proofs remain
+unexecuted; SQL runs. Linear-connected exchange reports the provenance gap
+without activation, not a final product limit.
 
-Fetch, import and publication receipts remain separate. Confirmation covers captured
-changes, not later saves; uncertainty recovers by readback. Workers retain effect
-locks through cancellation/status; acquisition/saves stay independent. Release's
-entry-point lesson requires the authored public cold-dispatch/reconnect proofs.
-Short taskless lifetimes and Desktop peer status remain.
+Fetch/import/publication remain separate; confirmation excludes later saves.
+Uncertainty recovers by readback. Workers retain effect locks through cancellation;
+acquisition/saves stay independent. Dispatch reads destinations, not every journal's
+status: one damaged journal must not block another plan. Its regression and Release's
+public cold-dispatch/reconnect proofs are unexecuted. Short taskless lifetimes and
+Desktop peer status remain.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
-moves/private journals and dependents. Moving back cannot release history; explicit
-selection can. Exchange excludes held local history even from retained Git documents. Independent
-exchange/selection proceeds; omission retains peer values, not convergence. Recovery UX remains for
-review. Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
+moves, private journals and dependents. Only explicit selection releases history.
+Exchange excludes held history, including retained Git documents. Independent
+exchange/selection proceeds; omission preserves peer values, not convergence.
+Recovery UX needs review. Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
 
 ## Synced planning integration (LOO-334)
 

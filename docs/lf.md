@@ -99,9 +99,10 @@ changes are reported without changing them. Repeated launches reuse the checkout
 a target behind the required commit needs `lf sync` there. Existing IDs and local
 execution history remain unchanged.
 
-[Git planning setup](#select-git-planning) is available, but automatic exchange is
-not connected yet. An absent remote Task reports that planning must synchronize
-instead of bootstrapping a copy. Imported planning never moves local Workflows.
+[Select Git planning](#select-git-planning) to exchange planning before dispatch
+and cold Task resolution. If acquisition cannot find the Task, launch reports
+missing synchronization instead of bootstrapping a copy. Imported planning never
+moves local Workflows.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's

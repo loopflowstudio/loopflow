@@ -75,15 +75,13 @@ impl Store {
         .await
     }
 
-    pub async fn peer_planning_destination(
+    pub(crate) async fn peer_planning_destination_ids(
         &self,
         repo: &str,
-        id: &str,
-    ) -> StoreResult<Option<PlanningDestination>> {
+    ) -> StoreResult<Vec<String>> {
         let repo = repo.to_string();
-        let id = id.to_string();
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_destination(&repo, &id)
+            sqlite.peer_planning_destination_ids(&repo)
         })
         .await
     }

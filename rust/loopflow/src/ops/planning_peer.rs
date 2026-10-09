@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use crate::engine::planning_exchange::PlanningSnapshot;
-use crate::engine::planning_git::{PlanningDocument, PlanningGit, PlanningPublication};
+use crate::engine::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{sqlite::SqliteStore, Store};
 
 use super::{OpsError, OpsResult};
@@ -25,12 +25,16 @@ pub(crate) async fn publish_repository(store: &Store, repo: &str) -> OpsResult<(
 }
 
 async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsResult<()> {
-    let destinations = store.peer_planning_status(repo).await.map_err(message)?;
-    let results = futures_util::future::join_all(destinations.into_iter().map(|destination| {
+    let destinations = store
+        .peer_planning_destination_ids(repo)
+        .await
+        .map_err(message)?;
+    let results = futures_util::future::join_all(destinations.into_iter().map(|id| {
         let store = store.sqlite.clone();
         let repo = repo.to_owned();
         tokio::task::spawn_blocking(move || {
-            let id = &destination.id;
+            let id = &id;
+            let linear = super::linear_observe::connected(&repo);
             // The blocking worker retains effect ownership through status writes,
             // even if its async waiter is canceled. Acquisition never takes it.
             let _lock = if publish {
@@ -46,7 +50,7 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
             let result = (|| {
                 // Peer provider frontiers/grouped receipts are not composed yet.
                 // Do not activate the known unsafe mixed-provider path.
-                if super::linear_observe::connected(&repo) {
+                if linear {
                     return Err(message("Git planning awaits Linear provenance reconciliation; local planning is retained"));
                 }
                 let binding = store.peer_planning_destination(&repo, id).map_err(message)?
@@ -60,7 +64,7 @@ async fn exchange_repository(store: &Store, repo: &str, publish: bool) -> OpsRes
             })();
             // Do not persist provider data or credential-bearing destinations in errors.
             let error = result.as_ref().err().map(|_| {
-                if super::linear_observe::connected(&repo) {
+                if linear {
                     "Git planning awaits Linear provenance reconciliation"
                 } else if publish {
                     "Git publication pending; local planning retained"
@@ -84,7 +88,7 @@ fn acquire_destination(
     repo: &str,
     destination: &str,
     git: &PlanningGit,
-) -> OpsResult<Option<PlanningDocument>> {
+) -> OpsResult<Option<(PlanningRevision, PlanningSnapshot)>> {
     let remote = git.fetch().map_err(message)?;
     store
         .record_peer_fetch(
@@ -93,16 +97,19 @@ fn acquire_destination(
             remote.as_ref().map(|document| document.revision.as_str()),
         )
         .map_err(message)?;
-    if let Some(document) = &remote {
+    let imported = if let Some(document) = remote {
         let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
         store
             .import_peer_planning(repo, destination, document.revision.as_str(), &snapshot)
             .map_err(message)?;
-    }
+        Some((document.revision, snapshot))
+    } else {
+        None
+    };
     store
         .record_peer_error(repo, destination, true, None)
         .map_err(message)?;
-    Ok(remote)
+    Ok(imported)
 }
 
 fn publish_destination(
@@ -113,29 +120,20 @@ fn publish_destination(
 ) -> OpsResult<()> {
     // Always acquire before deciding what to publish, including recovery from a
     // lost push response. Never publish from a stale local Git document alone.
-    let remote = acquire_destination(store, repo, destination, git)?;
+    let (remote, remote_snapshot) = match acquire_destination(store, repo, destination, git)? {
+        Some((revision, snapshot)) => (Some(revision), snapshot),
+        None => (None, PlanningSnapshot::default()),
+    };
     let exported = store
         .export_peer_planning(repo, destination)
         .map_err(message)?;
-    let remote_snapshot = remote
-        .as_ref()
-        .map(|document| PlanningSnapshot::from_bytes(&document.bytes))
-        .transpose()
-        .map_err(message)?
-        .unwrap_or_default();
     // Omitted/held objects retain their last shared history, not private local
     // moves. Only today's selected export may add local mutations to the remote.
     let merged = remote_snapshot.merge(&exported).map_err(message)?;
     if let Some(remote) = &remote {
         if merged == remote_snapshot {
             return store
-                .record_peer_publication(
-                    repo,
-                    destination,
-                    remote.revision.as_str(),
-                    "confirmed",
-                    &exported,
-                )
+                .record_peer_publication(repo, destination, remote.as_str(), "confirmed", &exported)
                 .map_err(message);
         }
     } else if merged.changes.is_empty() {
@@ -145,10 +143,7 @@ fn publish_destination(
     let local = git.local().map_err(message)?;
     let reusable = match (&local, &remote) {
         (Some(local), Some(remote)) => {
-            local.bytes == bytes
-                && git
-                    .is_ancestor(&remote.revision, &local.revision)
-                    .map_err(message)?
+            local.bytes == bytes && git.is_ancestor(remote, &local.revision).map_err(message)?
         }
         (Some(local), None) => local.bytes == bytes,
         _ => false,
@@ -156,12 +151,8 @@ fn publish_destination(
     let saved = if reusable {
         local.expect("reusable revision is present")
     } else {
-        git.save(
-            &bytes,
-            local.as_ref().map(|d| &d.revision),
-            remote.as_ref().map(|d| &d.revision),
-        )
-        .map_err(message)?
+        git.save(&bytes, local.as_ref().map(|d| &d.revision), remote.as_ref())
+            .map_err(message)?
     };
     // Persist uncertainty before the effect. A crash at any later point recovers
     // by fetching first, not by assuming that a failed response means no push.
@@ -190,11 +181,69 @@ mod tests {
 
     use loopflow_test_support::TestRepo;
 
-    use super::{acquire_destination, publish_destination};
+    use super::{acquire_destination, publish_destination, publish_repository};
     use crate::engine::planning_git::{PlanningDestination, PlanningGit};
     use crate::id::WaveId;
     use crate::store::sqlite::SqliteStore;
+    use crate::store::{open_ephemeral_store, StorageConfig};
     use crate::work::wave::Wave;
+
+    #[tokio::test]
+    async fn damaged_journal_does_not_block_an_independent_destination() {
+        let repo = TestRepo::new();
+        repo.create_file(".lf/config.yaml", "pm: null\n");
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("loopflow.db");
+        let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+            .await
+            .unwrap();
+        let root = repo.path().canonicalize().unwrap();
+        let key = root.to_str().unwrap();
+        let mut plans = Vec::new();
+        for name in ["damaged", "independent"] {
+            let binding = PlanningDestination::resolve(
+                &root,
+                "origin",
+                &format!("refs/loopflow/planning/shared/{name}"),
+            )
+            .unwrap();
+            let id = store.bind_peer_planning(key, &binding).await.unwrap();
+            store.use_peer_planning(key, Some(&id)).await.unwrap();
+            let wave = Wave::new(WaveId::new(), name.into(), key.into());
+            store.create_wave(&wave).await.unwrap();
+            plans.push((binding, wave));
+        }
+        let conn = rusqlite::Connection::open(database).unwrap();
+        conn.execute(
+            "DELETE FROM planning_peer_heads WHERE object_id=?1",
+            [plans[0].1.id()],
+        )
+        .unwrap();
+        assert!(store.peer_planning_status(key).await.is_err());
+
+        // Dispatch cannot require rendering every plan's status first.
+        assert!(publish_repository(&store, key).await.is_err());
+        let damaged = PlanningGit::new(&root, &plans[0].0).unwrap();
+        assert!(damaged.fetch().unwrap().is_none());
+        let independent = PlanningGit::new(&root, &plans[1].0).unwrap();
+        let published = independent.fetch().unwrap().unwrap();
+        assert_eq!(
+            crate::engine::planning_exchange::PlanningSnapshot::from_bytes(&published.bytes)
+                .unwrap(),
+            store
+                .export_peer_planning(key, &plans[1].0.id())
+                .await
+                .unwrap()
+        );
+        let error: String = conn
+            .query_row(
+                "SELECT publication_error FROM planning_destinations WHERE repo=?1 AND id=?2",
+                rusqlite::params![key, plans[0].0.id()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(error.contains("local planning retained"));
+    }
 
     #[test]
     fn lost_publication_receipt_recovers_without_another_commit() {

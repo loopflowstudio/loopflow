@@ -145,8 +145,8 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let lf_home = crate::store::lf_home_dir();
     let processes = observe_processes(now, &lf_home)?;
     // Driver death is proven from Process receipts, so reap before pruning them.
-    let engines = crate::harness::agent_process::reap_agent_processes(dry_run)?;
-    for error in &engines.errors {
+    let agents = crate::harness::agent_process::reap_agent_processes(dry_run)?;
+    for error in &agents.errors {
         tracing::warn!(%error, "failed to reap orphaned AgentProcess");
     }
     let mut report = ProcessPruneReport {
@@ -155,9 +155,9 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         dry_run,
         stale_process_receipt_pids: stale_process_receipt_pids(&processes),
         removed_process_receipts: 0,
-        orphaned_agent_process_groups: engines.orphaned,
-        reaped_agent_process_groups: engines.reaped,
-        errors: u32::try_from(engines.errors.len()).unwrap_or(u32::MAX),
+        orphaned_agent_process_groups: agents.orphaned,
+        reaped_agent_process_groups: agents.reaped,
+        errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
     };
     if !dry_run {
         match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
@@ -263,7 +263,7 @@ fn observe_processes(now: i64, lf_home: &Path) -> Result<ProcessSnapshot> {
 
 pub(crate) fn sample_processes(now: i64) -> Result<Vec<OsProcess>> {
     let output = Command::new("ps")
-        .args(["-axo", "pid=,ppid=,pgid=,state=,etime=,command="])
+        .args(["-axo", "pid=,state=,etime="])
         .output()
         .context("failed to inspect processes")?;
     if !output.status.success() {
@@ -289,42 +289,36 @@ fn parse_processes(output: &str, now: i64) -> Vec<OsProcess> {
         .filter_map(|line| {
             let mut fields = line.split_whitespace();
             let pid = fields.next()?.parse::<u32>().ok()?;
-            let _ppid = fields.next()?.parse::<u32>().ok()?;
-            let _process_group = fields.next()?.parse::<u32>().ok()?;
             let kernel_state = fields.next()?.to_string();
             let elapsed = fields.next()?;
-            let command = fields.collect::<Vec<_>>().join(" ");
-            if command.is_empty() {
-                return None;
-            }
             Some(OsProcess {
                 pid,
-                started_at: now.saturating_sub(elapsed_seconds(elapsed) as i64),
+                started_at: now.saturating_sub(i64::try_from(elapsed_seconds(elapsed)?).ok()?),
                 kernel_state,
             })
         })
         .collect()
 }
 
-fn elapsed_seconds(elapsed: &str) -> u64 {
-    let (days, clock) = elapsed
-        .split_once('-')
-        .map_or((0, elapsed), |(days, clock)| {
-            (days.parse::<u64>().unwrap_or(0), clock)
-        });
+fn elapsed_seconds(elapsed: &str) -> Option<u64> {
+    let (days, clock) = match elapsed.split_once('-') {
+        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
+        None => (0, elapsed),
+    };
     let parts = clock
         .split(':')
-        .filter_map(|part| part.parse::<u64>().ok())
-        .collect::<Vec<_>>();
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
     let clock_seconds = match parts.as_slice() {
         [minutes, seconds] => minutes.saturating_mul(60).saturating_add(*seconds),
         [hours, minutes, seconds] => hours
             .saturating_mul(3_600)
             .saturating_add(minutes.saturating_mul(60))
             .saturating_add(*seconds),
-        _ => 0,
+        _ => return None,
     };
-    days.saturating_mul(86_400).saturating_add(clock_seconds)
+    Some(days.saturating_mul(86_400).saturating_add(clock_seconds))
 }
 
 fn collect_activity(
@@ -610,7 +604,7 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     }
     if !report.orphaned_agent_process_groups.is_empty() {
         output.push_str(&format!(
-            "Engine process groups: {}\n",
+            "AgentProcess groups: {}\n",
             report
                 .orphaned_agent_process_groups
                 .iter()
@@ -688,6 +682,21 @@ mod tests {
     use super::{collect_activity, ActivityNodeKind, OsProcess, ProcessSnapshot};
     use crate::id::{ProcessLfid, TraceId};
     use crate::process::{Process, ProcessKind};
+
+    #[test]
+    fn process_sample_needs_only_identity_and_state_and_rejects_unknown_birth() {
+        let rows = super::parse_processes(
+            "10 S 01:00\n11 R 02:00:00\n12 Z 1-00:00:00\n13 S ?\n14 S 00:bad:01\n",
+            100_000,
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.started_at).collect::<Vec<_>>(),
+            [99_940, 92_800, 13_600]
+        );
+        assert!(rows[0].matches_start(10, 99_940, 3));
+        assert!(!rows[0].matches_start(10, 99_930, 3));
+        assert!(!rows[2].matches_start(12, 13_600, 3));
+    }
 
     #[test]
     fn detached_agent_is_a_recorded_node_without_its_parent_or_a_client_receipt() {

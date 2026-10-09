@@ -221,13 +221,13 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested one inventory. #1512 is `3e1e6245c`; LOO-441 must integrate
-before publication. Prior proofs: `a55f5345b`, this heading.
+Jack Heart requested one inventory. #1512: `3e1e6245c`; integrate LOO-441 before
+publication. Proofs: `a55f5345b`, this heading.
 
-The local cut moves attachment/lifecycle onto processes and replaces inferred
-ownership, registry and orphan inventories.
+Attachment/lifecycle move onto processes, replacing inferred ownership, registry
+and orphan inventories. Record projections are stateless.
 Detached rows remain; duplicate PID/birth grants no signal authority. Late history grants no control; tokens fence A → B → A.
-SQLite must be released before nested evidence reads.
+Release SQLite before nested evidence reads.
 
 Claude restarts its OS process within one attachment. A PID overwrite loses
 history; harness-only replacement strands capture. Invocation must hand replacement snapshots to harness and capture

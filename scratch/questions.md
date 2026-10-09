@@ -3,7 +3,7 @@
 2026-10-09 implementation choice: fresh opaque attachment tokens fence each
 claim and release, including A → B → A. This resolves the repeated-ID ambiguity
 without another process identity or lifecycle. The single-table AgentProcess cut
-must move the token and attached LfProcess onto that record; provider generation
+now owns the token and attached LfProcess on that record; provider generation
 still exists in this internal slice. No approval beyond Jack Heart's original
 Task directive is inferred.
 

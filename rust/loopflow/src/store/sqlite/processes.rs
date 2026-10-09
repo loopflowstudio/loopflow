@@ -179,6 +179,20 @@ fn attachment_in(
     }))
 }
 
+/// Require the current attached lf invocation, not merely a retained agent row.
+fn require_attachment_in(
+    conn: &rusqlite::Connection,
+    session: &str,
+    expected: &SessionAttachment,
+) -> StoreResult<()> {
+    if attachment_in(conn, session)?.as_ref() != Some(expected) || expected.process_lfid.is_none() {
+        return Err(StoreError::InvalidAuthority(
+            "Session attachment changed".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(super) fn attach_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
@@ -369,13 +383,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected)
-            || expected.process_lfid.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
-        }
+        require_attachment_in(&tx, session, expected)?;
         tx.execute(
             "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
             [session],
@@ -429,13 +437,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected)
-            || expected.process_lfid.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
-        }
+        require_attachment_in(&tx, session, expected)?;
         let argv = std::iter::once(command.get_program())
             .chain(command.get_args())
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -456,13 +458,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected)
-            || expected.process_lfid.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
-        }
+        require_attachment_in(&tx, session, expected)?;
         tx.execute(
             "UPDATE processes SET spawn_state=?2,completed_at=?3 WHERE lfid=?1",
             params![
@@ -484,13 +480,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected)
-            || expected.process_lfid.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
-        }
+        require_attachment_in(&tx, session, expected)?;
         let changed = tx.execute(
             "UPDATE processes SET pid=?2,os_started_at=?3 WHERE lfid=?1
              AND ((pid IS NULL AND os_started_at IS NULL) OR (pid=?2 AND os_started_at=?3))",
@@ -515,13 +505,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if attachment_in(&tx, session)?.as_ref() != Some(expected)
-            || expected.process_lfid.is_none()
-        {
-            return Err(StoreError::InvalidAuthority(
-                "Session attachment changed".into(),
-            ));
-        }
+        require_attachment_in(&tx, session, expected)?;
         tx.execute(
             "UPDATE processes SET endpoint=?2 WHERE lfid=?1",
             params![expected.agent_process_lfid, endpoint],
@@ -590,13 +574,7 @@ impl SqliteStore {
         let _dispatch = self.lock_session_attachment(session)?;
         {
             let conn = self.conn.lock().expect("store mutex poisoned");
-            if expected.process_lfid.is_none()
-                || attachment_in(&conn, session)?.as_ref() != Some(expected)
-            {
-                return Err(StoreError::InvalidAuthority(
-                    "Session attachment changed".into(),
-                ));
-            }
+            require_attachment_in(&conn, session, expected)?;
         }
         write()
     }

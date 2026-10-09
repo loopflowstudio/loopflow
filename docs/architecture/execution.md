@@ -89,10 +89,10 @@ caller/status wires remain until that lifecycle cut. These are publication block
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
-Headless Codex and OpenCode prepare their lifeline before spawning. The child
+Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The child
 establishes its process group, waits for watchdog readiness, then asks a parent
 thread to run its recording callback before exec. For an attached Session, this
-persists OS identity in the Session columns; without an attachment it writes
+persists OS identity in the AgentProcess row; without an attachment it writes
 nothing. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. A reconnecting lf invocation holds
@@ -131,7 +131,7 @@ The snapshot supplies history only and never authorizes dispatch.
 The continuing engine retains its provider generation while the new attachment receives a fresh opaque token, including reattachment of the same
 lf Process. Release revokes that token as well. The token is a compare-and-swap
 witness, not another process identity or lifecycle owner. The AgentProcess
-record cutover remains unfinished; provider identity still uses its generation.
+launch cutover remains unfinished; caller/status wires still use provider generation.
 
 Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,

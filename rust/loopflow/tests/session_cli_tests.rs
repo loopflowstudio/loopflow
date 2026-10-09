@@ -378,7 +378,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let recorded: (i64, String) = rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT provider_generation,provider_process_lfid FROM agent_sessions WHERE id=?1",
+                "SELECT p.provider_generation,p.parent_process_lfid FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -756,10 +756,21 @@ fn waiting_lists_only_conversations_waiting_on_a_person() {
     let (working, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Working");
     let (asked, _, _) = prepare_conversation(home.path(), &cwd, "codex", "Asked");
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let parent = loopflow::id::ProcessLfid::new();
+    db.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+        [&parent],
+    )
+    .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
+        store
+            .claim_session_attachment(id, None, &parent, true)
+            .unwrap();
         db.execute(
             "INSERT INTO session_activity(session_id,attachment_token,provider_generation,observed_at,open_tools,pending_input,yielded)
-             SELECT id,attachment_token,provider_generation,unixepoch(),1,?2,0 FROM agent_sessions WHERE id=?1",
+             SELECT s.id,p.attachment_token,p.provider_generation,unixepoch(),1,?2,0 FROM agent_sessions s JOIN processes p ON p.lfid=s.agent_process_lfid WHERE s.id=?1",
             rusqlite::params![id, pending],
         )
         .unwrap();

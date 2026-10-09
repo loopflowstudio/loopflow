@@ -61,7 +61,7 @@ attribution survive.
 
 - Session `provider_pid`, `provider_started_at`, `provider_endpoint`,
   `provider_generation` and `provider_process_lfid`; replace with AgentProcess.
-  Move `attached_process_lfid` and `attachment_token` into that same process row.
+  The record cut moved `attached_process_lfid` and `attachment_token` there.
   `SessionDriver` and `driver_generation` are removed in the attachment slice;
   historical migration fixtures retain released field names. No compatibility
   writer or second attachment counter remains.
@@ -72,6 +72,8 @@ attribution survive.
 - `harness/opencode_runtime.rs` and its JSON registry writer/reader/fixtures.
 - Top's ProviderProcess/OwnedProviderProcess/LiveProviderProcess attribution
   layer; SessionProcessObservation/SessionProcessOwnership and exclusive tests.
+  `ActiveSessionReader`, its no-op invalidation and async wrapper are also deleted;
+  one synchronous record/OS snapshot serves one-shot and watch reads.
 - Remaining provider-engine close names and messages, including `close_engine`.
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
@@ -133,7 +135,7 @@ choice requiring source work, not a new approval attributed to Jack Heart.
 
 ## Remaining implementation
 
-1. Complete the launch-owner correction above. Cover every Codex/OpenCode/Claude,
+1. Implement invocation-owned replacement snapshots. Cover every Codex/OpenCode/Claude,
    direct/native, helper and unbound path; one row per actual spawn, including
    Claude interrupt/respawn. Keep the attachment lock across admission/recording.
    Failed spawn is non-start evidence; uncertain spawn remains unknown. Native
@@ -152,7 +154,11 @@ choice requiring source work, not a new approval attributed to Jack Heart.
 4. Replace remaining predecessor fixture assumptions and restore required
    active-Session, native-history and Task-membership coverage on records. Prove
    headless public top/Task-status/scheduled-entry agreement, not only reducers
-   or SQL. The old directory-watcher costs no longer describe this reader.
+   or SQL. The old directory-watcher costs no longer describe this reader. The new
+   detached/replaced-record observation fixture covers rename, capture replacement,
+   provider snapshots, exact Task exclusion and observed death without payload files;
+   it still needs execution. CLI Waiting and work-watch fixtures now join process
+   rows rather than deleted Session columns; other fixture repairs remain.
 5. Integrate LOO-441's LfProcess/LfSession rename before publication. The current
    source still names `Process` and `AgentSession`; no dependency integration or
    partial publication is claimed. Update the final model/API docs and all wire
@@ -185,4 +191,11 @@ counterexample above stops further launch work until the owner is corrected.
 Earlier origin, token and pre-exec decisions remain in `a55f5345b` and its
 references. The record cut is checkpointed at `446cfb2b5`, local and unpublished.
 
-Check: `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, network-isolated focused record/migration/reaper tests (12), repaired top projection (1), Waiting/handoff (1) and Rust DTO fixtures (22) pass. Full Rust/Swift/Linux/public-entry verification remains gate/CI-owned; Claude respawn and unconditional recording remain unimplemented.
+Compression removed the empty reader lifecycle, unused OS ancestry/command sampling
+and repeated attachment-validation branches. Malformed elapsed-time samples remain
+unknown rather than becoming a zero-age birth. Review corrected stale schema claims
+in the architecture docs and stale Session-column SQL in CLI/watch fixtures.
+Earlier focused passes are recorded at `76ea312a3`, this plan; they do not verify
+the subsequent reductions.
+
+Check: `cargo fmt --all -- --check` and `git diff --check` pass; `resource_envelope.py --recover` fails at 30.2 GiB / 32 GiB reserve and `UV_LOCK_TIMEOUT=0 uv cache prune` is busy. Build, `cargo clippy --all-targets -- -D warnings`, record/active/top focused tests, CLI Waiting and work-watch checks are deferred to gate after capacity recovery; full Rust/Swift/Linux/public-entry verification remains gate/CI-owned.

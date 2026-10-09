@@ -17,7 +17,7 @@ failed on an unbound Initiative.
   software engineering CLI. Desktop centers Work; orchestra language stays top-level.
   One repository window across machines, identified by Work. Jack accepted
   CLI Session+diff opening, inspection and arrangement. Execution
-  and display machines differ; takeover is explicit. Unimplemented.
+  and display machines differ; takeover is explicit. Partial below.
 - Jack: delegation applies to open, unstarted and future Tasks. Started Tasks stay
   on their machine across later runs. Inheritance remains proposed.
 - Jack specified macOS-only Desktop launching/control, with actionable Linux
@@ -63,9 +63,9 @@ control and composed proof remain.
 
 LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
 Inspection separates Task/Session actions; Session time stays unknown. Saved/failed
-readings grant none. Exact hide/restore retains panes; Undo must not revive replaced content tokens. View identity grants no terminal
-input authority. Rust/Swift, native/remote proof and remaining controls remain
-unverified.
+readings grant none. Exact hide/restore retains panes; Undo renews closed-pane
+tokens, not untouched panes. View identity grants no terminal input authority.
+Full Rust/Swift and native/remote checks remain; controls are unfinished.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

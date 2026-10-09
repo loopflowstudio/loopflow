@@ -58,8 +58,10 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   The later `a629e512a` cut forwards Task run control and Session actions with
   independent reading availability and retained Task dates; Session observation
   time remains unavailable. Complete legal actions/freshness, composed opening,
-  pane control and terminal I/O remain unfinished. No cmux/herdr behavior was
-  re-exercised for this delta.
+  remaining pane control and terminal I/O remain unfinished. `940e0e078` adds
+  exact-target hide/restore through retained panes, without closing clients;
+  Undo cannot revive an old content target. Native/composed proof remains absent.
+  No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

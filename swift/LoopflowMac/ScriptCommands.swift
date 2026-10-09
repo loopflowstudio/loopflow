@@ -28,16 +28,14 @@ class CaptureScreenshotCommand: NSScriptCommand {
     }
 }
 
-
 /// Passive Apple event: operates on registered windows, never the key window.
 class InspectDesktopCommand: NSScriptCommand {
     override func performDefaultImplementation() -> Any? {
         do {
-            let result: String = try MainActor.assumeIsolated {
+            return try MainActor.assumeIsolated { () throws -> String in
                 let data = try JSONEncoder().encode(WorkLinkRouter.shared.inspect())
                 return String(decoding: data, as: UTF8.self)
             }
-            return result
         } catch {
             scriptErrorNumber = NSInternalScriptError
             scriptErrorString = error.localizedDescription
@@ -54,7 +52,7 @@ class SetPaneVisibilityCommand: NSScriptCommand {
                 throw RegistryQueryError("Expected a JSON pane visibility request.")
             }
             let request = try JSONDecoder().decode(DesktopPaneVisibility.self, from: Data(json.utf8))
-            return try MainActor.assumeIsolated {
+            return try MainActor.assumeIsolated { () throws -> String in
                 let reading = try WorkLinkRouter.shared.setVisibility(request)
                 return String(decoding: try JSONEncoder().encode(reading), as: UTF8.self)
             }

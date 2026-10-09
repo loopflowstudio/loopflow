@@ -46,8 +46,8 @@ final class WorkLinkRouter {
 
     /// No focus change, reads, surface allocation, or provider launch.
     func inspect() -> DesktopInspection {
-        DesktopInspection(observedAt: Int64(Date().timeIntervalSince1970), windows: targets.keys.sorted().compactMap { key in
-            targets[key].map { $0.inspect($0.incarnation) }
+        DesktopInspection(observedAt: Int64(Date().timeIntervalSince1970), windows: targets.sorted { $0.key < $1.key }.map { _, target in
+            target.inspect(target.incarnation)
         })
     }
 

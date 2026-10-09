@@ -184,16 +184,21 @@ struct MultiplexerStoreTests {
     @Test("close collapses the split and undo restores it")
     func closeUndo() throws {
         let store = MultiplexerStore()
-        let first = store.focusedPaneId
-        let second = try #require(store.split(first, axis: .vertical))
+        let first = store.focusedPane
+        let second = try #require(store.split(first.id, axis: .vertical))
 
         store.close(second.id)
-        #expect(store.layout.allPanes.map(\.id) == [first])
-        #expect(store.focusedPaneId == first)
+        #expect(store.layout.allPanes == [first])
+        #expect(store.focusedPaneId == first.id)
 
         store.undoClose()
-        #expect(store.layout.allPanes.map(\.id) == [first, second.id])
+        #expect(store.layout.allPanes.map(\.id) == [first.id, second.id])
+        #expect(store.layout.pane(for: first.id) == first)
+        #expect(store.focusedPane.incarnation != second.incarnation)
         #expect(store.focusedPaneId == second.id)
+        let restored = store.layout
+        store.undoClose()
+        #expect(store.layout == restored)
     }
 
     @Test("close removes the left pane as well as the right")
@@ -212,13 +217,16 @@ struct MultiplexerStoreTests {
     func closeClearsLastTerminal() {
         let store = MultiplexerStore()
         store.load(sessionId: "session-1")
-        store.close(store.focusedPaneId)
+        let original = store.focusedPane
+        store.close(original.id)
 
         #expect(store.layout.allPanes.count == 1)
         #expect(store.focusedPane.content == .empty)
 
         store.undoClose()
         #expect(store.focusedPane.content == .session(id: "session-1"))
+        #expect(store.focusedPane.id == original.id)
+        #expect(store.focusedPane.incarnation != original.incarnation)
     }
 
     @Test("close leaves the final empty pane alone")

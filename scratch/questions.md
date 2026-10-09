@@ -19,7 +19,8 @@ at `b040c7c8d:scratch/questions.md`.
   change-ID tie-break. No initiating host has blanket preference over collaborators;
   positive Linear-origin observations win concurrent peer writes. Preserve losing
   mutations. Public setup now provisions/recovers an explicit user key and binds an empty
-  destination. Local-only foreground exchange and Desktop destination status are connected; mixed-provider composition remains unfinished.
+  destination. Foreground exchange and Desktop status are connected, including
+  Linear repositories; public creation/link-origin and combined-lifetime proof remain.
 - `new_migration.py` identified the inherited LOO-406 draft as this Task's draft.
   Git's explicit stack boundary establishes that it belongs to the parent;
   LOO-412 therefore has one separate `planning_peers.sql` draft depending on it.
@@ -27,7 +28,7 @@ at `b040c7c8d:scratch/questions.md`.
   expected constraint failures and their mutations while independent objects commit.
   Wave selection follows Project projection to break their reference cycle. Invalid
   documents, reused mutation IDs, foreign repository ownership and unexpected SQL
-  failures still roll back the import. Association storage is implemented; public Git/HTTPS composition remains.
+  failures still roll back the import. Association has public scalar Git/HTTPS proof; creation/link-origin proof remains.
   Conflicts preserve both IDs and their execution histories.
 
 The cut remains unpublished. The design owns remaining integration and acceptance;
@@ -71,7 +72,8 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   counterexamples: `8f3472eda:scratch/questions.md`, the five October 8 entries.
   Valid contradictions isolate projection; malformed input aborts import. Retain
   losing receipts, provider authorship, destination-scoped unknown status and the
-  common content parser. No mixed-provider activation follows.
+  common content parser. Later Git/HTTPS composition supersedes this cut's
+  activation limit; the design retains the remaining acceptance.
 
 - October 9 acquisition-age/readiness and placement findings are implemented in
   the design. Original counterexamples: `610b13869:scratch/questions.md`, executable
@@ -93,7 +95,8 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   Desktop representation choices remain in the design's implemented boundaries;
   full rationale: `e08dc9312:scratch/questions.md`, the four entries after Ordering.
   Independent negative facts, original ages, unknown placement and last-good scoped
-  readings remain required; none enables mixed-provider exchange.
+  readings remain required. Connected exchange is now implemented; these
+  isolated proofs do not establish combined acceptance.
 
 - Association's refusal-only findings remain at
   `90a37ab79:scratch/questions.md`, October 9 association finding. The design now
@@ -139,9 +142,3 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   unchanged baselines preserve saves. Due dates use the peer journal; completion
   requests stay local. Captured optional null inputs retain their exact bytes.
   Earlier detail: `b888518a5:scratch/questions.md`, final two October 9 entries.
-- Context budgeting: authored memory/scratch fit. The generated launch inventory
-  exceeds its 16,000-token goal limit by roughly 12,400 tokens; it is not an
-  authored goal to trim or authorization to rewrite stored steers. The complete
-  source inspected this pass is
-  `.lf/tmp/context/8f3b1e92b0a70ea4f16c257edc29a017b62f0a631587a4a29eeda8120cbea434.md`;
-  omitted content is the 236-path PR inventory, not additional Task direction.

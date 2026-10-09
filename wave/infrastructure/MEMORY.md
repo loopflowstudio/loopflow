@@ -635,14 +635,15 @@ losers and exact receipt origins. Correspondence grants no identity or authority
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-Journal recovery preserves unknown authors and restores through ordinary edits,
-without enrollment: `af7730926`; earlier proofs: `f55d6c5b7`, this heading.
-`81df09092` proves Git/HTTPS association and changed-baseline retirement without
-inventing attempts or atomicity; unchanged baselines preserve saves/private holds.
-#1499 integration separates checkout branches from PRs and adds due-date exchange;
-creation receipts retain exact optional inputs. Completion requests stay local.
-Creation/link-origin, combined-lifetime and installed acceptance remain unproved.
-Plan and focused integration evidence: `scratch/work-on-another-machine-name.md`.
+`af7730926` recovers journal values through ordinary edits, without author inference
+or enrollment. `81df09092` proves scalar Git/HTTPS association, not atomicity:
+changed baselines retire unattempted intentions; unchanged baselines preserve saves/private holds.
+#1499 separates checkout branches from PRs and adds due dates; exact creation
+inputs survive, completion requests stay local.
+`5dbe92966` passes 78 storage checks after fixture repair: compare execution rows
+and placement, not the whole Task whose planning state legitimately changes.
+Creation/link-origin transport, combined lifetimes and installed acceptance remain
+unproved. Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

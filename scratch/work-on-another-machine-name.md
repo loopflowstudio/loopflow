@@ -228,10 +228,16 @@ receipt composition boundaries are unchanged.
 
 ## Remaining integration — October 9
 
-Scalar, receipt and state/comment/Wave composition have focused storage proof
-(`8a6f8f807`); recovery reads the same journal. Item 3 owns the remaining public
-Git/HTTPS composition. Earlier cut details:
-`b888518a5:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+The common writer, selected Git exchange, Linear receipt composition, association
+and recovery presentation exist. `81df09092` supplies public scalar Git/HTTPS
+association proof; `5dbe92966` groups its scalar frontier once per resolved owner.
+The latter's 78 storage passes include repaired #1499 placement/reopening fixtures,
+not a rerun of public transport. No new planner or blanket provider hold is needed.
+
+Remaining work separates **missing composed regressions** (creation/link origins,
+negative-evidence/order interaction and native reconnect) from **existing checks
+awaiting gate** (taskless lifetimes, cold-worker dispatch and materialized suites).
+Items 2–6 retain those boundaries; public fixtures may expose further repairs.
 Private or failed groups never advance observations.
 
 Deletion composition and its counterexamples remain at
@@ -254,8 +260,9 @@ Gate owns combined admission, cold-worker and provider recovery, including comme
 acquired in a different order from Task creation; parent integration proves no
 peer composition.
 
-Creation/link discovery and receipts share `planning_export.rs` and
-`planning_exports`; mappings and imported transitions never acknowledge effects.
+Creation/link discovery uses the derived `planning_exports` view;
+`planning_creations` owns per-origin receipts. Mappings and imported transitions
+never acknowledge effects.
 Exact capture/readback proof: `95e81c688:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
@@ -418,7 +425,13 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    No automatic turn/Flow retry exists.
 
 3. Finish public creation/link-origin HTTPS recovery and combined negative-evidence/
-   ordering composition. `81df09092` proves scalar association through ordinary
+   ordering composition. The existing `public_watch_exports_peer_born_plans_and_recovers_mapped_receipts`
+   case seeds a Store import and SQL mapping updates; it does not carry distinct
+   creation/attachment origins between two stores over Git. That composed regression
+   remains to be built: lost create/link replies, exact-origin readback, later saves,
+   duplicate suppression and preserved execution. The existing public export case
+   remains useful lower-bound coverage, not a replacement for this proof.
+   `81df09092` proves scalar association through ordinary
    Git exchange, HTTPS readback and subsequent local-save exchange, including
    reversed/repeated imports, populated execution and private-origin holds.
    Gate owns combined lifetimes; review owns recovery UX.
@@ -544,27 +557,19 @@ round-trip and private-origin proofs pass; broader invalidation and lifetimes re
    destinations; SQL failures still fail the read. Public JSON/text recovery,
    exchange-isolation and DTO checks remain gate-owned; Desktop has focused
    headless proof. Status neither repairs journals nor equates retention with convergence.
-4. Complete optional Linear composition. Task title/brief/assignee/membership and
-   Project name/summary/workflow/status use the common scalar receipt writer in the
-   import savepoint. Stable peer mutation IDs supply delivery identity. The latest
-   causal Linear predecessor now supplies both value and provider revision; imported
-   winners retain losing values, attempted flags and errors without acknowledgement.
+4. Verify combined optional Linear composition. Scalar, state, comment, content,
+   creation/link, deletion and order receipt projection already use the common
+   writers. `5624151a3` retains their implementation and storage proof; the
+   implemented-boundaries section owns removal/archive/reteam and invalidation.
+   Stable mutation IDs, causal baselines, exact provider bodies/revisions/ages and
+   retained losers remain required. Same-revision contradictions isolate an object;
+   malformed input aborts import. Mappings and readback grant no execution authority.
 
-   Common scalar, state, comment, content, creation/link, deletion and order
-   receipt composition is implemented. Provider entity observations retain their
-   original bodies, revisions and ages; same-revision contradictions isolate an
-   object while malformed input aborts import. Readback does not acknowledge a
-   mapping or execution. Full implementation/proof details remain at
-   `5624151a3:scratch/work-on-another-machine-name.md`, this item. The earlier
-   checks are storage evidence, not connected Git/Linear lifetime acceptance.
-
-   Removal/archive/reteam use common acquisition with the focused storage
-   proof under **Implemented boundaries, not remaining implementation**. Gate still owns public alternate
-   acquisition, complete-list ordering and comment composition, not only detail
-   reads. Public invalidation and complete receipt composition remain gate coverage
-   before publication. This
-   cut cannot repair LOO-406's unseen provider-write race or supply Linear
-   compare-and-swap semantics.
+   Public combined negative-evidence, complete-list ordering and comment coverage
+   still needs composition, not another receipt implementation. Detail-only and
+   separate storage tests cannot establish it. Gate owns execution of the composed
+   regressions before publication. LOO-406's unseen-write race remains; this Task
+   cannot supply Linear compare-and-swap semantics.
 
 5. Execute the public cold-worker regression: an absent issue selector must acquire
    automatically, run pushed code, then reuse the same identity/checkout by full ID.
@@ -645,7 +650,7 @@ and disposable remotes. Installed-release behavior remains separate. Release's c
 records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
-October 9 reconciliation reread Release's GOAL.md and full MEMORY.md; filesystem
+October 9 reconciliation read Release's GOAL.md and full MEMORY.md; filesystem
 inspection found no other immediate child memory. Its operation-entry and result
 lessons remain in parent memory: storage readback cannot prove foreground
 acquisition, and a successful report cannot replace operation success.
@@ -696,7 +701,7 @@ Those results predate #1499 integration and prove no combined native launch path
 
 Earlier optional-PR/due-date checks:
 `b888518a5:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
-Check: fmt, all-target Clippy and lib build pass; `TMPDIR=/private/tmp uv run --no-sync python scripts/test_network.py <lib-test> planning_peers::tests:: --test-threads=1` passes 78 after repair. Gate owns materialized/public composition and lifetimes; review owns recovery UX.
+Check: `git diff --check` and `lf context --skill realign` pass (prose only); prior fmt/Clippy/build/78-test results remain at `45780d937`, this heading; gate owns materialized/public/lifetime checks, review owns recovery UX.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

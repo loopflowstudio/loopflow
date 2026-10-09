@@ -579,5 +579,17 @@ validates the retained pane and native surface without following focus or retiri
 an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
 results, not empty text. The pinned lf2 artifact has no bounded reader: existing
 surfaces report `bounded_reader_unavailable` until verified artifact composition.
-No unbounded extraction is used. Native text extraction, input and cross-machine
+No unbounded extraction is used. Native text extraction and cross-machine
 composition remain unfinished.
+
+```sh
+lf desktop text --target "$target" --surface "$surface" -- 'add to the draft'
+lf desktop key --target "$target" --surface "$surface" enter
+```
+
+Text preserves the draft and inserts at its cursor; Enter is separate. Control
+characters in text are rejected rather than turned into keys. Both operations
+require the exact existing live surface and leave focus unchanged. An active IME
+composition must finish first. Missing/exited/replaced surfaces never reopen or
+redirect input. A lost reply is uncertain: do not automatically resend. The native
+fixture covers cursor insertion and submission but has not run here.

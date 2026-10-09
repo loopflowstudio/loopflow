@@ -492,6 +492,28 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum DesktopCommand {
+    /// Insert literal text at an exact surface's cursor; never submits or clears a draft
+    Text {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        surface: String,
+        /// Unicode text without control characters (use key for Enter/Tab)
+        text: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send one explicit key to an exact retained surface, without following focus
+    Key {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        surface: String,
+        #[arg(value_enum)]
+        key: commands::desktop::DesktopKey,
+        #[arg(long)]
+        json: bool,
+    },
     /// Read bounded text from an exact retained surface, without following focus
     Read {
         #[arg(long)]

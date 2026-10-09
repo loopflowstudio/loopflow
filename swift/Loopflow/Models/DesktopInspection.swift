@@ -201,18 +201,24 @@ public struct DesktopPaneCommand: Codable, Sendable, Equatable {
 
 public enum DesktopPaneAction: Codable, Sendable, Equatable {
     case hide, restore, focus, shell
+    case text(surface: String, text: String)
+    case key(surface: String, key: DesktopKey)
     case files(task: String), flowLog(task: String)
     case split(axis: SplitAxis)
     case move(destination: DesktopPaneTarget, axis: SplitAxis)
     case resize(toward: DesktopPaneTarget, ratio: Double)
     case zoom(enabled: Bool)
 
-    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task }
-    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom, shell, files; case flowLog = "flow_log" }
+    enum CodingKeys: String, CodingKey { case kind, axis, destination, toward, ratio, enabled, task, surface, text, key }
+    private enum Kind: String, Codable { case hide, restore, focus, split, move, resize, zoom, shell, files, text, key; case flowLog = "flow_log" }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         switch try values.decode(Kind.self, forKey: .kind) {
+        case .text: self = .text(surface: try values.decode(String.self, forKey: .surface),
+                                 text: try values.decode(String.self, forKey: .text))
+        case .key: self = .key(surface: try values.decode(String.self, forKey: .surface),
+                               key: try values.decode(DesktopKey.self, forKey: .key))
         case .hide: self = .hide
         case .restore: self = .restore
         case .focus: self = .focus
@@ -232,6 +238,14 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         let kind: Kind
         switch self {
+        case .text(let surface, let text):
+            kind = .text
+            try values.encode(surface, forKey: .surface)
+            try values.encode(text, forKey: .text)
+        case .key(let surface, let key):
+            kind = .key
+            try values.encode(surface, forKey: .surface)
+            try values.encode(key, forKey: .key)
         case .hide: kind = .hide
         case .restore: kind = .restore
         case .focus: kind = .focus
@@ -259,6 +273,10 @@ public enum DesktopPaneAction: Codable, Sendable, Equatable {
         }
         try values.encode(kind, forKey: .kind)
     }
+}
+
+public enum DesktopKey: String, Codable, Sendable, CaseIterable {
+    case enter, tab, escape, backspace, delete, left, right, up, down, home, end
 }
 
 /// A bounded observation of one native surface, independent of current focus.

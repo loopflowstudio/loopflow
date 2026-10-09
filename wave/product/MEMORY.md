@@ -55,7 +55,12 @@ must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
 LOO-427's local window, exact-pane arrangement, Machine-qualified terminal and
 bounded-read work retains partial proof in `scratch/findings.md`; native artifact,
-peer composition and packaged acceptance remain unfinished. Read grants no input authority; proof remains partial.
+peer composition and packaged acceptance remain unfinished. Exact `desktop text/key`
+now reuse the pane event and live-surface owner, not focus or a new input service.
+Jack selected insertion into the existing draft; Enter is separate. It rejects
+control text and requires finishing active IME composition;
+these are reversible restrictions, not new product decisions. Native draft/cursor
+and replacement fixtures remain unexecuted. Read grants no input authority.
 
 Jack queued the API (October 8): `--context` previews input without launch;
 `--explain` is broader; `--chrome` controls execution. Source removes root `run`,
@@ -585,11 +590,7 @@ Checks the automated evidence. Drafts, cached copies and refreshed text must agr
 Chapter display adopts live state only after a complete successful read (empty
 included); failed reads retain visibly stale authored content and history.
 
-September's authorship simulations, sample rewrites, PR #1276/#1277 overlap and
-unresolved roadmap wording are at `35e759aaf:wave/product/MEMORY.md`, this heading,
-with their original source links. They establish no reader validation or shipped
-claim. The retired `ux-research` flow's personas supplied hypotheses, not customer
-evidence (`80686b43b:wave/product/MEMORY.md`).
+Earlier evidence: `b092e8f92:wave/product/MEMORY.md`, this heading.
 
 ## Workspace redesign decisions (2026-09-26)
 

@@ -1018,3 +1018,63 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
         Some("Audit $ARGUMENTS using [rules](rules.md).\n")
     );
 }
+
+#[test]
+fn desktop_input_keeps_text_separate_from_keys_and_requires_surface_identity() {
+    use loopflow::lf::commands::desktop::DesktopKey;
+    use loopflow::lf::DesktopCommand;
+    let literal = "héλ🙂 \\n \"$(literal)\"";
+    let args = [
+        "lf",
+        "desktop",
+        "text",
+        "--target",
+        "{}",
+        "--surface",
+        "surface",
+        "--",
+        literal,
+    ]
+    .map(str::to_string)
+    .to_vec();
+    let cli = Cli::try_parse_from(normalize_args(args).unwrap()).unwrap();
+    assert!(matches!(cli.command, Some(Commands::Desktop {
+        cmd: DesktopCommand::Text { text, surface, .. }
+    }) if text == literal && surface == "surface"));
+    let cli = Cli::try_parse_from([
+        "lf",
+        "desktop",
+        "key",
+        "--target",
+        "{}",
+        "--surface",
+        "surface",
+        "enter",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Desktop {
+            cmd: DesktopCommand::Key {
+                key: DesktopKey::Enter,
+                ..
+            }
+        })
+    ));
+    for operation in ["text", "key"] {
+        assert!(
+            Cli::try_parse_from(["lf", "desktop", operation, "--target", "{}", "enter"]).is_err()
+        );
+    }
+    assert!(Cli::try_parse_from([
+        "lf",
+        "desktop",
+        "key",
+        "--target",
+        "{}",
+        "--surface",
+        "surface",
+        "arbitrary-bytes"
+    ])
+    .is_err());
+}

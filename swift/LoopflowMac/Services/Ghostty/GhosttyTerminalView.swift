@@ -185,6 +185,34 @@ final class GhosttySurfacePool {
         return .unavailable(reason: .boundedReaderUnavailable)
     }
 
+    func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {
+        try validateDesktopLiteralText(text)
+        let view = try inputView(terminal: terminal, surface: surface)
+        _ = view.insertTerminalText(text)
+    }
+
+    func sendKey(_ key: DesktopKey, terminal: TerminalIdentity, surface: String) throws {
+        let view = try inputView(terminal: terminal, surface: surface)
+        view.sendTerminalKey(key)
+    }
+
+    private func inputView(terminal: TerminalIdentity, surface incarnation: String) throws -> GhosttyMetalView {
+        // Never allocate, clean up, acquire a client, or fall back to focus.
+        guard let view = views[terminal], let surface = view.surface else {
+            throw RegistryQueryError("The retained pane has no native surface; no input was sent.")
+        }
+        guard view.programStatus.incarnation.uuidString.lowercased() == incarnation else {
+            throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no input was sent.")
+        }
+        guard !view.childExited, !ghostty_surface_process_exited(surface) else {
+            throw RegistryQueryError("The terminal child exited; no input was sent or client reopened.")
+        }
+        guard !view.hasMarkedText() else {
+            throw RegistryQueryError("The terminal has an active input-method composition; finish it before sending input.")
+        }
+        return view
+    }
+
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? {
         views[id]?.programStatus
     }
@@ -1223,7 +1251,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         dropHighlight?.isHidden = true
     }
 
-    private func insertTerminalText(_ text: String) -> Bool {
+    fileprivate func insertTerminalText(_ text: String) -> Bool {
         guard let surface else { return false }
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         clearBlockSelection()
@@ -1231,6 +1259,20 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
         }
         return true
+    }
+
+    fileprivate func sendTerminalKey(_ input: DesktopKey) {
+        guard let surface else { return }
+        programStatus.receive(.interaction, incarnation: programStatus.incarnation)
+        clearBlockSelection()
+        var key = ghostty_input_key_s()
+        key.action = GHOSTTY_ACTION_PRESS
+        key.mods = GHOSTTY_MODS_NONE
+        key.consumed_mods = GHOSTTY_MODS_NONE
+        key.keycode = input.macKeyCode
+        _ = ghostty_surface_key(surface, key)
+        key.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, key)
     }
 
     // MARK: - Key Translation
@@ -1333,6 +1375,13 @@ final class GhosttySurfacePool {
     func surfaceIncarnation(for id: TerminalIdentity) -> String? { nil }
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         .unavailable(reason: .missingSurface)
+    }
+    func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {
+        try validateDesktopLiteralText(text)
+        throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
+    }
+    func sendKey(_ key: DesktopKey, terminal: TerminalIdentity, surface: String) throws {
+        throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
     }
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
@@ -1606,4 +1655,30 @@ private func ghosttyIsPrintableKeyText(_ text: String) -> Bool {
 private func shellEscape(_ value: String) -> String {
     let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
     return "'\(escaped)'"
+}
+
+// Control bytes in a paste can submit or edit a shell when bracketed paste is
+// disabled. Keep the text/key boundary independent of the child program's mode.
+func validateDesktopLiteralText(_ text: String) throws {
+    guard !text.unicodeScalars.contains(where: { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) }) else {
+        throw RegistryQueryError("Literal text cannot contain control characters; use an explicit key action. No input was sent.")
+    }
+}
+
+private extension DesktopKey {
+    var macKeyCode: UInt32 {
+        switch self {
+        case .enter: 0x24
+        case .tab: 0x30
+        case .escape: 0x35
+        case .backspace: 0x33
+        case .delete: 0x75
+        case .left: 0x7b
+        case .right: 0x7c
+        case .up: 0x7e
+        case .down: 0x7d
+        case .home: 0x73
+        case .end: 0x77
+        }
+    }
 }

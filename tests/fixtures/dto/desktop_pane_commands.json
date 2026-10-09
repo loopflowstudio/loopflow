@@ -150,5 +150,185 @@
       "kind": "flow_log",
       "task": "task-fixture"
     }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "text",
+      "surface": "surface-session-pane",
+      "text": "héλ🙂 é \"$(literal)\"; \\n"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "enter"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "tab"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "escape"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "backspace"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "delete"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "left"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "right"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "up"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "down"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "home"
+    }
+  },
+  {
+    "target": {
+      "repository": "repo_22222222222222222222222222222222",
+      "window": "55555555-5555-5555-5555-555555555555",
+      "machine_id": "home_11111111111111111111111111111111",
+      "worktree": "/repo.task",
+      "pane": "session-pane",
+      "incarnation": "occurrence-session-pane"
+    },
+    "action": {
+      "kind": "key",
+      "surface": "surface-session-pane",
+      "key": "end"
+    }
   }
 ]

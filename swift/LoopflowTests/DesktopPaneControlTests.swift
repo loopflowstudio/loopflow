@@ -31,6 +31,42 @@ struct DesktopPaneControlTests {
             worktree: identity.worktree, pane: pane.id, incarnation: pane.incarnation)
     }
 
+    @Test func literalTextDoesNotInterpretEscapesOrAcceptControlKeys() throws {
+        for text in ["", "héλ🙂 e\u{301}", #""$(literal)"; \n"#] {
+            try validateDesktopLiteralText(text)
+        }
+        for text in ["line\nsubmit", "\r", "\t", "\0", "\u{1b}[A", "\u{7f}", "\u{85}"] {
+            #expect(throws: RegistryQueryError.self) { try validateDesktopLiteralText(text) }
+        }
+    }
+
+    @Test func inputRequiresAnExistingTerminalAndNeverAllocatesOrFollowsFocus() throws {
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let router = WorkLinkRouter(), window = UUID()
+        let store = registry.workspace(for: identity).multiplexer
+        store.show(.files(taskId: "fixture"))
+        let companion = target(store.focusedPane, window: window)
+        store.newShell(command: ["retained-command"])
+        let shell = target(store.focusedPane, window: window)
+        store.load(sessionId: "focused-elsewhere")
+        store.setCollapsed(paneId: shell.pane, collapsed: true)
+        register(router, window: window, registry: registry)
+        let before = store.layout, focus = store.focusedPaneId
+        for destination in [companion, shell] {
+            for action in [DesktopPaneAction.text(surface: "missing", text: "draft"),
+                           .key(surface: "missing", key: .enter)] {
+                #expect(throws: RegistryQueryError.self) {
+                    try router.controlPane(.init(target: destination, action: action))
+                }
+            }
+        }
+        #expect(store.layout == before)
+        #expect(store.focusedPaneId == focus)
+        #expect(store.collapsedPaneIds == [shell.pane])
+        #expect(store.shellCommands[shell.pane] == ["retained-command"])
+        #expect(registry.surfaces.programStatus(for: .shell(shell.pane, machineId: identity.machineId)) == nil)
+    }
+
     @Test(arguments: [DesktopTextRegion.screen, .scrollback, .selection])
     func passiveReadKeepsMissingSurfaceDistinctAndDoesNotFollowFocus(region: DesktopTextRegion) throws {
         let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
@@ -80,6 +116,97 @@ struct DesktopPaneControlTests {
     }
 
     #if canImport(GhosttyKit)
+    @Test(.requiresDisplay) func exactInputCombinesDraftAtCursorWithoutFollowingFocusOrSubmitting() async throws {
+        _ = NSApplication.shared
+        let manager = GhosttyManager.shared
+        manager.initialize()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let result = directory.appendingPathComponent("submitted")
+        func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let registry = SessionsWorkspaceRegistry(localMachineId: identity.machineId)
+        let router = WorkLinkRouter(), windowID = UUID()
+        let store = registry.workspace(for: identity).multiplexer
+        store.newShell()
+        let pane = store.focusedPane
+        store.newShell()
+        let otherPane = store.focusedPane
+        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
+        let other = TerminalIdentity.shell(otherPane.id, machineId: identity.machineId)
+        let view = registry.surfaces.view(for: terminal), otherView = registry.surfaces.view(for: other)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let root = NSView(frame: window.contentLayoutRect)
+        window.contentView = root
+        for (index, view) in [view, otherView].enumerated() {
+            view.frame = CGRect(x: CGFloat(index * 400), y: 0, width: 400, height: 300)
+            root.addSubview(view)
+            view.workingDirectory = directory.path
+            view.command = "/usr/bin/env -i HOME=\(quote(directory.path)) PATH=/usr/bin:/bin TERM=xterm-256color PS1=fixture-ready /bin/zsh -df"
+            view.createSurface(manager: manager)
+            _ = try #require(view.surface)
+        }
+        defer {
+            registry.surfaces.release(terminal)
+            registry.surfaces.release(other)
+            window.contentView = nil
+        }
+        func text(_ view: GhosttyMetalView) -> String {
+            guard let surface = view.surface else { return "" }
+            let selection = ghostty_selection_s(
+                top_left: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+                bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+                rectangle: false)
+            var output = ghostty_text_s()
+            guard ghostty_surface_read_text(surface, selection, &output) else { return "" }
+            defer { ghostty_surface_free_text(surface, &output) }
+            guard let bytes = output.text else { return "" }
+            return String(decoding: UnsafeBufferPointer(start: UnsafeRawPointer(bytes).assumingMemoryBound(to: UInt8.self), count: Int(output.text_len)), as: UTF8.self)
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !text(view).contains("fixture-ready") || !text(otherView).contains("fixture-ready") {
+            try #require(ContinuousClock.now < deadline)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let token = try #require(registry.surfaces.surfaceIncarnation(for: terminal))
+        let destination = target(pane, window: windowID)
+        register(router, window: windowID, registry: registry)
+        func send(_ action: DesktopPaneAction) throws {
+            _ = try router.controlPane(.init(target: destination, action: action))
+        }
+        try send(.text(surface: token, text: "printf '%s' 'drft'"))
+        for _ in 0..<3 { try send(.key(surface: token, key: .left)) }
+        #expect(window.makeFirstResponder(otherView))
+        store.setCollapsed(paneId: pane.id, collapsed: true)
+        let before = store.layout
+        view.setMarkedText("unfinished", selectedRange: NSRange(location: 10, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(throws: RegistryQueryError.self) { try send(.text(surface: token, text: "a")) }
+        #expect(throws: RegistryQueryError.self) { try send(.key(surface: token, key: .enter)) }
+        #expect(view.hasMarkedText())
+        view.unmarkText()
+        try send(.text(surface: token, text: "a"))
+        try send(.key(surface: token, key: .end))
+        try send(.text(surface: token, text: " > " + quote(result.path)))
+        let draftDeadline = ContinuousClock.now + .seconds(3)
+        while !text(view).contains("submitted") {
+            try #require(ContinuousClock.now < draftDeadline)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!FileManager.default.fileExists(atPath: result.path))
+        try send(.key(surface: token, key: .enter))
+        let submitDeadline = ContinuousClock.now + .seconds(3)
+        while (try? String(contentsOf: result, encoding: .utf8)) != "draft" {
+            try #require(ContinuousClock.now < submitDeadline)
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!text(otherView).contains("printf"))
+        #expect(store.layout == before)
+        #expect(store.focusedPaneId == otherPane.id)
+        #expect(window.firstResponder === otherView)
+        #expect(registry.surfaces.surfaceIncarnation(for: terminal) == token)
+    }
+
     @Test(.requiresDisplay) func passiveReadRetainsExitedSurfaceAndRejectsItsReplacement() throws {
         _ = NSApplication.shared
         let manager = GhosttyManager.shared
@@ -106,6 +233,9 @@ struct DesktopPaneControlTests {
         while !ghostty_surface_process_exited(surface), Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
         try #require(ghostty_surface_process_exited(surface))
         #expect(try router.readText(request).result == .unavailable(reason: .boundedReaderUnavailable))
+        for action in [DesktopPaneAction.text(surface: token, text: "must not reopen"), .key(surface: token, key: .enter)] {
+            #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: request.target, action: action)) }
+        }
         #expect(view.surface == surface)
         #expect(registry.surfaces.surfaceIncarnation(for: terminal) == token)
         registry.surfaces.release(terminal)
@@ -117,6 +247,9 @@ struct DesktopPaneControlTests {
         replacement.createSurface(manager: manager)
         _ = try #require(replacement.surface)
         #expect(throws: RegistryQueryError.self) { try router.readText(request) }
+        for action in [DesktopPaneAction.text(surface: token, text: "stale"), .key(surface: token, key: .enter)] {
+            #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: request.target, action: action)) }
+        }
         #expect(replacement.surface != nil)
     }
 
@@ -299,7 +432,8 @@ struct DesktopPaneControlTests {
         register(router, window: window, registry: registry)
         let before = store.layout, focus = store.focusedPaneId
         let actions: [DesktopPaneAction] = [.hide, .restore, .focus, .split(axis: .horizontal),
-            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .flowLog(task: "task")]
+            .move(destination: peer, axis: .vertical), .resize(toward: peer, ratio: 0.6), .zoom(enabled: true), .shell, .files(task: "task"), .flowLog(task: "task"),
+            .text(surface: "stale", text: "draft"), .key(surface: "stale", key: .enter)]
         for action in actions {
             #expect(throws: RegistryQueryError.self) { try router.controlPane(.init(target: old, action: action)) }
             #expect(store.layout == before)

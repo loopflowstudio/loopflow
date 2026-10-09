@@ -1,4 +1,4 @@
-//! Retained pane arrangement and passive reads use Desktop's existing Apple event boundary.
+//! Retained pane arrangement, explicit input and passive reads use Desktop's existing Apple event boundary.
 //! No file-backed layout cache, socket server, or Work mutation participates.
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -109,6 +109,14 @@ pub struct DesktopPaneCommand {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum DesktopPaneAction {
+    Text {
+        surface: String,
+        text: String,
+    },
+    Key {
+        surface: String,
+        key: DesktopKey,
+    },
     Hide,
     Restore,
     Focus,
@@ -133,6 +141,23 @@ pub enum DesktopPaneAction {
     Zoom {
         enabled: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopKey {
+    Enter,
+    Tab,
+    Escape,
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Up,
+    Down,
+    Home,
+    End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, clap::ValueEnum)]
@@ -214,6 +239,35 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
     super::open::require_supported()?;
     let (target, action, json) = match command {
         DesktopCommand::List { json } => return invoke(None, *json),
+        DesktopCommand::Text {
+            target,
+            surface,
+            text,
+            json,
+        } => {
+            validate_literal_text(text)?;
+            (
+                target,
+                DesktopPaneAction::Text {
+                    surface: surface.clone(),
+                    text: text.clone(),
+                },
+                json,
+            )
+        }
+        DesktopCommand::Key {
+            target,
+            surface,
+            key,
+            json,
+        } => (
+            target,
+            DesktopPaneAction::Key {
+                surface: surface.clone(),
+                key: *key,
+            },
+            json,
+        ),
         DesktopCommand::Read {
             target,
             surface,
@@ -313,6 +367,13 @@ pub fn run(command: &crate::lf::DesktopCommand) -> Result<()> {
         action,
     })?;
     invoke(Some(&request), *json)
+}
+
+fn validate_literal_text(text: &str) -> Result<()> {
+    if text.chars().any(char::is_control) {
+        bail!("Literal text cannot contain control characters; use `lf desktop key` for explicit keys. No input was sent.");
+    }
+    Ok(())
 }
 
 fn parse_target(target: &str) -> Result<DesktopPaneTarget> {
@@ -508,6 +569,29 @@ impl DesktopTextUnavailable {
             Self::MissingSurface => "The retained pane has no native surface; no client was acquired.",
             Self::NotTerminal => "The addressed pane is not a terminal.",
             Self::BoundedReaderUnavailable => "This Desktop build has no verified bounded text reader; no unbounded fallback was used.",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_literal_text;
+
+    #[test]
+    fn literal_text_preserves_unicode_but_cannot_smuggle_keys() {
+        for text in ["", "héλ🙂 e\u{301}", "\"$(echo literal)\"; \\n"] {
+            validate_literal_text(text).unwrap();
+        }
+        for text in [
+            "line\nsubmit",
+            "\r",
+            "\t",
+            "\0",
+            "\u{1b}[A",
+            "\u{7f}",
+            "\u{85}",
+        ] {
+            assert!(validate_literal_text(text).is_err(), "{text:?}");
         }
     }
 }

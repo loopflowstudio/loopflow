@@ -62,8 +62,11 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   Linux formatter checks and embedded C compilation/export, not native extraction.
   The framework remains unbuilt/unpublished; Swift truncation is no fallback.
   Direct model smoke/typechecking passed; packaged attempts timed out without
-  results. Native extraction/input, peer composition, complete opening and native
-  acceptance remain unfinished. Detailed implementation and contrary check evidence:
+  results. The later exact-input cut adds `desktop text/key` through the same pane
+  event, validating the existing live surface and preserving focus/drafts. Text
+  rejects control bytes; explicit keys remain separate. The native draft/cursor
+  fixture is unexecuted. Native extraction, peer composition, complete opening and
+  native acceptance remain unfinished. Detailed implementation and contrary check evidence:
   `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
   The tables retain October 7's baseline judgments; no cmux/herdr behavior was
   re-exercised for these deltas.

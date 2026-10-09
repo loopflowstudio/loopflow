@@ -565,8 +565,26 @@ targets. Reads never follow focus, acquire a client or clean up an exited surfac
 bounded reader. Existing surfaces return `bounded_reader_unavailable`, absent
 surfaces `missing_surface`, and nonterminal panes `not_terminal`. There is no
 unbounded fallback. JSON preserves these outcomes; text mode reports unavailability
-as an error. Read tokens authorize no input. Native extraction, terminal input and
-composed Session-plus-diff opening remain implementation work.
+as an error. Reading alone never sends input. Native extraction and composed
+Session-plus-diff opening remain implementation work.
+
+Insert text into the exact surface, then submit deliberately:
+
+```sh
+lf desktop text --target "$target" --surface "$surface" -- 'literal text'
+lf desktop key --target "$target" --surface "$surface" enter
+```
+
+Text inserts at the current cursor without clearing the existing draft. Quotes,
+backslashes and Unicode are literal; control characters (including newline and
+Tab) are rejected, never interpreted as keys. Key accepts `enter`, `tab`, `escape`,
+`backspace`, `delete`, `left`, `right`, `up`, `down`, `home` and `end`.
+Neither operation changes focus or opens a client. Missing, exited or replaced
+surfaces reject input, as does an active IME composition. Complete that composition
+first; the draft is not discarded. A reply reports dispatch, not child consumption
+or Task completion. Input is not idempotent: after a lost reply, inspect before
+sending more; never automatically repeat it. Native interaction proof remains
+with the fixture demo.
 
 ```sh
 open 'loopflow://task/LOO-303'

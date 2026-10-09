@@ -6,10 +6,10 @@
             <cocoa class="LoopflowMac.InspectDesktopCommand"/>
             <result type="text" description="JSON reading of retained windows and panes"/>
         </command>
-        <command name="control pane" code="CNRTpane" description="Arrange an exact retained pane without closing its client">
+        <command name="control pane" code="CNRTpane" description="Arrange or send explicit input to an exact retained pane">
             <cocoa class="LoopflowMac.ControlPaneCommand"/>
-            <direct-parameter type="text" description="JSON exact target and arrangement action"/>
-            <result type="text" description="JSON reading after the arrangement"/>
+            <direct-parameter type="text" description="JSON exact target and pane action"/>
+            <result type="text" description="JSON reading after the action"/>
         </command>
         <command name="read terminal text" code="CNRTtext" description="Read an exact retained terminal surface without acquiring a client">
             <cocoa class="LoopflowMac.ReadTerminalTextCommand"/>

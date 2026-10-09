@@ -147,7 +147,7 @@ final class SessionsWorkspaceRegistry {
 
     func controlPane(_ request: DesktopPaneCommand, model: WorkModel) throws {
         let target = request.target
-        let (workspace, _) = try retainedPane(for: target)
+        let (workspace, pane) = try retainedPane(for: target)
         let store = workspace.multiplexer
         // Validate both ends before changing anything. Moving a view is not
         // reassociating its Work or transferring a client to another checkout.
@@ -160,6 +160,16 @@ final class SessionsWorkspaceRegistry {
             _ = try retainedPane(for: other)
         }
         switch request.action {
+        case .text(let surface, let text):
+            guard let terminal = workspace.terminal(for: pane) else {
+                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
+            }
+            try surfaces.insertText(text, terminal: terminal, surface: surface)
+        case .key(let surface, let key):
+            guard let terminal = workspace.terminal(for: pane) else {
+                throw RegistryQueryError("The addressed pane is not a terminal; no input was sent.")
+            }
+            try surfaces.sendKey(key, terminal: terminal, surface: surface)
         case .shell:
             guard target.machineId == localMachineId else {
                 throw RegistryQueryError("Open a shell on the execution Machine in a terminal; remote Desktop shell opening is unavailable.")

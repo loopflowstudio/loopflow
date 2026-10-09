@@ -62,7 +62,9 @@ pub async fn relocate_wave(
     for planned in &mut moves {
         if let Some(existing) = store.get_wave_at(&planned.target).await? {
             if existing.id() != planned.wave.id() {
-                let blockers = store.wave_retirement_blockers(existing.id()).await?;
+                let blockers = store
+                    .wave_retirement_blockers(existing.id(), planned.wave.id())
+                    .await?;
                 if !blockers.is_empty() {
                     return Err(anyhow!(
                         "cannot relocate Wave {}: destination Wave {} retains {}",

@@ -1,7 +1,6 @@
 mod support;
 
-#[path = "support/planning.rs"]
-mod planning;
+use support::planning;
 
 use std::path::Path;
 use std::process::Command;
@@ -181,8 +180,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     store.create_wave(&alpha).await.unwrap();
     store.create_wave(&beta).await.unwrap();
     let definitions = loopflow::store::sqlite::SqliteStore::new(&database).unwrap();
-    definitions.ensure_wave(alpha.repo(), alpha.slug()).unwrap();
-    definitions.ensure_wave(beta.repo(), beta.slug()).unwrap();
     assert_ne!(alpha.id(), beta.id());
 
     #[cfg(unix)]
@@ -431,15 +428,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     author_wave(&repo_a, "infrastructure/child", "child");
     let child = registered_wave(&repo_a, "child").with_parent(alpha.id().clone());
     store.create_wave(&child).await.unwrap();
-    definitions
-        .ensure_wave(alpha.repo(), "infrastructure/child")
-        .unwrap();
     author_wave(&repo_a, "infrastructure/child/leaf", "grandchild");
     let grandchild = registered_wave(&repo_a, "leaf").with_parent(child.id().clone());
     store.create_wave(&grandchild).await.unwrap();
-    definitions
-        .ensure_wave(alpha.repo(), "infrastructure/child/leaf")
-        .unwrap();
 
     let occupied = registered_wave(&repo_a, "occupied");
     store.create_wave(&occupied).await.unwrap();
@@ -667,7 +658,7 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
 }
 
 #[tokio::test]
-async fn relocation_retires_an_empty_destination_shadow_without_losing_identity() {
+async fn relocation_retires_an_identical_destination_shadow_without_losing_identity() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("cadenza");
     let target = tmp.path().join("kata");
@@ -675,6 +666,7 @@ async fn relocation_retires_an_empty_destination_shadow_without_losing_identity(
     repository(&target);
     for slug in ["core", "ear", "theory"] {
         author_wave(&source, slug, slug);
+        author_wave(&target, slug, slug);
     }
     author_wave(&target, "scores", "scores");
     let home = tmp.path().join("home");
@@ -850,22 +842,30 @@ async fn relocation_refuses_meaningful_destination_history() {
         .await
         .unwrap();
 
-    let receipt_shadow = registered_wave(&target, "with-definition");
-    store.create_wave(&receipt_shadow).await.unwrap();
+    let definition_shadow = registered_wave(&target, "with-definition");
+    store.create_wave(&definition_shadow).await.unwrap();
     loopflow::store::sqlite::SqliteStore::new(&database)
         .unwrap()
         .update_wave_document(
-            receipt_shadow.id(),
+            definition_shadow.id(),
             "GOAL.md",
             "Retain this independently authored plan",
         )
         .unwrap();
 
+    let workflow_shadow = registered_wave(&target, "with-workflow");
+    store.create_wave(&workflow_shadow).await.unwrap();
+    rusqlite::Connection::open(&database).unwrap().execute(
+        "INSERT INTO wave_workflows(wave_id,name,content) VALUES(?1,'proof','edges: [{from: start, to: end}]')",
+        [workflow_shadow.id()],
+    ).unwrap();
+
     for (slug, shadow, evidence) in [
         ("with-task", &project_shadow, "Tasks"),
         ("with-child", &child_shadow, "child Waves"),
         ("with-pm", &pm_shadow, "PM snapshot"),
-        ("with-definition", &receipt_shadow, "stored definitions"),
+        ("with-definition", &definition_shadow, "stored definitions"),
+        ("with-workflow", &workflow_shadow, "stored definitions"),
     ] {
         let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))
             .await

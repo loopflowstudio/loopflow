@@ -593,10 +593,12 @@ impl Store {
     pub(crate) async fn wave_retirement_blockers(
         &self,
         wave_id: &WaveId,
+        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let wave_id = wave_id.clone();
+        let replacement = replacement.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
+            store.wave_retirement_blockers(&wave_id, &replacement)
         })
         .await
     }

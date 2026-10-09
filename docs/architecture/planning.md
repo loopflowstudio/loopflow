@@ -167,6 +167,13 @@ CLI and Desktop project creation, field/order edits, state and comments through
 pending in connected repositories; attempted effects retain uncertainty and errors.
 Observed conflicts show both values after adopting Linear. Disconnected repositories
 show no pending Linear delivery; retained losing values remain inspectable.
+The repository-scoped `peer_planning` Work frame reads the same destination status
+as `lf planning status`. It is independent of roadmap/Session availability and wakes
+on planning revisions, not execution or usage updates. Desktop retains last-good
+status on reader failure, fences replies by scope and Machine, and distinguishes
+unknown local changes from no additional eligible changes. Git publication is not
+Linear delivery; retained imports and sharing holds never imply convergence.
+
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing
 or clearing the repository connection ends them. Read projections stay read-only.

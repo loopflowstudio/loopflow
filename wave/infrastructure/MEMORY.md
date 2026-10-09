@@ -625,29 +625,30 @@ Jack Heart selected custom-ref sync: review-only, no landing/public export.
 Joining publishes nothing; execution stays local and imports unplaced.
 Malformed input aborts import; contradictions isolate objects.
 
-Receipts retain saves, baselines, uncertainty and losers, never transitions.
-Readback acknowledges effects, not mappings/errors; creation cannot settle removal.
-Active evidence retains losing removals; fixtures prove no live controls.
+Receipts retain saves, baselines, uncertainty and losers, not transitions.
+Readback settles effects, not mappings/errors or removal via creation.
+Active evidence retains losing removals; no live-control proof.
 
 `08a285872` defers rejected/held effects until import, never saves/acquisition.
 Public `30b476328` awaits gate. `fcd64901f`/`357090d4b` retain primary-only moves;
 only complete lists settle progress. Effect updates cannot promote losers.
 
 **Independent facts need independent rollback.** Removal, archive and Teams use
-separate savepoints; prepare validated histories before retries. Preserve original
-ages and Team baselines; legacy ages stay unknown. Entity revisions cannot order
-relationships. Team and cold-list fixtures prove no composed partial-list acceptance.
+separate savepoints and prevalidated histories. Retain original ages/Team baselines;
+legacy ages stay unknown. Entity revisions cannot order relationships.
+Team/cold-list fixtures prove no composed partial-list acceptance.
 
 **Invalidation needs causal acknowledgement.** `6ccbbabe3` retires observed notices,
-never unseen ones. Replay preserves readback and the greatest revision floor;
+not unseen. Replay preserves readback and the greatest revision floor;
 clocks invent no revisions. Scalar/list replay cannot clear freshness;
-acknowledgement requires its accepted frontier. Focused proof only.
+acknowledgement requires its accepted frontier. Focused proof.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
 Private histories/dependents stay held; omission is not convergence.
-Reads expose absence without placing Work. Legacy association, Desktop peer UI
-and public composition remain. Mixed-provider exchange stays disabled.
-Design: `scratch/work-on-another-machine-name.md`. Earlier proofs:
+Reads allocate no placement. Desktop streams scoped receipts/holds, retaining failed
+readings. Legacy association, authorship/recovery UI and composition remain.
+Mixed exchange is disabled.
+`scratch/work-on-another-machine-name.md`. Proofs:
 `7f206cd0e:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)

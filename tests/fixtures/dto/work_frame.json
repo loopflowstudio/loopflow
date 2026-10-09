@@ -146,5 +146,17 @@
         "conflicts": {}
       }
     }
+  },
+  {
+    "sequence": 8,
+    "answers": 7,
+    "home": "/home",
+    "revisions": null,
+    "unavailable": null,
+    "part": "peer_planning",
+    "body": {
+      "repo": "/src/loopflow",
+      "destinations": []
+    }
   }
 ]

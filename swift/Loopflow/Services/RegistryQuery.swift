@@ -121,6 +121,11 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
 
+    public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
+        struct Status: Decodable { let destinations: [PeerPlanningStatus] }
+        return try Self.decode(Status.self, from: await run(["planning", "status", "--json"], cwd)).destinations
+    }
+
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
         return try Self.decode(MachineIdentity.self, from: await run(["machine", "id", "--json"], nil)).id

@@ -501,14 +501,38 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
+    @Test("Peer planning retains unknown pending state and independent receipts")
+    func peerPlanningStatus() throws {
+        let data = try loadFixtureData("peer_planning_status.json")
+        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
+        #expect(statuses[0].pendingLocal == nil)
+        #expect(statuses[0].publicationState == "unconfirmed")
+        #expect(statuses[0].importedRevision == "retained-import")
+        #expect(statuses[0].fetchedRevision == "newer-fetch")
+        #expect(statuses[0].conflicts[0].object.id == "retained-task")
+        #expect(statuses[1].pendingLocal == true)
+        #expect(statuses[1].active)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
+        object.removeValue(forKey: "conflicts")
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+    }
+
     @Test("Work frames decode every part and keep the wire text a saved workspace needs")
     func workspaceFramesDecode() throws {
         let data = try loadFixtureData("work_frame.json")
         let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
 
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7])
+        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning"])
+        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8])
+        guard case .peerPlanning(let peers?) = frames[7].content else {
+            Issue.record("peer planning frame missing")
+            return
+        }
+        #expect(peers.repo == "/src/loopflow")
+        #expect(peers.destinations.isEmpty)
         #expect(frames[0].answers == nil)
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)

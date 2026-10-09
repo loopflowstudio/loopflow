@@ -110,6 +110,11 @@ struct RoadmapView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            if repoPath != nil {
+                PeerPlanningView(reading: model.peerPlanning)
+                    .padding(.horizontal, Spacing.xl)
+                    .padding(.bottom, Spacing.sm)
+            }
             Divider()
             if let queryError {
                 evidenceBanner(

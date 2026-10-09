@@ -222,3 +222,8 @@ remain separate. No new product decision is selected.
 - October 9 unplaced-Wave presentation uses the existing optional placement query;
   execution's required reader stays strict. Null means unplaced, never local by
   default. Rust/Swift share the nullable DTO; no migration or new authority is added.
+
+- October 9 Desktop status reuses the common destination reader in a scoped Work
+  frame. Read failures retain last-good evidence; scope/Machine changes fence old
+  replies. No status cache, sync worker, setup action or mixed activation is added.
+  Per-Work selection and losing-edit recovery remain unfinished.

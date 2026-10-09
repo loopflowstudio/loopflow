@@ -58,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Flows", href="/#flows")),
+                Li(A("Flows", href="/cli#flows")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -124,18 +124,17 @@ SITE_CONTENT = yaml.safe_load((Path(__file__).parent / "content.yaml").read_text
 STUDIO_CONTENT = SITE_CONTENT["studio"]
 HOME_CONTENT = SITE_CONTENT["homepage"]
 HERO_CONTENT = HOME_CONTENT["hero"]
-AGENTS_CONTENT = HOME_CONTENT["agents"]
+CLI_CONTENT = SITE_CONTENT["cli"]
 YOU_CONTENT = HOME_CONTENT["you"]
 FAQ_CONTENT = HOME_CONTENT["faq"]
 INSTALL_CONTENT = HOME_CONTENT["install"]
 
-# Copy buttons name the element whose text they copy.
+# Copy buttons carry the text they copy.
 COPY_SCRIPT = """
 document.querySelectorAll('[data-copy]').forEach(function (button) {
   var label = button.textContent;
   button.addEventListener('click', function () {
-    var text = document.getElementById(button.dataset.copy).textContent;
-    navigator.clipboard.writeText(text).then(function () {
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
       button.textContent = 'Copied';
       setTimeout(function () { button.textContent = label; }, 1600);
     });
@@ -348,7 +347,7 @@ def generate_llms_full_txt() -> str:
 
 
 def generate_sitemap_xml() -> str:
-    pages = ["", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
+    pages = ["", "/cli", "/studio", "/etude", "/fantasia", "/about", "/download", "/docs"] + [
         f"/docs/{slug}" for _, slug in DOCS_NAV if slug != "index" and doc_path(slug)
     ]
     entries = []
@@ -779,6 +778,8 @@ def _hero_section() -> FT:
     return Section(
         P(HERO_CONTENT["label"], cls="eyebrow kicker"),
         H1(HERO_CONTENT["heading"]),
+        P(HERO_CONTENT["needs_label"], cls="needs-label"),
+        Ul(*[Li(need) for need in HERO_CONTENT["needs"]], cls="needs-list"),
         P(HERO_CONTENT["introduction"], cls="intro"),
         Div(
             A(
@@ -805,17 +806,31 @@ def _hero_section() -> FT:
 
 
 def _install_row() -> FT:
+    command = INSTALL_CONTENT["install_command"]
     return Div(
-        Pre(
-            Span("$", cls="p"),
-            " ",
-            Span(AGENTS_CONTENT["install_command"], id="install-command"),
-            cls="term",
-            tabindex="0",
-            aria_label="Install Loopflow",
-        ),
-        Button("Copy", type="button", cls="copy", data_copy="install-command", aria_live="polite"),
+        Pre(Span("$", cls="p"), " ", command, cls="term", tabindex="0", aria_label="Install Loopflow"),
+        Button("Copy", type="button", cls="copy", data_copy=command, aria_live="polite"),
         cls="install-row",
+    )
+
+
+def _work_rows(rows: list) -> FT:
+    return Div(
+        *[
+            Article(
+                Div(item["label"], Span(item["title"]), cls="tag"),
+                Div(
+                    P(*_inline_code(item["text"])),
+                    P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
+                    if "link" in item
+                    else None,
+                ),
+                _terminal(item["commands"], item["label"] + " example"),
+                cls="work-row",
+            )
+            for item in rows
+        ],
+        cls="work-rows",
     )
 
 
@@ -887,7 +902,7 @@ def _install_section() -> FT:
                 INSTALL_CONTENT["copy_label"],
                 type="button",
                 cls="button solid",
-                data_copy="install-command",
+                data_copy=INSTALL_CONTENT["install_command"],
                 aria_live="polite",
             ),
             A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button"),
@@ -1002,27 +1017,13 @@ def build_effort_page(slug: str) -> tuple:
     )
 
 
-def build_homepage() -> tuple:
+def _product_page(title: str, current: str, *sections) -> tuple:
     return (
-        Title("Loopflow — " + HERO_CONTENT["heading"]),
+        Title(title),
         SkipLink(),
         Div(
-            _topbar("/"),
-            Main(
-                _hero_section(),
-                _claims_section(YOU_CONTENT, "mac", 1),
-                _claims_section(
-                    AGENTS_CONTENT,
-                    "flows",
-                    1 + len(YOU_CONTENT["claims"]),
-                    _install_row(),
-                    _terminal(AGENTS_CONTENT["commands"], "lf commands"),
-                ),
-                _faq_section(),
-                _install_section(),
-                id="main-content",
-                cls="home",
-            ),
+            _topbar(current),
+            Main(*sections, id="main-content", cls="home"),
             Footer(
                 Span(HOME_CONTENT["footer"]["text"]),
                 Div(
@@ -1035,6 +1036,53 @@ def build_homepage() -> tuple:
             Script(COPY_SCRIPT),
             cls="home-page",
         ),
+    )
+
+
+def build_homepage() -> tuple:
+    return _product_page(
+        "Loopflow — " + HERO_CONTENT["heading"],
+        "/",
+        _hero_section(),
+        _claims_section(YOU_CONTENT, "mac", 1),
+        _faq_section(),
+        _install_section(),
+    )
+
+
+def build_cli_page() -> tuple:
+    hero, agents = CLI_CONTENT["hero"], CLI_CONTENT["agents"]
+    model, where = CLI_CONTENT["model"], CLI_CONTENT["where"]
+    return _product_page(
+        "Loopflow — " + hero["heading"],
+        "/cli",
+        Section(
+            P(hero["label"], cls="eyebrow kicker"),
+            H1(hero["heading"]),
+            P(hero["introduction"], cls="intro"),
+            _install_row(),
+            P(hero["cost"], cls="cost"),
+            cls="home-hero",
+        ),
+        _claims_section(agents, "flows", 1, _terminal(agents["commands"], "lf commands")),
+        Section(
+            P(model["label"], cls="eyebrow"),
+            H2(model["heading"]),
+            _work_rows(model["rows"]),
+            id="model",
+            cls="group",
+        ),
+        Section(
+            P(where["label"], cls="eyebrow"),
+            H2(where["heading"]),
+            Div(
+                *[Div(B(item["title"]), *_inline_code(item["text"])) for item in where["items"]],
+                cls="strip points",
+            ),
+            id="where",
+            cls="group",
+        ),
+        _install_section(),
     )
 
 
@@ -1053,8 +1101,7 @@ def get():
 
 @rt("/cli")
 def get():
-    # Redirect /cli to docs
-    return RedirectResponse("/docs", status_code=302)
+    return build_cli_page()
 
 
 @rt("/products")

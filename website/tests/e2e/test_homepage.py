@@ -7,12 +7,13 @@ from playwright.sync_api import Page, expect
 
 
 def test_approved_homepage_sections(homepage: Page) -> None:
-    expect(homepage.locator("h1")).to_have_text("Build software by conducting agents in harmony.")
+    expect(homepage.locator("h1")).to_have_text("Loopflow lets anyone craft software.")
+    assert homepage.locator(".home-hero .needs-list li").count() == 2
     assert homepage.locator("main > section[id]").evaluate_all(
         "sections => sections.map(section => section.id)"
-    ) == ["mac", "flows", "faq", "start"]
+    ) == ["mac", "faq", "start"]
     assert homepage.locator(".claim .number").all_text_contents() == [
-        f"{number:02}" for number in range(1, 9)
+        f"{number:02}" for number in range(1, 5)
     ]
     expect(homepage.locator(".faq dt")).to_have_count(9)
 
@@ -28,11 +29,18 @@ def test_hero_leads_with_the_mac_app(homepage: Page) -> None:
     expect(homepage.locator("#start h2")).to_be_in_viewport()
 
 
-def test_terminal_section_carries_the_install_command(homepage: Page) -> None:
-    agents = homepage.locator("#flows")
-    expect(agents.locator("h2")).to_have_text("A software engineering CLI for your agents.")
-    assert "loopflow.studio/install.sh" in agents.locator(".install-row pre").text_content()
-    expect(agents.get_by_role("button", name="Copy", exact=True)).to_be_visible()
+def test_cli_page_makes_the_case_for_engineers(page: Page, base_url: str) -> None:
+    page.goto(f"{base_url}/cli")
+    expect(page.locator("h1")).to_have_text("Loopflow is the CLI for software engineering.")
+    assert page.locator("main > section[id]").evaluate_all(
+        "sections => sections.map(section => section.id)"
+    ) == ["flows", "model", "where", "start"]
+    assert "loopflow.studio/install.sh" in page.locator(".home-hero .install-row pre").text_content()
+    expect(page.locator(".home-hero").get_by_role("button", name="Copy", exact=True)).to_be_visible()
+    assert page.locator(".work-row .tag").evaluate_all(
+        "tags => tags.map(tag => tag.firstChild.textContent.trim())"
+    ) == ["Task", "Workflow", "Wave", "Project"]
+    expect(page.locator("main img")).to_have_count(0)
 
 
 def test_guide_links_resolve(homepage: Page, base_url: str) -> None:

@@ -186,3 +186,14 @@ Jack Heart, after blend A was ported: "i think ive changed my mind. lets go back
 Order becomes: hero, the Mac capture at full width, For you, For your agents (terminal), FAQ, install.
 
 Jack Heart on the FAQ's first answer ("No. lf is a command…"): "This is sort of wrong, Looplfow Desktop is a terminal." Answer rewritten to say the Mac app is one and `lf` also runs in other terminals.
+
+## Two pages: anyone, and engineers (2026-10-08)
+
+Jack Heart, new direction for the main page:
+"Loopflow lets anyone craft software. You need: a coding agent (claude, codex, or opencode); a github. We'll get you building whatever software you want like a software engineer, by guiding you through workflows that get the most out of you and ensure high quality software, not slop."
+
+Second page:
+"Loopflow is the CLI for software engineering. It's a big claim, but let's own. Let's make the case that our data model and APIs is the right one to encode what matters in high quality software development and avoids slop. For techincal people, we are NOT competing on Loopflow Desktop. We are saying we work wherever you work. Use as much as you want. Change whatever you want."
+
+Built: `/` carries the first, `/cli` the second (it used to redirect to docs). The terminal claims, the command list and the Task / Workflow / Wave / Project rows moved to `/cli`.
+Open: `/cli` does not yet argue why this data model is the right one; it shows the model. Section headings there are draft.

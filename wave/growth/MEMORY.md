@@ -255,6 +255,14 @@ software by conducting agents in harmony." is his candidate, asked as a
 question and not yet confirmed; "A software engineering CLI for your agents."
 heads the terminal section.
 
+Later still he split the audience across two pages. The main page speaks to
+anyone: "Loopflow lets anyone craft software," what you need (a coding agent
+and GitHub), and guided workflows that produce "high quality software, not
+slop." `/cli` speaks to engineers: "Loopflow is the CLI for software
+engineering," argued through the data model and commands. There Loopflow does
+not compete on the Mac app: "we work wherever you work. Use as much as you
+want. Change whatever you want." This supersedes both headline candidates above.
+
 ## Earlier copy decisions (2026-09-26)
 
 Word for word: "AI can build a lot of software fast. It can also spend all

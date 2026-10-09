@@ -542,8 +542,9 @@ lf sync-skills --repo      # repository skills/Flows → this checkout
 
 Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
 go to the corresponding checkout directories, never home. Release promotion’s
-skill sync includes builtin Flows. Sync again after adding or removing repository
-definitions. Flow content changes and overrides resolve at invocation time.
+skill sync includes builtin Flows. Recipes capture Flow topology at sync time;
+sync again after adding, editing, removing or overriding repository definitions.
+Headless commands load their skills when launched.
 
 Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
 are distinct definitions. `lf skill wave/session` selects the first; `lf skill
@@ -557,7 +558,7 @@ fallbacks, with Flow-first precedence for the same literal name.
 Codex exports retain slash and dash names, plus dashed fallbacks where unoccupied.
 Claude exports are flat: a literal dashed name wins over a flattened hierarchical
 name, with unrepresentable exports reported as skipped. Flow exports have no
-prefix and yield to skills at each provider's projected name. Each wrapper loads
+prefix and yield to skills at each provider's projected name. Each recipe retains
 its original exact Flow name. Invalid provider names are reported, never silently
 rewritten. Third-party files and bundles are preserved. Sync prunes only generated
 exports after replacements are writable; desired nested Codex exports survive.

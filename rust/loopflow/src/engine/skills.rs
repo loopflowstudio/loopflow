@@ -124,7 +124,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
         let blocked = exports
             .keys()
             .filter(|name| {
-                !writable_target(&root, name)
+                !writable_target(base, &root, name)
                     || exports
                         .keys()
                         .any(|other| other.starts_with(&format!("{name}/")))
@@ -139,7 +139,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
     // A failed replacement in either provider must not erase working old exports.
     if options.prune {
         for (root, exports, blocked) in &targets {
-            prune_targets(exports, blocked, root, &mut report)?;
+            prune_targets(exports, blocked, base, root, &mut report)?;
         }
     }
     report.written.sort();
@@ -217,12 +217,14 @@ fn validate_export_name(name: &str) -> Result<(), LoadError> {
     Ok(())
 }
 
-fn writable_target(root: &Path, name: &str) -> bool {
+fn writable_target(base: &Path, root: &Path, name: &str) -> bool {
     let directory = root.join(name);
     let path = directory.join(SKILL_FILE_NAME);
-    // Never write through third-party symlinks or bundle assets.
+    // The selected home/repository may use filesystem aliases (e.g. macOS /var).
+    // Protect provider destinations beneath it, not the path used to reach it.
     if directory
         .ancestors()
+        .take_while(|dir| *dir != base)
         .any(|dir| dir.is_symlink() || (dir.exists() && !dir.is_dir()))
         || directory
             .parent()
@@ -280,25 +282,31 @@ fn write_targets(
 fn prune_targets(
     exports: &BTreeMap<String, String>,
     blocked: &BTreeSet<String>,
+    base: &Path,
     target_root: &Path,
     report: &mut SkillSyncReport,
 ) -> Result<(), LoadError> {
-    if !target_root.ancestors().any(Path::is_symlink) {
-        for path in generated_skill_files(target_root)? {
-            let Some(name) = synced_skill_name_from_path(target_root, &path) else {
-                continue;
-            };
-            if exports.contains_key(&name)
-                || blocked
-                    .iter()
-                    .any(|blocked| portable_name(blocked) == portable_name(&name))
-            {
-                continue;
-            }
-            fs::remove_file(&path)?;
-            report.pruned.push(path.clone());
-            prune_empty_skill_dir(&path, target_root)?;
+    if target_root
+        .ancestors()
+        .take_while(|dir| *dir != base)
+        .any(Path::is_symlink)
+    {
+        return Ok(());
+    }
+    for path in generated_skill_files(target_root)? {
+        let Some(name) = synced_skill_name_from_path(target_root, &path) else {
+            continue;
+        };
+        if exports.contains_key(&name)
+            || blocked
+                .iter()
+                .any(|blocked| portable_name(blocked) == portable_name(&name))
+        {
+            continue;
         }
+        fs::remove_file(&path)?;
+        report.pruned.push(path.clone());
+        prune_empty_skill_dir(&path, target_root)?;
     }
     Ok(())
 }
@@ -474,6 +482,40 @@ mod tests {
             global_home: Some(home.path().to_path_buf()),
             repo: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_skills_accepts_home_aliases_but_preserves_provider_symlinks() {
+        let fixture = TempDir::new().unwrap();
+        let home = fixture.path().join("home");
+        let alias = fixture.path().join("alias");
+        let vendor = fixture.path().join("vendor");
+        let stale = "skills/obsolete/SKILL.md";
+        for root in [home.join(".agents"), vendor.clone()] {
+            let path = root.join(stale);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "---\nloopflow: true\n---\nOld export").unwrap();
+        }
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        std::os::unix::fs::symlink(&vendor, home.join(".claude")).unwrap();
+        let options = SkillSyncOptions {
+            global_home: Some(alias.clone()),
+            ..SkillSyncOptions::default()
+        };
+        let report = sync_skills(&options).unwrap();
+        assert!(alias.join(".agents/skills/implement/SKILL.md").is_file());
+        assert!(report.pruned.contains(&alias.join(".agents").join(stale)));
+        assert!(report
+            .skipped
+            .contains(&alias.join(".claude/skills/implement/SKILL.md")));
+        assert_eq!(
+            fs::read_to_string(vendor.join(stale)).unwrap(),
+            "---\nloopflow: true\n---\nOld export"
+        );
+        assert!(!vendor.join("skills/implement").exists());
+        let again = sync_skills(&options).unwrap();
+        assert!(again.written.is_empty() && again.pruned.is_empty());
     }
 
     #[test]

@@ -31,11 +31,30 @@ fn conversational_skill(skill: &Skill) -> String {
     instruction
 }
 
-fn builtin(skill: &Skill, name: &str) -> bool {
+fn is_builtin_decision(skill: &Skill, name: &str) -> bool {
     let source =
         crate::engine::builtins::get_builtin_skill(name).expect("known builtin decision skill");
     let body = split_frontmatter(source).map_or(source, |(_, body)| body);
     skill.name == name && skill.source.is_none() && skill.content.as_deref() == Some(body)
+}
+
+fn headless_command(
+    skill: &Skill,
+    flow_names: &[String],
+    commands: &clap::Command,
+) -> Result<String, LoadError> {
+    let mut argv = vec!["lf", "-b"];
+    if let Some(agent) = &skill.agent {
+        argv.extend(["-a", agent]);
+    }
+    if flow_names.contains(&skill.name)
+        || skill.name.starts_with('-')
+        || !matches!(resolve_child(commands, &skill.name, &[]), Ok(None))
+    {
+        argv.extend(["skill", "--"]);
+    }
+    argv.push(&skill.name);
+    shlex::try_join(argv).map_err(|error| LoadError::InvalidFlow(error.to_string()))
 }
 
 fn render_steps(
@@ -56,7 +75,7 @@ fn render_steps(
                             "invalid compiled return target at {position}"
                         ))
                     })?;
-                    if builtin(skill, "loop-or-next") {
+                    if is_builtin_decision(skill, "loop-or-next") {
                         output.push_str(&format!("{position}. Review the objective, changes and remaining findings in this conversation.\n   If this boundary's requirements are satisfied, continue after step {position}.\n   If the last pass made meaningful progress and specific work remains, state the next action and repeat steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then reassess at step {position}.\n   If progress requires missing input or repeats a failure without new evidence, explain what needs resolving and stop. A deferred check alone is not a blocker; leave it to its declared gate/CI or review. There is no arbitrary pass limit.\n", target + 1));
                     } else {
                         output.push_str(&format!("{position}. {}\n   Use its criteria to decide in ordinary language: advance continues after step {position}; iterate repeats steps {prefix}{} through {prefix}{index}, including intervening commands and branches, then returns to this decision; blocked explains what needs resolving and stops here.\n", conversational_skill(skill), target + 1));
@@ -64,24 +83,7 @@ fn render_steps(
                 } else if occurrence.human {
                     output.push_str(&format!("{position}. {}\n", conversational_skill(skill)));
                 } else {
-                    let explicit = flow_names.contains(&skill.name)
-                        || resolve_child(commands, &skill.name, &[])
-                            .map_or(true, |command| command.is_some());
-                    let name = shlex::try_quote(&skill.name)
-                        .map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
-                    let agent = skill
-                        .agent
-                        .as_deref()
-                        .map(shlex::try_quote)
-                        .transpose()
-                        .map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
-                    let launcher = agent
-                        .map_or_else(|| "lf -b".to_string(), |agent| format!("lf -b -a {agent}"));
-                    let command = if explicit {
-                        format!("{launcher} skill -- {name}")
-                    } else {
-                        format!("{launcher} {name}")
-                    };
+                    let command = headless_command(skill, flow_names, commands)?;
                     output.push_str(&format!("{position}. Run `{command}`.\n"));
                 }
                 if occurrence.human {
@@ -95,7 +97,7 @@ fn render_steps(
                 output.push_str(&format!("{position}. Run:\n\n```sh\n{quoted}\n```\n\n"));
             }
             ConcreteStep::Xor(branch) => {
-                let instruction = if builtin(&branch.router, "xor-route") {
+                let instruction = if is_builtin_decision(&branch.router, "xor-route") {
                     "Review the preceding findings and the path descriptions in this conversation."
                         .to_string()
                 } else {
@@ -127,6 +129,8 @@ fn render_steps(
 mod tests {
     use super::render_flow_instructions;
     use crate::engine::flow::{available_flow_names, compile_flow, load_authored_flow};
+    use crate::lf::{navigation::normalize_args, Cli, Commands, SkillCommand};
+    use clap::Parser;
     use std::fs;
     use tempfile::TempDir;
 
@@ -239,5 +243,38 @@ mod tests {
         assert!(plan.contains("Run `lf -b skill -- sync`"));
         assert!(plan.contains("Run `lf -b skill -- ship`"));
         assert!(plan.contains("Run `lf -b -a codex:mini implement`"));
+    }
+
+    #[test]
+    fn chat_recipe_preserves_shell_characters_and_cli_syntax_in_skill_names() {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        for name in ["--help", "don't-expand-$HOME;echo-unsafe"] {
+            fs::write(repo.path().join(format!(".lf/skills/{name}.md")), "Work").unwrap();
+            fs::write(
+                repo.path().join(".lf/flows/chat.yaml"),
+                format!("- step: {}\n", serde_json::to_string(name).unwrap()),
+            )
+            .unwrap();
+            let plan = recipe(repo.path(), "chat");
+            let command = plan
+                .split("1. Run `")
+                .nth(1)
+                .unwrap()
+                .split('`')
+                .next()
+                .unwrap();
+            let argv = shlex::split(command).unwrap();
+            let cli = Cli::try_parse_from(normalize_args(argv).unwrap()).unwrap();
+            assert!(cli.batch);
+            match cli.command.unwrap() {
+                Commands::Skill {
+                    cmd: SkillCommand::External(args),
+                }
+                | Commands::External(args) => assert_eq!(args, [name]),
+                command => panic!("expected skill invocation, got {command:?}"),
+            }
+        }
     }
 }

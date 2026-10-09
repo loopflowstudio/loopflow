@@ -85,11 +85,10 @@ See [Authoring](docs/authoring.md) for composition and review boundaries.
 ```bash
 lf sync-skills --yes        # export personal skills and builtin Flows
 lf sync-skills --repo       # export this repository’s skills and Flows locally
-lf flow show pursue --instructions
 ```
 
 Select `/pursue` in Claude Code or `pursue` in Codex’s skill picker to follow
-its resolved steps in the current conversation, including loops and review pauses.
+its generated checklist: headless commands, conversational reviews, and loops.
 Flow exports yield to existing skills with the same name. See
 [chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
 

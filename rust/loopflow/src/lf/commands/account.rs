@@ -28,6 +28,7 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, remove_account_home,
     AccountMatch,
 };
+use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart_daemon};
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
@@ -44,6 +45,7 @@ const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on the browser login to finish; give
 // them the ~10 minutes the OAuth authorization itself stays valid.
 const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
+const CODEX_DAEMON_TURN_WAIT: Duration = Duration::from_secs(5 * 60);
 #[cfg(test)]
 static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -179,8 +181,9 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
     }
 }
 
-/// The only command that changes which account a provider's shared home is
-/// signed in as. Running Codex agents keep their login until they restart.
+/// Sign a provider's shared home in as a stored account.
+/// Codex agents Loopflow launched keep their login until they
+/// restart; Codex's own background app-server is restarted to adopt it.
 async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
@@ -194,16 +197,69 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         crate::provider_account::activation::SwitchCause::Person,
     )
     .await?;
-    let login = crate::provider_account::account_login(&account);
-    match switched {
-        Some(_) => println!(
+    let login = account_login(&account);
+    if switched.is_some() {
+        println!(
             "{} is now signed in as {login} in {}",
             provider.display_name(),
             native.display()
-        ),
-        None => println!(
+        );
+    } else {
+        println!(
             "{} is already signed in as {login}",
             provider.display_name()
+        );
+    }
+    // The login is installed; launches must not wait on the daemon's turns.
+    drop(switched);
+    if provider == Provider::Codex {
+        restart_stale_codex_daemon(&native, login).await.with_context(|| {
+            format!("Codex login {login} is installed in {}, but its background app-server could not be reconciled; retry `lf account codex use {login}`", native.display())
+        })?;
+    }
+    Ok(())
+}
+
+/// A bare `codex` attaches to the home's background app-server, which keeps
+/// the login it started with whatever `auth.json` now holds. Restarting it
+/// cuts a turn running through it, so running turns get a few minutes to finish.
+async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
+    let Some(held) = daemon_login(native).await? else {
+        return Ok(());
+    };
+    if held.eq_ignore_ascii_case(login) {
+        return Ok(());
+    }
+    if !matches!(daemon_has_running_turn(native).await, Ok(false)) {
+        println!(
+            "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its turns to finish or become readable before restarting it",
+            CODEX_DAEMON_TURN_WAIT.as_secs() / 60
+        );
+        // Bound the probes as well as the sleeps; expiry deliberately permits restart.
+        let expired = tokio::time::timeout(CODEX_DAEMON_TURN_WAIT, async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                if matches!(daemon_has_running_turn(native).await, Ok(false)) {
+                    break;
+                }
+            }
+        })
+        .await
+        .is_err();
+        if expired {
+            println!(
+                "Codex daemon grace period expired; restarting now may interrupt remaining turns"
+            );
+        }
+    }
+    restart_daemon(native).await?;
+    match daemon_login(native).await? {
+        Some(now) if now.eq_ignore_ascii_case(login) => println!(
+            "Restarted Codex's background app-server, which was still signed in as {held}"
+        ),
+        now => bail!(
+            "Codex's background app-server still reports {} after a restart; run `codex app-server daemon restart`",
+            now.as_deref().unwrap_or("no login")
         ),
     }
     Ok(())
@@ -2447,3 +2503,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"fixture-login","s
         );
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "account_daemon_tests.rs"]
+mod daemon_tests;

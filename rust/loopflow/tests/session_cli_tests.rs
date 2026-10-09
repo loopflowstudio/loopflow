@@ -1041,6 +1041,7 @@ exit 2
                 );
             } else {
                 assert!(args.contains("tui.terminal_title=[]"), "{args}");
+                assert!(args.contains("--no-daemon\n"), "{args}");
             }
             if first {
                 let renamed = inspect(&["session", "rename", &id, "Release notes", "--json"]);

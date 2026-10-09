@@ -972,6 +972,19 @@ installation, missing-CLI repair, checkout preservation, and recovery after
 a forced activation failure. Transport is simulated; this does not replace a
 public release-channel demo. Discard the container afterward.
 
+### Codex daemon account switching
+
+```bash
+cargo test -p loopflow --lib lf::commands::account::daemon_tests
+cargo test -p loopflow --lib expired_grace_restarts_even_when_activity_becomes_unreadable -- --ignored
+```
+
+Run the second check explicitly at gate when changing daemon login reconciliation.
+It takes the real five-minute grace period, bounded by a 315-second test timeout.
+Both checks use disposable Unix sockets and a stand-in restart executable, without
+credentials or a live provider. They cover busy-to-idle, unreadable probes, expiry,
+and adoption after restart; configured Codex behavior remains demo/review evidence.
+
 ### Native Codex terminal capture
 
 ```bash

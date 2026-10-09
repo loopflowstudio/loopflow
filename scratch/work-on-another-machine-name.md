@@ -224,6 +224,13 @@ this heading. Keep these replacements deleted:
   reader compares full rows and explicitly selected retained Process IDs; new CLI
   inspection Processes remain outside that comparison.
 
+- Order acquisition's duplicate pre-settlement delivery read, copied retained lists
+  and per-member SQL preparation. Borrow the same receipts for completeness and
+  first settlement; reread after receipt updates because delivery eligibility changes.
+- Desktop peer refresh's separate success/error application and duplicate reply
+  guards. The existing reading reducer retains last-good values behind one
+  scope/generation check; stream and Machine fences remain unchanged.
+
 Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
 assertions or failure-path checks. No predecessor path or second planner is added.
 Remaining grouped owners, legacy association and acceptance are below; omission
@@ -605,7 +612,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 Desktop peer status): focused Rust builds + network-isolated peer invalidation (2), public status/Wave preservation + stream DTO (3), and headless Swift DTO/view/model checks (5 distinct) pass; fmt/diff and all-target Clippy pass. Gate retains combined public/partial-list, native provider, legacy association and mixed-provider acceptance. Earlier unplaced-Wave checks: `506efbbfe`, this heading.
+Check: `cargo build -p loopflow --lib` / `cargo test -p loopflow --lib --no-run`, network-isolated `planning_order_` (11) + `peer_ordering` (3), `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WorkModelStreamTests/peerPlanningFrames|DesktopHeadlessTests/peerPlanningStatus|DesktopHeadlessTests/roadmapPeerPlanning'` (3), fmt/diff and all-target Clippy pass. Gate retains combined public/partial-list, native provider, legacy association and mixed-provider acceptance. Prior Desktop proof: `c20e4ad13`; unplaced Waves: `506efbbfe`, this heading.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

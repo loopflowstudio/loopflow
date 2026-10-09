@@ -63,24 +63,26 @@ runtime to solve it. Peer exchange, observation/admission, complete routing, Des
 control and composed proof remain.
 
 LOO-427 keys windows and serial link queues by plan; views own no pending delivery.
-Receiver replacement keeps undelivered links; Portfolio owns no panes. Router smoke
-and Ghostty-disabled typecheck pass; configured SwiftPM, native retention/convergence
-and remote proof remain unverified.
+Receiver replacement retains queued links, not proof of usable in-flight completion.
+Router smoke and Ghostty-disabled typecheck pass; configured SwiftPM, native
+retention/convergence and remote proof remain unverified.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control
 stay local; imported completion cannot move or clean them. Preserve pending edits,
 semi-live comments/completion, causal reopening and stable mutation IDs. No real
-plan publication is authorized. Jack authorized stacking on 406's common writer;
-412's committed `5d336868f` also removes independent adoption, but peer import/export
-and public dispatch remain unfinished. Neither gates independent local Desktop work.
+plan publication is authorized.
+412's `7af31f09f` adds peer import/export and conflict retention, not integrated here.
+Its checkpoint can retain unprojected conflicts; it does not prove convergence.
 
-Jack's later decisions (`f027890ab:wave/infrastructure/MEMORY.md`): user-keyed Git
-plans by default, explicit shared-plan opt-in through the same records/APIs. A code
-remote grants neither shared identity nor publication permission. Linear wins
-planning conflicts; otherwise prefer the host where possible, then last-write-wins
-with recoverable losing edits. 412 owns binding and ordering. Precedence cannot
-fix Linear's read/write race or grant execution authority.
+Jack selected user-keyed Git plans by default, explicit shared opt-in through the
+same APIs, Linear conflict wins; otherwise host preference then last-write-wins
+with recoverable edits (`f027890ab:wave/infrastructure/MEMORY.md`). A code remote
+grants neither shared identity nor publication permission.
+412 has causal ordering/ref isolation, not selected-record binding or foreground
+exchange. Ref separation alone cannot prevent exporting unrelated local plans.
+Plan ID/delegation exchange is absent; local Desktop work stays independent.
+Precedence fixes neither Linear's read/write race nor execution authority.
 
 ## Terminal-host adoption (2026-10-07)
 

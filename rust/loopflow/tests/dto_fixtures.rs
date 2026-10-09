@@ -619,7 +619,35 @@ fn desktop_inspection_preserves_exact_windows_hidden_panes_and_stale_reading() {
     let report: DesktopInspection = serde_json::from_str(json).unwrap();
     let window = &report.windows[0];
     assert_eq!(window.reading, "unavailable");
-    assert!(window.recommended_action.is_none());
+    let task = window.task.as_ref().unwrap();
+    assert!(task.actions.is_none());
+    assert_eq!(
+        task.roadmap_generated_at.as_deref(),
+        Some("2026-10-08T19:00:00Z")
+    );
+    assert_eq!(
+        task.condition_observed_at.as_deref(),
+        Some("2026-10-08T18:59:58Z")
+    );
+    let session = window.session.as_ref().unwrap();
+    assert!(session.observed_at.is_none());
+    let actions = session.actions.as_ref().unwrap();
+    assert_eq!(actions.len(), 2);
+    assert!(actions[0].unavailable_reason.is_some());
+    assert!(actions[1].unavailable_reason.is_none());
+    let current = report.windows[1].task.as_ref().unwrap();
+    assert_eq!(
+        current.actions.as_ref().unwrap().recommended,
+        Some(loopflow::ops::task_actions::TaskAction::Resume)
+    );
+    assert_eq!(
+        current.run_control.as_ref().unwrap().unavailable.as_deref(),
+        Some("Task checkout is on another Machine")
+    );
+    assert!(report.render().contains("Observed: unavailable"));
+    assert!(report
+        .render()
+        .contains("Run: Task checkout is on another Machine"));
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
     assert_eq!(
         window.workspaces[0].layout.children[0].subject.as_deref(),

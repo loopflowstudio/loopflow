@@ -470,8 +470,13 @@ prompt budgets.
 
 Desktop inspection reports registered repository/window identities, selection,
 reading availability and retained Machine/checkout pane trees with focus, zoom
-and hidden panes. Current Rust Task recommendations are forwarded, not recomputed;
-stale readings supply none. Inspection neither focuses windows nor opens clients.
+and hidden panes. `task` forwards Rust's recommendation and `run_control`;
+`session` forwards its actions, including unavailable reasons and takeover warnings.
+Each has its own reading state: a Session failure cannot invalidate current Task
+evidence, or vice versa. Saved, failed and absent subjects supply no actions.
+Task readings retain roadmap-generation and condition-observation dates. Session
+observation time is explicitly unavailable; the UI snapshot time is not source
+freshness. Inspection neither focuses windows nor opens clients.
 It requires macOS and a running app with automation access; failure leaves
 `lf task status <task>` available in the terminal. Arrangement, terminal I/O and
 composed Session-plus-diff opening are not yet exposed by this command.

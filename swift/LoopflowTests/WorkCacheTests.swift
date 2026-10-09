@@ -65,6 +65,14 @@ struct WorkCacheTests {
         let session = try #require(returning.sessions.value?.first)
         #expect(session.state == .unknown)
         #expect(session.actions.map(\.kind) == [.open])
+        returning.select(.task(id: task.id))
+        returning.navigation.selectedSessionId = session.id
+        let inspection = returning.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(inspection.task?.reading == "saved")
+        #expect(inspection.task?.actions == nil)
+        #expect(inspection.task?.runControl == nil)
+        #expect(inspection.session?.reading == "saved")
+        #expect(inspection.session?.actions == nil)
     }
 
     @Test("A failed refresh keeps the saved workspace under one truthful status")

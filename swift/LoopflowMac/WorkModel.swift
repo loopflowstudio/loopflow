@@ -267,16 +267,55 @@ final class WorkModel {
         case .current: reading = "current"
         case .failed: reading = "unavailable"
         }
-        // Cached Workspace/Task text is evidence, never an actionable reading.
-        let action = reading == "current" && selection?.kind == .task
-            ? roadmap.value?.waves.flatMap { $0.tasks.items }.first {
-                $0.id == selection?.id || $0.runtime?.workId == selection?.id
-            }?.actions : nil
         return DesktopWindowInspection(repository: repository, window: window.uuidString,
             path: repoPath, selectionKind: selection?.kind.rawValue, selectionId: selection?.id,
             selectedSession: navigation.selectedSessionId, reading: reading, reason: workStatus.message,
-            recommendedAction: action?.recommended?.rawValue, actionReason: action?.reason,
+            task: inspectSelectedTask(), session: inspectSelectedSession(),
             supportedOperations: ["inspect"], workspaces: workspaces.inspect(), layouts: workspaces.inspectLayouts())
+    }
+
+    private func inspectSelectedTask() -> DesktopTaskInspection? {
+        guard let selection, selection.kind == .task else { return nil }
+        // Never use task(id:): its historical fallback remains useful for
+        // display after removal, but is not a current action reading.
+        let task = roadmap.value?.waves.flatMap { $0.tasks.items }.first {
+            $0.id == selection.id || $0.runtime?.workId == selection.id
+        }
+        let state: String
+        let reason: String?
+        switch roadmap {
+        case .loading: (state, reason) = ("loading", "Planning has not been read")
+        case .unavailable(_, let error): (state, reason) = ("unavailable", error)
+        case .available where showsSavedPlanning:
+            (state, reason) = ("saved", "Saved planning is not a current action reading")
+        case .available where task == nil:
+            (state, reason) = ("unavailable", "Selected Task is not available in the current planning reading")
+        case .available: (state, reason) = ("current", nil)
+        }
+        return DesktopTaskInspection(id: selection.id, reading: state, reason: reason,
+            roadmapGeneratedAt: roadmap.value?.generatedAt, conditionObservedAt: task?.condition.observedAt,
+            actions: state == "current" ? task?.actions : nil,
+            runControl: state == "current" ? task?.runControl : nil)
+    }
+
+    private func inspectSelectedSession() -> DesktopSessionInspection? {
+        guard let id = navigation.selectedSessionId else { return nil }
+        let record = sessions.value?.first { $0.id == id }
+        let state: String
+        let reason: String?
+        switch sessions {
+        case .loading: (state, reason) = ("loading", "Sessions have not been read")
+        case .unavailable(_, let error): (state, reason) = ("unavailable", error)
+        case .available where savedSessionRepos.contains(repoPath ?? ""):
+            (state, reason) = ("saved", "Saved Sessions are not a current action reading")
+        case .available where sessionsRefresh?.repo == repoPath:
+            (state, reason) = ("updating", "Session enumeration is not complete")
+        case .available where record == nil:
+            (state, reason) = ("unavailable", "Selected Session is absent from the current Session reading")
+        case .available: (state, reason) = ("current", nil)
+        }
+        return DesktopSessionInspection(id: id, machineId: record?.workspace?.machineId,
+            reading: state, reason: reason, observedAt: nil, actions: state == "current" ? record?.actions : nil)
     }
 
     var taskHistoryFilters: [String: TaskHistoryFilter] = [:]

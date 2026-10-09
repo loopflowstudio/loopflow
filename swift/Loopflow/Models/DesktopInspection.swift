@@ -21,24 +21,69 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let selectedSession: String?
     public let reading: String
     public let reason: String?
-    public let recommendedAction: String?
-    public let actionReason: String?
+    public let task: DesktopTaskInspection?
+    public let session: DesktopSessionInspection?
     public let supportedOperations: [String]
     public let workspaces: [DesktopWorkspaceInspection]
     public let layouts: [DesktopWorktreeInspection]
 
     public init(repository: String, window: String, path: String?, selectionKind: String?, selectionId: String?,
-                selectedSession: String?, reading: String, reason: String?, recommendedAction: String?,
-                actionReason: String?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection]) {
+                selectedSession: String?, reading: String, reason: String?, task: DesktopTaskInspection?,
+                session: DesktopSessionInspection?, supportedOperations: [String], workspaces: [DesktopWorkspaceInspection], layouts: [DesktopWorktreeInspection]) {
         self.repository = repository; self.window = window; self.path = path
         self.selectionKind = selectionKind; self.selectionId = selectionId; self.selectedSession = selectedSession
-        self.reading = reading; self.reason = reason; self.recommendedAction = recommendedAction
-        self.actionReason = actionReason; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts
+        self.reading = reading; self.reason = reason; self.task = task
+        self.session = session; self.supportedOperations = supportedOperations; self.workspaces = workspaces; self.layouts = layouts
     }
     enum CodingKeys: String, CodingKey {
-        case repository, window, path, reading, reason, workspaces, layouts
+        case repository, window, path, reading, reason, task, session, workspaces, layouts
         case selectionKind = "selection_kind", selectionId = "selection_id", selectedSession = "selected_session"
-        case recommendedAction = "recommended_action", actionReason = "action_reason", supportedOperations = "supported_operations"
+        case supportedOperations = "supported_operations"
+    }
+}
+
+/// Source readings are separate from the UI snapshot time and from each other.
+/// Unavailable/saved evidence retains identity and dates, but never legal actions.
+public struct DesktopTaskInspection: Codable, Sendable, Equatable {
+    public let id: String
+    public let reading: String
+    public let reason: String?
+    public let roadmapGeneratedAt: String?
+    public let conditionObservedAt: String?
+    public let actions: TaskActionModel?
+    public let runControl: TaskRunControl?
+
+    public init(id: String, reading: String, reason: String?, roadmapGeneratedAt: String?,
+                conditionObservedAt: String?, actions: TaskActionModel?, runControl: TaskRunControl?) {
+        self.id = id; self.reading = reading; self.reason = reason
+        self.roadmapGeneratedAt = roadmapGeneratedAt; self.conditionObservedAt = conditionObservedAt
+        self.actions = actions; self.runControl = runControl
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, reading, reason, actions
+        case roadmapGeneratedAt = "roadmap_generated_at", conditionObservedAt = "condition_observed_at"
+        case runControl = "run_control"
+    }
+}
+
+public struct DesktopSessionInspection: Codable, Sendable, Equatable {
+    public let id: String
+    public let machineId: String?
+    public let reading: String
+    public let reason: String?
+    /// The Session reader currently supplies no observation timestamp. Do not
+    /// substitute UI inspection time or the provider's generation for freshness.
+    public let observedAt: String?
+    public let actions: [SessionAction]?
+
+    public init(id: String, machineId: String?, reading: String, reason: String?,
+                observedAt: String?, actions: [SessionAction]?) {
+        self.id = id; self.machineId = machineId; self.reading = reading; self.reason = reason
+        self.observedAt = observedAt; self.actions = actions
+    }
+    enum CodingKeys: String, CodingKey {
+        case id, reading, reason, actions
+        case machineId = "machine_id", observedAt = "observed_at"
     }
 }
 

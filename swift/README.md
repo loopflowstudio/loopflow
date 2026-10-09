@@ -552,6 +552,9 @@ lf context --explain --task LOO-427 --json
 Inspection reads the open repository windows through macOS automation without
 launching the app, changing focus or acquiring a Session. Window incarnations,
 Machine/checkout layouts and hidden panes come from the retained workspace owners;
-stale planning cannot supply legal actions. This reports model state, not rendered
+Task recommendations/run legality and Session actions retain their separate
+source availability. Saved or failed readings supply no actions. Inspection
+preserves Task source dates; Session observation time remains unavailable rather
+than borrowing the UI snapshot time. This reports model state, not rendered
 usability or provider readiness. Pane controls and composed opening remain separate
 implementation work.

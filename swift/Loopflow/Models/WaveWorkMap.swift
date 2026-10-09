@@ -231,7 +231,7 @@ public enum TaskConditionState: String, Decodable, Sendable, Hashable {
 
 /// The lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
-public enum TaskAction: String, Decodable, Sendable, Hashable {
+public enum TaskAction: String, Codable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
     case startNextPr = "start_next_pr"
@@ -240,7 +240,7 @@ public enum TaskAction: String, Decodable, Sendable, Hashable {
 
 /// The next legal action and why. A nil recommendation means Task Work has not
 /// started; callers do not reconstruct a matrix of blocked alternatives.
-public struct TaskActionModel: Decodable, Sendable, Hashable {
+public struct TaskActionModel: Codable, Sendable, Hashable {
     public let recommended: TaskAction?
     public let reason: String
 }

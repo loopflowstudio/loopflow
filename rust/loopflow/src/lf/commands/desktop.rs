@@ -3,6 +3,10 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::ops::human_session::SessionAction;
+use crate::ops::task_actions::TaskActionModel;
+use crate::ops::task_run::TaskRunControl;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DesktopInspection {
     pub observed_at: i64,
@@ -19,11 +23,32 @@ pub struct DesktopWindowInspection {
     pub selected_session: Option<String>,
     pub reading: String,
     pub reason: Option<String>,
-    pub recommended_action: Option<String>,
-    pub action_reason: Option<String>,
+    pub task: Option<DesktopTaskInspection>,
+    pub session: Option<DesktopSessionInspection>,
     pub supported_operations: Vec<String>,
     pub workspaces: Vec<DesktopWorkspaceInspection>,
     pub layouts: Vec<DesktopWorktreeInspection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopTaskInspection {
+    pub id: String,
+    pub reading: String,
+    pub reason: Option<String>,
+    pub roadmap_generated_at: Option<String>,
+    pub condition_observed_at: Option<String>,
+    pub actions: Option<TaskActionModel>,
+    pub run_control: Option<TaskRunControl>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DesktopSessionInspection {
+    pub id: String,
+    pub machine_id: Option<String>,
+    pub reading: String,
+    pub reason: Option<String>,
+    pub observed_at: Option<String>,
+    pub actions: Option<Vec<SessionAction>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -114,11 +139,59 @@ impl DesktopInspection {
             if let Some(reason) = &window.reason {
                 lines.push(format!("  {reason}"));
             }
-            if let Some(action) = &window.recommended_action {
+            if let Some(task) = &window.task {
                 lines.push(format!(
-                    "  Rust action: {action} · {}",
-                    window.action_reason.as_deref().unwrap_or("")
+                    "  Task {}: {} · {}",
+                    task.id,
+                    task.reading,
+                    task.reason.as_deref().unwrap_or("")
                 ));
+                lines.push(format!(
+                    "    Roadmap generated: {} · condition observed: {}",
+                    task.roadmap_generated_at
+                        .as_deref()
+                        .unwrap_or("unavailable"),
+                    task.condition_observed_at
+                        .as_deref()
+                        .unwrap_or("unavailable")
+                ));
+                if let Some(actions) = &task.actions {
+                    lines.push(format!(
+                        "    Recommended: {} · {}",
+                        actions
+                            .recommended
+                            .map(|action| action.as_str())
+                            .unwrap_or("none"),
+                        actions.reason
+                    ));
+                }
+                if let Some(control) = &task.run_control {
+                    lines.push(format!(
+                        "    Run: {}",
+                        control.unavailable.as_deref().unwrap_or("available")
+                    ));
+                }
+            }
+            if let Some(session) = &window.session {
+                lines.push(format!(
+                    "  Session {} on {}: {} · {}",
+                    session.id,
+                    session.machine_id.as_deref().unwrap_or("unavailable"),
+                    session.reading,
+                    session.reason.as_deref().unwrap_or("")
+                ));
+                lines.push(format!(
+                    "    Observed: {}",
+                    session.observed_at.as_deref().unwrap_or("unavailable")
+                ));
+                for action in session.actions.iter().flatten() {
+                    lines.push(format!(
+                        "    {}: {} · {}",
+                        action.label,
+                        action.unavailable_reason.as_deref().unwrap_or("available"),
+                        action.help
+                    ));
+                }
             }
             lines.push(format!(
                 "  Supported: {}",

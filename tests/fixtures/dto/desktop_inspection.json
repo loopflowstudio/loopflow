@@ -10,8 +10,6 @@
       "selected_session": "session-one",
       "reading": "unavailable",
       "reason": "Registry read failed; retained views remain available",
-      "recommended_action": null,
-      "action_reason": null,
       "supported_operations": [
         "inspect"
       ],
@@ -64,7 +62,67 @@
             "children": []
           }
         }
-      ]
+      ],
+      "task": {
+        "id": "task_44444444444444444444444444444444",
+        "reading": "unavailable",
+        "reason": "Planning read failed",
+        "roadmap_generated_at": "2026-10-08T19:00:00Z",
+        "condition_observed_at": "2026-10-08T18:59:58Z",
+        "actions": null,
+        "run_control": null
+      },
+      "session": {
+        "id": "session-one",
+        "machine_id": "home_11111111111111111111111111111111",
+        "reading": "current",
+        "reason": null,
+        "observed_at": null,
+        "actions": [
+          {
+            "kind": "open",
+            "label": "Open here",
+            "help": "Open this Session in a terminal",
+            "unavailable_reason": "Session is active elsewhere; use Move here"
+          },
+          {
+            "kind": "move_here",
+            "label": "Move here",
+            "help": "Stop the other client and resume here; unsent text there is lost",
+            "unavailable_reason": null
+          }
+        ]
+      }
+    },
+    {
+      "repository": "repo_other",
+      "window": "other-window",
+      "path": "/repo",
+      "selection_kind": "task",
+      "selection_id": "task_44444444444444444444444444444444",
+      "selected_session": null,
+      "reading": "current",
+      "reason": null,
+      "supported_operations": [
+        "inspect"
+      ],
+      "workspaces": [],
+      "layouts": [],
+      "task": {
+        "id": "task_44444444444444444444444444444444",
+        "reading": "current",
+        "reason": null,
+        "roadmap_generated_at": "2026-10-08T19:00:00Z",
+        "condition_observed_at": "2026-10-08T18:59:58Z",
+        "actions": {
+          "recommended": "resume",
+          "reason": "Inspect earlier Flows before continuing"
+        },
+        "run_control": {
+          "unavailable": "Task checkout is on another Machine"
+        }
+      },
+      "session": null
     }
   ]
 }

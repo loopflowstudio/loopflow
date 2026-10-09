@@ -396,10 +396,119 @@ struct WorkDestinationTests {
         #expect(model.showsTaskLink == !scoped)
     }
 
+    @Test func inspectionForwardsTaskControlIndependentlyOfSessionFailure() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read or mutate Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.openTaskDestination(wave: wave, task: task)
+        model.navigation.selectedSessionId = "not-read-yet"
+        let workspaces = SessionsWorkspaceRegistry()
+        let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
+        #expect(report.reading == "loading")
+        #expect(report.task?.reading == "current")
+        #expect(report.task?.actions == task.actions)
+        #expect(report.task?.runControl == task.runControl)
+        #expect(report.task?.roadmapGeneratedAt == snapshot.generatedAt)
+        #expect(report.task?.conditionObservedAt == task.condition.observedAt)
+        #expect(report.session?.reading == "loading")
+        #expect(report.session?.actions == nil)
+        #expect(report.session?.observedAt == nil)
+        #expect(workspaces.inspect().isEmpty)
+    }
+
+    @Test func inspectionKeepsStaleDatesButNeverHistoricalActions() throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let model = WorkModel(query: RegistryQuery { _, _ in
+            throw RegistryQueryError("Inspection must not read or mutate Work")
+        }, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.openTaskDestination(wave: wave, task: task)
+        model.applyFixture(roadmap: .unavailable(lastGood: snapshot, reason: "Disconnected"),
+                           waves: .available([]), workActivity: .loading, repos: [])
+        let stale = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(stale.task?.reading == "unavailable")
+        #expect(stale.task?.reason == "Disconnected")
+        #expect(stale.task?.roadmapGeneratedAt == snapshot.generatedAt)
+        #expect(stale.task?.actions == nil)
+        #expect(stale.task?.runControl == nil)
+
+        let empty = RoadmapSnapshot(generatedAt: "2026-10-08T21:00:00Z", waves: [])
+        model.applyFixture(roadmap: .available(empty), waves: .available([]), workActivity: .loading, repos: [])
+        model.select(.task(id: task.id))
+        let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(removed.task?.reading == "unavailable")
+        #expect(removed.task?.actions == nil)
+        #expect(removed.task?.conditionObservedAt == nil)
+        #expect(removed.task?.roadmapGeneratedAt == empty.generatedAt)
+    }
+
+    @Test func inspectionForwardsSessionActionsThenWithdrawsThemOnReadFailure() async throws {
+        let record = try renameFixtureRecord("selected-session", title: "Review", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.first == "session" else { throw RegistryQueryError("No other reads permitted") }
+            if await reads.next() > 1 { throw RegistryQueryError("Session source disconnected") }
+            return #"{"entries":[\#(encoded)],"next":null}"#
+        }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.navigation.selectedSessionId = record.id
+        let registry = SessionsWorkspaceRegistry()
+        let first = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+        #expect(first.session?.reading == "current")
+        #expect(first.session?.actions == record.actions)
+        #expect(first.session?.machineId == record.workspace?.machineId)
+        #expect(first.task == nil)
+        await model.refreshSessions()
+        let failed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: registry)
+        #expect(failed.session?.id == record.id)
+        #expect(failed.session?.reading == "unavailable")
+        #expect(failed.session?.reason == "Session source disconnected")
+        #expect(failed.session?.actions == nil)
+        #expect(model.navigation.selectedSessionId == record.id)
+        #expect(registry.inspect().isEmpty)
+    }
+
+    @Test func inspectionDoesNotOfferActionsFromAnIncompleteSessionEnumeration() async throws {
+        let record = try renameFixtureRecord("retained-session", title: "Draft", work: nil)
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let reads = DestinationReadCounter()
+        let barrier = LinkedDestinationBarrier()
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            guard args.first == "session" else { throw RegistryQueryError("No other reads permitted") }
+            if args.contains("--after") {
+                await barrier.wait("last-page")
+                return #"{"entries":[],"next":null}"#
+            }
+            if await reads.next() == 1 { return #"{"entries":[\#(encoded)],"next":null}"# }
+            return #"{"entries":[],"next":"last-page"}"#
+        }, repoPath: "/src/loopflow")
+        await model.refreshSessions()
+        model.navigation.selectedSessionId = record.id
+        let refreshing = Task { await model.refreshSessions() }
+        while !(await barrier.contains("last-page")) { await Task.yield() }
+        let partial = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(partial.session?.reading == "updating")
+        #expect(partial.session?.actions == nil)
+        #expect(model.sessions.value?.contains { $0.id == record.id } == true)
+        await barrier.release("last-page")
+        await refreshing.value
+        let removed = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: SessionsWorkspaceRegistry())
+        #expect(removed.session?.reading == "unavailable")
+        #expect(removed.session?.actions == nil)
+        #expect(model.navigation.selectedSessionId == record.id)
+    }
+
     private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
         DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, selectedSession: nil, reading: "loading", reason: nil,
-            recommendedAction: nil, actionReason: nil, supportedOperations: ["inspect"], workspaces: [], layouts: [])
+            task: nil, session: nil, supportedOperations: ["inspect"], workspaces: [], layouts: [])
     }
 
     @Test func inspectionIncludesOnlyRegisteredWindowIncarnationsWithoutFocusing() {

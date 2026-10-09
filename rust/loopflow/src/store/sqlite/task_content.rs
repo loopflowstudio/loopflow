@@ -47,31 +47,14 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        super::children::require_task_not_deleted(&tx, &current)?;
+        let current = validate_refile(&tx, id, expected_project, destination)?;
         if current.project_id == *destination {
             return Ok(());
         }
-        if current.project_id != *expected_project {
-            return Err(StoreError::InvalidAuthority(
-                "Task membership changed before refiling".into(),
-            ));
-        }
-        super::durable::require_selected_project(&tx, destination)?;
-        let changed = tx.execute(
-            &format!("UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3
-             WHERE id=?1 AND worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
-             AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
-             AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
-             AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
-             AND NOT EXISTS({})", super::task_work::process_lfids("?1")),
+        tx.execute(
+            "UPDATE tasks SET project_id=?2,planning_revision=planning_revision+1,updated_at=?3 WHERE id=?1",
             params![id.as_str(), destination.as_str(), now_unix()],
         )?;
-        if changed != 1 {
-            return Err(StoreError::InvalidAuthority(
-                "a Task with recorded work retains its owning Wave".into(),
-            ));
-        }
         PlanningChanges::Task(id).record(
             &tx,
             "project_id",
@@ -80,6 +63,17 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    pub(crate) fn validate_task_refile(
+        &self,
+        id: &TaskId,
+        expected_project: &ProjectId,
+        destination: &ProjectId,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let snapshot = conn.transaction()?;
+        validate_refile(&snapshot, id, expected_project, destination).map(|_| ())
     }
 
     pub(crate) fn validate_task_edit(
@@ -175,4 +169,41 @@ fn validate_edit(
         return Err(StoreError::InvalidData("Task title cannot be empty".into()));
     }
     Ok(task)
+}
+
+fn validate_refile(
+    conn: &rusqlite::Connection,
+    id: &TaskId,
+    expected_project: &ProjectId,
+    destination: &ProjectId,
+) -> StoreResult<Task> {
+    let current = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
+    super::children::require_task_not_deleted(conn, &current)?;
+    if current.project_id == *destination {
+        return Ok(current);
+    }
+    if current.project_id != *expected_project {
+        return Err(StoreError::InvalidAuthority(
+            "Task membership changed before refiling".into(),
+        ));
+    }
+    super::durable::require_selected_project(conn, destination)?;
+    let unallocated: bool = conn.query_row(
+        &format!(
+            "SELECT worktree IS NULL AND started_at IS NULL AND abandon_requested_at IS NULL
+         AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1)
+         AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1)
+         AND NOT EXISTS(SELECT 1 FROM task_prs WHERE task_id=?1)
+         AND NOT EXISTS({}) FROM tasks WHERE id=?1",
+            super::task_work::process_lfids("?1")
+        ),
+        [id.as_str()],
+        |row| row.get(0),
+    )?;
+    if !unallocated {
+        return Err(StoreError::InvalidAuthority(
+            "a Task with recorded work retains its owning Wave".into(),
+        ));
+    }
+    Ok(current)
 }

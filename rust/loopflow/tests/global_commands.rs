@@ -2482,3 +2482,281 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
 }
+
+#[test]
+fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    for wave in ["source", "destination"] {
+        success(
+            command(
+                home.path(),
+                repo.path(),
+                &["wave", "ensure", wave, "--json"],
+            )
+            .output()
+            .unwrap(),
+        );
+    }
+    // Setup owns these locks; preview must not recreate them.
+    fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
+    let path = home.path().join(".lf/loopflow.db");
+    let store = SqliteStore::new(&path).unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let project = |wave: &str| -> String {
+        db.query_row(
+            "SELECT current_project_id FROM waves WHERE name=?1",
+            [wave],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    let source = project("source");
+    let destination = project("destination");
+    let task = store
+        .create_task(&loopflow::planning::NewTask {
+            id: loopflow::durable::TaskId::new(),
+            project_id: loopflow::durable::ProjectId::parse(&source).unwrap(),
+            title: "Unallocated work".into(),
+            description: String::new(),
+        })
+        .unwrap();
+    let read = |wave: &str| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &[
+                    "task",
+                    "refile",
+                    task.id.as_str(),
+                    "--wave",
+                    wave,
+                    "--explain",
+                    "--json",
+                ],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap()
+    };
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let report = read("destination");
+    assert_eq!(report["action"]["kind"], "refile", "{report}");
+    assert_eq!(report["action"]["project"], destination);
+    assert_eq!(report["action"]["previous_project"], source);
+    assert_eq!(report["impediments"], serde_json::json!([]), "{report}");
+    let destination_wave: String = db
+        .query_row("SELECT id FROM waves WHERE name='destination'", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(report["action"]["wave"], destination_wave);
+    assert_eq!(read(&destination_wave)["action"], report["action"]);
+    let absent = read("unregistered");
+    assert!(absent["action"].is_null());
+    assert!(absent["unavailable"].to_string().contains("not performed"));
+    let text = success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "refile",
+                task.id.as_str(),
+                "--wave",
+                "destination",
+                "--explain",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert!(text.contains("Intended action: refile Task to Wave"));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(&path).unwrap() == before,
+        "preview changed checkpointed storage"
+    );
+    // Execution addresses the same durable destination, not a new Wave named after its ID.
+    let second = store
+        .create_task(&loopflow::planning::NewTask {
+            id: loopflow::durable::TaskId::new(),
+            project_id: task.project_id.clone(),
+            title: "Refile by ID".into(),
+            description: String::new(),
+        })
+        .unwrap();
+    success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "refile",
+                second.id.as_str(),
+                "--wave",
+                &destination_wave,
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    let actual: String = db
+        .query_row(
+            "SELECT project_id FROM tasks WHERE id=?1",
+            [second.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(actual, destination);
+    let count: i64 = db
+        .query_row("SELECT count(*) FROM waves", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
+    fs::remove_dir_all(home.path().join(".lf/chapter-locks")).unwrap();
+    // A recorded checkout prevents moving ownership even without a live process.
+    db.execute(
+        "UPDATE tasks SET worktree=?2,checkout_machine_id=?3 WHERE id=?1",
+        rusqlite::params![
+            task.id.as_str(),
+            repo.path().to_str().unwrap(),
+            store.local_machine().unwrap().id.as_str()
+        ],
+    )
+    .unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let refused = read("destination");
+    assert!(
+        refused["impediments"].to_string().contains("recorded work"),
+        "{refused}"
+    );
+    assert_eq!(read("source")["impediments"], serde_json::json!([]));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(&path).unwrap() == before,
+        "preview changed checkpointed storage"
+    );
+    let remote = loopflow::durable::MachineId::new();
+    store
+        .add_machine(
+            &remote,
+            "must-not-contact.invalid",
+            "fixture-peer",
+            "/peer/repo",
+        )
+        .unwrap();
+    db.execute("INSERT INTO work_placements(wave_id,machine_id,enabled,placed_at,provenance)
+        VALUES(?1,?2,1,1,'explicit') ON CONFLICT(wave_id) DO UPDATE SET machine_id=excluded.machine_id",
+        rusqlite::params![destination_wave, remote.as_str()]).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let remote = read("destination");
+    assert!(
+        remote["impediments"]
+            .to_string()
+            .contains("run this command with"),
+        "{remote}"
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+    assert!(!home.path().join(".lf/chapter-locks").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn task_planning_explain_save_validates_draft_without_changing_files_or_storage() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("save-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "save-proof",
+        &repo.head_sha(),
+    );
+    fs::write(repo.path().join("note.md"), "Original\r\n").unwrap();
+    fs::write(repo.path().join("binary"), [0, 255]).unwrap();
+    std::os::unix::fs::symlink("note.md", repo.path().join("link.md")).unwrap();
+    let snapshot: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "file", "INF-123", "note.md", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let revision = snapshot["revision"].as_str().unwrap();
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let draft = tempfile::NamedTempFile::new().unwrap();
+    let read = |file: &str, revision: &str, content: &str, json: bool| -> String {
+        fs::write(draft.path(), content).unwrap();
+        let mut args = vec![
+            "task",
+            "save",
+            "INF-123",
+            file,
+            "--revision",
+            revision,
+            "--explain",
+        ];
+        if json {
+            args.push("--json");
+        }
+        success(
+            command(home.path(), repo.path(), &args)
+                .stdin(fs::File::open(draft.path()).unwrap())
+                .output()
+                .unwrap(),
+        )
+    };
+    let report: serde_json::Value =
+        serde_json::from_str(&read("note.md", revision, "New 🦀\r\n", true)).unwrap();
+    assert_eq!(
+        report["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
+    assert_eq!(
+        report["action"],
+        serde_json::json!({"kind":"save", "path":"note.md", "revision":revision, "draft_bytes":10})
+    );
+    assert_eq!(report["impediments"], serde_json::json!([]), "{report}");
+    assert!(read("note.md", revision, "Draft", false).contains("Intended action: save \"note.md\""));
+    for (file, rev, content) in [
+        ("../escape", revision, "Draft"),
+        (".git/config", revision, "Draft"),
+        ("note.md", "stale", "Draft"),
+        ("note.md", revision, "Bad\0draft"),
+        ("link.md", revision, "Draft"),
+        ("binary", revision, "Draft"),
+        ("missing", revision, "Draft"),
+    ] {
+        let refused: serde_json::Value =
+            serde_json::from_str(&read(file, rev, content, true)).unwrap();
+        assert!(
+            !refused["impediments"].as_array().unwrap().is_empty(),
+            "{refused}"
+        );
+    }
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(&path).unwrap() == before,
+        "preview changed checkpointed storage"
+    );
+    assert_eq!(
+        fs::read(repo.path().join("note.md")).unwrap(),
+        b"Original\r\n"
+    );
+    assert_eq!(fs::read(repo.path().join("binary")).unwrap(), [0, 255]);
+    assert!(!repo.path().join(".git/loopflow-file-recovery").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}

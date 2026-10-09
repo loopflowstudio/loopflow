@@ -165,12 +165,36 @@ fn parent_directory(root: &Path, relative: &str) -> OpsResult<(File, CString)> {
     Ok((directory, name))
 }
 
-fn save(
+enum SavePreparation {
+    Ready(SaveTarget),
+    Changed(TaskFileSave),
+}
+
+struct SaveTarget {
+    path: String,
+    parent: File,
+    name: CString,
+    permissions: fs::Permissions,
+}
+
+pub(super) fn validate_save(
     workspace: TaskWorkspace<'_>,
     path: &str,
     revision: &str,
     content: &str,
-) -> OpsResult<TaskFileSave> {
+) -> OpsResult<String> {
+    match prepare_save(workspace, path, revision, content)? {
+        SavePreparation::Ready(target) => Ok(target.path),
+        SavePreparation::Changed(result) => Err(task_error(result.message)),
+    }
+}
+
+fn prepare_save(
+    workspace: TaskWorkspace<'_>,
+    path: &str,
+    revision: &str,
+    content: &str,
+) -> OpsResult<SavePreparation> {
     let path = validate_task_relative_path(path)?;
     if Path::new(&path)
         .components()
@@ -183,12 +207,12 @@ fn save(
     }
     let current = file_snapshot(workspace, &path)?;
     if current.state != TaskFileState::Text || current.revision.as_deref() != Some(revision) {
-        return Ok(TaskFileSave {
+        return Ok(SavePreparation::Changed(TaskFileSave {
             file: current,
             published: false,
             message: "File changed on disk. Draft retained; reload or copy it before saving again."
                 .into(),
-        });
+        }));
     }
     let (parent, name) = parent_directory(workspace.worktree, &path)?;
     // SAFETY: parent and name remain alive and openat creates an owned descriptor.
@@ -206,13 +230,36 @@ fn save(
     let original = unsafe { File::from_raw_fd(fd) };
     let permissions = original.metadata()?.permissions();
     if revision_of(original)? != revision {
-        return Ok(TaskFileSave {
+        return Ok(SavePreparation::Changed(TaskFileSave {
             file: file_snapshot(workspace, &path)?,
             published: false,
             message: "File changed before Save. Draft retained.".into(),
-        });
+        }));
     }
 
+    Ok(SavePreparation::Ready(SaveTarget {
+        path,
+        parent,
+        name,
+        permissions,
+    }))
+}
+
+fn save(
+    workspace: TaskWorkspace<'_>,
+    path: &str,
+    revision: &str,
+    content: &str,
+) -> OpsResult<TaskFileSave> {
+    let SaveTarget {
+        path,
+        parent,
+        name,
+        permissions,
+    } = match prepare_save(workspace, path, revision, content)? {
+        SavePreparation::Ready(target) => target,
+        SavePreparation::Changed(result) => return Ok(result),
+    };
     let root = recovery_root(workspace, &path)?;
     fs::create_dir_all(&root)?;
     let directory = root.join(format!(

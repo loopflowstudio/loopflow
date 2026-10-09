@@ -4880,23 +4880,30 @@ pub fn task_edit(
 pub fn task_refile(repo: &Path, issue: &str, wave: &str) -> OpsResult<super::pm::PmUpdateResult> {
     block_on_task(async {
         let (store, task) = super::pm::resolve_saved_task(repo, None, issue).await?;
-        let locator = crate::work::wave::WaveLocator::discover(repo, wave).map_err(task_error)?;
-        if store
-            .get_wave_at(&locator)
-            .await
-            .map_err(task_error)?
-            .is_none()
-        {
-            super::project::ensure(repo, wave).await?;
-        }
-        let destination = crate::work::wave::context::resolve_managed_wave(
+        let destination = match crate::work::wave::context::resolve_managed_wave(
             Some(&store),
             Some(repo),
             Some(wave),
             None,
         )
         .await
-        .map_err(task_error)?;
+        {
+            Ok(destination) => destination,
+            Err(crate::work::wave::context::WaveResolveError::UnknownExplicit(_))
+                if wave.trim().parse::<crate::id::WaveId>().is_err() =>
+            {
+                super::project::ensure(repo, wave).await?;
+                crate::work::wave::context::resolve_managed_wave(
+                    Some(&store),
+                    Some(repo),
+                    Some(wave),
+                    None,
+                )
+                .await
+                .map_err(task_error)?
+            }
+            Err(error) => return Err(task_error(error)),
+        };
         let mut waves = vec![owning_wave(&store, &task).await?, destination.clone()];
         waves.sort_by(|a, b| a.id().as_str().cmp(b.id().as_str()));
         waves.dedup_by(|a, b| a.id() == b.id());

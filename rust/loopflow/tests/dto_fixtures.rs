@@ -1015,6 +1015,14 @@ fn task_planning_explanations_preserve_intent_and_effects() {
             ..
         })
     ));
+    assert!(
+        matches!(&reports[5].action, Some(TaskPlanningAction::Refile { wave, project, previous_project })
+        if wave == "destination-wave" && project == "destination-project" && previous_project == "source-project")
+    );
+    assert!(
+        matches!(&reports[6].action, Some(TaskPlanningAction::Save { path, revision, draft_bytes: 42 })
+        if path == "scratch/note.md" && revision == "observed-file-revision")
+    );
     assert!(reports[4].action.is_none());
     assert!(!reports[4].impediments.is_empty());
     assert_eq!(

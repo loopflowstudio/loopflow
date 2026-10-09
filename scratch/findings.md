@@ -22,12 +22,8 @@ Current alternatives rejected by the accepted direction: repository-pairing
 registry; independent per-machine planning trees merged by Desktop; clone-name
 or remote-URL matching as Work identity; rewriting Machine defaults per request.
 
-## October 8 implementation review
-
-Checkout-location review and corrected fixtures: `f881ae647:scratch/findings.md`,
-this heading. SQL membership and file comparisons now respect recorded Machine
-identity; unknown location stays unavailable, preserving explicit binds.
-Gate owns installed migration and full Session-lifecycle proof.
+Checkout-location review: `f881ae647:scratch/findings.md`, **October 8
+implementation review**. Gate retains migration/Session-lifecycle coverage.
 
 ## Integration boundary — October 8
 
@@ -207,3 +203,15 @@ mislabeling default inbox selection as inherited for empty/whitespace declaratio
 Provenance now follows the resolved branch. The public CLI fixture checks explicit
 override, inherited identity and empty/whitespace defaults against unchanged
 checkpointed storage. It establishes no admission, peer or native acceptance.
+
+## Refile and file-save explanation — October 9
+
+Preview reuses the store's unallocated-work predicate inside a read snapshot; writes
+revalidate inside the immediate transaction. File preview and exchange share pinned
+parent/file reads, text/path validation and both revision checks; only exchange
+creates recovery. Review found execution's name-first initialization could create a
+Wave named after a durable destination ID. Resolution now precedes initialization;
+unknown IDs never authorize creating a named Wave.
+The first refile fixture failed because setup had already created chapter locks
+(`/tmp/loo427-refile.log`); remove owned setup locks before testing preview absence.
+This is no peer admission, synchronization or native acceptance proof.

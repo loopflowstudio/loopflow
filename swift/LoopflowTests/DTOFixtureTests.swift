@@ -59,6 +59,8 @@ struct DTOFixtureTests {
         #expect(reports[3].action == .comment(message: nil, steer: false, refresh: true))
         #expect(reports[4].action == nil)
         #expect(!reports[4].impediments.isEmpty)
+        #expect(reports[5].action == .refile(wave: "destination-wave", project: "destination-project", previousProject: "source-project"))
+        #expect(reports[6].action == .save(path: "scratch/note.md", revision: "observed-file-revision", draftBytes: 42))
         #expect(try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONEncoder().encode(reports)) == reports)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         wire[0].removeValue(forKey: "effects")

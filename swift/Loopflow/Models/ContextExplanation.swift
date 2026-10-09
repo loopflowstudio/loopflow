@@ -156,11 +156,15 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
     case create(title: String, description: String, project: String?)
     case edit(revision: UInt64, fields: [String])
     case comment(message: String?, steer: Bool, refresh: Bool)
+    case refile(wave: String, project: String, previousProject: String)
+    case save(path: String, revision: String, draftBytes: UInt64)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, title, description, project, revision, fields, message, steer, refresh
+        case kind, title, description, project, revision, fields, message, steer, refresh, wave, path
+        case previousProject = "previous_project"
+        case draftBytes = "draft_bytes"
     }
-    private enum Kind: String, Codable { case create, edit, comment }
+    private enum Kind: String, Codable { case create, edit, comment, refile, save }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -172,6 +176,14 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
         case .edit:
             self = .edit(revision: try values.decode(UInt64.self, forKey: .revision),
                          fields: try values.decode([String].self, forKey: .fields))
+        case .refile:
+            self = .refile(wave: try values.decode(String.self, forKey: .wave),
+                           project: try values.decode(String.self, forKey: .project),
+                           previousProject: try values.decode(String.self, forKey: .previousProject))
+        case .save:
+            self = .save(path: try values.decode(String.self, forKey: .path),
+                         revision: try values.decode(String.self, forKey: .revision),
+                         draftBytes: try values.decode(UInt64.self, forKey: .draftBytes))
         case .comment:
             self = .comment(message: try values.decodeIfPresent(String.self, forKey: .message),
                             steer: try values.decode(Bool.self, forKey: .steer),
@@ -191,6 +203,16 @@ public enum TaskPlanningAction: Codable, Equatable, Sendable {
             try values.encode(Kind.edit, forKey: .kind)
             try values.encode(revision, forKey: .revision)
             try values.encode(fields, forKey: .fields)
+        case .refile(let wave, let project, let previousProject):
+            try values.encode(Kind.refile, forKey: .kind)
+            try values.encode(wave, forKey: .wave)
+            try values.encode(project, forKey: .project)
+            try values.encode(previousProject, forKey: .previousProject)
+        case .save(let path, let revision, let draftBytes):
+            try values.encode(Kind.save, forKey: .kind)
+            try values.encode(path, forKey: .path)
+            try values.encode(revision, forKey: .revision)
+            try values.encode(draftBytes, forKey: .draftBytes)
         case .comment(let message, let steer, let refresh):
             try values.encode(Kind.comment, forKey: .kind)
             try values.encode(message, forKey: .message)

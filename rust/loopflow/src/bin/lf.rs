@@ -1798,6 +1798,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
     let piped_notes;
+    let file_draft;
     let planning = match &cli.command {
         Some(Commands::Task {
             cmd: TaskCommand::Create {
@@ -1853,6 +1854,29 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 steer: *steer,
             },
         )),
+        Some(Commands::Task {
+            cmd: TaskCommand::Refile { wave, .. },
+        }) => Some((
+            cli.wave.as_deref(),
+            loopflow::ops::task::TaskPlanningRequest::Refile { wave },
+        )),
+        Some(Commands::Task {
+            cmd: TaskCommand::Save { path, revision, .. },
+        }) => {
+            anyhow::ensure!(
+                !cli.context,
+                "--context requires an agent invocation; nothing was executed"
+            );
+            file_draft = read_task_draft()?;
+            Some((
+                cli.wave.as_deref(),
+                loopflow::ops::task::TaskPlanningRequest::Save {
+                    path,
+                    revision,
+                    content: &file_draft,
+                },
+            ))
+        }
         _ => None,
     };
     if let Some((wave, request)) = planning {

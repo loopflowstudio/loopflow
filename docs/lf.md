@@ -581,7 +581,7 @@ Moving to `end` describes completion and possible checkout cleanup but leaves PR
 reconciliation and completion gates explicitly unperformed; it grants no permission.
 Missing or remote execution evidence stays unavailable.
 
-`task create/edit/comment --explain` validates planning input through the same
+`task create/edit/comment/refile/save --explain` validates mutation input through the same
 owners as saving. JSON separates `resolution`, intended `action`, `effects`,
 `impediments` and `unavailable`. Creation reads the current Project and derives a
 title from piped notes normally; new Task identity and execution stay unallocated.
@@ -591,6 +591,11 @@ a connected thread read would refresh Linear, but preview never does.
 Missing registry, cold acquisition, Wave/Project initialization, comment provenance
 and synchronization delivery remain explicit uncertainties. No preview saves,
 imports, registers, refreshes or synchronizes anything; execution validates again.
+Refiling reports the destination Wave/current Project and recorded-work or Machine
+placement restrictions without registering or locking anything. File-save preview
+reads the draft from stdin, reports its byte count and expected revision, and uses
+the save owner's path, text and pinned-file checks. It writes neither files nor
+recovery receipts. Concurrent changes and publication permissions remain unreserved.
 Other Task commands still explain identity only, not their mutation arguments.
 
 `desktop open --explain` reports `resolution`, the proposed `url`, `impediments`

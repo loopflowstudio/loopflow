@@ -7,27 +7,15 @@ one PR. Those choices are settled. Recorded location, local inspection/arrangeme
 exact-target passive read transport are local; peer composition and native I/O
 remain unfinished.
 
-## Q1 — Selected: local operations and custom Git-ref Task sync (October 8)
+## Selected decisions — October 8–9
 
-Jack Heart selected execution-Machine-local operations and portable planning
-exchange: LOO-406 owns the writer/Linear, LOO-412 Git-ref merge/scope. Workflow,
-Processes and cleanup stay local; imported completion changes planning only.
-Disconnect retains local work and pending sync. Q1 is resolved; composition proof remains.
-
-## Q2 — Selected: nearest explicit assignment (October 9)
-
-Jack Heart accepted nearest-explicit-ancestor Machine inheritance for unstarted
-Tasks, with narrower Task/sub-Wave overrides. Started Tasks stay on their recorded
-Machine for later runs/resumes. Historical explicit/inherited provenance stays
-unknown where indistinguishable. Exchange/admission proof remains.
-
-## Q3 — Selected: combine with the existing draft (October 8)
-
-Jack Heart selected combining agent input with an unsent draft: “robably combineing
-is right.” Use ordinary literal insertion at the current cursor; preserve existing
-text. Enter stays separate and submits the combined composer contents. No silent
-clear/replacement, draft parking or occupied-composer refusal is required. Exact
-surface targeting is implemented; native text/key fidelity proof remains.
+Jack Heart selected Q1: execution-Machine-local operations and Git-ref planning
+exchange (406 writer/Linear, 412 exchange); imported completion never moves
+Workflow or cleans execution. Q2: nearest explicit assignment for unstarted Tasks;
+narrower overrides win, started Tasks stay put, unknown historical provenance stays
+unknown. Q3: insert at the cursor into the existing draft, with Enter separate.
+The plan owns implementation; exchange/admission and native fidelity remain unproved.
+Original Q1–Q3 record: `7d5bcf939:scratch/questions.md`, those headings.
 
 ## Reversible visibility choice — October 8
 
@@ -106,12 +94,12 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 reconciliation: launch source
-`.lf/tmp/context/213b33bedc9ae862c3835d2944bb93f208438f2d1c726a236e1fb2230ee6531d.md`
-and generated steers were inspected. Initial `lf context --skill realign`: 32,141
-Work-seed tokens (16,141 over), from the generated manifest and historical steers.
-Authored notes fit; this producer gap cannot be repaired by their curation.
-Historical input and budgets remain unchanged.
+October 9 context: complete launch source
+`.lf/tmp/context/46610254667b5029d86e33f65ffcbbb8664584b946decaa38f8a2b19fecb2cb6.md`
+was inspected. `lf context --skill implement` reports 32,139 generated Work-seed
+tokens (16,139 over), from the manifest/historical steers. Authored notes fit;
+curation cannot change that producer gap without rewriting historical input or
+raising budgets. Neither is authorized.
 
 ## Explicit repository association — October 9
 

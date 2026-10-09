@@ -210,13 +210,8 @@ scratch stays at `19e31f64d`, not beside this Task's plan. Desktop replaces the
 path-only peer reading key with the existing Machine/repository reading key.
 
 
-Replaced lf2's `boundedReaderUnavailable` placeholder and DTO variant with the
-verified fixed-buffer reader. Removed the native input fixture's unbounded observer;
-it now observes through the exact-target router. Clipboard/Quick Look stay unchanged.
-The bounded-read fixture also owns exited-surface retention and replacement; the
-separate native setup is removed, preserving read and input rejection assertions.
-Apple-event handlers share MainActor/error reply handling; screenshot paths remain
-plain strings while Desktop readings remain JSON.
+Bounded-reader and native-fixture deletions: `7d5bcf939`, this section;
+section 4 retains their surviving owners and evidence limits.
 
 Command/opening deletion detail: `97bf9dbcb`, this file, **Delete — do not maintain**.
 The surviving owners are shared prompt/graph assembly, read-only selection,
@@ -248,10 +243,11 @@ retains unavailable location and remote refusals before reading Workflow intent;
 no preparation or admission is added.
 
 Create/edit/comment share input/scope/store validators; transaction-time checks
-survive. `planning_explain::read_creation` parses input once, separately from saved
-Task reads. One request match replaces the repeated dispatch and unreachable
-creation arm. Wave provenance follows the selection result, not environment presence;
-empty declarations select the default inbox. No initialization or acquisition is added.
+survive. Creation parses once and derives provenance from resolved selection, not
+empty declarations. Refile/save replace identity-only previews: the store owns
+refile validation in both read snapshots and write transactions; file-save owns
+read-only pinned preparation and effectful exchange. Delete the name-only refile
+initialization before durable-ID resolution. No preview acquires locks or writes.
 
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
@@ -410,12 +406,16 @@ New Task identity/location, initialization and comment provenance stay unavailab
 or unallocated. Movement retains prior node/edge, reason and force; end intent
 performs no completion reconciliation or cleanup.
 
-**Remaining explanation work:** generic Task previews omit operation arguments:
-`refile`'s destination Wave/current Project and placement restriction; `save`'s
-path/revision/draft; checkout, abandon/delete and interrupt's preparation, cleanup
-or control impediments. These effects must remain unperformed.
-Existing owners and checkpointed-store assertions govern these previews.
-`history show` and agent invocations remain identity-only; `--context` previews input.
+**Refile/save explanation, October 9:** shared read-only validation now reports the
+refile destination Wave/current Project, source/destination placement and recorded-
+work restrictions. Save consumes bounded UTF-8 stdin and checks path, draft and
+revision with the existing pinned-file preparation; preview creates no recovery.
+Execution resolves known destination IDs before initialization, rather than creating
+a Wave named after an ID. Concurrent writes still require execution-time validation.
+
+**Remaining explanation work:** checkout, abandon/delete and interrupt still omit
+preparation, cleanup or control impediments. `history show` and agent invocations
+remain identity-only; `--context` previews input. §2 composition and native proof remain.
 
 **Required proof:** cold opens for two repositories arriving before registration and
 registering in reverse order both reach their own windows; same-repo opens reuse
@@ -533,4 +533,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` PASS (prose-only realign); `06ebfa11e` build/fmt/Clippy and four isolated `task_planning_explain` passes retained without rerun; full suites/installation: gate/CI; native: demo.
+Check: build/fmt/Clippy PASS; isolated `global_commands task_planning_explain_{refile,save}`, `task_files_save`, Rust/Swift planning DTO filters PASS (7 tests); full suites/installation: gate/CI; native: demo.

@@ -1,4 +1,4 @@
-//! Planning previews validate saved local input, without acquisition or delivery.
+//! Task mutation previews validate local input, without acquisition, saving or delivery.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +15,14 @@ pub enum TaskPlanningRequest<'a> {
         notes: Option<&'a str>,
     },
     Edit(PmItemUpdate),
+    Refile {
+        wave: &'a str,
+    },
+    Save {
+        path: &'a str,
+        revision: &'a str,
+        content: &'a str,
+    },
     Comment {
         message: Option<&'a str>,
         steer: bool,
@@ -32,6 +40,16 @@ pub enum TaskPlanningAction {
     Edit {
         revision: u64,
         fields: Vec<String>,
+    },
+    Refile {
+        wave: String,
+        project: String,
+        previous_project: String,
+    },
+    Save {
+        path: String,
+        revision: String,
+        draft_bytes: usize,
     },
     Comment {
         message: Option<String>,
@@ -78,6 +96,14 @@ impl TaskPlanningExplanation {
                 if *steer { "direction" } else { "comment" }
             ),
             Some(TaskPlanningAction::Comment { message: None, .. }) => "read Task comments".into(),
+            Some(TaskPlanningAction::Refile { wave, project, .. }) => {
+                format!("refile Task to Wave {wave}, Project {project}")
+            }
+            Some(TaskPlanningAction::Save {
+                path,
+                revision,
+                draft_bytes,
+            }) => format!("save {path:?} at revision {revision} with {draft_bytes} draft bytes"),
             None => "unavailable".into(),
         };
         let mut lines = vec![
@@ -156,6 +182,79 @@ async fn read_planning(
                 fields,
             });
             report.effects.push("Save changed fields and pending planning mutations locally; attempt configured synchronization. Workflow, checkout and Processes stay unchanged".into());
+        }
+        TaskPlanningRequest::Refile { wave } => {
+            let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            let destination = crate::work::wave::context::resolve_managed_wave(
+                Some(store),
+                Some(cwd),
+                Some(wave),
+                None,
+            )
+            .await
+            .map_err(|error| {
+                anyhow::anyhow!("{error}; destination registration/acquisition was not performed")
+            })?;
+            let current = crate::ops::project::current_project(store, &destination)?;
+            let project = store
+                .get_project_by_project(&current.id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("destination Project is unavailable"))?;
+            report.action = Some(TaskPlanningAction::Refile {
+                wave: destination.id().to_string(),
+                project: project.id.to_string(),
+                previous_project: task.project_id.to_string(),
+            });
+            for wave in [super::owning_wave(store, &task).await?, destination] {
+                if let Err(error) = crate::ops::pm::require_planning_home(store, &wave).await {
+                    report.impediments.push(error.to_string());
+                }
+            }
+            if let Err(error) =
+                store
+                    .sqlite
+                    .validate_task_refile(&task.id, &task.project_id, &project.id)
+            {
+                report.impediments.push(error.to_string());
+            }
+            report.effects.push(if task.project_id == project.id {
+                "Membership is unchanged; attempt configured planning synchronization".into()
+            } else {
+                "Save destination Project membership and its pending planning mutation locally; attempt configured synchronization. Recorded work prevents refiling; no execution is transferred".into()
+            });
+        }
+        TaskPlanningRequest::Save {
+            path,
+            revision,
+            content,
+        } => {
+            let task = read_saved_task(store, cwd, selection.wave, &report.resolution).await?;
+            report.action = Some(TaskPlanningAction::Save {
+                path: (*path).into(),
+                revision: (*revision).into(),
+                draft_bytes: content.len(),
+            });
+            let validation =
+                super::file_context(&store.sqlite, task.id.as_str()).and_then(|checkout| {
+                    super::file_save::validate_save(
+                        super::TaskWorkspace::from(&checkout),
+                        path,
+                        revision,
+                        content,
+                    )
+                });
+            match validation {
+                Ok(path) => {
+                    if let Some(TaskPlanningAction::Save { path: selected, .. }) =
+                        &mut report.action
+                    {
+                        *selected = path;
+                    }
+                }
+                Err(error) => report.impediments.push(error.to_string()),
+            }
+            report.effects.push("Retain the submitted draft, receipt and displaced file under Git metadata, then atomically exchange the file. Planning and execution stay unchanged".into());
+            report.unavailable.push("File permissions at publication and concurrent filesystem changes are not reserved; execution revalidates before exchange".into());
         }
         TaskPlanningRequest::Comment { message, steer } => {
             if let Some(message) = message {

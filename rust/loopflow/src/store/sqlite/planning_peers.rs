@@ -263,15 +263,13 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
                     })
             })
         });
-        let missing_origin = linear.is_some() && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_capture_heads h
-             JOIN planning_peer_changes c ON c.id=h.id
-             WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND c.object_id!=?1
-             AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
-                 JOIN json_each(saved.parents) parent ON parent.value=h.id
-                 WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))",
-            params![project.as_str(), field], |row| row.get(0),
-        )?;
+        let missing_origin = linear.is_some()
+            && conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM planning_peer_uncaptured_heads
+                 WHERE kind='project' AND object_id=?1 AND field=?2)",
+                params![project.as_str(), field],
+                |row| row.get(0),
+            )?;
         if unchanged && frontier_retained && !missing_origin {
             continue;
         }
@@ -7666,6 +7664,15 @@ mod tests {
         target
             .edit_project(&local.project_id, Some("After observed Project fact"), None)
             .unwrap();
+        let mut content = super::super::project_content::read_content(
+            &target.conn.lock().unwrap(),
+            &local.project_id,
+        )
+        .unwrap();
+        content.workflow = "reviewed-peer".into();
+        target
+            .update_project_content(&local.project_id, &content)
+            .unwrap();
         assert_eq!(execution_rows(&target), execution);
         assert!(!export(&target, "/target")
             .objects()
@@ -7721,6 +7728,13 @@ mod tests {
                 local.project_id.as_str(),
                 "project_name",
                 "After observed Project fact",
+            ),
+            (
+                PlanningKind::Project,
+                incoming_project.as_str(),
+                local.project_id.as_str(),
+                "workflow",
+                "reviewed-peer",
             ),
         ] {
             let (_, saved) = exchanged

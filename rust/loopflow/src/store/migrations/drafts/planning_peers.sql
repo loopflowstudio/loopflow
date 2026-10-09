@@ -79,6 +79,17 @@ WHERE COALESCE(t.external_issue_id,p.external_project_id)=a.provider_id
     AND c.value IS (SELECT CASE WHEN type IN ('object','array') THEN value ELSE json_quote(value) END
         FROM json_each(ctx.fields) WHERE key=c.field);
 
+-- The same capture rule serves scalar triggers and semantic Project content.
+-- A matching foreign head needs a bridge only until a local head names it.
+CREATE VIEW planning_peer_uncaptured_heads AS
+SELECT h.kind,h.object_id,h.field,h.id
+FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+WHERE c.object_id!=h.object_id
+    AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own
+        JOIN planning_peer_changes saved ON saved.id=own.id
+        JOIN json_each(saved.parents) parent ON parent.value=h.id
+        WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field);
+
 -- Selection is local routing, not a second planner or a replication payload.
 CREATE TABLE planning_user (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -234,11 +245,8 @@ BEGIN
             WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key AND c.linear IS NOT NULL
             AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
             AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision'))
-        OR EXISTS(SELECT 1 FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
-                WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key AND c.object_id!=NEW.id
-                AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
-                    JOIN json_each(saved.parents) parent ON parent.value=h.id
-                    WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))));
+        OR EXISTS(SELECT 1 FROM planning_peer_uncaptured_heads
+            WHERE kind='project' AND object_id=NEW.id AND field=j.key)));
 END;
 
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
@@ -280,11 +288,8 @@ BEGIN
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key AND c.linear IS NOT NULL
             AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
             AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision'))
-        OR EXISTS(SELECT 1 FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
-                WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key AND c.object_id!=NEW.id
-                AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
-                    JOIN json_each(saved.parents) parent ON parent.value=h.id
-                    WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))));
+        OR EXISTS(SELECT 1 FROM planning_peer_uncaptured_heads
+            WHERE kind='task' AND object_id=NEW.id AND field=j.key)));
 END;
 
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)

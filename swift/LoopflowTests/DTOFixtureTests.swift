@@ -7,6 +7,17 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test("Activity retains unknown record identity without a PID")
+    func activityFixture() throws {
+        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))
+        let unknown = snapshot.nodes[2]
+        #expect(unknown.state == .unknown)
+        #expect(unknown.pid == nil)
+        #expect(unknown.parentId == snapshot.nodes[0].id)
+        #expect(unknown.id.hasPrefix("process:"))
+        #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
+    }
+
     @Test("Planning delivery retains uncertainty, errors and both conflict values")
     func planningSyncFixture() throws {
         let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: loadFixtureData("planning_sync.json"))

@@ -981,33 +981,40 @@ pub(crate) fn process_evidence(
     store: &SqliteStore,
     process: &ProcessLfid,
 ) -> ProcessIdentityEvidence {
-    let record = store.process(process);
-    if let Ok(Some(record)) = &record {
-        if record.kind == crate::process::ProcessKind::Agent {
-            return match (record.pid, record.os_started_at) {
-                (Some(pid), Some(start)) => process_identity_evidence(pid, start),
-                _ if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
-                _ => ProcessIdentityEvidence::Unknown,
-            };
-        }
-    }
-    let Ok(receipts) = read_process_receipts_at(&crate::store::lf_home_dir()) else {
+    let Ok(Some(record)) = store.process(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    if let Some(receipt) = receipts
-        .iter()
-        .find(|receipt| receipt.process_lfid == process.as_str())
-    {
-        return receipt.process_evidence();
+    let receipts = read_process_receipts_at(&crate::store::lf_home_dir());
+    recorded_process_evidence(&record, receipts.as_deref().ok(), process_identity_evidence)
+}
+
+/// One identity rule for control readers and sampled activity. An unavailable
+/// receipt inventory is not an empty one; neither permits invented OS identity.
+pub(crate) fn recorded_process_evidence(
+    record: &crate::process::LfProcess,
+    receipts: Option<&[ProcessReceipt]>,
+    mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+) -> ProcessIdentityEvidence {
+    if record.kind == crate::process::ProcessKind::Agent {
+        return match (record.pid, record.os_started_at) {
+            (Some(pid), Some(start)) => observe(pid, start),
+            _ if record.completed_at.is_some() => ProcessIdentityEvidence::Dead,
+            _ => ProcessIdentityEvidence::Unknown,
+        };
+    }
+    let Some(receipts) = receipts else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    if let Some(receipt) = receipts.iter().find(|receipt| {
+        receipt.process_lfid == record.lfid.as_str() && receipt.trace_id == record.trace_id.as_str()
+    }) {
+        return observe(receipt.pid, receipt.started_at);
     }
     // Historical Processes can lack identity evidence. A restart still proves exit.
-    match record {
-        Ok(Some(record))
-            if record.completed_at.is_some() || began_before_boot(record.started_at) =>
-        {
-            ProcessIdentityEvidence::Dead
-        }
-        _ => ProcessIdentityEvidence::Unknown,
+    if record.completed_at.is_some() || began_before_boot(record.started_at) {
+        ProcessIdentityEvidence::Dead
+    } else {
+        ProcessIdentityEvidence::Unknown
     }
 }
 

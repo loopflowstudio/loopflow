@@ -56,10 +56,16 @@ pub fn snapshot(home: &Path, store: &SqliteStore, task: Option<WorkRef>) -> Acti
 
 fn observe(store: &SqliteStore, result: &mut ActiveSessionsSnapshot) -> anyhow::Result<()> {
     let agents = store.agent_processes()?;
-    let os = crate::journal::OsProcess::sample(result.observed_at)?;
+    let os = crate::journal::OsProcess::sample(result.observed_at);
+    if let Err(error) = &os {
+        result.discovery = DiscoveryState::Unavailable;
+        result.gaps.push(error.to_string());
+    }
     let mut sessions = std::collections::BTreeMap::<String, ActiveSession>::new();
     for agent in &agents {
-        let Some(process) = crate::lf::commands::top::observe_agent_process(&os, agent) else {
+        let Some(process) =
+            crate::lf::commands::top::observe_agent_process(os.as_deref().ok(), agent)
+        else {
             continue;
         };
         let Some(id) = agent.process.agent_session_id.as_deref() else {
@@ -112,6 +118,7 @@ mod tests {
     use crate::session::TitleSource;
     use crate::session_record::new_artifact_key;
     use crate::store::sqlite::SqliteStore;
+    use std::os::unix::fs::PermissionsExt;
     use std::process::{Child, Command, Stdio};
 
     struct Agent(Child);
@@ -141,6 +148,7 @@ mod tests {
     fn snapshots_follow_detached_and_replaced_records_without_capture_files() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
+        let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let mut session = store.test_session("conversation", &new_artifact_key());
@@ -205,6 +213,27 @@ mod tests {
                 .is_empty()
         );
         assert!(!home.path().join("runs").exists());
+        // Sampling failure keeps both records visible as unknown, rather than
+        // turning an unavailable observation into an empty Session list.
+        let bin = home.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        let ps = bin.join("ps");
+        std::fs::write(&ps, "#!/bin/sh\nexit 2\n").unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::var_os("PATH");
+        std::env::set_var("PATH", &bin);
+        let unavailable = read();
+        match path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+        assert_eq!(unavailable.discovery, DiscoveryState::Unavailable);
+        assert!(!unavailable.gaps.is_empty());
+        assert_eq!(unavailable.sessions[0].processes.len(), 2);
+        assert!(unavailable.sessions[0]
+            .processes
+            .iter()
+            .all(|process| process.state == crate::lf::commands::top::ActivityState::Unknown));
         drop(old);
         assert_eq!(read().sessions[0].processes.len(), 1);
         assert_eq!(

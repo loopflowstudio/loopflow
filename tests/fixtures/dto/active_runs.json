@@ -1,5 +1,5 @@
 {
-  "discovery": "ready",
+  "discovery": "unavailable",
   "home": "/fixture/home",
   "observed_at": 1790270400,
   "task": {
@@ -7,7 +7,7 @@
     "id": "task_00000000000000000000000000000001"
   },
   "gaps": [
-    "Another Process has live providers without an unambiguous current Session"
+    "OS sampling unavailable; recorded processes retain unknown liveness"
   ],
   "sessions": [
     {
@@ -22,6 +22,12 @@
           "provider": "claude",
           "state": "waiting",
           "lfid": "33333333-3333-4333-8333-333333333333"
+        },
+        {
+          "lfid": "44444444-4444-4444-8444-444444444444",
+          "pid": null,
+          "provider": "claude",
+          "state": "unknown"
         }
       ],
       "title": "implement"

@@ -440,14 +440,7 @@ impl SqliteStore {
     pub(crate) fn open_processes(&self) -> StoreResult<OpenProcesses> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let processes = tx
-            .prepare(&format!(
-                "{} INDEXED BY processes_unfinished WHERE e.completed_at IS NULL
-                ORDER BY e.started_at DESC,e.lfid",
-                super::processes::PROCESS_SELECT
-            ))?
-            .query_map([], super::processes::read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let processes = super::processes::unfinished_processes(&tx)?;
         let mut tasks: HashMap<ProcessLfid, Vec<String>> = HashMap::new();
         let mut query = tx.prepare(&open_process_tasks())?;
         let mut rows = query.query([])?;

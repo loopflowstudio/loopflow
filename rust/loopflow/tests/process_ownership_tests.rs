@@ -14,6 +14,73 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
+async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
+    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
+
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let sql = rusqlite::Connection::open(database).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let parent = ProcessLfid::new();
+    let agent = ProcessLfid::new();
+    sql.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,?1,?2)",
+        rusqlite::params![parent, now],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO processes(lfid,trace_id,kind,parent_process_lfid,started_at,pid,os_started_at)
+         VALUES(?1,?1,'agent',?2,?3,4242,?3)",
+        rusqlite::params![agent, parent, now],
+    )
+    .unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let ps = bin.join("ps");
+    std::fs::write(
+        &ps,
+        "#!/bin/sh\nprintf 'sampling unavailable' >&2\nexit 2\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = command(home.path(), home.path(), &["monitor", "ps", "--json"])
+        .env("PATH", &bin)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let snapshot: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
+    for id in [&parent, &agent] {
+        let node = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == format!("process:{id}"))
+            .unwrap();
+        assert_eq!(node.state, ActivityState::Unknown);
+    }
+    assert_eq!(
+        snapshot
+            .nodes
+            .iter()
+            .find(|node| node.id == format!("process:{agent}"))
+            .unwrap()
+            .parent_id,
+        Some(format!("process:{parent}"))
+    );
+    let retained: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM processes WHERE lfid IN (?1,?2) AND completed_at IS NULL",
+            rusqlite::params![parent, agent],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(retained, 2, "observation grants no settlement authority");
+}
+
+#[tokio::test]
 async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     use loopflow::process::{LfProcess, LfProcessPage};
     let home = tempfile::tempdir().unwrap();

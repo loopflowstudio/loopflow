@@ -58,7 +58,7 @@ attribution survive.
   `kill -s TERM -- -pgid`. Native foreground terminals need their own process
   control treatment; no headless process-group change may break their TTY.
 
-## Predecessor removal (completed and remaining cuts)
+## Delete — do not maintain (completed and remaining cuts)
 
 - Session `provider_pid`, `provider_started_at`, `provider_endpoint`,
   `provider_generation` and `provider_process_lfid`; replace with AgentProcess.
@@ -87,6 +87,10 @@ attribution survive.
 - Native `spawn_native(None)`, capture launch without an attachment, and
   `native_provider_driver`'s missing-provenance-as-client inference are removed.
   Raw headless optional admission remains a deletion target.
+- Top’s receipt-selected inventory, `ProcessSnapshot`, and the exclusive
+  `read_process_snapshot` transaction wrapper are removed. One unfinished-row
+  query now serves Task membership and activity; receipts establish identity,
+  not inventory membership.
 - Top’s private OS sampler/elapsed parser and receipt-only birth comparison are
   removed. `journal::OsProcess` owns single-PID and inventory observation, including
   zombie rejection. Malformed samples fail observation rather than inventing absence.
@@ -106,8 +110,8 @@ rows stay separate and non-signallable. Native thread/history stay on the Sessio
 provider generation still survives in records and caller/status/history wires.
 
 Top, active Sessions, Task membership and scheduled orphan settlement query
-unfinished AgentProcesses, including detached/replaced rows; live views still
-filter out unknown identities. Settlement rechecks
+unfinished AgentProcesses, including detached/replaced rows; live views retain
+unknown identities without inferring liveness or control. Settlement rechecks
 attachment under the Session lock without holding SQLite across OS I/O. It still
 excludes interactive agents and recognizes only Codex app-server/OpenCode serve
 for live-orphan termination. Only Codex supplies a named FIFO for reconnect;
@@ -197,31 +201,23 @@ Earlier failing proof and analysis: `3f530ffce:scratch/introduce-agentprocess-re
    before treating a detached attachment as replaceable. Unfinished rows with
    unknown PID remain diagnosable. Top, active Sessions, receipt checks, gate and
    reaper now share `journal::OsProcess` parsing and identity judgment; zombies
-   are dead, invalid observations remain errors/Unknown. This removes the prior
-   source-level disagreement, not the missing-identity display gap below. No
-   configured orphan was signaled and OS death supplies no successful outcome.
+   are dead, invalid observations remain errors/Unknown. Inventory and unknown
+   display selection are covered below. No configured orphan was signaled and
+   OS death supplies no successful outcome.
 4. Replace remaining predecessor fixture assumptions and restore required
-   active-Session, native-history and Task-membership coverage on records. Prove
-   headless public top/Task-status/scheduled-entry agreement, not only reducers
-   or SQL. Source inspection at `48aaf72a1` separates three visibility gaps:
-   - `collect_activity` drops AgentProcesses lacking PID/birth; valid absence,
-     birth mismatch and zombies are dead, not unknown rows to resurrect.
-   - `load_snapshot` selects LfProcesses through receipts, unlike the gate's
-     `open_processes` inventory. An unfinished same-boot lf row without a receipt
-     can block a Task without ever reaching activity projection.
-   - OS sampling errors fail the entire top snapshot (and prune before reaping);
-     active Sessions clear their list and report Unavailable. The gate retains
-     Unknown. `ActivityState` has no unknown case yet.
-   Rendering needs recorded identities plus explicit unavailable observations for
-   both kinds, with Rust/Swift/DTO changes together; it must not infer liveness or
-   control from display. Public fixtures need missing receipts, missing agent
-   birth, failed sampling and exact death, preserving caller-lineage exclusion.
-   One OS parser does not supply equal record selection or error handling. The
-   detached/replaced-record observation fixture now passes: rename, capture
-   replacement, provider snapshots, exact Task exclusion and observed death
-   without payload files. This does not exercise public commands or uncertain OS
-   identity. CLI Waiting and work-watch fixtures now join process
-   rows rather than deleted Session columns; other fixture repairs remain.
+   native-history and Task-membership coverage on records. Top and the Task gate
+   now share unfinished-row selection and identity judgment. Missing lf receipts,
+   missing agent birth and failed sampling produce visible Unknown rows; LFIDs
+   are shown in text and JSON. Self-exclusion uses LFID, not a reusable PID.
+   Active Sessions retain unknown agents and report Unavailable when sampling
+   fails. Exact absence, birth mismatch and zombies remain death evidence.
+   The receipt-selected inventory and exclusive snapshot transaction wrapper
+   are deleted. Rust/Swift activity states and DTO fixtures move together.
+   Source fixtures compare actual Task blockers to top rows and retain native
+   history; the public ps fixture covers failed sampling. Public Task-status and
+   scheduled-entry agreement, caller-lineage exclusion and two-second removal
+   remain unproved. Prune still stops before reaping on a failed OS sample.
+   Earlier visibility counterexamples: `48aaf72a1`, this plan.
 5. LOO-441's LfProcess/LfSession rename is integrated from #1516. Update the final
    model/API docs and all wire fixtures after the generation cut. The common
    LfProcess projection still carries both kinds during this draft cutover.
@@ -274,10 +270,12 @@ also removed the eager cwd lookup when an explicit working directory is supplied
 
 Prior admission checks: `91d184b1c:scratch/introduce-agentprocess-record-the-provider.md`.
 Compression moves OS observation below presentation and deletes the native-client
-elapsed-time parser. Invalid ages report unavailability; missing PID/birth rows
-still need visible unknown nodes. Replacement review preserved the generic stop
+elapsed-time parser. Invalid ages report unavailability. The inventory reduction
+keeps missing PID/birth rows visible and removes top's per-receipt SQL reads.
+Review retained unknown parent state even beside a working child and matched
+receipts by both LFID and trace; display grants no signaling or settlement authority. Replacement review preserved the generic stop
 boundary, corrected closing against mutable Session provider settings and kept
 telemetry loss nonfatal after the durable replacement transaction. The live-close
 fixture's invalid trace identity was repaired before its passing run.
 
-Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, isolated lib filters `invocation_`, `saved_thread_rejection`, `subscription_limit_fails_over_without_resuming`, `telemetry_loss_cannot_keep_retry` (7 tests) and `agent_tests` (14 tests) pass; broader Rust/Swift/DTO/materialized and Linux checks remain gate/CI-owned.
+Check: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test --no-run` (lib/process_ownership_tests/dto_fixtures), network-isolated top/active/journal lib filters (21), public ps (1), Rust DTO filters (2), and `swiftc` ActivitySnapshot fixture round-trip pass; full Rust/Swift/DTO/materialized and Linux remain gate/CI-owned. Prior invocation replacement checks: `397b2ee59`, this plan.

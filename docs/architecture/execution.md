@@ -77,17 +77,16 @@ The source cut is incomplete: optional/unattributed launches still need conversi
 Captured Claude and native restarts reserve a fresh AgentProcess and update the
 capture's attachment; pending operations retain their old snapshots. Owned native
 launches record before exec without changing their terminal or process group.
-Focused admission, replacement and cleanup fixtures pass; public-reader agreement
-and installed acceptance remain unproved. Top omits agents without matching
-PID/birth evidence and selects lf rows through receipts; the Task gate can retain
-both kinds as unknown blockers. OS sampling errors fail top's snapshot rather
-than showing those recorded rows as unavailable. Activity, gates and reaping share
-one PID/birth/state parser, not identical inventory selection or error handling.
-Zombies count as dead; malformed readings remain unavailable, not absence.
-Library admission also exposes an unresolved account-failover regression: attached
-Codex stop retains its provider for capture settlement, while metadata-only retry
-requests a fresh thread against the old attachment. Invocation-owned replacement
-must preserve the old native history without weakening saved-thread checks.
+Focused admission, replacement and cleanup fixtures pass. Top and Task gates
+share unfinished-row selection and identity judgment. Missing lf receipts,
+missing agent birth and unavailable OS samples remain Unknown rows with LFIDs;
+active Sessions retain their records while reporting unavailable sampling.
+Zombies, birth mismatch and valid absence count as death. Observations grant no
+signal or settlement authority. Public Task-status/scheduled agreement and
+installed acceptance remain unproved.
+Invocation-owned retry settles the exact old AgentProcess before reserving its
+replacement, retaining native/account history. Account failover selects a fresh
+thread; same-account retry retains it. Generic stop still preserves takeover.
 Generation-based caller/status wires and optional launches remain publication
 blockers.
 

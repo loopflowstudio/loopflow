@@ -49,6 +49,17 @@ pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProces
     })
 }
 
+/// The unfinished inventory shared by Task membership and activity.
+pub(super) fn unfinished_processes(conn: &rusqlite::Connection) -> StoreResult<Vec<LfProcess>> {
+    Ok(conn
+        .prepare(&format!(
+            "{PROCESS_SELECT} INDEXED BY processes_unfinished WHERE e.completed_at IS NULL
+             ORDER BY e.started_at DESC,e.lfid"
+        ))?
+        .query_map([], read_process)?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 fn process_query(
     filter: &LfProcessFilter,
     after: Option<&LfProcessCursor>,
@@ -251,6 +262,10 @@ pub(super) fn attach_in(
 }
 
 impl SqliteStore {
+    pub(crate) fn unfinished_processes(&self) -> StoreResult<Vec<LfProcess>> {
+        unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
+    }
+
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

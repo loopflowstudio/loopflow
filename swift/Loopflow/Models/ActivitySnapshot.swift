@@ -9,6 +9,7 @@ public enum ActivityState: String, Codable, Sendable, Hashable {
     case working
     case waiting
     case stalled
+    case unknown
 }
 
 public struct ActivityNode: Codable, Sendable, Hashable, Identifiable {

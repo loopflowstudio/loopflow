@@ -91,6 +91,11 @@ Earlier command names below are dated evidence, not compatibility aliases.
   fixture is unexecuted. Native extraction, peer composition, complete opening and
   native acceptance remain unfinished. Detailed implementation and contrary check evidence:
   `a342d6870:docs/reviews/terminal-command-comparison.md`, this section.
+  **October 9 bounded-reader update:** lf3 is published with a verified public
+  download and selected in SwiftPM. Exact-target reads now use its fixed buffer;
+  inspection advertises `read`. Removed the temporary unavailable-reader result.
+  Headless composition checks pass; native extraction/draft fixtures compile but
+  remain unexecuted. The earlier stalls and native acceptance gap still stand.
   The later CLI cut moves the app launcher to `desktop open` and inspection to
   `desktop list`; bare `open` is ambiguous with PR opening (Sessions use
   `connect`). This does not establish composed Work opening or native readiness.

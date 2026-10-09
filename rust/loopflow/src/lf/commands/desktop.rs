@@ -209,7 +209,6 @@ pub enum DesktopTextResult {
 pub enum DesktopTextUnavailable {
     MissingSurface,
     NotTerminal,
-    BoundedReaderUnavailable,
 }
 
 // Raw event spelling avoids loading an installed scripting dictionary during
@@ -819,9 +818,10 @@ impl DesktopWorktreeNode {
 impl DesktopTextUnavailable {
     fn message(self) -> &'static str {
         match self {
-            Self::MissingSurface => "The retained pane has no native surface; no client was acquired.",
+            Self::MissingSurface => {
+                "The retained pane has no native surface; no client was acquired."
+            }
             Self::NotTerminal => "The addressed pane is not a terminal.",
-            Self::BoundedReaderUnavailable => "This Desktop build has no verified bounded text reader; no unbounded fallback was used.",
         }
     }
 }

@@ -49,9 +49,10 @@ without rewriting Machine defaults. Inheritance is unapproved; placement suites 
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
-`desktop text/key` reuse existing owners. Jack selected insertion into existing
-drafts with Enter separate; control-text/IME restrictions are reversible. Native
-cursor/replacement fixtures remain unexecuted; passive reads grant no input authority.
+`desktop text/key` reuse existing owners: Jack selected cursor insertion into
+drafts with Enter separate; control-text/IME limits are reversible. October 9's
+verified lf3 enables bounded reads. Native extraction/input remains unproved;
+reads grant no input authority.
 
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
@@ -100,11 +101,10 @@ scalar/list replay. Partial-list/public composition, legacy association,
 unplaced-Wave/Desktop, live controls and peer admission remain unproved.
 Imports stay unplaced; old evidence cannot clear membership uncertainty.
 
-October 9 (`e3ca861b1`): observe pane visibility before Session readings; a callback
-had masked missed closure. MultiplexerStore owns visibility for readiness and reads.
-Router receipts expose pre-registration failures; plain Task links await mounted
-content. Validated request IDs fence registration, never URLs or later arrivals.
-Headless callbacks prove neither compositor usability nor native Session readiness.
+October 9 (`e3ca861b1`): MultiplexerStore observes visibility before Session readings;
+a callback had masked closure. Receipts expose pre-registration failures; plain Task
+links await mounted content. Request IDs fence registration, never URLs or later
+arrivals. Headless callbacks prove neither compositor usability nor native readiness.
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters

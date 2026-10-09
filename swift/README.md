@@ -598,10 +598,11 @@ match. Shell opening is local-only.
 `lf desktop read --target "$target" --surface "$surface" --region selection --json`
 validates the retained pane and native surface without following focus or retiring
 an exited surface. Missing surfaces and nonterminal panes are explicit unavailable
-results, not empty text. The pinned lf2 artifact has no bounded reader: existing
-surfaces report `bounded_reader_unavailable` until verified artifact composition.
-No unbounded extraction is used. Native text extraction and cross-machine
-composition remain unfinished.
+results, not empty text. The verified lf3 reader writes directly into the requested
+byte bound; Swift copies only that UTF-8 prefix. `screen` reads the viewport,
+`scrollback` the retained screen history, and `selection` the current text or
+command block (empty when nothing is selected). No unbounded extraction is used.
+Mounted extraction/draft acceptance and cross-machine composition remain unproved.
 
 ```sh
 lf desktop text --target "$target" --surface "$surface" -- 'add to the draft'

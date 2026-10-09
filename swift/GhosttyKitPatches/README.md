@@ -54,13 +54,15 @@ an invalidated command-block selection no longer releases its tracked pin:
 selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
 retain their existing unbounded API and viewport metadata.
 
-The next artifact is `GhosttyKit-a60e9e2-lf3.xcframework.zip`. The October 9
-local macOS build passed 270 patch tests (four skipped) and exported the bounded
-reader for arm64 and x86_64. Reset now releases command-block selection directly;
-the prior suite failed because passive reads no longer performed that cleanup.
-The artifact is built locally but unpublished. `Package.swift` remains on lf2 until
-the relevant checks and upload/download checksum verification succeed. Desktop
-must not import the new symbol before that artifact is available.
+`Package.swift` selects the published `GhosttyKit-a60e9e2-lf3.xcframework.zip`.
+Its public download matches SwiftPM checksum
+`dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
+The October 9 macOS build passed 270 patch tests (four skipped) and exported the
+bounded reader for arm64 and x86_64. Reset now releases command-block selection
+directly; the prior suite failed because passive reads no longer did that cleanup.
+Desktop reads viewport, full scrollback or current selection into fixed storage,
+then copies only the written UTF-8 prefix. Empty selection succeeds. Native pane
+fixtures compile but require a display; headless checks do not prove mounted reads.
 
 On Linux, also compile the embedded C entry point (the terminal-only test does
 not compile it):

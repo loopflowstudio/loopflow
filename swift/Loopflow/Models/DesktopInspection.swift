@@ -324,7 +324,6 @@ public struct DesktopTextReading: Codable, Sendable, Equatable {
 public enum DesktopTextUnavailable: String, Codable, Sendable {
     case missingSurface = "missing_surface"
     case notTerminal = "not_terminal"
-    case boundedReaderUnavailable = "bounded_reader_unavailable"
 }
 
 /// Empty text is a successful observation, never a missing surface.

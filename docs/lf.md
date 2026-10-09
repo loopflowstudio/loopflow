@@ -655,12 +655,13 @@ pane is collapsed or hidden by zoom. Available results carry `text` and
 a reason instead of text. Replaced windows, content or native surfaces reject old
 targets. Reads never follow focus, acquire a client or clean up an exited surface.
 
-**Native extraction is not yet available:** the pinned Ghostty artifact lacks the
-bounded reader. Existing surfaces return `bounded_reader_unavailable`, absent
-surfaces `missing_surface`, and nonterminal panes `not_terminal`. There is no
-unbounded fallback. JSON preserves these outcomes; text mode reports unavailability
-as an error. Reading alone never sends input. Native extraction and composed
-Session-plus-diff opening remain implementation work.
+`screen` reads the current viewport; `scrollback` includes retained history;
+`selection` reads the selected text or shell command block, or empty text when
+nothing is selected. Extraction writes directly into fixed storage and ends at a
+complete UTF-8 scalar. Absent surfaces return `missing_surface`, and nonterminal
+panes `not_terminal`. JSON preserves these outcomes; text mode reports unavailable
+reads as errors. There is no unbounded fallback. Reading alone never sends input.
+Native pane acceptance and remote Session-plus-diff composition remain unproved.
 
 Insert text into the exact surface, then submit deliberately:
 

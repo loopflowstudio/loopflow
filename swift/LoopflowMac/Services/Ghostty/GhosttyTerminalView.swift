@@ -181,15 +181,35 @@ final class GhosttySurfacePool {
 
     func readText(_ request: DesktopTextRequest, terminal: TerminalIdentity) throws -> DesktopTextResult {
         // Do not use view(for:) or hasSurface: those allocate or schedule cleanup.
-        guard let view = views[terminal], view.surface != nil else {
+        guard let view = views[terminal], let surface = view.surface else {
             return .unavailable(reason: .missingSurface)
         }
         guard view.programStatus.incarnation.uuidString.lowercased() == request.surface else {
             throw RegistryQueryError("The terminal surface was replaced. Inspect Desktop again; no text was read.")
         }
-        // lf2 has no bounded reader. Replace this result with the fixed-buffer
-        // extraction only after the verified lf3 artifact is selected.
-        return .unavailable(reason: .boundedReaderUnavailable)
+        // The native reader formats directly into this fixed buffer under the
+        // renderer lock. Never read a whole terminal and truncate it in Swift.
+        var bytes = [CChar](repeating: 0, count: request.maxBytes)
+        var written = 0
+        var truncated = false
+        let succeeded = bytes.withUnsafeMutableBufferPointer { buffer in
+            if request.region == .selection {
+                return ghostty_surface_read_text_bounded(
+                    surface, nil, buffer.baseAddress, buffer.count, &written, &truncated)
+            }
+            let tag = request.region == .screen ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
+            var selection = ghostty_selection_s(
+                top_left: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
+                bottom_right: ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),
+                rectangle: false)
+            return ghostty_surface_read_text_bounded(
+                surface, &selection, buffer.baseAddress, buffer.count, &written, &truncated)
+        }
+        guard succeeded else {
+            throw RegistryQueryError("The terminal region could not be read; no unbounded fallback was used.")
+        }
+        let text = bytes.withUnsafeBytes { String(decoding: $0.prefix(written), as: UTF8.self) }
+        return .available(text: text, truncated: truncated)
     }
 
     func insertText(_ text: String, terminal: TerminalIdentity, surface: String) throws {

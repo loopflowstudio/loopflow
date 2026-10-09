@@ -655,6 +655,7 @@ struct WorkDestinationTests {
         let report = model.inspectDesktop(repository: "plan", window: UUID(), workspaces: workspaces)
         #expect(report.reading == "loading")
         #expect(report.supportedOperations.contains("list"))
+        #expect(report.supportedOperations.contains("read"))
         #expect(!report.supportedOperations.contains("inspect"))
         #expect(report.task?.reading == "current")
         #expect(report.task?.actions == task.actions)

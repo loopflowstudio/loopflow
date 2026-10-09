@@ -132,10 +132,12 @@ lf interrupt INF-123                             # end this turn so fresh direct
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf task-operate "INF-123"                           # advance until landed or blocked; link the blocking Session
+lf task complete INF-123                             # complete without moving the Workflow
+lf task reopen INF-123                               # reopen planning; keep the Workflow and PR
+lf task-operate "INF-123"                           # advance through follow-through to completion, or a blocker
 lf --task INF-123 skill task-session               # ongoing conversation that keeps applying task-operate
 lf arm                                             # request exact-head auto-merge and return
-lf land                                            # complete the Task after verified merge
+lf land                                            # request merge; follow-through completes the Task
 lf pr reconcile                                      # check recorded deliveries once and settle merges
 lf ci watch                                          # watch PR checks; start a ci-fix when a landing fails
 ```
@@ -230,7 +232,7 @@ Bind assigns an unbound conversation to one Task permanently, including a done T
 | **Wave** | Keeps the objective, memory, cadence, budget and instruments | `wave/<name>/` |
 | **Project** | Holds one Wave's plan, Tasks, KRs, targets and the workflow its Tasks take up | Linear |
 | **Chapter** | Names the repository's current group of In Progress Projects | Linear Project names and statuses |
-| **Task** | Owns concrete work, its checkout, serial PRs and every Flow process for it | Linear and local SQLite |
+| **Task** | Owns concrete work, its checkout, optional PR and every Flow process for it | Linear and local SQLite |
 | **Process** | Records one actual lf process and its observed command outcome | Machine-local SQLite |
 | **LfSession** | Keeps a continuable interactive or headless conversation and native history | Machine-local SQLite and provider-native storage |
 | **Machine** | Places execution and scopes its store, credentials and process authority | Machine identity and local data |

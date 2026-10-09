@@ -499,8 +499,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "account", "route"]
     );
     assert_eq!(
-        normalized(&["lf", "land", "--next", "show"]),
-        ["lf", "pr", "land", "--next", "show"]
+        normalized(&["lf", "land", "--wait-and-fix"]),
+        ["lf", "pr", "land", "--wait-and-fix"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),

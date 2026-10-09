@@ -2,7 +2,7 @@ mod support;
 
 use loopflow::pm::{IssueComment, IssueObservation};
 use loopflow_test_support::TestRepo;
-use support::{register_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 use time::OffsetDateTime;
 
 fn edit(revision: &str, title: &str, description: &str) -> IssueObservation {
@@ -28,7 +28,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     repo.stage_all();
     repo.commit("seed");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let now = OffsetDateTime::now_utc();
 

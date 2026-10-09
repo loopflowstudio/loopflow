@@ -38,7 +38,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
-        repo.display().to_string(),
+        repo.canonicalize().unwrap().display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
     wave
@@ -260,6 +260,9 @@ fn seed_stale_project_work(home: &Path, abandon_stale_project: bool, current_tas
         project_id: stale.id.clone(),
         worktree: Some(home.join("repo.w2-127")),
         workspace_slug: "w2-127".to_string(),
+        branch: "jack-heart/w2-127".to_string(),
+        base_commit: "deadbeef".to_string(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -399,6 +402,11 @@ fn seed_persisted_merge_request_without_copy(home: &Path) {
             [PERSISTED_TASK_ID],
         )
         .expect("move persisted Task into the current PM Project");
+    connection.execute(
+        "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+         SELECT 'pr-copy-fixture',id,1,workspace_slug,branch,base_commit,?2,?2 FROM tasks WHERE id=?1",
+        rusqlite::params![PERSISTED_TASK_ID, now],
+    ).unwrap();
     connection
         .execute(
             "UPDATE task_prs SET
@@ -871,13 +879,10 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         let status_task = &status["tasks"]["items"][0];
         assert_eq!(status_task["task"]["identifier"], "PRD-52");
         assert_eq!(
-            status_task["prs"][0]["publication"]["presentation"],
+            status_task["pr"]["publication"]["presentation"],
             serde_json::Value::Null
         );
-        assert_eq!(
-            status_task["prs"][0]["publication"]["merge"]["mode"],
-            "user"
-        );
+        assert_eq!(status_task["pr"]["publication"]["merge"]["mode"], "user");
 
         let roadmap = roadmap_json(home.path(), "product");
         let wave = &roadmap["waves"][0];
@@ -885,13 +890,10 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         let roadmap_task = &wave["tasks"]["items"][0];
         assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
         assert_eq!(
-            roadmap_task["active_pr"]["publication"]["presentation"],
+            roadmap_task["pr"]["publication"]["presentation"],
             serde_json::Value::Null
         );
-        assert_eq!(
-            roadmap_task["active_pr"]["publication"]["merge"]["mode"],
-            "user"
-        );
+        assert_eq!(roadmap_task["pr"]["publication"]["merge"]["mode"], "user");
     }
 }
 
@@ -904,13 +906,10 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
     let status_task = &status["tasks"]["items"][0];
     assert_eq!(status_task["task"]["identifier"], "PRD-52");
     assert_eq!(
-        status_task["prs"][0]["publication"]["presentation"],
+        status_task["pr"]["publication"]["presentation"],
         serde_json::Value::Null
     );
-    assert_eq!(
-        status_task["prs"][0]["publication"]["merge"]["mode"],
-        "user"
-    );
+    assert_eq!(status_task["pr"]["publication"]["merge"]["mode"], "user");
 
     let roadmap = roadmap_json(home.path(), "product");
     let wave = &roadmap["waves"][0];
@@ -918,13 +917,10 @@ fn previous_release_merge_request_migrates_into_readable_status_and_roadmap() {
     let roadmap_task = &wave["tasks"]["items"][0];
     assert_eq!(roadmap_task["task"]["identifier"], "PRD-52");
     assert_eq!(
-        roadmap_task["active_pr"]["publication"]["presentation"],
+        roadmap_task["pr"]["publication"]["presentation"],
         serde_json::Value::Null
     );
-    assert_eq!(
-        roadmap_task["active_pr"]["publication"]["merge"]["mode"],
-        "user"
-    );
+    assert_eq!(roadmap_task["pr"]["publication"]["merge"]["mode"], "user");
 }
 
 #[test]
@@ -963,7 +959,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
         let tasks = result["waves"][0]["tasks"]["items"].as_array().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["task"]["identifier"], identifier);
-        assert!(tasks[0]["active_pr"].is_null());
+        assert!(tasks[0]["pr"].is_null());
         if identifier == "W2-127" {
             assert_eq!(tasks[0]["runtime"]["work_id"], PERSISTED_TASK_ID);
             assert_eq!(tasks[0]["runtime"]["started"], false);
@@ -1051,4 +1047,90 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
         assert_eq!(retained["tasks"]["items"][0]["task"]["id"], "other-task");
         assert_eq!(retained["tasks"]["items"][0]["task"]["completed"], true);
     }
+}
+
+#[test]
+fn due_follow_up_is_visible_before_checkout_and_requires_a_confirmed_source() {
+    let home = tempfile::tempdir().unwrap();
+    seed_stale_project_work(home.path(), false, false);
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let source_id = TaskId::parse(PERSISTED_TASK_ID).unwrap();
+    let source = store.task(&source_id).unwrap().unwrap();
+    let mut planning = store.pm_snapshot(&source.wave_id).unwrap().unwrap();
+    let mut child = planning.snapshot.items[0].clone();
+    child.id = "follow-up-issue".into();
+    child.identifier = "W2-FOLLOW".into();
+    child.name = "Verify the installed command".into();
+    child.due_date = Some("2026-10-08".into());
+    child.completed = false;
+    child.state = Some("unstarted".into());
+    child.completed_at = None;
+    planning.snapshot.items.push(child.clone());
+    planning.synced_at += 1;
+    store.put_pm_snapshot(&planning).unwrap();
+    let intent = loopflow::work::task::follow_through::FollowThroughIntent {
+        key: "installed-check".into(),
+        issue_id: child.id.clone(),
+        relation_id: uuid::Uuid::new_v4().to_string(),
+        project_id: child.project_id.clone().unwrap(),
+        team_id: child.team_id.clone().unwrap(),
+        state_id: None,
+        wave: "product".into(),
+        title: child.name.clone(),
+        notes: "Check the installed release after deployment".into(),
+        due: Some("2026-10-09".into()),
+        existing: false,
+    };
+    store.reserve_follow_through(&source_id, &intent).unwrap();
+    let pending = status_json(home.path(), &["product"], None);
+    let pending_child = pending["tasks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["task"]["id"] == child.id)
+        .unwrap();
+    assert_eq!(
+        pending_child["task"]["follow_up_sources"],
+        serde_json::json!([])
+    );
+    let link = loopflow::work::task::follow_through::FollowThroughLink {
+        key: intent.key,
+        issue_id: child.id.clone(),
+        identifier: child.identifier,
+        url: child.url,
+        due: intent.due,
+    };
+    store.link_follow_through(&source_id, &link).unwrap();
+    store.link_follow_through(&source_id, &link).unwrap();
+    let status = status_json(home.path(), &["product"], None);
+    let row = status["tasks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["task"]["id"] == child.id)
+        .unwrap();
+    assert_eq!(row["runtime"]["started"], false);
+    assert!(row["reference"]["workspace"].is_null());
+    assert!(row["pr"].is_null());
+    assert_eq!(
+        row["task"]["due_date"], "2026-10-08",
+        "current planning owns the date, not the original filing"
+    );
+    assert_eq!(row["task"]["completed"], false);
+    assert_eq!(
+        row["task"]["follow_up_sources"],
+        serde_json::json!([
+            {"issue_id": source.plan.linear_id.as_ref().unwrap().as_str(), "identifier": source.plan.identifier}
+        ])
+    );
+    assert_eq!(row["follow_through"]["reason"], serde_json::Value::Null);
+    let roadmap = roadmap_json(home.path(), "product");
+    let roadmap_child = roadmap["waves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|wave| wave["tasks"]["items"].as_array().into_iter().flatten())
+        .find(|row| row["task"]["id"] == child.id)
+        .unwrap();
+    assert_eq!(roadmap_child["task"], row["task"]);
 }

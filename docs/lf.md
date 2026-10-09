@@ -230,9 +230,11 @@ Workflow sources without changing them. Repeating it preserves stored edits.
 `lf wave edit` saves to SQLite in both connection modes.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
-identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
-settles it. A repository without a code remote supports local work and refuses
-hosted landing. Local planning does not require Linear at any of these boundaries.
+identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
+merge, follow-through files accepted obligations or records none, then
+`lf task complete <task-id>` completes the source. A repository without a code
+remote supports local work and refuses hosted landing. Local planning does not
+require Linear at any of these boundaries.
 
 ## Select Git planning
 
@@ -400,63 +402,86 @@ in existing personal, repository or Wave settings.
 ## Publish and finish
 
 ```bash
-lf pr publish                         # push a ready PR
+lf pr publish                      # push a ready PR
 lf submit                          # prepare for a reviewer's merge click
 lf arm                             # prepare and request auto-merge; return
 lf land                            # record delivery and return
-lf --task EXP-12 land               # complete after verified merge
+lf land --wait-and-fix              # wait for merge and repair failing CI
 lf sync --plan                     # preview integration with main or stack parent
-lf wt create csv-export
-lf check                   # inspect release eligibility
 ```
 
-Choose one delivery operation for the desired endpoint. Submit, arm, and land
-own preparation and integration; publish does not sync. PR operations work
-on ordinary branches without creating a Task. Verified merge normally completes its Task. Arm and land return after recording delivery;
-`lf pr reconcile` checks it once and settles verified merges. In a Task checkout,
-it also recovers an existing PR whose GitHub identity is missing from the Task,
-without publishing or rotating the branch. Multiple PRs
-for the recorded branch remain unresolved. `lf ci watch`
-starts a ci-fix when a recorded landing fails its required checks.
+A Task has zero or one PR. Choose one delivery operation for the desired
+endpoint. Submit, arm and land own preparation and integration; publish does not
+sync. PR operations also work on ordinary branches without creating a Task.
+Arm and bare land return after recording delivery. `--wait-and-fix` observes and repairs
+its PR every 15 seconds for up to 30 minutes, including with Desktop closed;
+timeout or interruption leaves the intent intact. Repeating land for a merged
+Task PR succeeds and reports whether Task completion remains.
+`lf pr reconcile` checks recorded landings once. In a Task checkout it can also
+recover an existing PR whose GitHub identity is missing, without publishing.
+Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
+CI failures while it runs.
 
 ```bash
-lf task follow-up EXP-12 --outcome 'Installed latency meets the budget' --evidence 'Warm p95 below 1s over 20 samples' --check-at 2026-10-09T17:00:00Z
-lf land
-lf task follow-up EXP-12 --clear 'Published v0.14: 20 samples, p95 0.8s'
+lf task follow-up EXP-12 --title 'Verify the installed command' --notes 'Follow-up to EXP-12: after the release is installed, run the accepted scenario and record its version and result; investigate a failure.' --due 2026-10-09
+lf task follow-up EXP-12 --finish 'The installed check has its own Task'
+lf task complete EXP-12
 ```
 
-Record accepted remaining work before delivery. Its outcome, evidence condition
-and next check stay visible in Task status and Desktop. An overdue check calls
-for evidence or a scope decision; time and green CI never establish production
-success. `--next <slug>` keeps genuinely unfinished PR work open. Older keep-open
-requests without a stated outcome surface for an explicit scope decision.
+After verified merge, file accepted remaining obligations as linked follow-up
+Tasks, or record `lf task follow-up EXP-12 --none 'No accepted work remains'`.
+Use `--existing ISSUE` to link work already filed and `--wave WAVE` to choose its
+owner. Give each additional obligation a distinct `--key` before `--finish`;
+reusing a key (default: `follow-up`) retries the original filing, even if its
+title changes. Retries retain the child identity and Project after chapter
+rotation. Inspect receipts and retry identical input after an uncertain response.
+The source completes after filing,
+without waiting for those children to finish. Preserve accepted later checks in
+PR copy before landing clears scratch.
 
-`lf task move EXP-12 end` records an explicit completion. Old Session turns,
-reserved inputs and unknown process exits cannot veto it. Execution history and
-live process controls remain intact; uncertain or occupied checkouts are retained.
-`lf task abandon EXP-12` saves cancellation locally, including while Linear is
-unavailable. Retry retains its decision and delivery identity. An active connection
-delivers cancellation from that saved receipt; unavailable Linear states remain
-pending. Open PRs and additional committed work still need delivery or explicit
-abandonment.
+Filing and completion work locally without Linear. In a connected repository,
+foreground planning sync exports saved Tasks and then their related-issue links,
+including links from already completed Tasks. Closing that connection leaves
+unsent or uncertain effects for the next connection; filing starts no watcher.
+Displayed follow-up names and due dates use the current saved Task, while retry
+receipts keep their original identity and input.
 
-Completing an uncached Linear issue first retains its Task locally, without a
-checkout. The completion reason stays in Task history; retries reuse that identity
-and preserve the recorded outcome while provider writeback is pending.
+`ship` runs gate, waited landing, then follow-through. A bare delivery, manual
+GitHub merge or stopped finishing Flow leaves **Merged · Follow-through pending**.
+The next Task/Wave operation checks for live work, then runs `finish-delivery`
+if needed. It does not rerun gate or re-arm the merged PR.
 
-Completion, reopening and cancellation save locally before contacting Linear.
-An active Task Session or Desktop connection delivers pending decisions independently
-of comments and incoming planning. Status and Desktop retain pending synchronization feedback.
+Due follow-ups return on the owning Wave's next operation, even if unstarted.
+Their briefs carry release prerequisites, expected evidence and any timezone.
+A due date is not an alarm or proof of success. Only a concrete check already
+authorized in the brief can start unattended. Filing installs no schedule;
+without an installed Wave schedule, there is no automatic check between passes.
+
+`lf task complete EXP-12` completes without moving the Workflow. Moving or
+arriving at `end` records the movement, then requests completion. A failed
+request shows **Completion pending**; retry `lf task complete EXP-12`, without
+replaying the Flow. Completion requires merge and a durable none/filed
+disposition when the Task has a PR. Linear completion and reopening change
+status without moving the Workflow or stopping Processes; reopening supersedes
+an older completion request. `lf task reopen EXP-12` does the same locally,
+including offline: it returns planning to unstarted and keeps the PR, checkout,
+Started evidence and Workflow position. Restart the
+Workflow separately when needed; reopening does not start work. A PR-less
+Task can finish with research files or commits; they do not create a PR
+requirement. Old Session turns and unknown process exits cannot veto completion.
+Live controls and execution history remain intact; unsafe or occupied checkouts
+are retained. An open or closed-unmerged PR still requires delivery or explicit
+abandonment. A different PR needs another Task, stacked if dependent:
 
 ```bash
-lf task sync EXP-12                     # attempt pending delivery once
+lf checkout EXP-13 --stack-on EXP-12 --design scratch/child-design.md
+lf --task EXP-13 pr publish
 ```
 
-Observed conflicts adopt Linear automatically. The losing local state or comment
-remains in delivery history, and its delivery stops. An unchanged Linear baseline
-preserves pending local saves. Comment threads display Linear's current text beside
-the saved local body. Planning synchronization never moves the local Workflow.
-The separate provider read and write cannot prevent an unseen concurrent edit.
+A published parent PR, including a draft, is enough to start and publish the
+child. Prepare a child-specific design; checkout transfers it without overwriting
+newer child work. `lf sync` follows parent updates and its squash merge while
+preserving the child's identity, PR, Session and design.
 
 ## Check authorized deliveries in the background
 
@@ -486,7 +511,8 @@ with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
 failing PR nobody armed is reported, not repaired; so is a PR with no Task.
 Loopflow Desktop runs the same command for each open repository and stops it
 on quit. A second copy stands by behind a live one. Nothing depends on the
-watcher running: without it, failures are recorded and wait.
+watcher running during `land --wait-and-fix`: waited landing admits the same repair.
+After bare land returns, failures wait for a watcher or another waited landing.
 An idle check launches no provider. Existing work and GitHub merge requests
 continue when the schedule is disabled or a Task is held.
 

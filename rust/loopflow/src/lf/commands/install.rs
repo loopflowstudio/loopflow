@@ -2782,20 +2782,23 @@ mod artifact_tests {
         let (selected_app, selected_helper) = bundle("published", '5');
         let (superseded_app, _) = bundle("development", '6');
         let running = bin.join(format!("lf-{}", "7".repeat(64)));
-        fs::copy("/bin/sh", &running).unwrap();
+        fs::copy(std::env::current_exe().unwrap(), &running).unwrap();
         let mut process = std::process::Command::new(&running)
-            .args(["-c", "printf 'ready\\n'; read -r stop"])
+            .args([
+                "--ignored",
+                "--exact",
+                "lf::commands::install::artifact_tests::artifact_keepalive",
+                "--nocapture",
+            ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
             .unwrap();
         // Spawn acceptance alone does not prove the child is observable at its
         // new executable. Keep that exact executable running before pruning.
-        let mut ready = String::new();
-        BufReader::new(process.stdout.take().unwrap())
-            .read_line(&mut ready)
-            .unwrap();
-        assert_eq!(ready, "ready\n");
+        assert!(BufReader::new(process.stdout.take().unwrap())
+            .lines()
+            .any(|line| line.unwrap() == "ready"));
         let by_hand = bin.join("hotfix-61609c56");
         fs::write(&by_hand, "hotfix").unwrap();
         let unfinished = artifacts.join("published-partial");
@@ -2823,6 +2826,14 @@ mod artifact_tests {
         assert!(survived, "a binary a live process executes was removed");
         assert!(by_hand.exists() && unfinished.exists());
         assert!(!superseded.exists() && !daemon.exists() && !superseded_app.exists());
+    }
+
+    #[test]
+    #[ignore = "entry point for the artifact-retention fixture"]
+    fn artifact_keepalive() {
+        // A copied system shell is killed by macOS under network isolation.
+        println!("ready");
+        std::io::stdin().read_line(&mut String::new()).unwrap();
     }
 
     #[test]

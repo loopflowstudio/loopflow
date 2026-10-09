@@ -8,12 +8,13 @@ use crate::engine::{
 };
 use crate::journal::{self, LfEventFields, LfEventType, LfNode};
 use crate::lf::output::Colors;
-use crate::lf::Cli;
+use crate::lf::{Cli, Commands, PrCommand};
 use crate::ops::flow_process;
 use crate::ops::WorkBinding;
 use crate::store::SharedStore;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use clap::Parser;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -34,7 +35,19 @@ pub fn run(
     let items = compile_flow(flow, repo)?;
     require_autonomous_steps(&items)?;
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
-        block_on(async { Ok(open_flow_store().await?.sqlite.require_task_launch(task)?) })?;
+        block_on(async {
+            let store = open_flow_store().await?;
+            // Judge the compiled work, not the Flow's name: a local override must
+            // not smuggle an implementation edge into completed delivery recovery.
+            if matches!(items.as_slice(), [ConcreteStep::Skill(step)]
+                if step.skill.name == "follow-through" && step.returns.is_none())
+            {
+                store.sqlite.require_task_delivery(task)?;
+            } else {
+                store.sqlite.require_task_launch(task)?;
+            }
+            Ok(())
+        })?;
     }
     print_pipeline_header(&flow.name, &items);
     let bound_message = binding
@@ -131,6 +144,7 @@ pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Resu
         let mark = store.process_mark()?;
         let mut child = std::process::Command::new(&lf)
             .args(&args)
+            .current_dir(checkout)
             .spawn()
             .context("could not start the Task's Flow")?;
         ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
@@ -172,10 +186,6 @@ fn execute(
         &cli.account,
         &cli.only_account,
     )?;
-    let task = binding.and_then(|binding| match &binding.work {
-        WorkRef::Task(id) => Some(id.clone()),
-        _ => None,
-    });
     report_outcome(block_on(async {
         let driver = Driver {
             store: open_flow_store().await?,
@@ -187,7 +197,10 @@ fn execute(
             cwd: repo,
             launcher: cli,
             position: Mutex::new(ExecutionCursor::default()),
-            task: task.clone(),
+            task: binding.and_then(|binding| match &binding.work {
+                WorkRef::Task(id) => Some(id.clone()),
+                _ => None,
+            }),
             steers: Mutex::default(),
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -196,16 +209,20 @@ fn execute(
             .sqlite
             .lock_task_checkouts(&[driver.cwd], driver.task.as_ref())?;
         // The driver's one record of its Flow, written before any step runs.
-        driver.store.sqlite.record_flow_process(
-            &driver.process,
-            flow_name,
-            &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
-        )?;
+        driver
+            .store
+            .sqlite
+            .record_flow_process(
+                &driver.process,
+                &crate::engine::flow_graph::FlowGraph::new(flow_name, items),
+                driver.task.as_ref(),
+            )
+            .context("could not record the Flow and start its Task; no steps launched")?;
         drop(admission);
         let outcome = drive(&driver, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Flow; the finished Flow can.
-        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &task) {
+        if let (FlowOutcome::Completed, Some(task)) = (&outcome, &driver.task) {
             let task = driver
                 .store
                 .get_task(task)
@@ -407,7 +424,7 @@ struct Driver<'a> {
 /// How a step's process ended, before any answer is read.
 enum StepExit {
     Finished,
-    /// Interrupted: the Flow stops here.
+    /// Held or interrupted: the Flow stops here without an automatic retry.
     Stopped,
 }
 
@@ -505,7 +522,7 @@ impl Driver<'_> {
         let status = status.context("could not execute Flow step")?;
         match status.code() {
             Some(0) => Ok((StepExit::Finished, step)),
-            Some(130) => Ok((StepExit::Stopped, step)),
+            Some(3 | 130) => Ok((StepExit::Stopped, step)),
             _ => {
                 // The step's own conversation says how its turn ended.
                 for envelope in self.turn_events(step.as_ref())?.iter().rev() {
@@ -680,28 +697,38 @@ impl SkillExecutor for &Driver<'_> {
     async fn run_command(
         &self,
         ops: &crate::engine::ConcreteCommand,
-        ctx: ExecutionContext,
+        _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
         let label = ops.item.display_name();
-        print_step_progress(ctx.progress, &label);
-        let started = crate::store::rows::now_unix();
+        eprintln!("op: {label}");
         // Authored spellings outlive the CLI's; the step runs today's.
-        let args: Vec<String> = ops
-            .item
-            .clone()
-            .current()
-            .argv()
-            .into_iter()
-            .skip(1)
-            .collect();
+        let argv = ops.item.clone().current().argv();
+        let parsed = crate::lf::navigation::normalize_args(argv.clone())
+            .and_then(Cli::try_parse_from)
+            .ok();
+        let handoff_checkout = match parsed.and_then(|cli| cli.command) {
+            Some(Commands::Pr {
+                cmd:
+                    Some(PrCommand::Land {
+                        local: false,
+                        wait_and_fix: false,
+                        worktree,
+                        ..
+                    }),
+            }) => Some(crate::ops::land::resolve_repos(self.cwd, worktree.as_deref())?.0),
+            _ => None,
+        };
+        let args: Vec<String> = argv.into_iter().skip(1).collect();
         if let (StepExit::Stopped, _) = self.spawn(&label, &args).await? {
             return Ok(SkillOutcome::Waiting);
         }
-        // A landing the step left to its watcher has not delivered yet. Its
-        // effect is recorded; the Flow stops here and neither failed.
-        if let Some(landing) = self.store.sqlite.watched_landing_at(self.cwd, started)? {
-            eprintln!("Landing {landing} is still being watched; the Flow stops here.");
-            return Ok(SkillOutcome::Waiting);
+        // Only a nonwaiting land hands delivery off. A recent landing in the
+        // same checkout says nothing about an unrelated command's result.
+        if let Some(checkout) = handoff_checkout {
+            if let Some(landing) = self.store.sqlite.pending_landing_at(&checkout)? {
+                eprintln!("Landing {landing} is still being watched; the Flow stops here.");
+                return Ok(SkillOutcome::Waiting);
+            }
         }
         Ok(SkillOutcome::Completed)
     }

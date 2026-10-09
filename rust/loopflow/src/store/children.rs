@@ -89,25 +89,10 @@ impl Store {
         .await
     }
 
-    pub(crate) async fn complete_task(
-        &self,
-        task: &Task,
-        skipped_pr: Option<&TaskPr>,
-        how: crate::store::sqlite::EndMove,
-        note: Option<&str>,
-    ) -> StoreResult<bool> {
+    pub(crate) async fn complete_task(&self, task: &Task, request: i64) -> StoreResult<bool> {
         let task = task.clone();
-        let skipped_pr = skipped_pr.cloned();
-        let by = crate::journal::current_process_lfid();
-        let note = note.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.complete_task(
-                &task,
-                skipped_pr.as_ref(),
-                &how,
-                by.as_ref(),
-                note.as_deref(),
-            )
+            store.complete_task(&task, request)
         })
         .await
     }
@@ -135,13 +120,33 @@ impl Store {
         .await
     }
 
-    pub async fn stack_task_pr(&self, expected: &TaskPr, parent: &TaskPrId) -> StoreResult<()> {
-        let expected = expected.clone();
+    pub async fn stack_task_placement(&self, task: &Task, parent: &TaskPrId) -> StoreResult<()> {
+        let task = task.clone();
         let parent = parent.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.stack_task_pr(&expected, &parent)
+            store.stack_task_placement(&task, &parent)
         })
         .await
+    }
+
+    pub async fn sync_task_placement(
+        &self,
+        task_id: &TaskId,
+        new_base: &str,
+        clear_parent: bool,
+        updated_at: OffsetDateTime,
+    ) -> StoreResult<()> {
+        let task_id = task_id.clone();
+        let new_base = new_base.to_string();
+        run_sqlite(&self.sqlite, move |store| {
+            store.sync_task_placement(&task_id, &new_base, clear_parent, updated_at)
+        })
+        .await
+    }
+
+    pub async fn insert_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
+        let pr = pr.clone();
+        run_sqlite(&self.sqlite, move |store| store.insert_task_pr(&pr)).await
     }
 
     pub async fn update_task_pr(&self, pr: &TaskPr) -> StoreResult<()> {
@@ -160,11 +165,6 @@ impl Store {
             store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
         })
         .await
-    }
-
-    pub async fn heal_task_pr_base(&self, pr: &TaskPr) -> StoreResult<()> {
-        let pr = pr.clone();
-        run_sqlite(&self.sqlite, move |store| store.heal_task_pr_base(&pr)).await
     }
 
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
@@ -243,28 +243,9 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.active_task_pr(&task_id)).await
     }
 
-    pub async fn sync_task_pr(
-        &self,
-        pr_id: &TaskPrId,
-        new_base: &str,
-        clear_parent: bool,
-        updated_at: OffsetDateTime,
-    ) -> StoreResult<()> {
-        let pr_id = pr_id.clone();
-        let new_base = new_base.to_string();
-        run_sqlite(&self.sqlite, move |store| {
-            store.sync_task_pr(&pr_id, &new_base, clear_parent, updated_at)
-        })
-        .await
-    }
-
-    pub async fn settle_task_pr(&self, settled: &TaskPr, next: Option<&TaskPr>) -> StoreResult<()> {
+    pub async fn settle_task_pr(&self, settled: &TaskPr) -> StoreResult<()> {
         let settled = settled.clone();
-        let next = next.cloned();
-        run_sqlite(&self.sqlite, move |store| {
-            store.settle_task_pr(&settled, next.as_ref())
-        })
-        .await
+        run_sqlite(&self.sqlite, move |store| store.settle_task_pr(&settled)).await
     }
 
     pub(crate) async fn settle_task_pr_merged(

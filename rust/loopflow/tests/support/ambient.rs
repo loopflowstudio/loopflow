@@ -2,6 +2,11 @@ use std::ffi::OsString;
 
 /// Execution authority and capture context inherited by tests launched inside lf.
 pub const AMBIENT_TASK_ENV: &[&str] = &[
+    // Detached children must use the fixture binary, not the launching agent's installation.
+    "LF_BIN",
+    "LF_TRACE_ID",
+    "LF_PROCESS_LFID",
+    "LF_GIT_OPERATION_ID",
     "LF_CAPTURE_KEY",
     "LF_AGENT_CALLER",
     "LF_AS",
@@ -16,21 +21,21 @@ pub const AMBIENT_TASK_ENV: &[&str] = &[
 
 /// Call while holding the suite's environment lock; restore on drop.
 #[derive(Debug)]
-pub struct EnvGuard(Vec<(&'static str, Option<OsString>)>);
+pub struct EnvGuard(Vec<(String, Option<OsString>)>);
 
 impl EnvGuard {
     pub fn new() -> Self {
         Self::clear(AMBIENT_TASK_ENV)
     }
 
-    pub fn clear(names: &[&'static str]) -> Self {
+    pub fn clear(names: &[&str]) -> Self {
         Self(
             names
                 .iter()
                 .map(|&name| {
                     let value = std::env::var_os(name);
                     std::env::remove_var(name);
-                    (name, value)
+                    (name.to_owned(), value)
                 })
                 .collect(),
         )

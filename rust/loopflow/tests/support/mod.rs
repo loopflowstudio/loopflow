@@ -2,9 +2,11 @@ pub mod planning;
 
 use std::env;
 use std::ffi::OsString;
+use std::fs;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
+use base64::Engine;
 use loopflow::id::WaveId;
 use loopflow::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};
 use loopflow::store::{PmSnapshotRow, StorageConfig, Store};
@@ -138,6 +140,48 @@ fi
 "#,
         script = script.strip_prefix("#!/bin/sh\n").unwrap_or(script),
     )
+}
+
+#[allow(dead_code)] // Shared synthetic account for provider-backed CLI proofs.
+pub fn register_codex_account(home: &Path) {
+    let account_home = home.join("accounts/codex/fixture");
+    fs::create_dir_all(&account_home).unwrap();
+    let email = "fixture@example.com";
+    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::json!({"email": email, "sub": "fixture"}).to_string());
+    fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens": {
+            "access_token": "synthetic-fixture-token",
+            "id_token": format!("h.{claims}.s")
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: loopflow::store::ProviderAccountId::parse("fixture").unwrap(),
+            home: Some(account_home),
+            login_email: Some(loopflow::profile::EmailAddress::parse(email).unwrap()),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
 }
 
 pub struct EnvGuard {
@@ -274,18 +318,24 @@ pub struct RegisteredTask {
     pub pr: TaskPr,
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.
-pub fn register_task(
+/// Seed a retained PR row explicitly, independently of checkout placement.
+#[allow(dead_code)] // Shared helper compiled into tests without delivery fixtures.
+pub fn register_task_with_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
     base_commit: &str,
 ) -> RegisteredTask {
-    register_task_fixture(home, worktree, branch, base_commit)
+    let registered = register_task_fixture(home, worktree, branch, base_commit);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registered.store.insert_task_pr(&registered.pr))
+        .unwrap();
+    registered
 }
 
-#[allow(dead_code)] // Shared helper compiled into integration tests without this incident shape.
-pub fn register_unrun_task(
+#[allow(dead_code)] // Shared helper compiled into suites with published Tasks only.
+pub fn register_task_without_pr(
     home: &Path,
     worktree: &Path,
     branch: &str,
@@ -349,6 +399,9 @@ fn register_task_fixture(
         project_id: project.id.clone(),
         worktree: Some(worktree.to_path_buf()),
         workspace_slug: "task-pr-proof".to_string(),
+        branch: branch.to_string(),
+        base_commit: base_commit.to_string(),
+        parent_pr_id: None,
         agent: None,
         abandon_intent: None,
         created_at: now,
@@ -444,23 +497,16 @@ fn register_task_fixture(
             )
             .await
             .expect("create test Task");
-        if worktree.exists()
-            && loopflow::engine::git::rev_parse(worktree, &format!("refs/heads/{}", pr.branch))
-                .is_ok()
-        {
-            store
-                .append_task_event(
-                    &task.id,
-                    &loopflow::work::task::TaskEventKind::PrStarted {
-                        pr_id: pr.id.clone(),
-                        sequence: pr.sequence,
-                        branch: pr.branch.clone(),
-                        base_commit: pr.base_commit.clone(),
-                    },
-                )
-                .await
-                .expect("fixture checkout already exists");
-        }
+        store
+            .append_task_event(
+                &task.id,
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: base_commit.to_string(),
+                },
+            )
+            .await
+            .unwrap();
     });
     RegisteredTask {
         store,
@@ -490,6 +536,7 @@ pub fn register_sibling_task(
     task.plan.identifier = identifier.to_string();
     task.plan.title = format!("Sibling {identifier}");
     task.workspace_slug = branch.to_string();
+    task.branch = branch.to_string();
     task.worktree = Some(worktree.to_path_buf());
     task.created_at = now;
     task.updated_at = now;
@@ -512,20 +559,16 @@ pub fn register_sibling_task(
             None,
         ))
         .expect("create sibling Task");
-    if worktree.exists()
-        && loopflow::engine::git::rev_parse(worktree, &format!("refs/heads/{}", pr.branch)).is_ok()
-    {
+    if worktree.is_dir() {
         runtime
             .block_on(registered.store.append_task_event(
                 &task.id,
-                &loopflow::work::task::TaskEventKind::PrStarted {
-                    pr_id: pr.id.clone(),
-                    sequence: pr.sequence,
-                    branch: pr.branch.clone(),
-                    base_commit: pr.base_commit.clone(),
+                &loopflow::work::task::TaskEventKind::CheckoutReady {
+                    branch: branch.to_string(),
+                    base_commit: task.base_commit.clone(),
                 },
             ))
-            .expect("fixture sibling checkout already exists");
+            .unwrap();
     }
     task
 }

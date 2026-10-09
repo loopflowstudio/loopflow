@@ -25,17 +25,21 @@ pub struct WorkBinding {
 pub(crate) fn render_task_context(
     task: &Task,
     project: &ProjectPlan,
-    pr: &TaskPr,
+    pr: Option<&TaskPr>,
     wave_name: &str,
     steers: &[Steer],
 ) -> String {
-    let placement = pr
+    let placement = task
         .parent_pr_id
         .as_ref()
         .map(|parent| format!("Stack parent PR: {parent} (land the parent first)"))
         .unwrap_or_else(|| "Stack parent PR: none (rooted on main)".to_string());
+    let pull_request = pr
+        .and_then(TaskPr::github)
+        .map(|pr| format!("\nPull request: {}", pr.url))
+        .unwrap_or_default();
     format!(
-        "Linear Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nPR {pr_sequence}: {pr_branch}\nBase commit: {base_commit}\n{placement}",
+        "Task {identifier}: {title}\n\n{description}\n\nChapter plan: {project} (source {project_id})\n{project_context}\n\n{direction}\n\nTask directive snapshot synced at: {task_snapshot_synced_at}\nChapter plan snapshot synced at: {project_snapshot_synced_at}\nWave: {wave}\nTask Work: {task_id}\nWorktree: {worktree}\nBranch: {branch}{pull_request}\nBase commit: {base_commit}\n{placement}",
         identifier = task.plan.identifier,
         title = task.plan.title,
         description = task.plan.description,
@@ -47,10 +51,9 @@ pub(crate) fn render_task_context(
         project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
         task_id = task.id,
-        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "unplaced".into()),
-        pr_sequence = pr.sequence,
-        pr_branch = pr.branch,
-        base_commit = pr.base_commit,
+        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "not placed".into()),
+        branch = task.branch,
+        base_commit = task.base_commit,
         placement = placement,
     )
 }
@@ -194,13 +197,9 @@ async fn bind_selected_work(
             .ok_or_else(|| run_error(format!("Task {} has no owning Project", task.id)))?;
         let work = WorkRef::Task(task.id.clone());
         let steers = Vec::new();
-        let pr = store
-            .task_prs(&task.id)
-            .await
-            .map_err(run_error)?
-            .pop()
-            .ok_or_else(|| run_error(format!("Task {} has no recorded PR", task.id)))?;
-        let mut context = render_task_context(&task, &project.plan, &pr, wave.slug(), &steers);
+        let pr = store.active_task_pr(&task.id).await.map_err(run_error)?;
+        let mut context =
+            render_task_context(&task, &project.plan, pr.as_ref(), wave.slug(), &steers);
         if let Ok(Some(workflow)) = store.sqlite.workflow(&task.id) {
             context.push_str(&format!("\n\n{}", workflow.guidance(&task.plan.identifier)));
         }
@@ -380,6 +379,9 @@ mod tests {
             project_id: project.id.clone(),
             worktree: Some(worktree),
             workspace_slug: "runtime-research".to_string(),
+            branch: "jack/runtime-research".to_string(),
+            base_commit: "deadbeef".to_string(),
+            parent_pr_id: None,
             agent: None,
             abandon_intent: None,
             created_at: now,

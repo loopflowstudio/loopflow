@@ -6,7 +6,7 @@ mod support;
 use loopflow::store::{CredentialType, ProviderToken};
 use loopflow_test_support::TestRepo;
 use std::process::Command;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_without_pr, EnvGuard};
 
 #[test]
 fn public_watch_exports_peer_born_plans_and_recovers_mapped_receipts() {
@@ -33,7 +33,7 @@ fn planning_reconnect_fixture(mode: &str) {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
-    let registered = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
+    let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let key = home.path().join("provider.key");
     std::fs::write(&key, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap();

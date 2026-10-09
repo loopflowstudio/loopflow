@@ -140,6 +140,45 @@ Checkout shares preparation checks without fetches/leases; missing checkout mean
 restoration, not launch refusal. Abandon/delete/interrupt remain identity-only.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
+## Task delivery boundary (LOO-418, reconciled 2026-10-09)
+
+Jack Heart decided: zero or one PR per Task; dependencies use stacked Tasks.
+After merge, file follow-ups or record “none needed”, then complete. October 8:
+end triggers completion; Task status, Workflow position and Process liveness
+are independent. Failed end requests retry without replaying the Flow;
+reopening supersedes old intent. Linear completion preserves execution.
+
+Jack authorized stacking on LOO-406 `558a39232`: local planning, optional
+placement, independent completion. Jack retained best-effort unseen concurrency:
+observed Linear conflicts win; the enabled counterexample documents an overwritten
+unseen reopening despite matching readback, not an atomic-write guarantee.
+LOO-385 overlaps without closure authority. October 9: Jack approved the HTML
+walkthrough and requested shipping #1499; native-demo acceptance remains unproven.
+
+Placement, PR history and unresolved scope survive.
+Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,
+without a watcher or wake. Common planning owns creation/status;
+foreground export owns optional issues and relations, even after completion.
+Lost replies retain identity. Links read current saved names/dates, including
+removal, without changing immutable filing input.
+
+Reservation and child commit together; older reservations recover in their
+pinned Project after rotation. Historical intents retain unknown creation in
+common export; absence cannot authorize another create. Jack accepted usable local
+Tasks while that export stays pending. Reopening preserves
+execution/PR (`7671f8e9f`).
+
+Merged delivery can finish after Done without reopening (`1c4f10f96`). Resolved
+disposition blocks new scope; unresolved delivery retains its checkout (`0865e43a9`).
+Fixtures prove no scheduled or native acceptance.
+
+Failed promotion retains confirmed copy; handoffs preserve child edits.
+Flow/Started commit atomically after placement. Rust and populated-upgrade checks
+cover filing, completion, arrival, reopening, end retry and stacked handoff.
+Post-sync gate adds Swift build/headless lifecycle views; configured native and
+Jack's demo remain. Fixtures must use canonical paths and their own nested CLI.
+Settlement rechecks merge/disposition.
+
 ## Terminal-host adoption (2026-10-07)
 
 Jack Heart: Flow → Task → Wave, Desktop optional. Automated trials are account-free;
@@ -166,8 +205,8 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation
 
-LOO-367, Intelligence backlog, test Waves, LOO-343 and LOO-380 remain unverified;
-no rendered proof. Prior account: `f881ae647:wave/product/MEMORY.md`, this heading.
+LOO-380 proof and unresolved LOO-367/366/343/test-Wave findings:
+`314095b00:wave/product/MEMORY.md`, this heading. Unrechecked; no new cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 
@@ -301,7 +340,9 @@ heading. Task Workflow and Flow execution remain separate owners.
   checkout; an empty unpublished PR is retired at `end` (reverses part of
   W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
   settles the landing, the Task stays active and flagged until forced.
-- Earlier `feature`/`code` recipe and commit-push decisions: `942dab5d8:wave/product/MEMORY.md`, this heading. Historical recipes grant no review or delivery authority.
+- Superseded Flow-template and `lf commit -p` observations remain at
+  `51dd1ea90:wave/product/MEMORY.md`, this heading. The accepted Workflow
+  names and owner-scoped commands are recorded above.
 - Waiting is one reading per Session, saved at most every 5 s: an unanswered
   question, or no open tool call and a hand-back or 120 s of quiet. Codex
   approvals count as questions; OpenCode permissions do not.
@@ -529,8 +570,29 @@ continuity to Flows, not separate execution semantics. See
 and [research](../../docs/reviews/independent-operations.md). These decisions do not
 authorize an automatic Project reset, Task cancellation or claims of measured gains.
 
-CI watcher gaps: `e021858ec:wave/product/MEMORY.md`,
-**CI watcher decisions**; no failing-landing proof.
+## CI repair and waited landing (2026-10-01, reconciled 2026-10-08)
+
+On LOO-365, Jack Heart chose one optional repository watcher, runnable from a
+terminal, launchd or Desktop per open repository; never a required resident.
+Repair needs no owning conversation and deduplicates per failing PR/head.
+A PR without a Task is reported, not repaired. Jack preferred this helper to the
+minute cron and wanted that cron removed. October 4 retired Flow resumption.
+Unreviewed exceptions—taskless landing, unarmed reporting, Desktop view—and proof
+limits remain at `53be55c70:wave/product/MEMORY.md`, “CI watcher decisions.”
+
+October 8, LOO-418: Jack confirmed self-contained CI repair with Desktop closed
+and requested explicit `land --wait-and-fix` naming. Default waiting was not accepted.
+Repeated land preserves merged work. Busy checkouts cannot poison another waiter.
+After sync with #1512, caller ancestry exempts waiting; live or unresolved
+Processes still block. Unanswered turns alone are history, not execution.
+
+Finite landing (#1382) provided continuation after caller exit; #1384 moved
+repair to the watcher. #1287 fixed repair permissions and locks retained across
+canceled waits. No inspected record establishes a particular land crash as the
+cause of the switch. Task run retries whole failed Flows three times while its
+carrier survives; held exit 3 now stays held. Jack requested failed-step retry
+as Infrastructure LOO-435. Local CLI/provider fixtures pass; live repair and
+crashed-runner recovery remain unproven. Evidence: `53be55c70:scratch/`.
 
 ## Skill reduction decisions (2026-09-28)
 
@@ -879,9 +941,9 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
   boundary, with navigation owned by the following decider. There is no agent
   exchange row, answer lane,
   or dedicated answer controller.
-- **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
-  oldest-first. There is no live memory stream, and recent Wave Chat is not
-  ambient Project/Task prompt context.
+- **LOO-406 supersedes file-only memory in source.** Saved Wave definitions
+  provide ancestor context; files are explicit import sources. This integration
+  authorizes no live migration. Recent Wave Chat is not ambient Task context.
 - **Environment configures a process; it never decides what the process is.**
   Work identity comes from durable state; execution and signal authority must
   be established at their owning boundary, never inferred from a Run id,
@@ -889,7 +951,10 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-July–August incidents: `b908182f5:wave/product/MEMORY.md`; Steer delivery remains provider-dependent.
+### Earlier runtime findings (July–August evidence)
+
+Resident-era incidents and Steer-delivery limits: `b908182f5:wave/product/MEMORY.md`.
+October 4 retired automatic recovery; unknown liveness grants no retry.
 
 ## Model (design invariants)
 
@@ -981,9 +1046,8 @@ text first; that latency has no owning Task (LOO-375 owns `wt list` only).
 ## Sessions projection and native resume (reconciled 2026-09-24)
 
 The older Ask/Ready/Complete and Task-review control contract is superseded by
-October 4's Task conversation correction. Its dated implementation and proof
-notes remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
-under this heading. Retain these independent constraints:
+October 4's Task conversation correction. Details remain at `16fa9742591e3edfc0ed42c913c64347c02ffeb5:wave/product/MEMORY.md`
+under this heading. Retain:
 
 - `lf session list --json` owns the shared Session projection; Desktop owns no
   second queue, title store, liveness model or resolution state.

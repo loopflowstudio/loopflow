@@ -57,16 +57,16 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let prs: [PrSnapshot]
-    public let activePr: String?
+    public let pr: PrSnapshot?
+    public let followThrough: TaskFollowThrough
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, prs, execution
+        case task, reference, runtime, directive, condition, actions, pr, execution
         case workflowName = "workflow_name"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
         case nextMove = "next_move"
-        case activePr = "active_pr"
+        case followThrough = "follow_through"
     }
 }
 
@@ -86,12 +86,22 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let rank: UInt32
     public let state: String?
     public let completedAt: String?
+    public let dueDate: String?
+    public let followUpSources: [FollowThroughSource]
     public let completed: Bool
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
         case id, identifier, name, description, rank, completed, state, assignee, sync
         case completedAt = "completed_at"
+        case dueDate = "due_date"
+        case followUpSources = "follow_up_sources"
+    }
+
+    public var followUpLabel: String? {
+        guard !followUpSources.isEmpty else { return nil }
+        let source = followUpSources.map(\.identifier).joined(separator: ", ")
+        return "Follow-up to \(source)" + (dueDate.map { " · Due \($0)" } ?? "")
     }
 
     public var terminalLabel: String? {
@@ -113,8 +123,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
 public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     public let workId: String
     public let status: TaskState
-    /// Linear calls the Task complete while it is active here.
-    public let planningConflict: String?
+    /// A durable completion request awaiting settlement.
+    public let completionPending: String?
     public let reason: String
     public let updatedAt: String
     public let provider: String
@@ -124,7 +134,7 @@ public struct TaskRuntimeSnapshot: Decodable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case status, reason, provider, started
         case workId = "work_id"
-        case planningConflict = "planning_conflict"
+        case completionPending = "completion_pending"
         case updatedAt = "updated_at"
     }
 }
@@ -147,11 +157,13 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     public var identity: WorkspaceIdentity? { machineId.map { WorkspaceIdentity(machineId: $0, worktree: worktree) } }
     public let slug: String
     public let branch: String?
+    public let baseCommit: String
     public let worktree: String
     public let localExists: Bool?
 
     enum CodingKeys: String, CodingKey {
         case slug, branch, worktree
+        case baseCommit = "base_commit"
         case machineId = "machine_id"
         case localExists = "local_exists"
     }
@@ -177,16 +189,17 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let latestFlowProcess: FlowProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
-    public let activePr: PrSnapshot?
+    public let pr: PrSnapshot?
+    public let followThrough: TaskFollowThrough
     public let section: RoadmapSection
 
     enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, condition, actions, execution, section
+        case task, reference, runtime, condition, actions, execution, section, pr
         case workflowName = "workflow_name"
         case latestFlowProcess = "latest_flow_process"
         case runControl = "run_control"
         case nextMove = "next_move"
-        case activePr = "active_pr"
+        case followThrough = "follow_through"
     }
 }
 
@@ -234,7 +247,6 @@ public enum TaskConditionState: String, Decodable, Sendable, Hashable {
 public enum TaskAction: String, Codable, Sendable, Hashable {
     case resume
     case openPr = "open_pr"
-    case startNextPr = "start_next_pr"
     case noAction = "no_action"
 }
 
@@ -339,21 +351,12 @@ public struct PrMergeRequestSnapshot: Decodable, Sendable, Hashable {
     public let mode: PrMergeMode
     public let requestedAt: String
     public let headSha: String
-    public let afterMerge: PrAfterMerge
-    public let nextSlug: String?
 
     enum CodingKeys: String, CodingKey {
         case mode
         case requestedAt = "requested_at"
         case headSha = "head_sha"
-        case afterMerge = "after_merge"
-        case nextSlug = "next_slug"
     }
-}
-
-public enum PrAfterMerge: String, Decodable, Sendable, Hashable {
-    case continueTask = "continue_task"
-    case completeTask = "complete_task"
 }
 
 public struct GithubPrSnapshot: Decodable, Sendable, Hashable {
@@ -403,5 +406,85 @@ public enum WorkEvidence<Item: Decodable & Sendable & Hashable>: Decodable, Send
     public var unavailableReason: String? {
         if case let .unavailable(reason) = self { return reason }
         return nil
+    }
+}
+
+
+public struct FollowThroughSource: Decodable, Sendable, Hashable {
+    public let issueId: String
+    public let identifier: String
+
+    enum CodingKeys: String, CodingKey {
+        case identifier
+        case issueId = "issue_id"
+    }
+}
+
+public struct FollowThroughIntent: Decodable, Sendable, Hashable {
+    public let key: String
+    public let issueId: String
+    public let relationId: String
+    public let projectId: String
+    public let teamId: String
+    public let stateId: String?
+    public let wave: String
+    public let title: String
+    public let notes: String
+    public let due: String?
+    public let existing: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case key, wave, title, notes, due, existing
+        case issueId = "issue_id"
+        case relationId = "relation_id"
+        case projectId = "project_id"
+        case teamId = "team_id"
+        case stateId = "state_id"
+    }
+}
+
+public struct FollowThroughLink: Decodable, Sendable, Hashable, Identifiable {
+    public var id: String { key }
+    public let key: String
+    public let issueId: String
+    public let identifier: String
+    public let url: URL?
+    public let due: String?
+
+    enum CodingKeys: String, CodingKey {
+        case key, identifier, url, due
+        case issueId = "issue_id"
+    }
+}
+
+public struct TaskFollowThrough: Decodable, Sendable, Hashable {
+    public let intents: [FollowThroughIntent]
+    public let links: [FollowThroughLink]
+    public let reason: String?
+    public let needsConversion: Bool
+    public let scopeNotes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case intents, links, reason
+        case needsConversion = "needs_conversion"
+        case scopeNotes = "scope_notes"
+    }
+
+    public var resolved: Bool {
+        reason != nil && !needsConversion && intents.allSatisfy { intent in
+            links.contains { $0.key == intent.key && $0.issueId == intent.issueId }
+        }
+    }
+
+    public func deliveryLabel(merged: Bool, done: Bool) -> String? {
+        if needsConversion {
+            return (merged ? "Merged · " : "") + "Follow-through scope needs conversion"
+        }
+        if done {
+            if merged && !resolved { return "Done · Follow-through pending" }
+            return links.isEmpty ? nil : "Done · Follow-up " + links.map(\.identifier).joined(separator: ", ")
+        }
+        guard merged else { return nil }
+        return resolved ? "Merged · Ready to complete" : "Merged · Follow-through pending"
     }
 }

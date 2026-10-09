@@ -35,7 +35,8 @@ Give every started, unfinished Task in the Wave exactly one disposition, with
 its evidence: the first row below that fits. Started is the recorded fact,
 whether or not a driver is alive now. Include Tasks status lists under
 `unavailable_tasks`; they are unknown until read. Unstarted backlog is listed
-as backlog and left alone: starting it is the person's selection.
+as backlog and left alone: starting it is the person's selection, except for
+an already authorized concrete check in a due follow-up's brief (see below).
 
 | Disposition | Evidence and action |
 | --- | --- |
@@ -50,7 +51,8 @@ as backlog and left alone: starting it is the person's selection.
 When status gives `next_move.owner` as `wave`, that owner is you: the Task's
 disposition is yours to establish, never a handoff. Its recommended action is
 a suggestion to check against the rules below, not an instruction. No action is
-a valid result only when every started Task already holds a disposition above.
+a valid result only when every started Task already holds a disposition above
+and due follow-ups have been checked for selection or authorized execution.
 
 - **Look for a live driver first.** Read `lf task status <issue> --json` and
   check every Flow in `execution.work.flows` and every unfinished Process in
@@ -67,6 +69,18 @@ a valid result only when every started Task already holds a disposition above.
   last edge reached waits on a person there; rerun an edge that stopped or
   failed with `lf task run <issue> <flow>`, and take no other edge for them;
   do not choose a new direction or arm an unapproved merge.
+- **Retry completion alone.** A durable completion request at end retries with
+  `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
+  position and Process liveness are independent. A newer reopening supersedes
+  old intent; end alone cannot re-complete it.
+- **Finish merged delivery.** A verified merge is not Task completion. Inspect
+  all associated Flows and unfinished Processes first; leave a live ship Flow
+  to finish. With no live driver, a durable none/filed disposition needs
+  `lf task complete <issue>` and a status reread. Otherwise run
+  `lf --task <issue> run finish-delivery` to file accepted follow-ups or record
+  none, then complete. This applies to manual GitHub merges too. Do not replay
+  gate, re-arm, resume a stopped Flow or wait for the filed children to finish.
+  Missing scope judgment or uncertain provider writes remain visible blockers.
 - **Reviews stay in the Task conversation.** Surface the Session from
   `lf session list --waiting --json`. Discuss feedback and preserve agreed
   direction there; closing a Session supplies no navigation authority.
@@ -74,6 +88,25 @@ a valid result only when every started Task already holds a disposition above.
 
 Start authorized remaining work without asking. Do not approve reviews,
 arm a merge, cancel or abandon Tasks, or change direction.
+
+## Return to due follow-ups
+
+Read follow-up links and due dates in the shared plan, including unstarted Tasks.
+List due or overdue follow-ups separately from unrelated backlog. Use the date
+and any timezone, release or environment prerequisite in the brief; a due date
+is a day, not an exact-time alarm. Missing date or provider evidence stays unknown.
+
+Surface each due Task for selection unless its accepted brief already authorizes
+that concrete unattended check. For an authorized check, use ordinary Task execution
+and the same live-driver inspection above. Missing credentials or installation
+leaves it blocked; elapsed time never establishes success or completes the Task.
+Filing a follow-up grants no permission for unrelated future work.
+
+Use existing operation turns or an installed Wave schedule. Inspect
+`lf cron list --wave <exact-wave> --json`; do not install or enable a schedule as
+a side effect of filing or reading a due Task. Without an installed schedule,
+report “next Wave pass; no automatic check scheduled.” An open conversation does
+not schedule its next turn; failed schedule reads leave coverage unknown.
 
 ## Exercise all five functions within the Wave
 
@@ -172,7 +205,8 @@ headings in this order, omitting an empty group:
 3. **Stuck** — waiting on a dependency or capacity, paused, or unknown, with
    the named cause or missing evidence.
 
-Then list unstarted backlog, and after it any judgment, unresolved decisions
+Then list due follow-ups with their selection or authorized-check disposition,
+unstarted backlog, and after it any judgment, unresolved decisions
 and evidence gaps. Keep each row to its disposition and decisive evidence. If
 nothing needed action, say why briefly. Persist only changed decisions, durable learning and unresolved concerns at
 their existing owners. Report external posts only after confirming delivery;
@@ -190,12 +224,11 @@ Fill the link from `task.identifier` and `reference.issue_url`, and the readable
 title from `task.name`. Give the Task's disposition as its status, not
 `runtime.status` alone, and take the next owner from `next_move.owner`. An
 owner of `wave` names work this pass acts on, not a handoff: report its result.
-Link each published PR from that Task's `prs[].publication.github` `number` and
-`url`. State the next action only when supported by current evidence; leave
+Link the Task's optional `pr` using its recorded GitHub number and URL; omit
+the PR link when absent. State the next action only when supported by current evidence; leave
 unknown state unknown. Include an
-active PR/workspace slug only when navigating that workspace is the job. In
-roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
-use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+workspace slug only when navigating that workspace is the job, using
+`reference.workspace.slug`. A Task can have a checkout without a PR. Never infer a
 URL, branch, or slug from a title or identifier. If a link is absent, keep the
 readable title and available status without inventing a URL.
 

@@ -761,6 +761,7 @@ def main() -> None:
         "prioritySortOrder": 1,
         "assignee": None,
         "completedAt": None,
+        "dueDate": None,
         "state": {"type": "unstarted"},
         "team": {"id": "team-task-pr-tests"},
         "project": project,

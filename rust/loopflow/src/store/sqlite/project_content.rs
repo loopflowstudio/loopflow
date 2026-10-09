@@ -310,9 +310,13 @@ mod tests {
                     .select_project_workflow(&project, name, source)
                     .is_err());
             }
+            let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
+            store
+                .select_project_workflow(&project, "review", changed)
+                .unwrap();
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),
-                Some(definition)
+                Some(changed)
             );
             assert_eq!(
                 store.project(&project).unwrap().unwrap().plan.workflow,

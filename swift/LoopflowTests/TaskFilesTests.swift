@@ -528,7 +528,7 @@ struct TaskFilesTests {
 
         // Mount, hide and reopen the actual browser; its documents belong to the checkout.
         for _ in 0..<2 {
-            let browser = NSHostingView(rootView: TaskFilesView(store: store, prURL: nil, prBase: nil))
+            let browser = NSHostingView(rootView: TaskFilesView(store: store, prURL: nil, checkoutBase: nil))
             browser.frame = CGRect(x: 400, y: 0, width: 700, height: 500)
             root.addSubview(browser)
             browser.layoutSubtreeIfNeeded()

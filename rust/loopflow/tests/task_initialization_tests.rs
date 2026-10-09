@@ -8,7 +8,7 @@ use loopflow::ops::task::task_status;
 use loopflow::ops::task_actions::TaskAction;
 use loopflow::work::task::{GithubPr, PrPublication, TaskEventKind};
 use loopflow_test_support::TestRepo;
-use support::{register_unrun_task, EnvGuard};
+use support::{register_task_with_pr, EnvGuard};
 
 fn unbound_command(cli: &Path, repo: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(cli);
@@ -33,7 +33,7 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     repo.stage_all();
     repo.commit("Parent notes");
     let parent_head = repo.head_sha();
-    let parent = register_unrun_task(home.path(), repo.path(), "parent", &parent_head);
+    let parent = register_task_with_pr(home.path(), repo.path(), "parent", &parent_head);
     let child =
         support::register_sibling_task(&parent, "INF-124", "child", &target.path().join("child"));
     let worktree = child.worktree.as_ref().unwrap();
@@ -52,12 +52,12 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     runtime
         .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
-    let pr = runtime
-        .block_on(parent.store.active_task_pr(&child.id))
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
+        .execute("DELETE FROM task_prs WHERE task_id=?1", [child.id.as_str()])
         .unwrap();
     runtime
-        .block_on(parent.store.stack_task_pr(&pr, &parent.pr.id))
+        .block_on(parent.store.stack_task_placement(&child, &parent.pr.id))
         .unwrap();
 
     let checkout = || {
@@ -70,6 +70,10 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
     };
     checkout();
     assert!(!worktree.join("scratch").exists());
+    assert!(runtime
+        .block_on(parent.store.active_task_pr(&child.id))
+        .unwrap()
+        .is_none());
     assert_eq!(
         loopflow::engine::git::rev_parse(worktree, "HEAD^").unwrap(),
         parent_head
@@ -107,9 +111,15 @@ fn stacked_checkout_starts_with_one_scratch_deletion_commit() {
 #[test]
 fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     let repo = TestRepo::new();
+    assert!(Command::new("git")
+        .current_dir(repo.path())
+        .args(["branch", "test/checkout-recovery"])
+        .status()
+        .unwrap()
+        .success());
     let home = tempfile::tempdir().unwrap();
     let target = tempfile::tempdir().unwrap();
-    let mut fixture = register_unrun_task(
+    let mut fixture = register_task_with_pr(
         home.path(),
         repo.path(),
         "test/checkout-recovery",
@@ -199,7 +209,7 @@ fn checkout_restores_exact_task_history_from_a_dirty_checkout() {
     assert_eq!(
         events
             .iter()
-            .filter(|event| matches!(event.kind, TaskEventKind::PrStarted { .. }))
+            .filter(|event| matches!(event.kind, TaskEventKind::CheckoutReady { .. }))
             .count(),
         1
     );
@@ -231,7 +241,7 @@ fn initializing_worktree_keeps_status_wait_and_roadmap_readable() {
     let base = repo.head_sha();
     let branch = "jack/initializing-task";
     repo.create_branch(branch);
-    let mut task = register_unrun_task(home.path(), repo.path(), branch, &base);
+    let mut task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let missing_worktree = home.path().join("not-yet-created-worktree");
     task.task.worktree = Some(missing_worktree.clone());
     let runtime = tokio::runtime::Runtime::new().expect("initialization fixture runtime");
@@ -362,7 +372,7 @@ fn missing_worktree_status_is_actionable_and_read_only() {
         let base = repo.head_sha();
         let branch = "jack/missing-worktree";
         repo.create_branch(branch);
-        let task = register_unrun_task(home.path(), repo.path(), branch, &base);
+        let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
         (task, repo.path().to_path_buf(), branch.to_string())
     };
     assert!(!missing_path.exists(), "fixture worktree is absent");
@@ -407,209 +417,69 @@ fn missing_worktree_status_is_actionable_and_read_only() {
 }
 
 #[test]
-fn saved_task_checkout_works_offline_with_and_without_linear() {
-    for (connected, explicit_name) in [(false, false), (false, true), (true, false), (true, true)] {
-        let repo = TestRepo::new();
-        let home = tempfile::tempdir().unwrap();
-        let fixture = register_unrun_task(home.path(), repo.path(), "main", &repo.head_sha());
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let original_prs = runtime
-            .block_on(fixture.store.task_prs(&fixture.task.id))
-            .unwrap();
-        let mut snapshot = runtime
-            .block_on(fixture.store.pm_snapshot(&fixture.task.wave_id))
-            .unwrap()
-            .unwrap();
-        let mut item = snapshot.snapshot.items[0].clone();
-        item.id = "offline-placement-issue".into();
-        item.identifier = "INF-456".into();
-        item.name = "Saved Task placement".into();
-        item.branch_name = None;
-        snapshot.snapshot.items.push(item);
-        runtime
-            .block_on(fixture.store.put_pm_snapshot(snapshot, None))
-            .unwrap();
-        let task = runtime
-            .block_on(fixture.store.get_task_by_issue("INF-456"))
-            .unwrap()
-            .unwrap();
-        let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        if connected {
-            fs::create_dir_all(repo.path().join(".lf")).unwrap();
-            fs::write(
-                repo.path().join(".lf/config.yaml"),
-                "pm:\n  provider: linear\n  linear_team: unreachable-team\n",
-            )
-            .unwrap();
-        } else {
-            conn.execute(
-                "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
-                [task.id.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE projects SET external_project_id=NULL WHERE id=?1",
-                [task.project_id.as_str()],
-            )
-            .unwrap();
-        }
-        // A saved edit must survive allocation, even while an older provider fact remains.
-        conn.execute(
-            "UPDATE tasks SET issue_title='Retain all five title words',planning_revision=3 WHERE id=?1",
-            [task.id.as_str()],
-        )
+fn research_checkout_restores_and_reads_files_without_a_pull_request() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let parent = register_task_with_pr(home.path(), repo.path(), "main", &repo.head_sha());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let research = support::register_sibling_task(
+        &parent,
+        "INF-124",
+        "research",
+        &target.path().join("research"),
+    );
+    let worktree = research.worktree.as_ref().unwrap();
+
+    let restored = loopflow::ops::task::task_checkout(
+        repo.path(),
+        "INF-124",
+        loopflow::ops::task::TaskCheckoutOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(restored.id, research.id);
+    fs::write(worktree.join("findings.md"), "Use the existing store.\n").unwrap();
+    let result = Command::new("git")
+        .current_dir(worktree)
+        .args(["add", "findings.md"])
+        .status()
         .unwrap();
-        // Provider inventory is observation history, not a prerequisite for saved placement.
-        conn.execute("DELETE FROM pm_items", []).unwrap();
-        conn.execute("DELETE FROM pm_wave_projects", []).unwrap();
-        let saved = runtime
-            .block_on(fixture.store.get_task(&task.id))
-            .unwrap()
-            .unwrap();
-        let checkout = || {
-            let mut args = vec!["task", "checkout", task.id.as_str(), "--json"];
-            if explicit_name {
-                args.extend(["--name", "offline-placement"]);
-            }
-            let mut command =
-                unbound_command(Path::new(env!("CARGO_BIN_EXE_lf")), repo.path(), &args);
-            for (name, _) in std::env::vars_os() {
-                if name.to_string_lossy().starts_with("LINEAR_") {
-                    command.env_remove(name);
-                }
-            }
-            command
-                .env("HOME", home.path())
-                .env("LF_HOME", home.path())
-                .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-                .env("LF_USER_NAME", "Fixture Person")
-                .output()
-                .unwrap()
-        };
-        conn.execute(
-            "UPDATE tasks SET planning_state='completed',planning_completed=1 WHERE id=?1",
-            [task.id.as_str()],
-        )
+    assert!(result.success());
+    let result = Command::new("git")
+        .current_dir(worktree)
+        .args(["commit", "-m", "Record research findings"])
+        .status()
         .unwrap();
-        let refused = checkout();
-        assert!(!refused.status.success());
-        assert!(String::from_utf8_lossy(&refused.stderr).contains("terminal planning state"));
-        assert!(runtime
-            .block_on(fixture.store.task_prs(&task.id))
-            .unwrap()
-            .is_empty());
-        assert!(runtime
-            .block_on(fixture.store.get_task(&task.id))
-            .unwrap()
-            .unwrap()
-            .worktree
-            .is_none());
-        conn.execute(
-            "UPDATE tasks SET planning_state='unstarted',planning_completed=0 WHERE id=?1",
-            [task.id.as_str()],
-        )
-        .unwrap();
-        let first = checkout();
-        assert!(
-            first.status.success(),
-            "{}",
-            String::from_utf8_lossy(&first.stderr)
-        );
-        let placed = runtime
-            .block_on(fixture.store.get_task(&task.id))
-            .unwrap()
-            .unwrap();
-        assert_eq!(placed.plan, saved.plan);
-        assert_eq!(placed.project_id, saved.project_id);
-        assert_eq!(placed.wave_id, saved.wave_id);
-        assert_eq!(
-            placed.workspace_slug,
-            if explicit_name {
-                "offline-placement".to_string()
-            } else {
-                format!("retain-all-five-title-{}", &task.id.as_str()[5..17])
-            }
-        );
-        let worktree = placed.worktree.as_ref().unwrap();
-        assert!(worktree.join(".git").exists());
-        let prs = runtime.block_on(fixture.store.task_prs(&task.id)).unwrap();
-        assert_eq!(prs.len(), 1);
-        assert_eq!(
-            prs[0].branch,
-            format!(
-                "lf/{}/retain-all-five-title-words",
-                task.id.as_str().trim_start_matches("task_")
-            )
-        );
-        let events = runtime
-            .block_on(fixture.store.task_events_after(&task.id, 0))
-            .unwrap();
-        fs::remove_dir_all(worktree).unwrap();
-        let retried = checkout();
-        assert!(
-            retried.status.success(),
-            "{}",
-            String::from_utf8_lossy(&retried.stderr)
-        );
-        assert!(worktree.join(".git").exists());
-        assert_eq!(
-            runtime
-                .block_on(fixture.store.get_task(&task.id))
-                .unwrap()
-                .unwrap(),
-            placed
-        );
-        assert_eq!(
-            runtime.block_on(fixture.store.task_prs(&task.id)).unwrap(),
-            prs
-        );
-        assert_eq!(
-            runtime
-                .block_on(fixture.store.task_events_after(&task.id, 0))
-                .unwrap(),
-            events
-        );
-        assert_eq!(
-            runtime
-                .block_on(fixture.store.task_prs(&fixture.task.id))
-                .unwrap(),
-            original_prs
-        );
-        let executions: i64 = conn.query_row(
-            "SELECT (SELECT count(*) FROM agent_sessions WHERE task_id=?1) + (SELECT count(*) FROM task_workflows WHERE task_id=?1)",
-            [task.id.as_str()], |row| row.get(0),
-        ).unwrap();
-        assert_eq!(executions, 0);
-        fs::create_dir_all(worktree.join(".lf/flows")).unwrap();
-        fs::write(
-            worktree.join(".lf/flows/offline.yaml"),
-            "- cmd: task sync --plan\n",
-        )
-        .unwrap();
-        let output = unbound_command(
-            Path::new(env!("CARGO_BIN_EXE_lf")),
+    assert!(result.success());
+    fs::write(worktree.join("draft.md"), "Keep this draft.\n").unwrap();
+    let changes = loopflow::ops::task::task_changes("INF-124", "parent").unwrap();
+    assert!(changes
+        .files
+        .iter()
+        .any(|file| file.path == "findings.md" && file.committed));
+    assert!(changes
+        .files
+        .iter()
+        .any(|file| file.path == "draft.md" && file.untracked));
+    let snapshot = loopflow::ops::task::task_snapshot(&restored).unwrap();
+    assert!(snapshot.pr.is_none());
+    assert_eq!(snapshot.branch.as_deref(), Some("research"));
+    assert!(runtime
+        .block_on(parent.store.task_prs(&research.id))
+        .unwrap()
+        .is_empty());
+    let json = serde_json::to_value(snapshot).unwrap();
+    assert!(json["pr"].is_null());
+    assert!(json.get("prs").is_none());
+    assert!(json.get("active_pr").is_none());
+    let binding = runtime
+        .block_on(loopflow::ops::resolve_work_binding(
+            &std::sync::Arc::new(parent.store),
             worktree,
-            &["-b", "--task", task.id.as_str(), "flow", "offline"],
-        )
-        .env("LF_HOME", home.path())
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .output()
+            "task:INF-124",
+        ))
         .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let flows = support::recorded_flows(home.path());
-        assert_eq!(flows.len(), 1);
-        assert_eq!(flows[0].0.as_deref(), Some("succeeded"));
-        assert_eq!(
-            runtime
-                .block_on(fixture.store.get_task(&task.id))
-                .unwrap()
-                .unwrap()
-                .plan,
-            saved.plan
-        );
-    }
+    assert!(binding.context.contains("Branch: research"));
+    assert!(!binding.context.contains("PR 1:"));
 }

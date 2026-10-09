@@ -90,6 +90,13 @@ fn put_snapshot(
         .get_wave_at(&WaveLocator::discover(repo, wave).unwrap())
         .unwrap()
         .expect("registered Wave");
+    let goal = std::fs::read_to_string(repo.join("wave").join(wave).join("GOAL.md"))
+        .unwrap_or_else(|_| {
+            format!("---\npm:\n  linear_initiative: {initiative}\n---\nFixture Wave.\n")
+        });
+    store
+        .update_wave_document(registered.id(), "GOAL.md", &goal)
+        .unwrap();
     store
         .put_pm_snapshot(&PmSnapshotRow {
             wave_id: registered.id().clone(),
@@ -290,7 +297,7 @@ fn repository_team_matrix() {
         let error = String::from_utf8_lossy(&checkout.stderr);
         assert!(!checkout.status.success());
         assert!(
-            error.contains("terminal planning state"),
+            error.contains("is done; use `lf task reopen"),
             "unexpected task result: {error}"
         );
     }

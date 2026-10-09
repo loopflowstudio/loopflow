@@ -52,6 +52,8 @@ const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
 /// Local context previews accept authored Wave directories without registration.
 /// `global_commands` covers their config, usage and refresh behavior.
+const FOLLOW_UP_DESTINATION: &[&[&str]] = &[&["task", "follow-up"]];
+
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Scheduling requires an explicit Wave or repository, never ambient selection.
@@ -223,7 +225,7 @@ fn make_envs(product_uuid: &str, stale_uuid: &str) -> Vec<Env> {
 /// documented special cases.
 fn expected_outcome(cmd: &Cmd, env: &Env) -> Outcome {
     // Connection may register the selected Wave.
-    if env.id == "explicit-unknown" && cmd.id == "repo connect" {
+    if env.id == "explicit-unknown" && matches!(cmd.id, "repo connect" | "task create") {
         return Outcome::Resolved;
     }
 
@@ -522,6 +524,7 @@ fn registry_is_complete() {
         .iter()
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
@@ -570,6 +573,7 @@ fn registry_is_complete() {
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
         .chain(AUTHORED_CONTEXT)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
     {

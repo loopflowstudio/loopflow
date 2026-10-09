@@ -26,6 +26,7 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
             tracing::debug!(%error, "planning export pending");
         }
     }
+    sync_follow_through_relations(store, Path::new(repo)).await?;
     Ok(())
 }
 
@@ -253,4 +254,49 @@ async fn observe(
         }
     }
     Ok(true)
+}
+
+// Local filing settles independently. Exporting either endpoint makes its retained
+// relation eligible, including after the source Task has already completed.
+async fn sync_follow_through_relations(store: &Store, repo: &Path) -> OpsResult<()> {
+    for relation in store
+        .sqlite
+        .pending_follow_through_relations(&repo.to_string_lossy())
+        .map_err(message)?
+    {
+        let path = store
+            .sqlite
+            .home_dir()
+            .map_err(message)?
+            .join("locks/follow-through-relations")
+            .join(format!("{}.lock", relation.task_id));
+        let Some(_lock) = super::planning_delivery::lock_delivery(&path)? else {
+            continue;
+        };
+        let attempt = async {
+            super::pm::issue_client(repo)
+                .await?
+                .ensure_follow_up_relation(
+                    &relation.source_issue_id,
+                    &relation.target_issue_id,
+                    &relation.relation_id,
+                )
+                .await
+                .map_err(message)?;
+            store
+                .sqlite
+                .confirm_follow_through_relation(&relation)
+                .map_err(message)
+        };
+        match tokio::time::timeout(Duration::from_secs(5), attempt).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%error, task = %relation.task_id, "follow-up relation synchronization pending")
+            }
+            Err(_) => {
+                tracing::debug!(task = %relation.task_id, "follow-up relation synchronization timed out; receipt retained")
+            }
+        }
+    }
+    Ok(())
 }

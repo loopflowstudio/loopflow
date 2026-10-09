@@ -8,10 +8,11 @@ use loopflow::engine::worktrees::create_named_worktree;
 use loopflow::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, OpsError, PrOptions,
 };
-use loopflow::work::task::{AfterMerge, PrMergeMode, PrPhase};
+use loopflow::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
 use support::{
-    codex_app_server_script, counting_open_script, presentation_attempts, register_task, EnvGuard,
+    codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
+    EnvGuard,
 };
 
 fn push_branch(repo: &TestRepo, name: &str) {
@@ -338,8 +339,7 @@ fn land_local_squash_merges_to_main() {
             strict: true,
             local: true,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -385,8 +385,7 @@ fn land_preserves_main_on_failure() {
             strict: true,
             local: true,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -425,8 +424,7 @@ fn land_cleans_up_remote_branch() {
             strict: true,
             local: true,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -473,8 +471,7 @@ fn land_clears_scratch_and_preserves_gitkeep() {
             strict: true,
             local: true,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -529,8 +526,7 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
             strict: true,
             local: false,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("reviewed change".to_string()),
@@ -636,8 +632,7 @@ fi
             strict: true,
             local: false,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -711,8 +706,7 @@ fn land_preserves_checkpoint_history_and_pushes_the_final_tree_once() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("merged change".to_string()),
@@ -792,8 +786,7 @@ fn land_refuses_when_clearing_scratch_leaves_no_authored_change() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("notes only".to_string()),
@@ -857,8 +850,7 @@ fn land_does_not_push_when_target_already_contains_the_authored_patch() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("already upstream".to_string()),
@@ -917,8 +909,7 @@ fn land_missing_pr_error_includes_branch_name() {
             strict: true,
             local: false,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("cached title".to_string()),
@@ -959,8 +950,7 @@ fn land_uses_cached_pr_copy_when_available() {
             strict: false,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -1003,8 +993,7 @@ fn submit_and_land_make_no_presentation_attempt() {
                 strict: true,
                 local: false,
                 create_pr: true,
-                complete: false,
-                next_slug: None,
+                wait_and_fix: false,
                 worktree: None,
                 commit_message: None,
                 pr_title: Some("test title".to_string()),
@@ -1042,8 +1031,7 @@ fn submit_and_land_make_no_presentation_attempt() {
                 strict: true,
                 local: false,
                 create_pr: true,
-                complete: false,
-                next_slug: None,
+                wait_and_fix: false,
                 worktree: None,
                 commit_message: None,
                 pr_title: Some("test title".to_string()),
@@ -1080,8 +1068,7 @@ fn submit_assigns_reviewer_and_skips_auto_merge() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1121,7 +1108,7 @@ fn submit_records_user_merge_for_a_managed_task() {
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     submit(
         repo.path(),
@@ -1129,8 +1116,7 @@ fn submit_records_user_merge_for_a_managed_task() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1174,7 +1160,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),
     );
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
 
     let result = land(
         repo.path(),
@@ -1182,8 +1168,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
             strict: true,
             local: false,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1208,7 +1193,7 @@ fn land_clears_the_durable_request_when_auto_arm_fails() {
 }
 
 #[test]
-fn latest_land_disposition_wins_before_merge() {
+fn same_head_publication_preserves_the_armed_merge_request() {
     let home = tempfile::TempDir::new().expect("temp home");
     let repo = TestRepo::new();
     let log_path = home.path().join("gh.log");
@@ -1224,7 +1209,7 @@ fn latest_land_disposition_wins_before_merge() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     fs::write(format!("{}.auto", log_path.display()), "armed externally")
         .expect("seed external auto-merge state");
 
@@ -1234,8 +1219,7 @@ fn latest_land_disposition_wins_before_merge() {
             strict: true,
             local: false,
             create_pr: false,
-            complete: true,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1271,122 +1255,12 @@ fn latest_land_disposition_wins_before_merge() {
         .expect("refreshed reviewer copy");
     assert_eq!(copy.title, "refresh published PR");
     assert!(copy.body.starts_with("same head\n\n<!--"));
-    assert!(copy.body.contains("Merging PR 1 completes the Task."));
+    assert!(copy
+        .body
+        .contains("File accepted follow-ups or record none needed, then complete the Task."));
     assert!(!copy.body.contains("no Task settlement is requested"));
     let preserved = preserved.merge_request().expect("preserved merge request");
-    assert_eq!(preserved.after_merge, AfterMerge::CompleteTask);
     assert_eq!(preserved.head_sha, head);
-
-    let hook = repo.bare_path().join("hooks/pre-receive");
-    fs::write(
-        &hook,
-        format!(
-            "#!/bin/sh\necho git-push >> '{}'\ncat >/dev/null\n",
-            log_path.display()
-        ),
-    )
-    .expect("write remote push hook");
-    let mut permissions = fs::metadata(&hook)
-        .expect("read hook metadata")
-        .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&hook, permissions).expect("make push hook executable");
-
-    land(
-        repo.path(),
-        &LandOptions {
-            strict: true,
-            local: false,
-            create_pr: false,
-            complete: false,
-            next_slug: Some("follow-up-proof".to_string()),
-            worktree: None,
-            commit_message: None,
-            pr_title: Some("test title".to_string()),
-            pr_body: Some("test body".to_string()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("revise land disposition");
-    let revised_head = repo.head_sha();
-
-    let pr = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .expect("read active PR")
-        .expect("active PR");
-    assert_eq!(pr.phase(), PrPhase::Open);
-    let publication = pr.publication.expect("publication");
-    let presentation = publication
-        .presentation
-        .as_ref()
-        .expect("Task identity survives refresh and land");
-    assert_eq!(presentation.title, "test title");
-    assert!(presentation.body.starts_with(
-        "test body\n\n<!-- loopflow:task-pr-context:start -->\n> [!NOTE]\n> **Task:** [Prove Task PR transitions · INF-123](https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions)"
-    ));
-    assert!(!presentation.body.contains("Task cycle:"));
-    assert!(presentation.body.contains(
-        "> **PR lifecycle:** Merging PR 1 leaves the Task open and names `follow-up-proof` as the next serial PR."
-    ));
-    assert_eq!(publication.github.map(|pr| pr.number), Some(912));
-    let merge = publication.merge.expect("explicit merge request");
-    assert_eq!(merge.mode, PrMergeMode::Auto);
-    assert_eq!(merge.head_sha, revised_head);
-    assert_eq!(merge.after_merge, AfterMerge::ContinueTask);
-    assert_eq!(merge.next_slug.as_deref(), Some("follow-up-proof"));
-    create_or_update_pr(
-        repo.path(),
-        &PrOptions {
-            draft: false,
-            title: Some(presentation.title.clone()),
-            body: Some(presentation.body.clone()),
-            agent: None,
-        },
-        &NullProgress,
-    )
-    .expect("refresh continuing PR with its existing managed context");
-    let refreshed = runtime
-        .block_on(task.store.active_task_pr(&task.task.id))
-        .unwrap()
-        .unwrap();
-    let refreshed_copy = refreshed
-        .publication
-        .as_ref()
-        .and_then(|publication| publication.presentation.as_ref())
-        .unwrap();
-    assert_eq!(refreshed_copy, presentation);
-    let log = fs::read_to_string(&log_path).expect("read gh log");
-    assert!(log.contains(&format!(
-        "pr merge 912 --squash --auto --match-head-commit {revised_head}"
-    )));
-    let first_disable = log
-        .find("pr merge 912 --disable-auto")
-        .expect("pre-existing Auto is replaced");
-    let first_arm = log
-        .find("pr merge 912 --squash --auto --match-head-commit")
-        .expect("land arms the exact prepared head");
-    assert!(
-        first_disable < first_arm,
-        "external Auto must be replaced by the exact-head command:\n{log}"
-    );
-    let disable = log
-        .rfind("pr merge 912 --disable-auto")
-        .expect("second land revokes prior Auto request");
-    if revised_head != head {
-        let push = log
-            .find("git-push")
-            .expect("a changed head is pushed by the second land");
-        assert!(
-            disable < push,
-            "Auto intent must be revoked before the LF-owned head-changing push:\n{log}"
-        );
-    } else {
-        assert!(
-            !log.contains("git-push"),
-            "an unchanged head needs no replacement push:\n{log}"
-        );
-    }
 }
 
 #[test]
@@ -1406,13 +1280,12 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
     repo.stage_all();
     repo.commit("feature work");
     repo.push_new_branch(branch);
-    let task = register_task(home.path(), repo.path(), branch, &base);
+    let task = register_task_with_pr(home.path(), repo.path(), branch, &base);
     let options = LandOptions {
         strict: true,
         local: false,
         create_pr: false,
-        complete: true,
-        next_slug: None,
+        wait_and_fix: false,
         worktree: None,
         commit_message: None,
         pr_title: Some("test title".to_string()),
@@ -1442,7 +1315,6 @@ fn repeated_identical_land_preserves_the_armed_task_request() {
         .expect("active PR");
     let request = pr.merge_request().expect("preserved merge request");
     assert_eq!(request.mode, PrMergeMode::Auto);
-    assert_eq!(request.after_merge, AfterMerge::CompleteTask);
     assert_eq!(request.head_sha, armed_head);
     let replay_log = fs::read_to_string(&log_path).expect("read replay gh log");
     assert_eq!(
@@ -1503,8 +1375,7 @@ fi
         strict: true,
         local: false,
         create_pr: false,
-        complete: false,
-        next_slug: None,
+        wait_and_fix: false,
         worktree: None,
         commit_message: None,
         pr_title: Some("revised title".to_string()),
@@ -1592,8 +1463,7 @@ fn assert_non_task_land_publishes_changed_source(committed: bool) {
             strict: committed,
             local: false,
             create_pr: false,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1653,8 +1523,7 @@ fn submit_does_not_rotate_worktree() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("test title".to_string()),
@@ -1715,8 +1584,7 @@ fn land_generates_copy_when_cached_pr_copy_is_stale() {
             strict: true,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: None,
@@ -2206,8 +2074,7 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
             strict: false,
             local: false,
             create_pr: true,
-            complete: false,
-            next_slug: None,
+            wait_and_fix: false,
             worktree: None,
             commit_message: None,
             pr_title: Some("Document memory".into()),
@@ -2232,4 +2099,573 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
         .output()
         .unwrap();
     assert_eq!(committed.stdout, b"accepted\n");
+}
+
+#[test]
+fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
+    use std::time::{Duration, Instant};
+
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    push_branch(&repo, "main");
+    let base = repo.head_sha();
+    let remote = "https://github.com/loopflowstudio/loopflow.git";
+    for args in [
+        vec![
+            "config".into(),
+            format!("url.{}.insteadOf", repo.bare_path().display()),
+            remote.into(),
+        ],
+        vec![
+            "remote".into(),
+            "set-url".into(),
+            "origin".into(),
+            remote.into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    repo.create_branch("waited-repair");
+    let worktree = repo.path().canonicalize().unwrap();
+    for (path, contents) in [
+        ("feature.txt", "keep the feature"),
+        (".lf/config.yaml", "agent: codex\npm:\n  provider: linear\n  linear_team: team-task-pr-tests\n"),
+        (".lf/workflows/delivery-proof.yaml", "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, flow: delivery-proof}\n  - {from: review, to: end}\n"),
+        (".lf/flows/delivery-proof.yaml", "- cmd: flow show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n- cmd: task follow-up INF-123 --none fixture-has-no-later-obligations\n"),
+    ] {
+        let path = worktree.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, contents).unwrap();
+    }
+    for args in [
+        vec!["add", "."],
+        vec!["commit", "-m", "Feature and delivery fixture"],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(&worktree)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let home = tempfile::tempdir().unwrap();
+    let proof = home.path().join("repair-proof");
+    let launches = home.path().join("repair-launches");
+    let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false, false)
+        .replace("merge-head", "$head")
+        .replace("watched-land", "waited-repair");
+    let codex = codex_app_server_script(
+        r#"{"status":"published","summary":"The fixture check now passes."}"#, "",
+    ).replace("read -r turn_start\n", "read -r turn_start\necho repair >> \"$LF_TEST_REPAIR_LAUNCHES\"\ngit rev-parse HEAD > \"$LF_TEST_REPAIR_PROOF\"\n");
+    let _env = EnvGuard::with_lf_home(&[
+        ("gh", &gh), ("codex", &codex), ("open", noop_open_script()),
+        ("tmux", "#!/bin/sh\nif [ \"$1\" = new-session ]; then\nfor arg do command=$arg; done\n/bin/sh -c \"$command\" </dev/null >/dev/null 2>&1 &\nfi\n"),
+    ], home.path());
+    let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let unrelated = loopflow::id::ProcessLfid::new();
+    db.execute("INSERT INTO processes(lfid,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
+        rusqlite::params![unrelated, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+    let command = || {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            cmd.env_remove(name);
+        }
+        cmd.current_dir(&worktree)
+            .env("LF_HOME", home.path())
+            .env("LF_TEST_REPAIR_PROOF", &proof)
+            .env("LF_TEST_REPAIR_LAUNCHES", &launches);
+        cmd
+    };
+    let run = || {
+        let out = home.path().join("run.stdout");
+        let err = home.path().join("run.stderr");
+        let mut child = command()
+            .args(["-b", "task", "run", "INF-123", "delivery-proof"])
+            .stdout(fs::File::create(&out).unwrap())
+            .stderr(fs::File::create(&err).unwrap())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(45);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "waited Task did not finish: {}\n{}",
+                    fs::read_to_string(out).unwrap(),
+                    fs::read_to_string(err).unwrap()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        (
+            status,
+            fs::read_to_string(out).unwrap(),
+            fs::read_to_string(err).unwrap(),
+        )
+    };
+    let (status, _, error) = run();
+    assert_eq!(status.code(), Some(3), "{error}");
+    assert!(error.contains(unrelated.as_str()), "{error}");
+    assert!(!launches.exists(), "unrelated work must prevent repair");
+    assert_eq!(
+        support::recorded_flows(home.path()).len(),
+        1,
+        "held land must not replay gate"
+    );
+    // A concurrent watcher reports other work without poisoning the delivery
+    // that a foreground waiter will continue. Neither caller starts a repair.
+    let watched = command().args(["ci", "watch", "--once"]).output().unwrap();
+    assert!(
+        watched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&watched.stderr)
+    );
+    assert!(!launches.exists());
+    let landing_state: String = db
+        .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(landing_state, "watching");
+    db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE lfid=?1", [&unrelated]).unwrap();
+    // Even a later observation of this old request cannot turn the next
+    // Flow's read-only first command into a landing handoff.
+    db.execute(
+        "UPDATE pr_landings SET updated_at=?1",
+        [time::OffsetDateTime::now_utc().unix_timestamp() + 60],
+    )
+    .unwrap();
+    let (status, output, error) = run();
+    assert!(status.success(), "{output}\n{error}");
+    assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
+    assert!(
+        output.contains("Pull request merged; follow-through can proceed"),
+        "{output}"
+    );
+    let workflow: (String, String) = db
+        .query_row(
+            "SELECT node,graph FROM task_workflows WHERE task_id=?1",
+            [fixture.task.id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(workflow.0, "review");
+    let status = command()
+        .args(["task", "status", "INF-123", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        status["execution"]["follow_through"]["reason"],
+        "fixture-has-no-later-obligations"
+    );
+    assert_eq!(
+        status["execution"]["status"], "active",
+        "filing alone must not complete a Task"
+    );
+    assert_eq!(support::recorded_flows(home.path()).len(), 2);
+}
+
+#[test]
+fn waited_land_retains_intent_on_interrupt_and_finishes_only_after_merge() {
+    use std::time::{Duration, Instant};
+
+    // Reap the waiting CLI even if an assertion fails; never leave a 30-minute waiter.
+    struct Waiter(std::process::Child);
+    impl Drop for Waiter {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    push_branch(&repo, "main");
+    let base = repo.head_sha();
+    let github_remote = "https://github.com/loopflowstudio/loopflow.git";
+    let local_remote = repo.bare_path().to_string_lossy().to_string();
+    for args in [
+        vec![
+            "config".to_string(),
+            format!("url.{local_remote}.insteadOf"),
+            github_remote.into(),
+        ],
+        vec![
+            "remote".into(),
+            "set-url".into(),
+            "origin".into(),
+            github_remote.into(),
+        ],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    let branch = "waited-land";
+    let worktree = repo.create_named_worktree(branch);
+    fs::create_dir_all(worktree.join("scratch")).unwrap();
+    fs::write(worktree.join("scratch/.gitkeep"), "").unwrap();
+    fs::write(
+        worktree.join("feature.txt"),
+        "retain until follow-through\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["add", "."],
+        vec!["commit", "-m", "Feature ready to land"],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(&worktree)
+            .status()
+            .unwrap()
+            .success());
+    }
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&worktree)
+        .output()
+        .unwrap();
+    assert!(head.status.success());
+    let head = String::from_utf8(head.stdout).unwrap().trim().to_string();
+    let home = tempfile::tempdir().unwrap();
+    let log_path = repo.bare_path().join("wait-gh.log");
+    let merged_path = repo.bare_path().join("merged");
+    let unarmed = support::github_merge_response(1, &head, "OPEN", "CLEAN", None);
+    let armed = support::github_merge_response(1, &head, "OPEN", "CLEAN", Some("auto"));
+    let merged = support::github_merge_response(1, &head, "MERGED", "UNKNOWN", None);
+    let checks = support::github_checks_page(&head, &[("fixture-check", "SUCCESS", true)]);
+    let script = format!(
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then exit 0; fi
+echo "$@" >> '{log}'
+case "$1 $2" in
+  'pr list')
+    if [ -f '{log}.auto' ] && [ ! -f '{merged_path}' ]; then
+      echo '[{{"url":"https://example.com/pr/1","state":"OPEN","isDraft":false,"number":1,"mergeCommit":null,"headRefOid":"{head}"}}]'
+    else echo '[]'; fi ;;
+  'pr create'|'pr view') echo 'https://example.com/pr/1' ;;
+  'pr merge') touch '{log}.auto' ;;
+  'api graphql')
+    case "$*" in
+      *LoopflowPrChecks*)
+        echo '{checks}'
+        exit 0 ;;
+    esac
+    if [ -f '{merged_path}' ]; then echo '{merged}';
+    elif [ -f '{log}.auto' ]; then echo '{armed}';
+    else echo '{unarmed}'; fi ;;
+  api*)
+    if [ -f '{merged_path}' ]; then
+      echo '{{"merged":true,"state":"closed","draft":false,"merge_commit_sha":"{head}","merged_at":"2026-09-29T00:00:00Z","number":1,"html_url":"https://example.com/pr/1","head":{{"sha":"{head}"}}}}'
+    else
+      echo '{{"merged":false,"state":"open","mergeable_state":"clean","draft":false,"number":1,"html_url":"https://example.com/pr/1","head":{{"sha":"{head}"}}}}'
+    fi ;;
+esac
+"#,
+        log = log_path.display(),
+        merged_path = merged_path.display(),
+    );
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", &script), ("open", noop_open_script())],
+        home.path(),
+    );
+    let fixture = register_task_with_pr(home.path(), &worktree, branch, &base);
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let command = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        for (name, _) in
+            std::env::vars_os().filter(|(name, _)| name.to_string_lossy().starts_with("LF_"))
+        {
+            command.env_remove(name);
+        }
+        command.current_dir(&worktree).env("LF_HOME", home.path());
+        command
+    };
+    let pending = || {
+        let output = command()
+            .args(["task", "status", "INF-123", "--json"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let status = &status["execution"];
+        assert_eq!(status["status"], "not_ready", "{status}");
+        assert_eq!(
+            status["follow_through"]["reason"],
+            serde_json::Value::Null,
+            "{status}"
+        );
+        assert_eq!(
+            status["follow_through"]["links"],
+            serde_json::json!([]),
+            "{status}"
+        );
+        assert_eq!(
+            fs::read_to_string(worktree.join("feature.txt")).unwrap(),
+            "retain until follow-through\n"
+        );
+    };
+    let wait_args = [
+        "land",
+        "--wait-and-fix",
+        "--strict",
+        "--title",
+        "Waited landing",
+        "--body",
+        "Follow-through must run after merge.",
+    ];
+    let stdout = home.path().join("wait.stdout");
+    let stderr = home.path().join("wait.stderr");
+    let spawn = || {
+        Waiter(
+            command()
+                .args(wait_args)
+                .stdout(fs::File::create(&stdout).unwrap())
+                .stderr(fs::File::create(&stderr).unwrap())
+                .spawn()
+                .unwrap(),
+        )
+    };
+    let wait_for_open = |waiter: &mut Waiter, generation: i64| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        // A completed finite observation advances the generation and releases
+        // its claim. Interrupt during the waiting interval, not arm/preflight.
+        while !database
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pr_landings WHERE state='watching'
+             AND generation>?1 AND supervisor_process_id IS NULL)",
+                [generation],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        {
+            assert!(
+                waiter.0.try_wait().unwrap().is_none(),
+                "wait exited before observing open PR: {}",
+                fs::read_to_string(&stderr).unwrap()
+            );
+            assert!(
+                Instant::now() < deadline,
+                "no prepared landing observation: {}\n{}",
+                fs::read_to_string(&stdout).unwrap(),
+                fs::read_to_string(&stderr).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        // Green checks and an auto-merge request are still not a merge.
+        assert!(
+            waiter.0.try_wait().unwrap().is_none(),
+            "wait returned while PR was open: {}",
+            fs::read_to_string(&stderr).unwrap()
+        );
+    };
+    let finish = |waiter: &mut Waiter| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(status) = waiter.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "wait did not return: {}",
+                fs::read_to_string(&stderr).unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+
+    let mut first = spawn();
+    wait_for_open(&mut first, 1);
+    let request = runtime
+        .block_on(fixture.store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap()
+        .merge_request()
+        .cloned()
+        .unwrap();
+    assert_eq!(request.mode, PrMergeMode::Auto);
+    assert!(Command::new("kill")
+        .args(["-INT", &first.0.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    let interrupted = finish(&mut first);
+    let interrupted_stderr = fs::read_to_string(&stderr).unwrap();
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.active_task_pr(&fixture.task.id))
+            .unwrap()
+            .unwrap()
+            .merge_request(),
+        Some(&request)
+    );
+    pending();
+
+    // A later observer can run after interruption, without arming or completing.
+    let reconcile = command().args(["pr", "reconcile"]).output().unwrap();
+    assert!(
+        reconcile.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reconcile.stderr)
+    );
+    pending();
+    let generation: i64 = database
+        .query_row("SELECT generation FROM pr_landings", [], |row| row.get(0))
+        .unwrap();
+    let mut retry = spawn();
+    wait_for_open(&mut retry, generation);
+
+    // Advance the real Git remote and then publish the authoritative GitHub fact.
+    for args in [
+        vec!["merge", "--ff-only", branch],
+        vec!["push", "origin", "main"],
+    ] {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+    }
+    fs::write(&merged_path, &head).unwrap();
+    assert!(
+        finish(&mut retry).success(),
+        "{}",
+        fs::read_to_string(&stderr).unwrap()
+    );
+    assert!(fs::read_to_string(&stdout)
+        .unwrap()
+        .contains("merged; follow-through can proceed"));
+    pending();
+    let mut failures = Vec::new();
+    fs::write(
+        worktree.join("scratch/retained.md"),
+        "keep the finishing notes",
+    )
+    .unwrap();
+    for args in [&["pr", "reconcile"][..], &wait_args, &["land"]] {
+        let output = command().args(args).output().unwrap();
+        if !output.status.success() {
+            failures.push(format!(
+                "{args:?} exited {:?}: {}",
+                output.status.code(),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        pending();
+    }
+    assert_eq!(
+        fs::read_to_string(worktree.join("scratch/retained.md")).unwrap(),
+        "keep the finishing notes"
+    );
+    let selected = command()
+        .current_dir(repo.path())
+        .args(["land", "--worktree", worktree.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    assert!(String::from_utf8_lossy(&selected.stdout).contains("already merged"));
+    // Completion is durable even when dirty notes prevent checkout cleanup.
+    let disposition = command()
+        .args([
+            "task",
+            "follow-up",
+            "INF-123",
+            "--none",
+            "No remaining obligation",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        disposition.status.success(),
+        "{}",
+        String::from_utf8_lossy(&disposition.stderr)
+    );
+    let completed = command()
+        .args(["task", "complete", "INF-123"])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&completed.stderr)
+        .contains("is complete, but cleanup is incomplete"));
+    assert_eq!(
+        runtime
+            .block_on(fixture.store.task_state(&fixture.task.id))
+            .unwrap(),
+        loopflow::durable::TaskState::Done
+    );
+    for args in [&["land"][..], &["land", "--wait-and-fix"]] {
+        let output = command().args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("Task INF-123 is complete"),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+    let pr = runtime
+        .block_on(fixture.store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(pr.phase(), loopflow::work::task::PrPhase::Merged);
+    let log = fs::read_to_string(&log_path).unwrap();
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.starts_with("pr merge "))
+            .count(),
+        1,
+        "retry must retain the original merge request:\n{log}"
+    );
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.starts_with("pr create "))
+            .count(),
+        1,
+        "retry must retain the same PR:\n{log}"
+    );
+    // Check the interruption contract after recovery, so a bad exit code does
+    // not hide lost intent, a removed checkout, or duplicate remote requests.
+    // SIGINT uses the process-wide handler; the Flow driver treats 130 as stopped.
+    if interrupted.code() != Some(130) {
+        failures.push(format!(
+            "SIGINT exited {:?}, expected stopped (130): {interrupted_stderr}",
+            interrupted.code()
+        ));
+    }
+    if !interrupted_stderr.contains("merge intent retained") {
+        failures.push("SIGINT did not report retained merge intent".into());
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

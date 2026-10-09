@@ -1,2 +1,3 @@
 - gate
-- cmd: pr land -c
+- cmd: land --wait-and-fix
+- follow-through

@@ -201,9 +201,8 @@ Fill the link from `task.identifier` and `reference.issue_url`, and the readable
 title from `task.name`. Take status from `runtime.status` or the roadmap
 `section`, and next owner from `next_move.owner`. State the next action only
 when supported by current evidence; leave unknown state unknown. Include an
-active PR/workspace slug only when navigating that workspace is the job. In
-roadmap, use `active_pr.slug`; in status, match `active_pr` to `prs[].id` and
-use that PR's `slug`. Fall back to `reference.workspace.slug`. Never infer a
+workspace slug only when navigating that workspace is the job, using
+`reference.workspace.slug`. A Task can have a checkout without a PR. Never infer a
 URL, branch, or slug from a title or identifier. If a link is absent, keep the
 readable title and available status without inventing a URL.
 

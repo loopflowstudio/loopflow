@@ -43,7 +43,7 @@ lf wait INF-123 --until terminal                # block until it settles
 
 Tracked Work follows Wave → Task in navigation. A Wave owns its objective and
 memory; its current Linear Project owns Tasks, KRs, targets and workflow.
-Task owns the checkout and serial PRs. Every conversation and Flow attributed
+Task owns its checkout and zero or one PR. Every conversation and Flow attributed
 to it is equally its work; none is privileged.
 
 Process records an actual lf command process. LfSession keeps a continuable

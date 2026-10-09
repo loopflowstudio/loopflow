@@ -238,9 +238,12 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Put the Task at a node of its Workflow without running anything.
-    /// `force` reaches `end` although Linear already calls the Task complete.
-    public func moveTask(issue: String, node: String, force: Bool = false, cwd: String?) async throws {
-        _ = try await run(["task", "move", issue, node] + (force ? ["--force"] : []), cwd)
+    public func moveTask(issue: String, node: String, cwd: String?) async throws {
+        _ = try await run(["task", "move", issue, node], cwd)
+    }
+
+    public func completeTask(issue: String, cwd: String?) async throws {
+        _ = try await run(["task", "complete", issue], cwd)
     }
 
     /// One planning Task's complete comment thread. Read-only; works before

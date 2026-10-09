@@ -83,6 +83,15 @@ Flow invoking the `default` skill must preserve their distinct launch modes.
 Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
+The composed delivery fixture runs a real CLI/Flow against an isolated Home and
+simulated provider observations, local follow-up filing and independent completion,
+then checks its captured CLI and monitor population in Rust
+and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
+launch an installed version. Regenerate its wire capture with
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib merged_follow_up_completion_and_arrival`,
+then run `cargo test -p loopflow --test dto_fixtures composed_lifecycle` and
+`swift test --package-path swift --filter 'composedTaskLifecycle|composedLifecycleDelivery'`.
+
 Provider fixtures must read the launch's actual context channel. When a final
 sync adds fixtures that inspect a changed transport, run those focused tests
 before arming; the earlier gate did not cover the newly combined behavior.
@@ -482,10 +491,12 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
-The installation harness pulls `public.ecr.aws/docker/library/rust:bookworm`
+The installation harness pulls `public.ecr.aws/docker/library/rust:trixie`
 from Docker's ECR Public mirror to avoid Docker Hub's shared-runner pull limits.
-It follows stable alongside CI's Rust jobs and logs its compiler version. After
-adopting a newer standard-library API, run `uv run python scripts/test_task_installation.py` too;
+It follows stable alongside CI's Rust jobs and logs its compiler version. Trixie also supplies
+Git with `merge-tree --merge-base`; Bookworm's Git 2.39 cannot run stacked replay
+checks. After adopting a newer
+standard-library API, run `uv run python scripts/test_task_installation.py` too;
 a local lint pass does not prove that the disposable installation builds.
 
 CI installs stable on each run. An older local compiler can miss new Clippy
@@ -652,6 +663,11 @@ cargo build -p loopflow --bin lf
 LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run pytest python/tests/test_checkout_refresh.py
 ```
 
+Checkout pruning also reads OS-account installation authority. `LF_HOME` alone
+does not isolate that read: an unreleased CLI can reject the installed Home's
+older schema. Run these proofs in a disposable OS account or leave them to the
+Rust CI job; never migrate the installed Home to make a fixture pass.
+
 The background-push regression holds Git until the CLI exits, then verifies
 upstream tracking and a subsequent sync. Immediate local pushes can hide
 broken pipes that interrupt Git after the remote ref moves; background children
@@ -794,15 +810,19 @@ Prove explicit experimental Machine continuity with `global_commands` and
 without an explicit experiment forward to the installed CLI and main Machine.
 Never run candidate mutation checks against the main Machine.
 
-Run the real CLI resume regressions with isolated installation authority:
+Run the Task CLI proofs with isolated installation authority:
 
 ```bash
 uv run python scripts/test_task_installation.py
-# One changed managed operation proof:
-uv run python scripts/test_task_installation.py --test task_operation_starts_with_durable_history_after_claim_only_failure
+# One changed Task adoption proof:
+uv run python scripts/test_task_installation.py --test task_adopts_linear_checkout_and_preserves_flow_history
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
+Every ordinary installation run first upgrades populated released planning and
+Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
+historical PRs, pending completion delivery, a running Process and its Workflow,
+and an associated Session; they never open an installed Home.
 The default container tracks stable Rust, matching the other CI Rust jobs, and
 logs its compiler version. When adopting a newer standard-library API or Clippy
 fix, verify the installation harness uses the same toolchain policy; a host lint
@@ -843,7 +863,7 @@ Task adoption uses an explicit experimental Machine. No host Machine, credential
 is mounted. Default executable routing uses two real source CLI processes and
 a simulated installed executable. It runs in this disposable account because
 `HOME` and `LF_HOME` cannot isolate installation records. The ordinary
-`pr_tests` suite covers Task continuation's auto-merge revocation and review
+`pr_tests` suite covers changed-head auto-merge revocation and review
 continuity in an explicit experimental Machine.
 
 The separate planning CLI proof (`cargo test -p loopflow --test planning_lookup_tests`) runs planning-only `task status` by identifier and UUID against
@@ -1062,11 +1082,15 @@ cargo nextest run -p loopflow --test task_github_cache_tests --no-fail-fast
 ```
 
 When changing Linear response shapes, run the client tests and PM-operation
-consumers together. Team migration also reads issue comments; its fixtures must
-include the requested pagination metadata.
+consumers together, including `planning_reconnect_tests` on Linux (a disposable
+container works on macOS). That suite is compiled out on macOS, so a local Rust
+pass there does not cover its HTTPS fixtures. Keep nullable requested fields,
+including `dueDate`, present in fixture responses. Team migration also reads issue
+comments; its fixtures must include the requested pagination metadata.
 
 ```bash
 cargo nextest run -p loopflow --lib -E 'test(pm::linear::) | test(ops::pm::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
 ### Test without an installed Loopflow

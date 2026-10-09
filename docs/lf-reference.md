@@ -12,7 +12,7 @@ are internal process boundaries and are marked below.
 
 ## Selection and output
 
-`--machine <label-or-id>` runs the command in the saved remote repository.
+`--machine <label-or-id>` runs the command remotely; `--repo NAME_OR_PATH` overrides its saved repository.
 `--forward-agent` requires `--machine`.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
@@ -65,6 +65,7 @@ Open Loopflow or run its CLI
 | `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--machine` | Run the command on this saved machine in its repository |
+| `--repo` | Select a repository by name under repo_root (default ~/src), or by explicit path |
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |

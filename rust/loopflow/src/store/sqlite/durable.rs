@@ -775,7 +775,7 @@ mod durable_store_tests {
     use std::thread;
 
     use super::super::sessions::reserve_session_in;
-    use crate::durable::{ProjectId, TaskId};
+    use crate::durable::{ProjectId, TaskId, WorkRef};
 
     use crate::id::WaveId;
     use crate::planning::{LinearIssueId, LinearProjectId, ProjectPlan, TaskPlan};

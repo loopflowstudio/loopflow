@@ -442,6 +442,18 @@ pub fn load_global_config() -> Result<Option<Config>, LoadError> {
         .map_err(|error| LoadError::InvalidFlow(format!("Config validation error: {error}")))
 }
 
+/// Repository lookup belongs to the selected Machine, never repository config.
+pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
+    let path = global_config_path();
+    let Some(value) = load_yaml_file(&path)?.and_then(|config| config.get("repo_root").cloned())
+    else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(value).map_err(|error| {
+        LoadError::InvalidFlow(format!("Invalid repo_root in {}: {error}", path.display()))
+    })
+}
+
 fn global_config_path() -> PathBuf {
     crate::store::lf_home_dir().join("config.yaml")
 }

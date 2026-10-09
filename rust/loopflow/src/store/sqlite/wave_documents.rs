@@ -10,7 +10,7 @@ use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
 
-use super::{durable, SqliteStore};
+use super::SqliteStore;
 
 impl SqliteStore {
     pub(crate) fn wave_document(&self, wave: &WaveId, name: &str) -> StoreResult<Option<String>> {

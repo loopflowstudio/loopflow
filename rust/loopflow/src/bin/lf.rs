@@ -1416,6 +1416,12 @@ fn run() -> anyhow::Result<()> {
     if matches!(cli.command, Some(Commands::Desktop { .. })) {
         loopflow::lf::commands::desktop::require_supported()?;
     }
+    let _selected_repo_cwd = cli
+        .repo
+        .as_deref()
+        .map(|selection| CwdGuard::enter(&loopflow::repo::resolve_selection(selection)?))
+        .transpose()?;
+    loopflow::lf::commands::work_route::validate_repository_selection(&cli)?;
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
@@ -1541,6 +1547,24 @@ fn run() -> anyhow::Result<()> {
     }
 }
 
+fn selected_task_repository(
+    cli: &Cli,
+    directory: &Path,
+    selector: Option<&str>,
+) -> anyhow::Result<std::path::PathBuf> {
+    let repo = loopflow::ops::task::task_repository(directory, selector)?;
+    if cli.repo.is_some() {
+        anyhow::ensure!(
+            loopflow::repository::CanonicalRepo::discover(directory)?
+                == loopflow::repository::CanonicalRepo::discover(&repo)?,
+            "Task {} does not belong to selected repository {}",
+            selector.unwrap_or("in this checkout"),
+            directory.display()
+        );
+    }
+    Ok(repo)
+}
+
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Remote commands prove they reached the saved machine before dispatch.
     loopflow::lf::commands::machine::validate_expected_machine_process()?;
@@ -1599,7 +1623,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     {
         let end = loopflow::ops::task::EndOptions { force: *force };
         let directory = loopflow::repo::working_directory()?;
-        let repo = loopflow::ops::task::task_repository(&directory, Some(issue))?;
+        let repo = selected_task_repository(&cli, &directory, Some(issue))?;
         let (task, flow) = loopflow::ops::task::task_place(
             &repo,
             issue,
@@ -1635,7 +1659,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     }
     if let Some(task) = cli.task.as_ref() {
         let directory = loopflow::repo::working_directory()?;
-        let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
+        let repo = selected_task_repository(&cli, &directory, Some(task))?;
         let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
         if let Some(cwd) = cli.bound_cwd.clone() {
             binding.cwd = cwd;
@@ -1957,7 +1981,7 @@ fn execute_command(
         }
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
-            let repo = loopflow::ops::task::task_repository(&directory, cmd.selector())?;
+            let repo = selected_task_repository(cli, &directory, cmd.selector())?;
             with_runtime(&repo, args, || run_task_command(&repo, cmd))
         }
         Some(Commands::Context {

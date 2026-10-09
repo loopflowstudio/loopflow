@@ -17,6 +17,7 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home.join(".lf"))
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
         .env("NO_COLOR", "1")
         .current_dir(cwd)
@@ -516,4 +517,138 @@ fn desktop_rejects_linux_before_machine_routing_or_work_preparation() {
         assert!(error.contains("lf task status"), "{error}");
         assert!(!home.path().join(".lf/loopflow.db").exists());
     }
+}
+
+#[test]
+fn repo_selection_uses_machine_root_or_explicit_checkout_without_registration() {
+    use std::os::unix::fs::symlink;
+    let home = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    fs::create_dir_all(home.path().join("src")).unwrap();
+    symlink(repo.path(), home.path().join("src/example")).unwrap();
+    fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+    fs::write(
+        repo.path().join(".lf/skills/selected-marker.md"),
+        "Selected checkout",
+    )
+    .unwrap();
+    // A repository cannot change the root that selected it.
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "repo_root: /unavailable\n",
+    )
+    .unwrap();
+    for (cwd, selector) in [
+        (outside.path(), "example"),
+        (outside.path(), repo.path().to_str().unwrap()),
+        (home.path(), "./src/example"),
+        (outside.path(), "~/src/example"),
+    ] {
+        let output = success(
+            command(home.path(), cwd, &["--repo", selector, "list"])
+                .output()
+                .unwrap(),
+        );
+        assert!(output.contains("selected-marker"), "{selector}: {output}");
+    }
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+    fs::create_dir_all(home.path().join(".lf")).unwrap();
+    fs::create_dir_all(home.path().join("custom")).unwrap();
+    symlink(repo.path(), home.path().join("custom/override")).unwrap();
+    fs::write(home.path().join(".lf/config.yaml"), "repo_root: ~/custom\n").unwrap();
+    let output = success(
+        command(home.path(), outside.path(), &["--repo", "override", "list"])
+            .output()
+            .unwrap(),
+    );
+    assert!(output.contains("selected-marker"));
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+}
+
+#[test]
+fn repo_selection_reports_resolved_missing_or_non_git_path_before_effects() {
+    let home = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(home.path().join("src/empty")).unwrap();
+    for name in ["absent", "empty"] {
+        let output = command(
+            home.path(),
+            outside.path(),
+            &[
+                "--repo",
+                name,
+                "task",
+                "create",
+                "--title",
+                "Must not create",
+            ],
+        )
+        .output()
+        .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains(home.path().join("src").join(name).to_str().unwrap()));
+        assert!(!home.path().join(".lf/loopflow.db").exists());
+    }
+}
+
+#[test]
+fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
+    let home = tempfile::tempdir().unwrap();
+    let selected = TestRepo::new();
+    let other = TestRepo::new();
+    let created: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            other.path(),
+            &["task", "create", "--title", "Keep original", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    for args in [
+        vec![
+            "--repo",
+            selected.path().to_str().unwrap(),
+            "task",
+            "edit",
+            id,
+            "--title",
+            "Wrong repository",
+        ],
+        vec![
+            "--repo",
+            selected.path().to_str().unwrap(),
+            "task",
+            "checkout",
+            id,
+        ],
+        vec![
+            "--repo",
+            selected.path().to_str().unwrap(),
+            "--task",
+            id,
+            ":",
+            "Must not launch",
+        ],
+    ] {
+        let output = command(home.path(), other.path(), &args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("does not belong to selected repository"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let status = success(
+        command(home.path(), other.path(), &["task", "status", id, "--json"])
+            .output()
+            .unwrap(),
+    );
+    assert!(status.contains("Keep original"));
+    assert!(!status.contains("Wrong repository"));
 }

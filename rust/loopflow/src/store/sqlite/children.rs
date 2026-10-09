@@ -303,8 +303,8 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT t.id, t.issue_title FROM tasks t
              LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
-             WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
+             WHERE (t.id=?1 OR t.external_issue_id=?1 OR t.issue_identifier=?1
+                OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3)
              ORDER BY t.id",
         )?;
         let mut tasks = statement

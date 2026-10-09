@@ -61,6 +61,13 @@ The harness acts as a User over the same `lf` API. See
 ## Find a command or workflow
 
 ```bash
+lf --repo loopflow list    # use ~/src/loopflow without changing directories
+```
+
+Set `repo_root: ~/projects` in `~/.lf/config.yaml` to change the search root.
+Use `--repo ./path` for an explicit checkout; with `--machine`, lookup happens there.
+
+```bash
 lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
 lf flow pursue             # select a flow explicitly

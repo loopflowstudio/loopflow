@@ -540,7 +540,7 @@ fn help_preserves_location_without_promoting_query_filters() {
 fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
     use loopflow::lf::DesktopCommand;
 
-    let cli = Cli::try_parse_from(normalized(&["lf", "desktop", "open"])).unwrap();
+    let cli = Cli::try_parse_from(["lf", "desktop", "open"]).unwrap();
     assert!(matches!(
         cli.command,
         Some(Commands::Desktop {
@@ -559,9 +559,10 @@ fn desktop_open_has_one_owner_and_ambiguous_shorthand_has_no_effects() {
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
     let error = String::from_utf8(output.stderr).unwrap();
-    for owner in ["desktop", "pr", "session"] {
+    for owner in ["desktop", "pr"] {
         assert!(error.contains(&format!("lf {owner} open")), "{error}");
     }
+    assert!(!error.contains("lf session open"));
     assert!(!home.path().join(".lf").exists());
 }
 

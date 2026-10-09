@@ -29,6 +29,38 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
     })
 }
 
+/// Explicit path selection narrows Task lookup before routing or preparation.
+/// Unknown Tasks remain with the ordinary repository-scoped planning acquisition.
+pub fn validate_repository_selection(cli: &Cli) -> Result<()> {
+    if cli.repo.is_none() {
+        return Ok(());
+    }
+    let command_task = match &cli.command {
+        Some(Commands::Task { cmd }) => cmd.selector(),
+        Some(Commands::Context { task, .. }) => task.as_deref(),
+        _ => None,
+    };
+    if cli.task.is_none() && command_task.is_none() {
+        return Ok(());
+    }
+    let repo = crate::repository::CanonicalRepo::current()?
+        .ok_or_else(|| anyhow!("selected repository is unavailable"))?;
+    let path = crate::store::database_path_from_env()?;
+    if !path.try_exists()? {
+        return Ok(());
+    }
+    let store = crate::store::sqlite::SqliteStore::open_read_only(&path)?;
+    for selector in cli.task.as_deref().into_iter().chain(command_task) {
+        let scoped = store.resolve_task_id(selector, Some(&repo.to_string()))?;
+        if scoped.is_none() && store.resolve_task_id(selector, None)?.is_some() {
+            return Err(anyhow!(
+                "Task {selector} does not belong to selected repository {repo}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop {
@@ -79,7 +111,14 @@ pub(super) async fn resolve(cli: &Cli) -> Result<Option<crate::durable::TaskExec
         return Ok(None);
     }
     let store = crate::store::open_store(&config).await?;
-    let Some(task) = store.sqlite.resolve_task_id(selector, None)? else {
+    let repo = cli
+        .repo
+        .as_ref()
+        .map(|_| crate::repository::CanonicalRepo::current())
+        .transpose()?
+        .flatten();
+    let repo = repo.map(|repo| repo.to_string());
+    let Some(task) = store.sqlite.resolve_task_id(selector, repo.as_deref())? else {
         return Ok(None);
     };
     let route = store.task_execution_route(&task).await?;

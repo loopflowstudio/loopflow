@@ -77,6 +77,8 @@ just like a standalone skill. Task Flow launches preserve the same choice.
 ## Select where work happens
 
 ```bash
+lf --repo loopflow list             # ~/src/loopflow, without changing saved defaults
+lf --repo ./another-checkout list
 lf --task EXP-12 skill design       # contribute in the Task's checkout
 lf --wt csv-export : "Add CSV export"
 lf --wave exports : "Review the goal" # add context in the current directory
@@ -84,9 +86,17 @@ lf -b task run EXP-12       # place the Task, run its default
 lf -b task run EXP-12 pursue # take the workflow edge that runs pursue
 lf task run EXP-12 end       # take an edge that runs nothing
 lf task move EXP-12 demo     # put the Task at a node, running nothing
-lf --task EXP-12 run incident # run a Flow without moving the Task
+lf --task EXP-12 flow incident # run a Flow without moving the Task
 lf task run EXP-12 --reason "take the smaller approach"
 ```
+
+`--repo NAME` selects `<repo_root>/NAME`; the Machine-local `~/.lf/config.yaml`
+can set `repo_root: ~/projects` instead of the default `~/src`. Absolute paths,
+`./` and `../` paths, and quoted `~/` paths select a checkout directly. No flag
+keeps the current directory. Linked worktrees retain their checkout and share
+canonical repository identity. Missing/non-Git paths fail without creating work.
+Repository selection does not register a plan, join peers, or change saved defaults.
+An explicit Task from another repository is rejected rather than silently retargeted.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
@@ -473,7 +483,7 @@ location, not historical usage attribution. Ordinary `lf context` still reads
 prompt budgets.
 
 `desktop open` launches/focuses the app; selected Task/Session opening is not yet
-composed with this command. Bare `open` is ambiguous with PR and Session commands.
+composed with this command. Bare `open` is ambiguous with `pr open`; Sessions use `session connect`.
 
 Desktop inspection reports registered repository/window identities, selection,
 reading availability and retained Machine/checkout pane trees with focus, zoom
@@ -674,12 +684,14 @@ and survive automatic pruning. Memory updates do not require PRs or a schedule.
 lf machine add mini --repo '~/src/project'
 lf machine status mini
 lf machine connect mini codex work@example.com
-lf --machine mini session list
+lf --machine mini --repo project session list
 ```
 
 `--machine <label-or-id>` runs the entire command on that machine. Commands without
 a Work or repository target use its saved repository; `machine add` sets that default.
-`--forward-agent` requires `--machine`.
+Names and quoted `~/` paths resolve on the selected Machine, using its own
+`repo_root`; they are not expanded on the caller. Explicit `./` paths are relative
+to the remote login directory. `--forward-agent` requires `--machine`.
 
 `lf repo identity` establishes or prints the selected repository plan's opaque ID
 (`--json` returns the ID as a JSON string). It also works before creating any Waves

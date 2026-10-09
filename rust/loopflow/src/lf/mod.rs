@@ -117,6 +117,10 @@ pub struct Cli {
     #[arg(long, value_name = "LABEL_OR_ID")]
     pub machine: Option<String>,
 
+    /// Select a repository by name under repo_root (default ~/src), or by explicit path
+    #[arg(long, value_name = "NAME_OR_PATH", conflicts_with = "repository")]
+    pub repo: Option<String>,
+
     /// Select a registered repository plan on this Machine, not a clone name
     #[arg(long, value_name = "ID")]
     pub repository: Option<crate::durable::RepositoryId>,
@@ -252,6 +256,7 @@ impl Cli {
             diff: self.diff,
             machine: self.machine.clone(),
             repository: self.repository.clone(),
+            repo: self.repo.clone(),
             forward_agent: self.forward_agent,
             wave: self.wave.clone(),
             task: self.task.clone(),

@@ -431,12 +431,17 @@ mod tests {
         )
         .unwrap();
         let task = store
-            .create_task(&crate::planning::NewTask {
-                id: TaskId::new(),
-                project_id: project.id,
-                title: "Inspect before starting".into(),
-                description: String::new(),
-            })
+            .create_task(
+                &crate::planning::NewTask {
+                    id: TaskId::new(),
+                    project_id: project.id,
+                    title: "Inspect before starting".into(),
+                    description: String::new(),
+                },
+                std::sync::Arc::new(crate::store::PlanningLocks::new(
+                    tempfile::tempfile().unwrap(),
+                )),
+            )
             .await
             .unwrap();
         let report = explain_context(

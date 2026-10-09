@@ -66,8 +66,10 @@ Jack's October 8 API: `--context` previews input without launch;
 `--explain` is broader; `--chrome` controls execution. Source removes root `run`,
 `--max-turns` and `--no-loopflow`, retaining Task skill/Flow selection. History owns
 activity, Process pages, show/replay and usage for Desktop. `desktop open/list` own app launch and inspection; root `open` is ambiguous
-with PR/Session opening. Composed Work opening, Wave planning and previews remain.
-Rust unverified. Lookup: configurable `~/src`; remembered names undecided.
+with PR opening; Sessions use `connect`. Composed Work opening, Wave planning and previews remain.
+Lookup now uses Machine-local `repo_root` (default `~/src`) or explicit paths;
+remote selectors expand there. Paths never become portable Work identity.
+Remembered names remain undecided; scoped Task-prefix propagation remains incomplete.
 Discord unchanged.
 `--steers-after` filters repeated nodes, not across restarts.
 
@@ -117,10 +119,9 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 
-Jack Heart's LOO-380 cleanup receipts: `7c3072d64:wave/product/MEMORY.md`.
-Still unverified: LOO-367's handoff, Intelligence's backlog Project (LOO-366),
-test Waves and LOO-343's dead claim; no rendered proof. The sidebar fix remains;
-parent #1439 landed. Dated reconciliation detail: `c88ae1522:wave/product/MEMORY.md`.
+LOO-367 handoff, Intelligence's backlog, test Waves and LOO-343's dead claim remain
+unverified. Jack Heart's LOO-380 receipts and parent #1439:
+`fc87e09c1:wave/product/MEMORY.md`, this heading; no rendered proof.
 
 ## Reactive workspace (2026-10-05)
 

@@ -26,8 +26,11 @@ pub fn run(
     let target = runtime.block_on(resolve_target(target, forward_agent))?;
     // Automatic routing already chose both Machine and plan. Keep that reading
     // together rather than combining its Machine with a second plan reading.
+    let routed = task_route.is_some();
     let work_route = match task_route {
         Some(route) => Some(route),
+        // A path/name addresses the destination's filesystem, not the caller's.
+        None if cli.repo.is_some() => None,
         None => runtime.block_on(super::work_route::resolve(&cli))?,
     };
     if let Some(route) = &work_route {
@@ -69,10 +72,10 @@ pub fn run(
             cmd.extend(["--repository".into(), repository.to_string()]);
         }
     }
-    cmd.extend(resident_args(lf_args, &cli));
+    cmd.extend(resident_args(lf_args, &cli, routed));
     let preamble = build_preamble(
         &target.route,
-        if repository.is_some() {
+        if repository.is_some() || cli.repo.is_some() {
             None
         } else {
             target.repo.as_deref()
@@ -83,7 +86,9 @@ pub fn run(
     run_ssh(&target.route, forward_agent, &preamble)
 }
 
-fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
+fn resident_args(args: &[String], cli: &Cli, routed: bool) -> Vec<String> {
+    // Automatic Work routing carries the resolved plan, not a path on this Machine.
+    let mut remove_repo = routed && cli.repo.is_some();
     let mut remaining = cli.account.len() + cli.only_account.len();
     let mut shared = cli.shared;
     let mut result = Vec::new();
@@ -94,7 +99,12 @@ fn resident_args(args: &[String], cli: &Cli) -> Vec<String> {
             result.extend(iter.cloned());
             break;
         }
-        if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
+        if remove_repo && arg == "--repo" {
+            iter.next();
+            remove_repo = false;
+        } else if remove_repo && arg.starts_with("--repo=") {
+            remove_repo = false;
+        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
             iter.next();
             remaining -= 1;
         } else if remaining > 0
@@ -326,7 +336,7 @@ mod tests {
     fn remote_preferences_cannot_relax_the_resident_account_restriction() {
         let args = ["--account", "person@", "--shared", "skill", "implement"].map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap()),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false),
             ["--isolate", "skill", "implement"]
         );
     }
@@ -343,7 +353,7 @@ mod tests {
         ]
         .map(str::to_string);
         assert_eq!(
-            resident_args(&args, &parse_remote_command(&args).unwrap()),
+            resident_args(&args, &parse_remote_command(&args).unwrap(), false),
             [
                 "--isolate",
                 "skill",
@@ -354,6 +364,23 @@ mod tests {
             ]
         );
     }
+    #[test]
+    fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {
+        for selection in [vec!["--repo", "~/src/remote"], vec!["--repo=~/src/remote"]] {
+            let mut args = selection;
+            args.extend([
+                "--task", "LOO-427", "skill", "debug", "--", "--repo", "literal",
+            ]);
+            let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+            let cli = parse_remote_command(&args).unwrap();
+            assert_eq!(resident_args(&args, &cli, false), args);
+            assert_eq!(
+                resident_args(&args, &cli, true),
+                ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
+            );
+        }
+    }
+
     #[test]
     fn ssh_args_bound_the_connection() {
         let args =

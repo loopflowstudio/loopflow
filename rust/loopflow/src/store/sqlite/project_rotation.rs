@@ -1,7 +1,7 @@
 //! Project selection, membership and pending changes settle in one transaction.
 
 use super::planning_changes::PlanningChanges;
-use super::{durable, SqliteStore};
+use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};

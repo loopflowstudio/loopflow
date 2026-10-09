@@ -51,3 +51,50 @@ pub fn working_directory() -> Result<PathBuf> {
 pub fn find_repo_root() -> Result<PathBuf> {
     require_repo_root(&std::env::current_dir()?, "this command")
 }
+
+/// Resolve an explicit CLI repository selection on the executing Machine.
+/// Retain the selected checkout; CanonicalRepo owns common-directory identity.
+pub fn resolve_selection(selection: &str) -> Result<PathBuf> {
+    let selected = Path::new(selection);
+    let path = if selected.is_absolute()
+        || selection == "."
+        || selection == ".."
+        || selection.starts_with("./")
+        || selection.starts_with("../")
+        || selection == "~"
+        || selection.starts_with("~/")
+    {
+        expand_home(selected)?
+    } else {
+        anyhow::ensure!(
+            !selection.is_empty() && !selection.contains('/'),
+            "repository names must be a single name; use ./ or an absolute path for {selection:?}"
+        );
+        let root = crate::engine::config::repository_root()?.unwrap_or_else(|| "~/src".into());
+        let root = expand_home(&root)?;
+        anyhow::ensure!(
+            root.is_absolute(),
+            "repo_root must be absolute or start with ~/: {}",
+            root.display()
+        );
+        root.join(selection)
+    };
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    discover_repo_root(&path)
+        .with_context(|| format!("resolve repository {}", path.display()))?
+        .ok_or_else(|| anyhow!("not a Git repository: {}", path.display()))
+}
+
+fn expand_home(path: &Path) -> Result<PathBuf> {
+    if let Ok(suffix) = path.strip_prefix("~") {
+        let home = dirs::home_dir()
+            .ok_or_else(|| anyhow!("home directory unavailable for {}", path.display()))?;
+        Ok(home.join(suffix))
+    } else {
+        Ok(path.to_path_buf())
+    }
+}

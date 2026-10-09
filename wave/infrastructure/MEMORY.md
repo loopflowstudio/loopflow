@@ -221,13 +221,12 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart selected LfSession/LfProcess for Loopflow ownership; provider-owned
-names remain LOO-442. This pure rename preserves wire/storage/fixture bytes,
-ProcessLfid, enum variants and product Session/Process. SQL and profiling
-captures retain historical names. `2b183c547` implements Rust/Swift and live
-docs; Rust tests await gate, installation unproved.
-LFID stays durable; optional PID is reusable. LOO-400's accepted history,
-mapping, placement and proofs:
+Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
+#1516 landing October 9. The rename preserves wire/storage/fixtures, ProcessLfid,
+variants and product Session/Process; SQL/profiling retain historical names.
+`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
+defer to CI. Installation unproved.
+LFID stays durable; PID reusable. LOO-400 history, mapping, placement and proofs:
 `6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)

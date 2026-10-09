@@ -53,14 +53,13 @@ main = f'''
 <section class="reading">
   <ul class="plain">
 {items([
-("A native Mac terminal", "Loopflow for Mac is a native macOS terminal. Open a repository and start a Session with Claude Code, Codex, or OpenCode, the same way every time."),
-("Skills", "Start a Session from a Skill instead of an empty prompt, so you stop retyping how you like work done. Pick one when you open the Session."),
-("A process that moves work forward", "Give a Task an outcome. Flows take it through design, implementation, checks, and delivery, pausing where your judgment is needed."),
-("Workflows", "A Workflow is the stages a Task goes through to become a shipped and validated PR. Two stops are yours, design and demo. Between them a Flow runs, and your agent does each step in a Session of its own. It is a file, so you choose the stops."),
-("Organized around the work", "Loopflow organizes your work into Waves (long-lived streams) and Tasks (concrete outcomes, i.e. PRs). The sidebar is that work, not a list of chats."),
-("Sessions belong to the work", "Every Session is kept under the Task it was for, whichever agent ran it. Open a Task and its conversations, its changes, and where it stands are together. Close the window and they are still there."),
-("Waiting on you", "A Task that needs you is marked, so you look where you are needed and leave the rest running."),
-("Side by side", "Split the window to follow several Sessions, or several Tasks, at once."),
+("The work, not the chats", "Loopflow for Mac is laid out around your work. Waves are long-lived streams, Tasks are concrete outcomes (i.e. PRs), and every Session is kept under the Task it was for, so you follow the work and not a trail of chats."),
+("A workflow for every Task", "Loopflow encodes the stages a Task goes through to become a shipped and validated PR. Flows carry it from one stage to the next, and it stops where your judgment is needed."),
+("You choose where you step in", "Stay in one Session and steer as you go, come in at design and demo, or let it run. Set it project by project, and spend your time on the stages that matter most to you."),
+("What needs you is on screen", "A Task that is waiting on you is marked. The rest keeps running."),
+("A Wave remembers", "A Wave keeps its goal, its plan, and its memory, so later Sessions start from what earlier ones learned and you do not rebuild context by hand."),
+("Many at once", "Each Task works in its own copy of the code, so several can move side by side without colliding."),
+("A native Mac terminal underneath", "Every pane is a real terminal running Claude Code, Codex, or OpenCode, with <code>lf</code> included."),
 ])}
   </ul>
   <p class="more"><a href="/cli">Underneath, it is all <code>lf</code> ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>

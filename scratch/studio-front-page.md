@@ -368,3 +368,11 @@ Jack Heart on the diagram's counts: "1 waiting on two steps at once is off.
 needs a current state too", then "oh thats for the project nevermind. just
 atke off the live staet". The diagram in `x6` is the Project's workflow with
 no counts and no current position. Each Task row still names where it is.
+
+Jack Heart on the list under the video: "i still think the text after the
+video is too nuts & bolt and not enough about the work model and higher level
+UX + workflows". Rewritten to seven items: the work not the chats, a workflow
+for every Task, you choose where you step in, what needs you is on screen, a
+Wave remembers, many at once, and one closing item for the terminal. Skills,
+splits and the Session picker are off the page. Wording draws on Jack Heart's
+earlier sentences for `/cli` and the old homepage claims.

@@ -148,3 +148,5 @@ exchange. Repository identity/delegation must extend that shared schema. Buildin
 Desktop identity on today's adoption path would retain the authority being
 replaced; a new local writer or Git engine here would duplicate an explicit owner.
 The complete outcome remains unchanged and implementation stops at this dependency.
+
+Sync check (October 8): `lf sync --continue` resolved the architecture rows with current `lf flow` spelling and incoming Wave-owned definitions; `cargo test -p loopflow --test documented_commands` was stopped after over six minutes with its build script stuck at macOS `_dyld_start` (no tests ran); focused proof remains for gate/CI.

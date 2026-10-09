@@ -1,18 +1,30 @@
 # Desktop control on shared Work — LOO-427
 
-**Status (October 8, 2026):** implementation authorized by Jack Heart; slice 1
-implemented at `21ce4e495`, simplified at `f8d3386da`.
-One PR through demo review; slices 2–5 remain. Slice 2 awaits coherent committed
-LOO-406/412 APIs; the dependency inspection is recorded in [findings](findings.md#integration-boundary-october-8).
-Jack selected execution-machine local operations and custom Git-ref Task sync
-on October 8, superseding the planning-machine/callback proposal.
-The implementation sequence below replaces the earlier combined architecture
-slice. [Findings](findings.md) hold the source evidence;
-[questions](questions.md) hold only unresolved product decisions.
-The [comparison](../docs/reviews/terminal-command-comparison.md) retains all command
-judgments and behavioral evidence.
+**Status (October 8, 2026):** Jack Heart authorized implementation through demo
+review, in one PR. Recorded checkout location, prototype delegation/routing,
+repository-keyed windows, exact retained-pane arrangement and text/key input are
+implemented locally. Passive reads validate exact pane/surface identity but pinned
+lf2 cannot extract bounded text; the verified native artifact remains required.
+Source and focused compile/model evidence establish neither native acceptance nor delivery.
+
+LOO-406 through `b6f34a6f8` is integrated; LOO-412 through `a388ed425` was inspected,
+not integrated. Mixed Linear/Git remains disabled pending acquisition/receipt
+composition, not by product policy. Shared exchange, peer first-start admission,
+remote Desktop opening and complete-path proof remain. Implementation details and
+contrary evidence follow below and in [findings](findings.md); [questions](questions.md)
+retains unresolved choices. [Comparison](../docs/reviews/terminal-command-comparison.md)
+retains every host disposition and behavioral observation.
 
 ## Accepted outcome
+
+Jack Heart: Loopflow is “a software engineering CLI for your agents,” used by
+agents as much as for using them. Work leads; Sessions/panes support it. Orchestra
+language stays top-level. Jack approved the Work/Desktop design; the command map
+below incorporates his later review and labels exploratory regrouping separately.
+The accepted demo includes CLI-driven Session-plus-diff opening with usable-target
+results. Execution on the Mini and presentation on the Mac remain separate.
+Started Tasks stay on their Machine across later runs and resumes; delegation
+applies to open, unstarted and future Tasks only. No Task transfer is introduced.
 
 Jack Heart selected one repository window across machines, built on one shared
 Work model, “all fromone place,” with the ability to “Delegate” a subtree to a
@@ -26,6 +38,162 @@ repositories need no window; repeated opens reuse one. Work identity, execution
 location and visual placement remain distinct. Mac view control is macOS-only;
 Linux gets an actionable error before launch or Work changes. Ordinary lf remains
 cross-platform. No live planning migration is authorized.
+
+## Command map — October 8 review
+
+**Accepted for implementation, October 8.** After reviewing this command map and
+Desktop/cmux comparison, Jack Heart requested “lets queue implementation for this.”
+This remains one PR through demo review, not merge approval. LOO-397's Clap-derived
+discovery owns routing. Open questions remain explicit; no follow-up Tasks.
+
+### Target public tree
+
+```text
+lf
+├── wave        list / show / workflow / chapter operations
+├── task        create / list / show / edit / run / move / …
+├── session     list / connect / resume / rename / …
+├── skill NAME  explicit skill invocation
+├── flow NAME   explicit Flow invocation; definition/execution reads remain
+├── NAME        convenient unambiguous skill/Flow invocation
+├── : PROMPT    inline agent request
+├── monitor     ps / top / work / active
+├── history     feed (default) / list / show / replay / usage
+├── desktop     open / list / focus / split / move / resize / zoom
+│               hide / restore / shell / files / flow-log / read / text / key
+├── wt / commit / sync / pr
+├── machine / account / config / repo / self
+└── list / help
+```
+
+Unique descendant commands omit parents:
+`lf ps` → `lf monitor ps`, `lf top` → `lf monitor top`. `open` is ambiguous
+among Desktop, PR and Session; use `lf desktop open`. Exact owner commands win;
+ambiguous shortcuts name their choices and perform nothing. `list`/`show` generally require an owner. Explicit
+`skill`/`flow` resolve naming collisions; the shorthand collision policy remains
+open. Not every verb exists yet.
+
+Jack favors Wave-owned planning, including Workflow selection, and questions
+public `project` and `roadmap`. Proposed: `wave show WAVE` owns the chapter plan;
+`wave list` discovers Waves, `monitor` covers current attention across them, and
+`task list/show` retains exact historical lookup. Project IDs, chapter history,
+KRs and Workflow storage survive. A combined cross-Wave backlog view is optional,
+not a requirement merely because roadmap exists today.
+
+Jack questions `run NAME`: remove that duplicate dispatch spelling after its
+Flow drivers, skills, examples and tests use explicit invocation. `task run`
+continues to advance the captured Workflow; direct invocation does not. Removing
+a CLI spelling does not remove the shared execution function or driver.
+
+Jack accepted combining activity and history (October 8): `lf history` is the
+chronological feed, with execution details and replay underneath. Remove the
+separate activity command; preserve event coverage, exact capture IDs, inputs/results,
+filters and paging. Recorded `monitor list/show` and top-level `replay` move here.
+Replay starts a new execution. Session-native history stays under Session.
+Jack accepted `history usage` for aggregate views of tokens, cost and time.
+Reuse existing records; no second store.
+
+Jack questioned both `open` and `desktop`, and dislikes `inspect` alongside
+`--explain`. Proposed: `desktop open` owns opening, `desktop list` reads actual
+windows/panes. They keep short forms through normal resolution, not duplicate
+implementations. `desktop list --json` preserves reading freshness, exact targets,
+capability support and legal actions. Composed Session+diff opening must return
+opening/usable/failed outcomes; neither command success nor layout mutation proves
+a rendered endpoint. Remote viewing stays separate from execution placement.
+
+Jack deferred Discord changes; leave it unchanged.
+
+### Flags: three independent concerns
+
+| Scope | Flags | Contract |
+|---|---|---|
+| General command behavior | `--explain` (new), `--json`, `--verbose`, `--help` | Explain the selected invocation without performing its effects; structured output where defined; diagnostics; static usage. Current JSON/flag placement is not uniformly global. |
+| Repository/execution selection | `--repo`, `--machine` | Select a repository on the execution Machine; never rewrite saved defaults. |
+| Work/checkout selection | `--task`, `--wave`, `--wt` | Apply only to operations that consume that scope. Explicit subjects and inferred checkout use one resolver; contradictory selections produce an explanation, never silent retargeting. |
+| Agent launch | `--context` (new), `--agent`, `--docs`, `--clipboard`, `--diff`, `--interactive`/`--batch`, `--account`/`--only-account`, `--isolate`/`--shared`, `--chrome`, `--yolo`, `--steers-after` | Applies to agent launches, inline requests and appropriate Flow steps; account/permission behavior stays unchanged. |
+
+Within launch flags, context inputs are `--docs`/`--clipboard`/`--diff`;
+agent/account selection is separate from execution settings `--chrome`/`--yolo`.
+Jack requests removing `--max-turns` and probably `--no-loopflow`; the draft
+removes both public switches while retaining normal operating guidance.
+Keep `--steers-after`: Jack recalled context-budget blowups and requested checking
+its continued use. Source tracing confirms `flow.rs` records a cursor per node,
+passes it through `Cli::step_args`, and `run.rs` applies it in `task_input::read_seed`.
+The existing `a_repeated_node_receives_only_task_direction_newer_than_its_last_run`
+fixture checks first-visit inclusion, repeated-node omission and later new direction.
+It was inspected, not rerun. The map resets with a fresh Flow driver; this is not
+cross-restart deduplication. Removing `--no-loopflow` must migrate that fixture's
+setup without dropping its context-growth assertions. Retain the advanced launch flag.
+
+Jack explicitly proposes `--context` as “show me the context that would be used
+here, dont actually launche”; `--explain` applies to more commands. Neither claim
+is an account of existing usage. Examples of intended behavior:
+
+```sh
+lf task run LOO-427 --explain          # resolve Work, Machine, action, impediments
+lf implement --context                # print assembled agent input, no launch
+lf implement --context --explain      # input plus why each source was selected
+lf --repo loopflow --machine mini ps  # observe that repository on Mini
+```
+
+Explain may read local facts and explicitly addressed peers using existing
+transport, but never creates Tasks/checkouts, claims clients, syncs plans, logs in,
+publishes or launches agents. Missing evidence stays unavailable. The result is
+an observation, not a reservation: execution re-resolves changing facts. Help
+explains syntax; explain describes this invocation. Unsupported combinations
+fail before effects. `--context` on a non-agent command is invalid; Flow context
+preview must define whether it shows the first step or a labeled set before it
+is exposed. It cannot execute prior steps to fabricate future input.
+
+`--docs` keeps its existing meaning: add contents from paths, globs or directories
+to agent input; it does not generate documentation. Explain can show why those
+sources were included. Preserve context budgets, provenance and truncation
+reporting while retiring `context --explain` as a separate identity front door.
+The standalone budget report's final home remains open.
+
+### Repository lookup
+
+Jack proposed `~/src` as the default search root with a user override. Use the
+existing machine-local `~/.lf/config.yaml`; proposed key `repo_root: ~/src`.
+No new dotfile or mandatory registration command. First resolve the execution
+Machine, then its root/path; remote `~` is expanded there, never by the laptop.
+
+Proposed minimal rule: no `--repo` uses cwd; a bare name uses `<root>/<name>`;
+absolute paths or explicit `./`/`../` paths use that location. Canonical Git
+common-directory handling recognizes linked worktrees. Missing/non-Git paths
+fail with the resolved location; no recursive disk scan or checkout creation.
+`--repo` narrows Task lookup; an explicit mismatched Task cannot silently select
+another repository. The selection stays bound through asynchronous operations.
+
+Jack remains unsure about remembered names. The draft uses deterministic paths
+with no remembered-name precedence or auto-registration side effect. Durable
+repository/Work IDs still identify shared planning across machines; this path
+lookup neither pairs clones nor joins/publishes a shared plan. Git remotes are
+not a substitute for Work identity.
+
+### Cutover and acceptance
+
+Proposed structures: `RepositorySelection` (cwd/name/path), one resolved invocation
+carrying Work/Machine and intended effect, and `InvocationExplanation` with sources,
+unavailable facts and effects. Reuse `WorkSelection`, `ContextFact`, existing
+prompt assembly and Clap navigation; no parallel resolver or execution planner.
+Proposed functions `resolve_repository(selection, machine)` and
+`explain_invocation(resolved)` are read paths; context preview consumes the same
+prompt builder as launch. Names are draft, not promises of new public Rust APIs.
+
+Remaining public removals: `Commands::Project`, `Roadmap`,
+and `Context { explain }` dispatch in `lf/mod.rs`
+and `bin/lf.rs`. History now owns the former recorded Monitor commands and Replay. Preserve implementation owners,
+DTO evidence, history, native retention and supported published contracts.
+Discord stays unchanged.
+
+Headless gate: `documented_commands`, CLI routing and DTO fixtures must prove
+canonical/short forms agree, ambiguity has no effects, previews start no providers
+or mutating operations, repository roots resolve on the selected Machine, and
+unknown facts remain explicit. Preview input matches launch assembly for the same
+snapshot. Desktop list/open retain the existing exact-target and readiness tests.
+This API cut is accepted within the one-PR design; native-reader work is independent.
+Unresolved choices remain in questions.md.
 
 ## Architecture and ownership
 
@@ -48,27 +216,70 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
-- Replace `store/sqlite/durable.rs::inherit_placement`'s creation-time copies
-  with effective delegation in slice 2. Preserve historical assignments as
-  unknown provenance and keep `tasks.checkout_machine_id` independent.
-- Replace `LoopflowApp`'s unaddressed workspace `WindowGroup`, `WavesView`'s
-  separate opening path and `WorkLinkRouter`'s unrelated-window fallback/single
-  pending URL together in slice 3. Preserve utility windows and every destination.
-- Replace path-only Session read keys and Machine-unqualified `TerminalIdentity`
-  lookups with their consumers, callbacks and fixtures in slice 4. Preserve
-  retained native surfaces, focus, drafts and explicit Session bindings.
-- LOO-412 owns replacing `TaskSource::accept_planning`'s independent adoption;
-  LOO-406 owns deleting split planning-authority dispatch. Consume their finished
-  paths here; neither predecessor supplies the shared repository identity.
+The command-map cutover above names pending API removals and required survivors.
+Input reuses `insertTerminalText` and the existing typed pane event; no predecessor
+input command exists to retain. Already removed: copied inheritance, duplicate Desktop window/opening paths,
+unqualified terminal/read keys, separate visibility mutations and repeated layout
+pruning. Existing registry/multiplexer/surface owners remain authoritative.
+Close/Undo renews removed content tokens; filtered absence cannot release a
+surface. Passive reads allocate/clean up nothing; bounded extraction never falls
+back to full-buffer copies. Recorded proof, failed attempts and previous detailed
+removal notes remain in [findings](findings.md) and the October 8 pre-review
+preservation snapshot. Fresh prompt preparation also drops the unused `ProcessPromptInput.cwd` and
+`max_turns` overrides: its checkout already supplies cwd, and historical limits
+stay in captured-request replay. `run::split_skill_args` and its exclusive tests
+are removed; the sole caller parses borrowed arguments inline. Resolver tests
+cover explicit/untyped definitions, trailing colons, namespaces and messages.
+
+LOO-412 owns remaining adoption/exchange replacement; no second planning writer.
+
+History cut (`7a4ce56cd`): removed `MonitorCommand::{List,Show,Usage,Activity}` and
+root `Commands::Replay`; their command handling now lives in `history`. Keep the activity
+projection, Process cursor/filter owner, captured-input inspection/replay and usage
+readers. Migrate Desktop and fixtures with the CLI; historical receipts and the
+comparison baseline retain their original spelling. Removed `history::feed`'s
+scalar forwarding; the activity reader consumes its parsed options directly.
+`output::print_process` serves History and Monitor; moving it only into History
+had left Monitor uncompilable. Process text/JSON fixtures retain both consumers.
+`DesktopCommand::Inspect` is replaced by `List`, without an alias or a new reader;
+exact targets, transport and wire records are unchanged.
 
 ## Implementation sequence — one PR
+
+**CLI cutover, partially implemented (October 8).** Root `run` dispatch and the
+public `--max-turns`/`--no-loopflow` switches are removed, including forwarding,
+help, current examples and launch fixtures. Task edges resolve in their prepared
+checkout and invoke explicit `flow` or `skill`, escaping command-name collisions.
+Shared execution, captured requests/replay and standalone native-skill guidance
+selection survive. `--steers-after` and the repeated-node context assertions remain;
+the fixture now also requires normal operating guidance. Review repaired missing Workflow nodes; fixtures cover
+ambiguous root `run`, removed flags, cursor forwarding, reserved Flow names and
+single-skill Workflow edges. These Rust fixtures have not executed.
+
+History now defaults to the durable Work feed, with `list`, `show`, `usage` and
+`replay` under it. Monitor retains live observations. Desktop's one-shot activity
+read, fixtures and current docs use the new owner; wire records are unchanged.
+Saved command normalization preserves historical selectors without exposing old
+Monitor routes. Review repaired stale examples that used `show` with list filters.
+
+`DesktopCommand::Open` now owns the existing app launcher; `Commands::Open` and
+`commands/open.rs` are deleted. Captured root-open commands normalize to the new
+owner. Ordinary Work selection/routing and early Linux refusal remain; this does
+not yet deliver a selected Task/Session into its repository window or report
+rendered readiness. Exact pane controls still bypass Work preparation. Inspection
+capabilities now advertise `list`, not the removed `inspect` CLI name.
+
+Remaining API work: Wave-owned planning, composed Work opening, context preview/explain
+and configurable repository root/path lookup.
+Q2, shared-plan composition, native extraction and input proof, and complete-path acceptance
+remain required. This internal cut neither completes LOO-427 nor splits its PR.
 
 ### 1. Separate recorded checkout location from delegation — Implemented locally
 
 `tasks.checkout_machine_id` records location beside `worktree`. The one Task draft,
 `task_checkout_machine.sql`, backfills existing placement evidence and leaves
 missing Machine evidence unknown. New checkouts record the preparing Machine;
-creation-time Work assignment still inherits from the Project.
+new Work resolves effective placement instead of copying its parent.
 
 `task_checkouts` no longer joins `work_placements`. Status, Task-file access,
 comparisons and Session workspace resolution consume recorded location. SQL
@@ -79,9 +290,9 @@ Comparisons read the validated checkout and its PR through one store, without
 hydrating the Task again. Session resolution uses cwd and explicit Work; its
 unused recorded-root argument is removed.
 
-Unknown location cannot authorize local file reads or infer
-membership from an unavailable path. No delegation inheritance or live move was
-introduced. Later slices must edit the same migration draft.
+Unknown location cannot authorize local file reads or infer membership from an
+unavailable path. The later delegation prototype changes no recorded checkout
+location or live process. The same migration draft owns subsequent schema changes.
 
 Focused fixtures cover migration/history retention, reassignment A→B with retained
 files/status/Session identity on A, creation on the preparing Machine, unknown
@@ -89,18 +300,30 @@ history, alias pagination and explicit bindings. No installed store was changed.
 
 ### 2. Shared Work identity, delegation and routing
 
-**Next slice; dependency unavailable at this inspection.** LOO-406's
-`b3cd894f3` shares comments but retains split planning owners; LOO-412's
-`2bb5ce5c4` has no committed Git planning exchange. Required integration is a
-common local create/edit/comment/planning-outcome writer with stable pending
-mutation IDs, plus portable export/import and exchange preserving execution.
-Repository identity and delegation need that same portable schema. Uncommitted
-transport work is not an integration API. Slices 3–5 retain their dependencies.
+**Partially implemented, not composed.** The current branch includes LOO-406's
+common writer and planning-sync receipts. `repository_plans` supplies local plan
+identity even without Tasks; explicit binding can associate a peer path with that
+ID. Known started Tasks route via recorded checkout Machine; locally unstarted
+Tasks use effective delegation. Neither rewrites Machine defaults. LOO-412's
+portable exchange still needs composition with this identity/delegation schema.
+The two-store routing fixture seeds identical Work IDs directly: it proves routing
+is independent of path/default, not exchange convergence or peer start admission.
 
-Preserve shared planning identity through local reads/writes, synchronization and delegation. Add the repository
-root identity within the shared model, including repositories with no Tasks.
-Reuse LOO-406's storage primitives rather than implementing its local lifecycle
-again. Preserve connected-plan ownership and existing historical identities.
+First-start observation/admission remains unresolved: local absence cannot prove
+a peer never started. Even a fresh negative peer observation is not a reservation.
+A local SQLite transaction cannot exclude a competing peer allocation. Dependent
+cross-machine launch work must not treat the prototype as complete admission.
+Delegation inheritance remains proposed, not accepted from source code alone.
+
+Remaining identity work composes the existing repository root with LOO-412's
+user-keyed default and explicit shared selection. At `ce740b028`, one repository
+can select different destinations for different Waves; a destination/ref is not
+itself repository identity. Window convergence must preserve that distinction,
+not open a window per destination or implicitly merge existing plans.
+Code remotes grant neither identity nor publication permission. `bind_repository` currently refuses a different
+existing ID; preserving existing plans while selecting/joining belongs in this
+composition, not a second registry. Connected-plan ownership and historical IDs
+remain intact.
 
 Resolve Work → effective delegation → execution checkout. Define explicit versus
 inherited provenance, assignment changes and pending/conflicted synchronization. A
@@ -110,7 +333,7 @@ callback planner or another synchronization engine. Work is one logical planning
 model with synchronized local records, not one physical planning-machine store.
 Retain historical execution and explicit legacy-ID mappings.
 
-**Proof:** two machine fixtures converge on the same planning identities and
+**Required proof:** two machine fixtures converge on the same planning identities and
 changes; delegated execution reaches the correct checkout. Network failure retains
 local writes and visible pending sync; reconnection deduplicates and preserves
 conflicting input. Receiving planning completion never moves a local Workflow. A delegation
@@ -125,10 +348,13 @@ Flow execution and arrival all stay there. Nested create/edit/comment/completion
 use the same local planning writer; operations do not call back to another store.
 
 LOO-406 owns local planning mutations and optional Linear sync. LOO-412 owns
-portable planning exchange through a single custom Git ref, provisionally
-`refs/loopflow/planning`, separate from code branches. The exact ref, selected
-remote, scope and merge protocol remain in that Task. Do not duplicate them here
-or publish real plan data to the public code remote.
+portable planning exchange separately from code branches. Its committed prototype
+uses `refs/loopflow/planning/users/<uuid>` by default and explicit
+`refs/loopflow/planning/shared/<name>` destinations. Connection selects no existing
+Work and publishes nothing; explicit Wave selection includes descendants/history.
+The selected remote, user key, scope and merge protocol remain with that owner.
+This is dependency source evidence, not an integrated CLI promise or authorization
+to publish real plan data to the public code remote.
 
 Planning changes (identity, brief, membership, comments, completion) are locally
 committed with stable mutation identity and pending synchronization. Execution
@@ -140,7 +366,23 @@ Git unavailability does not make ordinary planning writes depend on a laptop:
 local saves succeed with pending sync, rather than unconfirmed host callbacks.
 Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
-and completion propagate semi-live through the active sync owner. Import uses the
+and completion propagate semi-live through the active sync owner. LOO-406 now keeps
+Desktop foreground Linear sync scoped to the repository (`29777b8cb`), independent
+of selected Task/Wave; switching selection must not stop propagation. Git exchange
+is still unintegrated and cannot claim this coverage. LOO-412's newer source has
+taskless foreground/post-save exchange, but refuses Git exchange in connected
+Linear repositories. The newer `270019c8d` cut acquires provider evidence before
+projecting fields,
+rolls rejected objects back to savepoints and retains membership/provider conflicts
+outside that rollback. Malformed input aborts import; valid contradictory observations
+do not discard independent objects. Those regressions remain unexecuted. `7262b6b20` shares field-winner/baseline
+normalization; `a388ed425` routes peer Task completion/reopening/cancellation
+through common state-delivery receipts with stable mutation IDs, causal baselines
+and no local Workflow move. Reimports retain uncertain attempts. This source
+cut has SQL checks, not executed Rust or composed proof. Other grouped receipts,
+alternate acquisition and legacy association still need composition.
+LOO-427 consumes the repaired common path rather than bypassing its
+limitation or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
 with optional Linear sync. Receiving a comment is not a command to start a Flow.
 
@@ -150,50 +392,154 @@ Machine. Repeat exchange creates no duplicate mutations. Disconnect permits loca
 planning and execution with pending sync; reconnect converges supported planning
 changes. Incoming completion never advances the other Machine's captured Workflow,
 signals a Process or removes a checkout; delayed completion cannot overwrite newer
-reopening. Existing divergent execution IDs/history remain intact. No central
+reopening. Rejected provider facts must preserve the displayed local projection,
+not just its provider cache; unresolved membership remains visible while unrelated
+imports proceed. Existing divergent execution IDs/history remain intact. No central
 Workflow write, remote arrival acknowledgement or host-failure gate remains.
 
-### 3. One repository window and explain/inspect
+### 3. One repository window and command explanation
 
-**Depends on 2.** Key the window to repository identity in the shared planning model. Cut startup,
-restoration, menu opening, Task links and in-window navigation over together.
-Replace `LoopflowApp`'s unaddressed workspace `WindowGroup` and the separate
-`WavesView` opening path. Retain utility windows and existing native surfaces.
-
-Replace `WorkLinkRouter.deliver`'s unrelated-window fallback and single pending
-URL with per-repository pending destinations. Preserve every cold-open request;
-concurrent opens of one repo converge. Planning uses the common local reader; execution observations retain Machine
-and freshness. Synced planning completion and local Workflow position stay distinct.
+**Local mechanics implemented; public API reconciliation remains.** `desktop open/list`
+own app launch and retained-window reading; root `open` and `inspect` are removed. `context --explain`
+still awaits the broader invocation API. Cross-machine composition depends on 2. Startup,
+restoration, menu opening and Task links use repository-keyed windows. Per-repository
+queues and delivery tokens preserve cold-open destinations and fence canceled
+completions. Utility windows and retained surfaces keep their own lifetimes.
+Inspection forwards Task and Session actions independently, retaining Task dates;
+Session observation time stays unavailable. Saved/failed readings grant no actions.
+Shared peer identity, remote observations/opening and configured proof remain.
 
 `explain_context(selection)` returns Machine/repo/checkout/Wave/Task/Session/Process
 and selection provenance, including absent/unavailable values. `inspect_desktop`
 returns selected work, layout, focus, supported operations and existing Rust
 legal actions. Explicit targets and checkout inference share the same resolver.
 
-**Proof:** cold opens for two repositories arriving before registration and
+**Required proof:** cold opens for two repositories arriving before registration and
 registering in reverse order both reach their own windows; same-repo opens reuse
 one. Plain-repo and remote-unavailable cases remain useful. JSON/Swift agree.
 
 ### 4. Arrange and interact with exact retained panes
 
-**Depends on 3; Q3 affects Session input.** One `DesktopTarget` contains repository,
-window incarnation, Machine/workspace, pane and expected content incarnation.
-Validate and dispatch on the main actor; delayed requests never follow new focus
-or a reused surface. Replace path-only read keys and unqualified terminal keys
-with their consumers/callbacks/fixtures together.
+**Retained-pane arrangement and exact input implemented locally; native proof remains.** `DesktopPaneTarget`
+contains repository, window incarnation, Machine, checkout, pane and content
+incarnation. `lf desktop hide/restore --target JSON` uses one Apple event carrying
+JSON as an argument, not script interpolation. Router and workspace validation plus
+`setCollapsed` run synchronously on the main actor. No new workspace, navigation,
+provider/client acquisition or Work mutation is requested. Restore only removes
+collapse; it preserves Work selection, window focus and zoom. A lost reply leaves
+outcome uncertain; hide/restore are idempotent.
 
-Expose focus, shell/Files/Flow-log companions, split, move, resize, zoom, hide and
-restore through `SessionsWorkspaceRegistry`, `MultiplexerStore` and
-`GhosttySurfacePool`. Native surfaces/drafts survive arrangement. Ending a
-shell/client is a distinct effect from hiding a view or completing Work.
+Close/Undo renews content tokens. Surface incarnation is separate; passive reads
+validate it without allocation or exit cleanup. Neither token grants input authority.
 
-Expose bounded screen, scrollback and selection reads, distinguishing empty,
-hidden and unavailable. Reads claim no client. Literal insertion and key submission
-are separate; no silent draft replacement. Bounded observation establishes output,
-not semantic Task/turn completion. Transport/spelling are implementation choices
-using existing owners; no socket or cross-version negotiation is required.
+Focus, empty split, move, resize and explicit zoom now share hide/restore's
+single typed Apple event and synchronous exact-target validation. A failed reply
+leaves the outcome uncertain: unlike hide/restore, retrying split can add another
+pane. Inspection, not automatic replay, establishes what happened. Move and resize
+validate both targets before mutation and stay in one Machine/checkout. Move
+relocates the original leaf, not close/load; content occurrences, shell commands
+and surface keys survive. Resize gives the target's side the requested divider
+share, including when it is the second subtree. Split preserves selection/zoom;
+move/resize preserve visibility too. Zoom changes visibility without selecting
+another pane; rendering no longer marks an unselected zoomed terminal focused.
+Focus selects/reveals the addressed pane in its retained workspace, without Work
+navigation or foregrounding another window. These are reversible implementation
+choices, not Jack's resolution of Q2.
 
-**Proof:** stale targets, focus changes, surface replacement, retained drafts,
+
+Companions are implemented locally: `lf desktop shell/files/flow-log` dispatches
+through the same exact-target command. Shell opening requires the local Machine;
+Files/Flow-log require the named Task's recorded/prepared checkout to match.
+They fill an empty target or split beside occupied contents, preserving selection,
+zoom and Work navigation. Files/Flow-log reuse retained panes and drafts; Shell
+allocates a new pane, so a lost reply cannot authorize replay. Toolbar and CLI
+share insertion rather than separate layout mutations. Review caught a notification
+preceding shell command publication; the common insertion now publishes both
+together. Native surface/draft retention across this full path is still unproved.
+
+Machine-qualified terminal identities now reach surface lookup, title/bell/close
+callbacks, shell discovery, status association and retained membership. An unknown
+Session Machine cannot select a terminal by ID alone. Session reads/cache markers
+use Machine/repository keys; late direct reads and mutation readbacks keep their
+originating identity. Remote routing/composition remains separate and unfinished.
+
+Passive inspection returns a native `surface` incarnation only for an existing
+surface, including a retained exited surface until its lifecycle owner releases it.
+Missing surfaces remain unavailable without allocating. The token comes from
+`ProgramStatusSurface`, not pane occurrence or a parallel generation store. A
+released view cannot create a second native surface with its old lifetime.
+
+**Bounded extraction patch implemented locally; artifact and composition remain.**
+`0004-bounded-text.patch` extends the embedded reader with caller-owned byte
+storage. `ScreenFormatter` writes directly into a fixed destination, stopping on
+capacity and checking only the final UTF-8 scalar for truncation; no full string or pin map
+is allocated. Explicit selections cover viewport/scrollback; a null selection
+reads the current text or command block, with empty distinguished from failure.
+Review removed stale command-block pin cleanup from its getter; selection changes,
+reset and teardown retain that ownership. Clipboard/Quick Look keep their existing
+unbounded APIs and viewport metadata, not a fallback for this read.
+
+The patch workflow selects the next `a60e9e2-lf3` artifact and includes focused
+bounded-text tests. `Package.swift` still selects published lf2: the new symbol is
+not imported by Desktop before a verified artifact exists. Native build helpers
+stalled at `_dyld_start`, before testing; the Linux terminal-only build/tests pass. The earlier embedded Linux build lacked cached HarfBuzz. A later application-root
+check passes 79 tests, and the complete embedded Linux libraries compile
+with Fontconfig, exporting the bounded reader (`d30198ccb`). Neither supplies a
+native framework. The independent pre-main capability failure is recorded in
+findings; the framework remains unbuilt.
+No artifact was published. Jack Heart's October 6 authorization already covers
+future patch artifacts after relevant build/behavior checks and download checksum
+verification; it does not authorize real planning-data publication.
+
+**Exact-target read boundary implemented locally.** `lf desktop read` sends the
+pane target, required surface incarnation, region and byte bound through the
+existing Apple event transport. Window and pane validation share arrangement's
+owners; passive pool lookup validates the surface lifetime without `view(for:)`
+or `hasSurface`. The reply echoes the request with observation time, pane-local
+collapse/zoom visibility and a tagged available/unavailable result. Empty text
+cannot stand for unavailable. Stale windows/content/surfaces fail without fallback;
+focus does not select the read target. Limits are 1–1048576 bytes (default 65536).
+
+The pinned lf2 reader returns `bounded_reader_unavailable` for an existing exact
+surface, `missing_surface` for absence and `not_terminal` for companion panes.
+This is not native extraction or a complete read capability; inspection does not
+advertise it as supported. No new symbol, dynamic lookup or unbounded fallback was
+added. Remaining native composition is a verified lf3 build/publication via
+[the patch workflow](../swift/GhosttyKitPatches/README.md), manifest/checksum
+selection, then fixed-buffer C extraction and bounded Swift copying at this
+existing boundary. A capable build executor is required; repeating unchanged
+pre-main stalls, importing the unavailable symbol or using unbounded reads
+does not complete it.
+
+Fixtures cover the wire contract, missing/nonterminal surfaces, limits, stale
+window/content and focus-independent targeting. A display-gated fixture covers
+real exited-surface retention and replacement rejection; it has not run. Empty
+native selections, extraction/copy limits and retained terminal drafts still need
+the bounded C reader composed and executed, not inference from DTO examples.
+
+**Exact input implemented locally (October 8).** `desktop text/key` extend the
+existing pane action/event; no input router, socket, layout store or clipboard
+path is added. Window/content validation and Machine-qualified surface lookup
+stay synchronous. Missing, exited or replaced surfaces fail without allocation,
+cleanup, client acquisition or focus fallback. Text uses ordinary insertion;
+keys use paired Ghostty press/release. Focus, layout and existing drafts stay put.
+Read tokens alone never cause input; each input command is deliberate.
+
+Jack selected combining with the existing draft (Q3): insert at the current cursor,
+with separate Enter submitting the combined contents. Text rejects C0/C1 controls,
+including newlines and Tab, rather than risking submission when bracketed paste
+is disabled. No escape decoding, silent clear or occupied-draft refusal. Active
+IME composition must finish first. These reversible input restrictions are in
+questions.md. Lost replies remain uncertain and cannot authorize automatic retry.
+
+Wire fixtures cover every key and required surface identity; headless fixtures
+cover invalid text, missing/nonterminal/stale content and retained state. The
+owned two-shell native fixture checks cursor insertion, explicit submission and
+focus retention; exit/replacement coverage also rejects input. These native
+fixtures require a display and remain unexecuted. Bounded observation still
+establishes output, never Task/turn completion.
+
+**Required proof:** stale targets, focus changes, surface replacement, retained drafts,
 literal text versus Enter, passive reads and limits. Linux errors precede any
 app/provider/Work effect. Use owned fixture terminals and fake providers only.
 
@@ -206,7 +552,11 @@ behavior/migration suites and
 Use `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel` for headless Desktop
 build/tests. Include the full `session_lifecycle_tests` suite and the disposable installation
 migration harness for the changed association/schema. Materialized migration and
-Desktop checks remain with gate; empty filters are not proof. Clear inherited execution markers per TESTING.md.
+Desktop checks remain with gate; empty filters are not proof. Checks use the
+isolation in TESTING.md. LOO-406's `planning_reconnect_tests` now owns Linux
+work-watch/Flow reconnect fixtures; those remain unexecuted evidence, reusable
+for the common writer rather than a second reconnect harness. LOO-427 still
+needs mixed Git-exchange and Desktop-selection coverage.
 
 Demo: one repository window shows two Tasks on different Machines. Explain their
 identity/delegation, open them, add shell/Files panes, retain an unfinished draft,
@@ -215,4 +565,9 @@ original input target and draft survive. Review native usability separately from
 headless gate. Preserve comparison dispositions and evidence limits; no real
 provider accounts or live user terminals.
 
-Check: `git diff --check` and `lf context --skill implement --json` pass for the dependency reconciliation; unchanged Rust retains 13 focused passes, fmt and Clippy from compression; gate owns materialized/installation migrations, full Session lifecycle and Desktop; native demo remains.
+Prior failed attempts, Swift compile/model evidence and Linux extraction checks
+remain in [findings](findings.md), Git blob `6046145dcdd3d334bb2ad3560130de60dce82ca5`
+and `/tmp/loo427-compress-msMFvo/current-scratch/`. No native surface proof or
+artifact publication follows from these checks.
+
+Check: `cargo fmt --check`, `git diff --check`, `swiftc -swift-version 6 -emit-module` for Loopflow/LoopflowMac and `swiftc -typecheck` for DesktopPaneControlTests/DTOFixtureTests/DisplayTests PASS (commands/logs: `/tmp/loo427-open-*`); `cargo test -p loopflow --lib --test cli_discovery --test global_commands desktop_` and `cargo clippy --all-targets -- -D warnings` each timed out after 90 s compiling Loopflow, without results. Gate/CI retain Rust, Linux and packaged Swift execution; demo retains native/composed proof. Prior input smoke and failed checks remain in `/tmp/loo427-compress-input-nryd8M/scratch/`.

@@ -163,6 +163,10 @@ this heading. Keep these replacements deleted:
 - Transition/intent-only export discovery, mapping-only completion shortcuts and
   duplicate status eligibility filters. One `planning_exports` view reads common
   receipt acknowledgement; preparation alone creates missing Task receipts.
+- Sequence-selected deletion delivery and scalar-clock visibility over a retained
+  removal receipt: neither imported arrival nor that clock orders provider evidence.
+  Common pending/attempt/status readers retain every unresolved
+  removal identity. Tombstone projection alone never prepares or settles a delete.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
@@ -185,12 +189,39 @@ and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
-Current implementation: `098de8033`, with parent `efc90abb1` integrated at
+Creation implementation: `098de8033`, with parent `efc90abb1` integrated at
 `7b5a12e2b`. `a002e4060` implements the previous feedback's foreground creation
 request: discover unprepared peer-born plans, retain mapped uncertainty in acquisition
 and status, and acknowledge through common readback. Prepared receipt transport
 (`88cd47572`) is no longer the frontier. Remaining work is below, not another
 creation owner or a repeat implementation of discovery.
+
+`84f8fb9d8` deletion receipt composition extends `planning_changes.rs`, not a peer-only
+delete writer. Each saved deletion has its own optional journal field keyed by the
+common receipt ID. Capture covers saves, attempts, acknowledgement, errors and
+explicit active-issue conflicts in the same transaction; the existing peer draft
+seeds retained rows. Import unions attempts and settlement for the same baseline,
+keeps all losing values, and never infers acknowledgement from a tombstone, mapping
+or missing inventory. Creation readback may fill an unattempted null baseline;
+it acknowledges creation, not removal. Conflicting baselines or unordered active/
+trash outcomes isolate the object and retain its journal.
+
+Review caught local `seq` being treated as deletion recency: a late historical
+receipt could hide a newer save. All unresolved deletion identities now remain
+visible to the common pending/attempt/status readers; uncertain attempts still
+exclude another write. Explicit active evidence retires older concurrent removals
+through one visibility reconciler used by local acquisition and peer import.
+A removal saved against that active revision survives. A rerun exposed a second
+ordering error: the independent visibility scalar could outrank that removal's
+receipt. Receipts now capture the original save time in `task_changes`; where
+receipts exist, their common reconciler alone projects visibility. The regression
+forces the contrary scalar clock rather than relying on timing. Provider-only
+removal still needs its separate acquisition cut. Reimport changes no revision.
+Focused regressions cover these cases, migration, late errors and full-row equality
+for seven execution tables (including populated Sessions, Processes and Workflows),
+plus the retained checkout. They do not prove running-provider controls or public
+mixed-provider lifetime behavior. This is one internal cut, not completed ordering
+or alternate-provider composition; mixed-provider exchange remains disabled.
 
 The latest conflict-free sync adds issue-scoped comment fixtures and an
 installation-test child-readiness repair; it is not the earlier dependency-only
@@ -255,8 +286,14 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Next: ordering/deletion receipts and alternate provider/relationship acquisition,
-then legacy association and unplaced-Wave/Desktop presentation.
+Next: ordering receipts and alternate provider/relationship acquisition, including
+removal/archive frontiers. Deletion receipt transport is implemented above; stale
+entity-frontier rejection still isolates the whole object, even if an independent
+deletion receipt arrived. Projection conflicts retain local receipts unchanged;
+foreground delivery does not yet consult those conflicts, so an imported uncertain
+attempt isolated from projection cannot safely authorize another effect. Compose
+acquisition and delivery eligibility before mixed activation, then legacy
+association and unplaced-Wave/Desktop presentation.
 Mixed-provider exchange stays disabled until those owners compose. Existing mapping
 or an import checkpoint is never effect acknowledgement. These are implementation
 gaps, not a missing parent dependency or verification-only work. Publication still
@@ -390,7 +427,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    The focused storage suite passes; connected-provider composition remains unproved.
 
    Creation/link receipts and foreground discovery/readback now share their common
-   owner; ordering and deletion remain uncomposed. Comments now use the common owners
+   owner; deletion receipts now use their common owner as described above. Ordering
+   and alternate removal/frontier acquisition remain uncomposed. Comments use the common owners
    described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
@@ -478,7 +516,9 @@ provenance gap; revise it with the completed composition, not as a product limit
      capture owner; import suppresses echo. Storage tests pass; composed acceptance remains.
    - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
      revisions and scalar peer fields cannot settle a captured move. Deletion
-     retains its separate baselines and attempts in `planning_changes.rs`.
+     now transports its separate baselines and attempts through `planning_changes.rs`.
+     Its positive acknowledgement/active evidence is not entity or list ordering;
+     alternate removal/archive acquisition remains a distinct unfinished boundary.
 
    Cover alternate accepted provider writers, including reteam, archive/removal,
    complete-list order and public comment acquisition, not only Task/Project detail reads.
@@ -600,7 +640,7 @@ Prior creation/export and Linux public recovery results: `a002e4060:scratch/work
 Compression's build, Project-content/migration and static-check evidence remains at
 `098de8033:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 
-Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no product rerun; revised Linux creation fixture and combined-candidate/Wave/Desktop checks remain with gate.
+Check (October 9 implement): `cargo test -p loopflow --lib peer_deletion --no-run`, network-isolated `peer_deletion` (5) / `peer_migration_preserves_the_populated_predecessor` (1), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `git diff --check` and `lf context --skill implement` pass; combined/public/Desktop checks remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

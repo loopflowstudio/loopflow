@@ -187,3 +187,14 @@ remain separate. No new product decision is selected.
   inheritance was removed after the public fixture demonstrated an execution write.
   The fixture also exposed unplaced Wave status rejection; nullable Rust/Swift
   Machine presentation remains necessary, not permission to assign a Machine on read.
+
+- October 9 deletion representation: optional `deletion:<receipt-id>` fields use
+  the existing mutation journal and common `task_changes` rows, not a new receipt
+  table. Baselines may fill once before attempting; incompatible captured effects
+  isolate projection. Attempt/acknowledgement flags merge monotonically. Unordered
+  active/trash outcomes remain conflicts, not clock-selected authority. One
+  deterministic diagnostic is displayed while every original stays in the journal.
+  Review removed deletion's local-sequence selection and shared visibility
+  reconciliation with explicit active readback. Ordering and alternate removal/
+  relationship acquisition remain unfinished; no mixed-provider activation or
+  new product policy from Jack Heart is claimed.

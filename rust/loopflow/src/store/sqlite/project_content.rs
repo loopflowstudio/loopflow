@@ -116,9 +116,6 @@ impl SqliteStore {
         project: &ProjectId,
         content: &ProjectContent,
     ) -> StoreResult<()> {
-        content
-            .validate()
-            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
@@ -306,8 +303,10 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
+            // Source parsing belongs to ops::project::workflow; the Store owns
+            // name validation and transactional preservation, not a second parser.
             assert!(store
-                .select_project_workflow(&project, "review", "changed")
+                .select_project_workflow(&project, "invalid/review", definition)
                 .is_err());
             assert_eq!(
                 store.wave_workflow(&wave, "review").unwrap().as_deref(),

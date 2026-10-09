@@ -822,19 +822,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
     block_on_task(async {
         let store = task_store().await?;
         let main = crate::engine::worktrees::main_repo_root(repo).map_err(task_error)?;
-        if store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .is_none()
-        {
-            if let Err(error) =
-                super::planning_peer::acquire_repository(&store, &main.to_string_lossy()).await
-            {
-                tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
-            }
-        }
-        let saved = store.get_task_by_issue(issue).await.map_err(task_error)?;
+        let saved = super::planning_peer::find_task(&store, &main.to_string_lossy(), issue).await?;
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,

@@ -1099,24 +1099,7 @@ pub(crate) async fn resolve_saved_task(
     let store = Arc::new(pm_store().await?);
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    let task = store
-        .get_task_by_issue(issue)
-        .await
-        .map_err(|error| OpsError::Message(error.to_string()))?;
-    let task = if task.is_none() {
-        if super::planning_peer::acquire_repository(&store, &canonical.to_string())
-            .await
-            .is_err()
-        {
-            tracing::debug!("Git planning acquisition pending; using saved Task");
-        }
-        store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(|error| OpsError::Message(error.to_string()))?
-    } else {
-        task
-    };
+    let task = super::planning_peer::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
         None => {

@@ -14,6 +14,22 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
+/// Saved Tasks need no network before a read or local save. On a cache miss,
+/// acquire the selected planning destinations once, without allocating execution.
+pub(crate) async fn find_task(
+    store: &Store,
+    repo: &str,
+    selector: &str,
+) -> OpsResult<Option<crate::work::task::Task>> {
+    if let Some(task) = store.get_task_by_issue(selector).await.map_err(message)? {
+        return Ok(Some(task));
+    }
+    if let Err(error) = acquire_repository(store, repo).await {
+        tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
+    }
+    store.get_task_by_issue(selector).await.map_err(message)
+}
+
 /// One acquisition per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
 pub(crate) async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {

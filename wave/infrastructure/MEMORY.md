@@ -631,8 +631,9 @@ winner retires losing intention; ordinary unchanged acquisition preserves it.
 
 Comments preserve authorship without steer/echo; `a518b985b` journals semantic
 workflow/KR/target fields through common owners, not raw Markdown.
-Imports group immutable history/winners once. Linux build/Clippy and focused
-comment/import/setup checks pass after typed SQL and new-Task local-default repairs.
+History/winners group once. `3bebc219d` passed Linux build/Clippy and focused
+comment/import/setup. Cold lookup shares acquisition only on a miss; launch
+freshness stays separate.
 Creation/link, order, deletion, alternate acquisition, legacy association and Desktop
 remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs: `ae6f392c2`.
 Checkpoint CI skips product suites with scratch.

@@ -42,10 +42,11 @@ Connections share a private OpenSSH control socket and expire after 60 idle
 seconds. Personal SSH control sockets are never reused or closed. Explicit
 agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
-before dispatch. For `--context`/`--explain`, the receiving invocation validates
-identity through read-only storage instead of a separate `machine id` probe.
-Neither side admits a Process or prepares provider credentials; names and paths
-still resolve at the destination. Missing or changed identity fails without
+before dispatch. Every receiving invocation validates identity through read-only
+storage before help, repository lookup or Process admission; no shell-side identity
+probe duplicates that check. Launch retains its sender probe and credential
+preparation. `--context`/`--explain` skip both, and neither side admits a Process.
+Names and paths resolve at the destination. Missing or changed identity fails without
 initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
 login through SSH stdin; account-selected launches connect missing logins in the
 foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).

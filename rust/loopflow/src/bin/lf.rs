@@ -1441,6 +1441,12 @@ fn init_tracing(verbose: bool) {
 
 fn run() -> anyhow::Result<()> {
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
+    // Validate addressed commands once, before help, repository lookup, or admission.
+    // A rejected destination must not create even a fallback Process on that Machine.
+    if let Err(error) = loopflow::lf::commands::machine::validate_expected_machine_process() {
+        journal::mark_effect_free_read();
+        return Err(error);
+    }
     // Ensure Ctrl+C terminates lf and the child agent. Without this,
     // child.wait() retries on EINTR and hangs while the agent catches
     // SIGINT and keeps running. SIGTERM the agent first so it doesn't
@@ -1456,19 +1462,9 @@ fn run() -> anyhow::Result<()> {
             loopflow::process::CommandExit(code)
         })?
     {
-        let preview_args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
-        let preview = match Cli::try_parse_from(&preview_args) {
-            Ok(cli) => cli.context || cli.explain,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
-                ) =>
-            {
-                false
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let args = reorder_args(std::iter::once("lf".to_string()).chain(command).collect());
+        let cli = loopflow::lf::commands::ssh::parse_remote_command(&args[1..])?;
+        let preview = cli.context || cli.explain;
         if preview {
             journal::mark_effect_free_read();
         }
@@ -1480,14 +1476,14 @@ fn run() -> anyhow::Result<()> {
         }
         ctrlc::set_handler(|| loopflow::engine::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow::lf::commands::machine::validate_expected_machine_process()?;
         return loopflow::lf::commands::ssh::run(
             remote
                 .machine
                 .as_deref()
                 .expect("remote invocation has a machine"),
             remote.forward_agent,
-            &preview_args[1..],
+            &cli,
+            &args[1..],
             None,
         );
     }
@@ -1534,9 +1530,6 @@ fn run() -> anyhow::Result<()> {
         );
     if matches!(cli.command, Some(Commands::Desktop { .. })) && !opening_preview {
         loopflow::lf::commands::desktop::require_supported()?;
-    }
-    if cli.context || cli.explain {
-        loopflow::lf::commands::machine::validate_expected_machine_process()?;
     }
     let _selected_repo_cwd = cli
         .repo
@@ -1875,9 +1868,6 @@ fn selected_task_repository(
 }
 
 fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
-    // Remote commands prove they reached the saved machine before dispatch.
-    loopflow::lf::commands::machine::validate_expected_machine_process()?;
-
     // Display location is not execution placement. Opening reads Work here;
     // the retained Desktop owners prepare/connect only the requested view.
     if let Some(Commands::Desktop { cmd }) = &cli.command {

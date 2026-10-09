@@ -14,10 +14,10 @@ pub const EXPECTED_MACHINE_ID_ENV: &str = "LF_EXPECTED_MACHINE_ID";
 pub fn run(
     target: &str,
     forward_agent: bool,
+    cli: &Cli,
     lf_args: &[String],
     task_route: Option<TaskExecutionRoute>,
 ) -> anyhow::Result<()> {
-    let cli = parse_remote_command(lf_args)?;
     let preview = cli.context || cli.explain;
     if !preview && matches!(cli.command, Some(crate::lf::Commands::Desktop { .. })) {
         super::desktop::require_supported()?;
@@ -37,7 +37,7 @@ pub fn run(
         Some(route) => Some(route),
         // A path/name addresses the destination's filesystem, not the caller's.
         None if cli.repo.is_some() => None,
-        None => super::work_route::resolve(&cli)?,
+        None => super::work_route::resolve(cli)?,
     };
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
@@ -62,7 +62,7 @@ pub fn run(
                 .block_on(super::machine_credentials::prepare_launch(
                     &target,
                     &AccountSelection::from_env()?,
-                    &cli,
+                    cli,
                 ))?
                 .env_value()?,
         )
@@ -92,7 +92,7 @@ pub fn run(
     cmd.extend(if preview {
         lf_args.to_vec()
     } else {
-        resident_args(lf_args, &cli, routed)
+        resident_args(lf_args, cli, routed)
     });
     let preamble = build_preamble(
         &target.route,
@@ -103,7 +103,6 @@ pub fn run(
         },
         &cmd,
         &extra_env,
-        !preview,
     );
     run_ssh(&target.route, forward_agent, &preamble)
 }
@@ -143,7 +142,8 @@ fn resident_args(args: &[String], cli: &Cli, routed: bool) -> Vec<String> {
     result
 }
 
-fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
+/// Parse transport policy once; help/version are forwarded for the peer to print.
+pub fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {
     if lf_args.first().is_some_and(|arg| arg == "lf") {
         return Err(anyhow!(
             "the remote `lf` is implicit; use `lf --machine <target> <args...>` without `-- lf`"
@@ -192,17 +192,10 @@ fn build_preamble(
     repo: Option<&str>,
     cmd: &[String],
     extra_env: &[(&str, &str)],
-    probe_identity: bool,
 ) -> String {
     let mut lines = vec![super::machine::REMOTE_PATH.to_string()];
     for (name, value) in extra_env {
         lines.push(format!("export {name}={}", sh_quote(value)));
-    }
-    // Preview validates the expected identity inside the receiving read-only
-    // invocation; `machine id` initializes an absent registry and journals a Process.
-    if probe_identity {
-        lines.push("LF_REACHED_MACHINE_ID=$(lf machine id) || exit 1".to_string());
-        lines.push(r#"[ "$LF_REACHED_MACHINE_ID" = "$LF_EXPECTED_MACHINE_ID" ] || { echo 'remote machine identity changed' >&2; exit 1; }"#.to_string());
     }
     if let Some(repo) = repo {
         let path = if repo.starts_with('/') {
@@ -292,22 +285,7 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::{build_preamble, command_result, parse_remote_command, resident_args, sh_quote};
-
-    #[test]
-    fn quotes_shell_data_without_forwarding_credentials() {
-        assert_eq!(sh_quote("it's here"), "'it'\\''s here'");
-        let script = build_preamble(
-            "mini",
-            Some("~/project's checkout"),
-            &["lf".into(), "session".into(), "list".into()],
-            &[("LF_EXPECTED_MACHINE_ID", "home_test")],
-            true,
-        );
-        assert!(script.contains("machine identity changed"));
-        assert!(!script.contains("TOKEN"));
-        assert!(!script.contains("LEASE"));
-    }
+    use super::{build_preamble, command_result, parse_remote_command, resident_args};
 
     #[test]
     fn repository_addressed_transport_preserves_arguments_without_entering_machine_default() {
@@ -316,7 +294,7 @@ mod tests {
         let bin = dir.path().join(".local/bin");
         std::fs::create_dir_all(&bin).unwrap();
         let lf = bin.join("lf");
-        std::fs::write(&lf, "#!/bin/sh\nif [ \"$1\" = machine ]; then echo home_fixture; else printf '%s\\n' \"$PWD\" \"$@\"; fi\n").unwrap();
+        std::fs::write(&lf, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\"\n").unwrap();
         std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
         let script = build_preamble(
             "fixture",
@@ -331,7 +309,6 @@ mod tests {
                 "literal 'draft'; $(false)".into(),
             ],
             &[("LF_EXPECTED_MACHINE_ID", "home_fixture")],
-            true,
         );
         let output = std::process::Command::new("/bin/bash")
             .args(["-c", &script])

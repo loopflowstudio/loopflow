@@ -888,6 +888,44 @@ fn remote_preview_preserves_absent_corrupt_and_changed_machine_evidence() {
 }
 
 #[test]
+fn addressed_commands_validate_identity_before_reads_writes_and_forwarding() {
+    let fixture = preview_machines();
+    let local_db = fixture.root.path().join("local/loopflow.db");
+    let remote_db = fixture.root.path().join("remote/store/loopflow.db");
+    let local_before = checkpoint_bytes(&local_db);
+    let remote_before = checkpoint_bytes(&remote_db);
+    for args in [
+        vec!["--help"],
+        vec!["--version"],
+        vec!["wave", "show", "--json"],
+        vec!["--repo", "/unavailable", "--explain"],
+        vec!["machine", "rename", "mini", "changed"],
+        vec!["self", "doctor", "--json"],
+        vec!["task", "run", "UNKNOWN-427"],
+        vec!["--machine", "mini", "machine", "list", "--json"],
+    ] {
+        let output = fixture
+            .command(&args)
+            .env(
+                "LF_EXPECTED_MACHINE_ID",
+                "home_99999999999999999999999999999999",
+            )
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("expected Machine"),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stdout.is_empty(), "{args:?}");
+    }
+    assert_eq!(checkpoint_bytes(&local_db), local_before);
+    assert_eq!(checkpoint_bytes(&remote_db), remote_before);
+    assert!(!fixture.root.path().join("forbidden-effect").exists());
+}
+
+#[test]
 fn remote_preview_connection_failure_never_falls_back_to_local_execution() {
     let fixture = preview_machines();
     let local_db = fixture.root.path().join("local/loopflow.db");

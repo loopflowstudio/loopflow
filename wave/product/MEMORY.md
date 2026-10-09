@@ -101,16 +101,17 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
-October 9 planning reads skip Process admission and use read-only storage;
-missing-registry and checkpointed-WAL tests exposed fallback Process writes.
-Resolve chapter targets once on the operation's store, without a CLI ID round trip.
-Workflow reads and writes have separate APIs.
-Previews share Task admission/Workflow, Desktop URL validation and skill/Flow syntax
-with launch. Only launch prepares Work. Linux previews report platform impediments.
-Explicit-Machine previews skip credential preparation and writable identity probes;
-receivers validate identity read-only. Checkpoint both stores: an effect-free receiver
-cannot undo a sender's Process write. Two-CLI fixtures establish repository/Work
-resolution, not configured SSH, native acceptance or peer-exclusive first start.
+October 9 planning reads use read-only storage and skip Process admission;
+missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters
+once on the operation's store; Workflow reads and writes have separate APIs.
+Previews share launch's Task admission/Workflow, URL validation and definition syntax.
+Only launch prepares Work; Linux previews report platform impediments.
+Explicit-Machine previews skip probes/credentials. Entry-level identity
+validation replaces shell/dispatch checks, protecting early readers; rejection cannot
+write a fallback Process. Transport retains the parsed CLI.
+Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
+Two-CLI fixtures prove repository/Work resolution, not configured SSH, native
+acceptance or peer-exclusive first start.
 
 ## Terminal-host adoption (2026-10-07)
 

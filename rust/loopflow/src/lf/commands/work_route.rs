@@ -127,7 +127,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     {
         forwarded.extend(["--task".into(), selector.into()]);
     }
-    super::ssh::run(machine.as_str(), false, &forwarded, Some(route))?;
+    super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
     Ok(true)
 }
 

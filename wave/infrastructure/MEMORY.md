@@ -1007,16 +1007,15 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 Jack Heart's LOO-444 direction supersedes 429's all-system transport: preserve
 native prompts/guides, add fixed instructions, put skill/request in the first
 turn and refresh whole-file context at start/compaction. No cutover is implemented.
-Literal byte identity conflicts with accepted surface/name/reply metadata in that
-slot; the design retains this unresolved channel choice, not a silent relocation.
+Literal byte identity conflicts with variable surface/name/reply metadata;
+the channel choice remains unresolved.
 
 Fake-API probes: Claude 2.1.295 injects user context at startup/compact, unlike
 2.1.294. Codex 0.161.0 preserves native
 base, AGENTS.md and additive instructions through manual compaction. SessionStart
 with source compact injects; PostCompact does not. App-server needs scoped hook
 trust; TUI bypass did not suffice. `context_delivery.py` under
-`scripts/benchmarks/skill-invocation/` owns reproduction. These prove no LF cutover,
-automatic compaction, OpenCode wire behavior, cmux or installed acceptance.
+`scripts/benchmarks/skill-invocation/` owns reproduction. LF cutover, automatic compaction, OpenCode, cmux and installation remain unproved.
 
 Retain setup-free capture, saved config/trust, native identity and caller checkpoints.
 Interrupted profiles may remain unselected. Prior PTYs prove no fresh reconnect

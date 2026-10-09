@@ -219,14 +219,16 @@ Process `ef54b06d-9896-467f-a920-f8d4648f9d8b`, and interrupted research Process
 closure is not yet observed. LOO-378 is explicitly paused with substantial
 unpublished code retained, without deletion or delivery authorization.
 
-## Process vocabulary (LOO-400, 2026-10-07)
+## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart approved Process, LFID/PID and PR #1483 landing
-(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). `process.lfid` is durable identity;
-optional `pid` is reusable. One draft preserves identities, parents, outcomes,
-unknown PIDs and historical JSON. Sequencer wire `process_id` still maps to Rust
-`process_lfid`. Fixtures establish no installed control authority; LOO-397 owns
-command placement. Exact evidence: `cbdb9a43b:wave/infrastructure/MEMORY.md`.
+Jack Heart selected LfSession/LfProcess for Loopflow ownership; provider-owned
+names remain LOO-442. This pure rename preserves wire/storage/fixture bytes,
+ProcessLfid, enum variants and product Session/Process. SQL and profiling
+captures retain historical names. `2b183c547` implements Rust/Swift and live
+docs; Rust tests await gate, installation unproved.
+LFID stays durable; optional PID is reusable. LOO-400's accepted history,
+mapping, placement and proofs:
+`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

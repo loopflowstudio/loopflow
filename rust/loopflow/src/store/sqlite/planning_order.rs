@@ -293,34 +293,20 @@ pub(super) fn project_pending(conn: &Connection, project: &ProjectId) -> StoreRe
         return Ok(false);
     };
     let members = project_members(conn, project)?;
-    let desired = current_members(
-        conn,
-        project,
-        &serde_json::from_value::<Vec<String>>(change.value)?,
-    )?;
+    let desired = serde_json::from_value::<Vec<String>>(change.value)?
+        .into_iter()
+        .filter(|id| members.contains(id))
+        .collect::<Vec<_>>();
     apply_order(conn, project, &include_members(&desired, &members))?;
     Ok(true)
 }
 
 fn next_delivery(conn: &Connection, project: &ProjectId) -> StoreResult<Option<OrderDelivery>> {
-    let pending = deliveries(conn, project)?;
-    // Any uncertain attempt, including a losing order, prevents another write.
-    if let Some(index) = pending
-        .iter()
-        .position(|d| d.effects.last().is_some_and(|e| !e.settled))
-    {
-        return Ok(pending.into_iter().nth(index));
-    }
-    let selected: Option<String> = conn
-        .query_row(
-            "SELECT id FROM planning_order_current WHERE project_id=?1",
-            [project.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(pending
+    // The view contains only the selected save and unresolved effects. Any
+    // uncertain effect, including a losing order, takes precedence over the save.
+    Ok(deliveries(conn, project)?
         .into_iter()
-        .find(|d| Some(&d.id) == selected.as_ref()))
+        .min_by_key(|delivery| delivery.effects.last().is_none_or(|effect| effect.settled)))
 }
 
 fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
@@ -330,19 +316,6 @@ fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<St
     )?;
     let rows = query.query_map([project.as_str()], |row| row.get(0))?;
     rows.collect::<Result<_, _>>().map_err(Into::into)
-}
-
-fn current_members(
-    conn: &Connection,
-    project: &ProjectId,
-    desired: &[String],
-) -> StoreResult<Vec<String>> {
-    let members = project_members(conn, project)?;
-    Ok(desired
-        .iter()
-        .filter(|id| members.contains(id))
-        .cloned()
-        .collect())
 }
 
 fn apply_order(conn: &Connection, project: &ProjectId, order: &[String]) -> StoreResult<()> {
@@ -416,10 +389,12 @@ pub(crate) fn validate_peer_receipt(value: &Value) -> StoreResult<()> {
                 != effect.after.iter().collect()
             || effect.issue.is_empty()
             || !effect.input.as_object().is_some_and(|input| {
-                input.len() == 2
-                    && ["sortOrder", "prioritySortOrder"]
-                        .iter()
-                        .all(|key| input.get(*key).is_some_and(Value::is_number))
+                // Moving between priority groups leaves the secondary key alone.
+                input.get("prioritySortOrder").is_some_and(Value::is_number)
+                    && input.iter().all(|(key, value)| {
+                        matches!(key.as_str(), "sortOrder" | "prioritySortOrder")
+                            && value.is_number()
+                    })
             })
             || index > 0
                 && (!receipt.effects[index - 1].settled

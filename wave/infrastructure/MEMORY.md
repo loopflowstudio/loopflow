@@ -633,9 +633,10 @@ tables, not live controls.
 rejected/skipped projection retains receipts only in journals. Saves/acquisition
 stay independent; selection cannot release effects before import. `30b476328`'s changed public fixture awaits gate; mixed transport/live controls remain unproved.
 
-Ordering now transports common move receipts, not just ranks. Save clocks select intentions; effect updates cannot revive losing orders. Unresolved effects
-hold delivery, while settled superseded partial moves remain history. Only complete lists recognize progress; imports and detail reads settle nothing.
-Mixed-provider activation remains unproved.
+Order receipts preserve save priority, baselines, uncertain effects and losing lists.
+Only complete lists settle progress; superseded settled moves cannot deliver.
+Peer validation required both sort keys; retain primary-only input.
+Proofs: `fcd64901f`; repair checks: design. Mixed activation remains unproved.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
 proves neither negative membership nor deletion. Archive/membership contradictions

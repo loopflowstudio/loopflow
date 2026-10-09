@@ -32,8 +32,13 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
-    orders: BTreeMap<&'a str, Vec<&'a Value>>,
-    order_heads: BTreeMap<&'a str, Vec<&'a Value>>,
+    orders: BTreeMap<&'a str, OrderHistory<'a>>,
+}
+
+#[derive(Default)]
+struct OrderHistory<'a> {
+    values: Vec<&'a Value>,
+    heads: Vec<&'a Value>,
 }
 
 /// Rejected projections can retain effects only in the peer journal. Never
@@ -91,6 +96,7 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
                 .orders
                 .entry(receipt)
                 .or_default()
+                .values
                 .push(&change.value);
         }
         let Some(observation) = &change.linear else {
@@ -118,9 +124,10 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             objects
                 .get_mut(&change.object)
                 .expect("retained order object")
-                .order_heads
+                .orders
                 .entry(receipt)
                 .or_default()
+                .heads
                 .push(&change.value);
         }
     }
@@ -1172,8 +1179,8 @@ fn insert_and_project(
                 conn,
                 &ProjectId::from_raw(&object.id),
                 receipt,
-                history,
-                &changes.order_heads[receipt],
+                &history.values,
+                &history.heads,
             )?;
         }
     }

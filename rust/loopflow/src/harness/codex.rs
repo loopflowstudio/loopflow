@@ -32,7 +32,8 @@ use tokio_tungstenite::{client_async, tungstenite::Message};
 use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::engine::process::{
-    bind_group_to_driver, engine_lifeline_path, hold_engine_lifeline, kill_process_group,
+    agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
+    AgentProcessLifeline,
 };
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
@@ -1072,11 +1073,6 @@ impl CodexHarness {
             Some(route) => route.launch_as(command.as_std_mut()).await?,
             None => None,
         };
-        // Own process group so stop() can kill everything under the `codex`
-        // entry point, including the real app-server binary that npm shims
-        // spawn as a grandchild.
-        #[cfg(unix)]
-        command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         // A login shell/snapshot can replace the launcher's PATH with the
         // installation, losing a development Session's executable/Machine.
@@ -1104,12 +1100,14 @@ impl CodexHarness {
                 store.record_session_provider_launch(session, driver, true)?;
             }
         }
+        let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
-            Some(
-                command
-                    .spawn()
-                    .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
-            )
+            let prepared = AgentProcessLifeline::prepare(command.as_std_mut(), Some(&lifeline))?;
+            let child = command
+                .spawn()
+                .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?;
+            prepared.retain();
+            Some(child)
         } else {
             None
         };
@@ -1119,7 +1117,6 @@ impl CodexHarness {
         // harness, so no destructor or signal hook can be what stops it. The
         // lifeline ties it to the processes that drive it: when the last one
         // ends, by return, signal, panic or SIGKILL, the group is terminated.
-        let lifeline = engine_lifeline_path(&endpoint);
         if let Some(pid) = child.as_ref().and_then(tokio::process::Child::id) {
             self.child_group.store(pid, Ordering::Release);
             if let Some((store, session, driver)) = &self.session_driver {
@@ -1127,13 +1124,12 @@ impl CodexHarness {
                     store.record_session_provider_process(session, driver, pid, started_at)?;
                 }
             }
-            bind_group_to_driver(pid, Some(&lifeline)).map_err(|error| {
-                anyhow!("failed to bind codex app-server to its driver: {error}")
-            })?;
         } else {
             // Reconnecting adopts the engine; one that predates lifelines has none.
-            hold_engine_lifeline(&lifeline).map_err(|error| {
-                anyhow!("Codex engine is stopping after its driver exited ({error}); retry")
+            hold_agent_process_lifeline(&lifeline).map_err(|error| {
+                anyhow!(
+                    "Codex AgentProcess is stopping after its attached lf exited ({error}); retry"
+                )
             })?;
         }
 

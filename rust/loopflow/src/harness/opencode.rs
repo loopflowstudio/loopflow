@@ -106,11 +106,6 @@ impl OpenCodeHarness {
         if config.write_scope == AgentWriteScope::Worktree {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
-        // Own process group so `stop()` and the driver lifeline can kill the
-        // whole tree — `opencode serve` spawns descendants (MCP servers, model
-        // proxies, npm-shim grandchildren) that a direct-child kill orphans.
-        #[cfg(unix)]
-        command.process_group(0);
         super::configure_vendor_std_env(command.as_std_mut())?;
         {
             let history = self.history.lock().expect("OpenCode history lock poisoned");
@@ -118,21 +113,12 @@ impl OpenCodeHarness {
                 store.record_session_provider_launch(session, driver, true)?;
             }
         }
+        let lifeline =
+            crate::engine::process::AgentProcessLifeline::prepare(command.as_std_mut(), None)?;
         let mut child = command
             .spawn()
             .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
-        // `stop()` kills the group; the lifeline covers every way this process
-        // can end without reaching it, including signals and SIGKILL.
-        #[cfg(unix)]
-        if let Some(pid) = child.id() {
-            if let Err(error) = crate::engine::process::bind_group_to_driver(pid, None) {
-                kill_process_group(pid);
-                shutdown_child(&mut child).await;
-                return Err(anyhow!(
-                    "failed to bind opencode serve to its driver: {error}"
-                ));
-            }
-        }
+        lifeline.retain();
         let stderr = child
             .stderr
             .take()

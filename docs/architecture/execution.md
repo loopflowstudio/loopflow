@@ -79,6 +79,12 @@ Process does not reserve agent work or mark a Task Started.
 5. Append correlated provider outcomes and usage; settle command completion
    under its Process lifetime.
 
+Headless Codex and OpenCode prepare their lifeline before spawning. The child
+establishes its process group and waits for watchdog readiness before executing
+the provider. No post-spawn bind is needed. A reconnecting lf invocation holds
+the same FIFO; the last attached invocation's exit closes the lifeline and stops
+the group, including after SIGKILL. Native terminal process groups are unchanged.
+
 Prepared rows without publication are recoverable preparation failures. A missing
 spawn receipt is uncertainty, not permission to duplicate a possibly live engine.
 Recovery preserves recorded inputs and exact native evidence. File publication

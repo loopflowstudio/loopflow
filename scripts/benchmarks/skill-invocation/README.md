@@ -180,3 +180,26 @@ now compares the entire context string. A 2,500-scalar / 9,901-byte Codex block
 passes. Count provider units before selecting whole files, not just Unicode
 scalars; a native spill preview is still truncation. These samples prove no
 Loopflow integration or automatic compaction.
+
+
+```sh
+uv run python scripts/test_network.py uv run --no-sync python \
+  scripts/benchmarks/skill-invocation/first_turn_transport.py \
+  --transport editor --output /tmp/lf-editor-proof
+# Repeat with --case carriage-return, paste-marker, and trailing-whitespace.
+```
+
+Codex 0.161.0's external editor preserves 285 KB Unicode, embedded CRLF and a
+literal paste terminator exactly in the first request. A fixture `VISUAL` copies
+bytes into the native draft; Ctrl-G and Enter remain terminal input. The probe
+checks editor terminal descriptors, raw-mode restoration, no premature request,
+resize, follow-up history and clean exit. Maximum observed argument, including
+editor arguments: 86 bytes. Composer echo precedes thread readiness; the probe
+waits for the native session footer before requesting the editor.
+
+The trailing-whitespace case fails exact equality despite successful exit:
+285,027 bytes become 285,023. Codex trims the editor result and submitted text.
+The editor is therefore not a lossless transport for arbitrary requests. These
+are provider-only observations, not production integration, preserved user editor
+settings, signal/input ownership, resume or cmux acceptance. Production remains
+unchanged; normalization and a protective message envelope are not selected.

@@ -1,4 +1,4 @@
-"""Probe exact first turns through native Codex stdin and terminal paste transports."""
+"""Probe exact first turns through native Codex stdin, paste and external-editor transports."""
 
 import argparse
 import fcntl
@@ -6,6 +6,7 @@ import json
 import os
 import pty
 import select
+import shlex
 import shutil
 import signal
 import struct
@@ -103,8 +104,13 @@ def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, byte
     return process.returncode, bytes(output), timed_out
 
 
-def _run_paste(
-    command: list[str], root: Path, env: dict[str, str], prompt: str, server: Requests
+def _run_interactive(
+    command: list[str],
+    root: Path,
+    env: dict[str, str],
+    prompt: str,
+    server: Requests,
+    transport: str,
 ) -> tuple[int, bytes, dict[str, bool]]:
     with _terminal(command, root, env) as (process, master):
         os.set_blocking(master, False)
@@ -117,7 +123,9 @@ def _run_paste(
             key: False
             for key in [
                 "editor_ready",
-                "paste_drained",
+                "input_loaded",
+                "editor_returned_raw",
+                "no_request_before_submit",
                 "resized",
                 "followup_preserves_first_turn",
                 "clean_exit",
@@ -166,14 +174,28 @@ def _run_paste(
             attrs = termios.tcgetattr(master)
             if attrs[3] & (termios.ECHO | termios.ICANON):
                 raise RuntimeError("editor is not in raw mode")
+            # The composer echoes before thread startup finishes. External-editor
+            # shortcuts are unavailable until the native session footer appears.
+            _wait(lambda: _visible("gpt-5.4default"))
             pending.extend(b"zzlfreadyzz")
             _wait(lambda: _visible("zzlfreadyzz"))
             checks["editor_ready"] = True
-            # Remove the unsubmitted readiness marker, then send one bracketed paste.
-            pending.extend(b"\x15\x1b[200~" + prompt.encode() + b"\x1b[201~")
-            _wait(lambda: not pending)
-            checks["paste_drained"] = True
-            _wait(lambda: _visible("Pasted") or _visible("LOO444_END"))
+            # Clear the readiness marker without submitting it.
+            pending.extend(b"\x15")
+            if transport == "editor":
+                pending.extend(b"\x07")
+                _wait(lambda: (root / "editor.json").exists())
+                receipt = json.loads((root / "editor.json").read_text())
+                checks["input_loaded"] = receipt["exact_copy"] and receipt["terminal"]
+                _wait(lambda: _visible("LOO444_END"))
+            else:
+                pending.extend(b"\x1b[200~" + prompt.encode() + b"\x1b[201~")
+                _wait(lambda: not pending)
+                checks["input_loaded"] = True
+                _wait(lambda: _visible("Pasted") or _visible("LOO444_END"))
+            attrs = termios.tcgetattr(master)
+            checks["editor_returned_raw"] = not attrs[3] & (termios.ECHO | termios.ICANON)
+            checks["no_request_before_submit"] = not server.bodies
             # Resize while the first turn is still editable; the same PTY owns input.
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 120, 0, 0))
             screen.resize(32, 120)
@@ -206,16 +228,36 @@ def _run_paste(
                 _pump()
             checks["clean_exit"] = process.poll() == 0
         except (OSError, RuntimeError, TimeoutError) as error:
-            (root / "paste.error").write_text(str(error))
+            (root / "terminal.error").write_text(str(error))
     return process.returncode, bytes(output), checks
+
+
+def _editor_command(root: Path) -> str:
+    script = root / "editor.py"
+    script.write_text(
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "root = Path(__file__).parent\n"
+        "target = Path(sys.argv[1])\n"
+        "source = (root / 'prompt.txt').read_bytes()\n"
+        "target.write_bytes(source)\n"
+        "receipt = {'exact_copy': target.read_bytes() == source, "
+        "'terminal': all(os.isatty(fd) for fd in (0, 1, 2)), "
+        "'max_argument_bytes': max(len(arg.encode()) for arg in sys.argv)}\n"
+        "pending = root / 'editor.pending'\n"
+        "pending.write_text(json.dumps(receipt))\n"
+        "pending.rename(root / 'editor.json')\n"
+    )
+    return shlex.join([sys.executable, str(script)])
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--transport", choices=["stdin", "paste"], default="stdin")
+    parser.add_argument("--transport", choices=["stdin", "paste", "editor"], default="stdin")
     parser.add_argument(
-        "--case", choices=["unicode", "carriage-return", "paste-marker"], default="unicode"
+        "--case",
+        choices=["unicode", "carriage-return", "paste-marker", "trailing-whitespace"],
+        default="unicode",
     )
     args = parser.parse_args()
     executable = shutil.which("codex")
@@ -231,7 +273,9 @@ def main() -> int:
         prompt = prompt.replace("LOO444_BEGIN\n", "LOO444_BEGIN\r\n")
     elif args.case == "paste-marker":
         prompt = prompt.replace("LOO444_END", "literal \x1b[201~ LOO444_END")
-    (root / "prompt.txt").write_text(prompt)
+    elif args.case == "trailing-whitespace":
+        prompt += " \t\r\n"
+    (root / "prompt.txt").write_bytes(prompt.encode())
     env = {
         "PATH": os.environ["PATH"],
         "HOME": str(root / "home"),
@@ -255,10 +299,18 @@ def main() -> int:
 trust_level = "trusted"
 '''
         )
-        if args.transport == "paste":
+        if args.transport in {"paste", "editor"}:
+            if args.transport == "editor":
+                env["VISUAL"] = _editor_command(root)
             command = [executable, "--no-alt-screen", "--no-daemon"]
-            status, output, checks = _run_paste(command, root, env, prompt, server)
+            status, output, checks = _run_interactive(
+                command, root, env, prompt, server, args.transport
+            )
             checks["complete_first_turn"] = _assess(server.bodies, prompt)["complete_first_turn"]
+            max_argument_bytes = max(len(arg.encode()) for arg in command)
+            if args.transport == "editor" and (root / "editor.json").exists():
+                receipt = json.loads((root / "editor.json").read_text())
+                max_argument_bytes = max(max_argument_bytes, receipt["max_argument_bytes"])
             result = {
                 "version": version,
                 "evidence": str(root),
@@ -266,7 +318,7 @@ trust_level = "trusted"
                 "case": args.case,
                 "model_requests": len(server.bodies),
                 "prompt_bytes": len(prompt.encode()),
-                "max_argument_bytes": max(len(arg.encode()) for arg in command),
+                "max_argument_bytes": max_argument_bytes,
                 "checks": checks,
             }
             (root / "terminal.output").write_bytes(output)

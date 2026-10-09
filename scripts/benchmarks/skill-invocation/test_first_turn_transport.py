@@ -1,5 +1,10 @@
+import json
+import shlex
+import subprocess
+from pathlib import Path
+
 import pytest
-from first_turn_transport import _assess, _terminal_replies
+from first_turn_transport import _assess, _editor_command, _terminal_replies
 
 
 def _request(text: str, role: str = "user") -> dict:
@@ -48,6 +53,7 @@ def test_terminal_normalization_is_not_exact_delivery():
     for original, received in [
         ("skill\r\nrequest", "skill\nrequest"),
         ("literal \x1b[201~ request", "literal  request"),
+        ("request \t\r\n", "request"),
     ]:
         assert not _assess([_request(received)], original)["complete_first_turn"]
 
@@ -63,3 +69,16 @@ def test_terminal_queries_are_answered_once_across_read_boundaries(query, reply)
         output.extend(query[split:] + query)
         assert _terminal_replies(output, start) == reply * 2
         assert _terminal_replies(output, len(output)) == b""
+
+
+def test_external_editor_copies_bytes_without_normalizing(tmp_path: Path):
+    root = tmp_path / "quoted ' editor"
+    root.mkdir()
+    prompt = "skill λ 🐙\r\nrequest \x1b[201~ \t\r\n".encode()
+    (root / "prompt.txt").write_bytes(prompt)
+    target = root / "native draft.md"
+    subprocess.run([*shlex.split(_editor_command(root)), str(target)], check=True, timeout=5)
+    assert target.read_bytes() == prompt
+    receipt = json.loads((root / "editor.json").read_text())
+    assert receipt["exact_copy"]
+    assert receipt["max_argument_bytes"] < 1024

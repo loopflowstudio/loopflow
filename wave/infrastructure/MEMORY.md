@@ -629,8 +629,9 @@ planning export or landing. Plan ownership above governs sharing.
 Copied planning/issue-derived IDs are removed. Causality precedes Linear, then
 clock/ID; losers survive. Checkpoints acknowledge retention, not convergence.
 Release's entry-point lesson requires separate fetch/import/publication outcomes.
-Scalar imports now share field receipts, retaining stable IDs, causal baselines and
-uncertain attempts. Grouped receipts, provider revision fences and legacy association remain.
+Scalar imports share field receipts, stable IDs and causal baselines, retaining uncertainty.
+Receipt retirement supplies no provider frontier: delayed older Linear acquisition
+remains unproved. Grouped receipts and legacy association remain.
 
 `repo planning key/connect/use/select/status` pins bindings and explicit selection.
 Joining is empty; key recovery preserves identity. `use` routes future roots only;

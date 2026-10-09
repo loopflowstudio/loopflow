@@ -115,6 +115,10 @@ fn observed_reopening_beats_delayed_completion_and_linear_beats_concurrent_peer(
     );
     let merged = reopened.merge(&observed).unwrap();
     assert_eq!(value(&merged, "disposition"), "Linear open");
+    let (id, winner) = merged.winners().next().unwrap();
+    assert_eq!(id, "linear-reopen");
+    assert!(winner.linear);
+    assert_eq!(winner, &merged.changes[id]);
     assert_eq!(
         merged.changes["later"].value["planning_state"],
         "Peer completed"

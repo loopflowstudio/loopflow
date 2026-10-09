@@ -141,18 +141,17 @@ impl PlanningSnapshot {
     /// alone cannot distinguish a local intention from an observed Linear fact.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
         self.heads().into_values().map(move |heads| {
-            let winner = heads
+            heads
                 .into_iter()
-                .max_by_key(|id| {
-                    let change = &self.changes[id];
-                    (change.linear, change.clock, id.clone())
+                .map(|id| {
+                    let (id, change) = self
+                        .changes
+                        .get_key_value(&id)
+                        .expect("a head belongs to the snapshot");
+                    (id.as_str(), change)
                 })
-                .expect("a field has at least one head");
-            let (id, change) = self
-                .changes
-                .get_key_value(&winner)
-                .expect("a head belongs to the snapshot");
-            (id.as_str(), change)
+                .max_by_key(|(id, change)| (change.linear, change.clock, *id))
+                .expect("a field has at least one head")
         })
     }
 

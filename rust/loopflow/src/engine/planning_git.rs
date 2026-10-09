@@ -296,10 +296,12 @@ impl PlanningGit {
     /// Publish once, without forcing or retrying a write, then inspect the remote.
     /// The caller retains its common-writer pending effect until confirmation.
     pub fn publish(&self, revision: &PlanningRevision) -> Result<PlanningPublication> {
-        let retained = self.local()?.ok_or(PlanningGitError::Invalid(
-            "no local revision for this planning destination",
-        ))?;
-        if !self.is_ancestor(revision, &retained.revision)? {
+        let retained = self
+            .read_revision(&self.local_ref)?
+            .ok_or(PlanningGitError::Invalid(
+                "no local revision for this planning destination",
+            ))?;
+        if !self.is_ancestor(revision, &retained)? {
             return Err(PlanningGitError::Invalid(
                 "revision belongs to another planning destination",
             ));

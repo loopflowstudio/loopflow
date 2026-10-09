@@ -422,7 +422,17 @@ fn reserve_incoming(
         }
         enroll(conn, repo, destination, object)?;
     }
-    require_selected_references(conn, repo, destination, &incoming.resolved())
+    for (_, change) in incoming.winners() {
+        if let Some(object) = reference(&change.field, &change.value) {
+            if unselected(conn, repo, destination, &object)? {
+                return Err(invalid(format!(
+                    "planning reference {} belongs to unselected work",
+                    object.id
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn reference(field: &str, value: &Value) -> Option<PlanningObject> {
@@ -448,27 +458,6 @@ fn unselected(
         Some(saved) => saved != destination,
         None => recorded(conn, object)?,
     })
-}
-
-fn require_selected_references(
-    conn: &Connection,
-    repo: &str,
-    destination: &str,
-    objects: &BTreeMap<PlanningObject, BTreeMap<String, Value>>,
-) -> StoreResult<()> {
-    for fields in objects.values() {
-        for (field, value) in fields {
-            if let Some(object) = reference(field, value) {
-                if unselected(conn, repo, destination, &object)? {
-                    return Err(invalid(format!(
-                        "planning reference {} belongs to unselected work",
-                        object.id
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// A common-writer move never enrolls its new parent. Hold the affected object's
@@ -759,20 +748,17 @@ fn delivery_fields(
     if columns.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let body: Option<String> = conn
-        .query_row(
-            &format!(
-                "SELECT json_object({}) FROM {} WHERE id=?1",
-                columns.join(","),
-                table(object.kind)
-            ),
-            [&object.id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    body.map(|body| serde_json::from_str(&body).map_err(Into::into))
-        .transpose()
-        .map(Option::unwrap_or_default)
+    // insert_and_project has already established the row in this transaction.
+    let body: String = conn.query_row(
+        &format!(
+            "SELECT json_object({}) FROM {} WHERE id=?1",
+            columns.join(","),
+            table(object.kind)
+        ),
+        [&object.id],
+        |row| row.get(0),
+    )?;
+    serde_json::from_str(&body).map_err(Into::into)
 }
 
 fn project_delivery_fields(

@@ -226,9 +226,8 @@ Jack Heart requested one inventory (#1512 `3e1e6245c`; record/read cuts
 Detached rows survive; duplicate PID/birth and late history grant no control.
 Tokens fence A → B → A.
 
-Claude/headless/native: `6fe75717f` / `a81397932` / `4f7d21ff7`.
-Native pre-exec retains TTY groups; wait snapshots reject late exits.
-`961677e04`: close/orphan I/O holds only the Session lock. Runtime proofs unrun;
+Source through `961677e04`: native pre-exec retains TTY groups; wait snapshots
+reject late exits. Close/orphan I/O holds only the Session lock. Runtime proofs unrun;
 admission must survive cancellation without reactor progress. Request attribution
 still uses generations; native error cleanup omits exits. Only Codex has FIFO
 handoff; reaping covers noninteractive Codex/OpenCode. Unfinished: optional launches,

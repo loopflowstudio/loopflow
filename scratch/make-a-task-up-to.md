@@ -1,6 +1,6 @@
 # One Task, up to one PR
 
-LOO-418 · integrated local planning at `314095b00` · reconciled 2026-10-08
+LOO-418 · integrated local planning; recovery at `7671f8e9f` · reconciled 2026-10-08
 
 Jack Heart authorized stacking on LOO-406 and continuing. The merge is recorded
 at `9f54c5b43`, with repairs at `07eeef61d` and focused Docker proof.
@@ -418,6 +418,13 @@ commands must use the new command contract.
 
 ### Delete — do not maintain
 
+Task acquisition now shares one local-first lookup for completion, existing
+follow-up selection and historical links. Filing and `--finish` share one
+reserve/acquire/link path; the separate `confirm_intent` helper and duplicate
+provider acquisition branches are deleted. The fixture no longer simulates the
+retired provider-first completion writer. Transactional creation, immutable retry
+input, common export and completion settlement are unchanged.
+
 Integration removed `complete_planning_task`, `task_pm::complete_task`,
 `reconcile_pm_writeback`, the completion arm of `PmTaskUpdate`, and direct
 completion writeback updates. Common local planning owns creation and status;
@@ -629,30 +636,13 @@ The inline filing sender is deleted. The simulated provider test loses creation
 and relation responses/readbacks, removes the child's date, and recovers one
 issue/relation without reopening the source or completing the child.
 
-All-target compilation exposed integration fixtures still assuming mandatory
-placement and a Working PR. They now unwrap explicitly placed fixtures, establish
-an actual published parent, and assert an unplaced Task rather than no Task row.
-The first new test also assumed a Task-owned Wave column and omitted its isolated
-Home; both fixture/query errors were repaired. An overly broad test-name filter
-selected two Git cherry-pick tests that failed on the Docker image's older Git
-option set; they remain with capable gate/CI, not silently counted as passes.
+Earlier integration/compression checks, failed attempts and their repairs are
+retained at `6b31332c9:scratch/make-a-task-up-to.md`, “Composed headless lifecycle.”
+That evidence includes Docker proof of atomic reservation recovery across rotation,
+historical export uncertainty, local reopening and live-edge preservation; native
+compilation stalled in the build-script loader. The fixture's Project alias,
+unsupported started-state write and unimported Workflow assumptions were corrected.
+The enabled unseen-write regression remains unresolved; combined gate, Swift,
+populated installation and Jack's demo remain separate.
 
-Check (2026-10-08, disposable Docker): focused follow-up export/lost-response test, research checkout, due-follow-up projection and four handoff tests pass; prior two unchanged local/composed lifecycle tests pass; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` pass. The integrated unseen-write reopening regression remains failing as recorded at `07eeef61d`; full gate, Swift and populated installation checks remain with gate.
-
-Check (2026-10-08, compression): disposable Docker `cargo test -p loopflow --test task_follow_through_tests` (3), `--lib ops::task::follow_through::tests` (3), `--lib end_request_is_atomic_and_survives_reopening_the_store` (1), and `--lib ops::pm::planning_lookup_tests` (17) pass; `cargo clippy --all-targets -- -D warnings`, native `cargo fmt --check` and `git diff --check` pass. Native compilation stalled in the build-script loader and was stopped; Docker supplies the build proof. Full gate/Swift/installation and Jack’s demo remain with their existing owners.
-
-Implementation review (2026-10-08): old filing events cannot distinguish a
-never-sent request from a lost creation reply. Conversion therefore preserves
-uncertainty in the common export receipt instead of treating absence as permission
-to send. Atomic local filing initially failed three existing tests because the
-selected Project projection can use its provider ID; admission now resolves that
-alias to the stable local Project before checking selection, and new receipts pin
-the local identity. The first reopening test exposed that common state delivery
-supports unstarted, not started: reopening now returns planning to unstarted while
-preserving Started and execution. No schema extension is needed. The enabled
-unseen-write reopening regression remains unresolved and unchanged. The held-Flow
-fixture also exposed its predecessor assumption that adding a Workflow file after
-Wave import changes the catalog. Renaming it and changing its checkout did not
-fix that; the fixture now stores the definition through `project workflow set`.
-
-Check (2026-10-08, integration recovery): Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5), `--test task_follow_through_tests` (3), `--test task_flow_launch_tests` filtered to local reopening and live-edge preservation (1 each), `--lib end_request_is_atomic_and_survives_reopening_the_store` (1), `--lib engine::flow_graph::tests` (10), and `cargo clippy --all-targets -- -D warnings` pass; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack's demo remain; the enabled concurrent-reopening regression is unchanged. Initial path-scoped `lf commit` returned exit 1 without a diagnostic; prior scratch edits were preserved before editing. The final ordinary checkpoint succeeded at `7671f8e9f`.
+Check (2026-10-08): disposable Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5, including CLI/monitor lifecycle), `cargo test -p loopflow --test task_follow_through_tests` (3), and `cargo clippy --all-targets -- -D warnings` pass after installing the container’s missing Clippy component; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack’s demo remain.

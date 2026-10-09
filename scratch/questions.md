@@ -73,10 +73,8 @@ The child exists locally in its pinned Project. Automatically exporting a truly
 uncreated historical issue remains unresolved, rather than guessing it was unsent.
 
 Context limit (2026-10-08): the complete supplied launch source at
-`.lf/tmp/context/c9f039f03d3bfbe5f04fb1f0a074d7df9019efd9cf9147592dedb7b72b16a766.md`
-was inspected; its omitted section is generated changed-path metadata. The live
-query initially reported 16,306/16,000 goal tokens, while authored scratch and
-Product memory fit. A post-edit query reported 16,313/16,000 goal tokens (313 over),
-10,470/12,000 scratch tokens, and 15,995/16,000 memory tokens. This generated
-inventory cannot be shortened by curating accepted scope; no limit or Task
-directive was changed.
+`.lf/tmp/context/c9643381cf8b6248ece3d421670cb121eaa2760d8052c3423211d8dc6dd53fd2.md`
+was inspected; omitted material is generated changed-path metadata. A post-edit query
+reported 16,302/16,000 goal tokens (302 over), not excess authored scope. Its inventory
+cannot be shortened by curating accepted decisions; no limit or Task directive was
+changed. Authored scratch and memory remain within their limits.

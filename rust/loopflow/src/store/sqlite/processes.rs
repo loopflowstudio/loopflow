@@ -442,8 +442,16 @@ impl SqliteStore {
             .chain(command.get_args())
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        tx.execute("UPDATE processes SET spawn_state='spawn_requested',command=?2 WHERE lfid=?1 AND completed_at IS NULL",
-            params![expected.agent_process_lfid,serde_json::to_string(&argv)?])?;
+        let changed = tx.execute(
+            "UPDATE processes SET spawn_state='spawn_requested',command=?2
+            WHERE lfid=?1 AND completed_at IS NULL AND spawn_state='reserved' AND pid IS NULL",
+            params![expected.agent_process_lfid, serde_json::to_string(&argv)?],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::InvalidAuthority(
+                "AgentProcess already has a launch attempt; a new launch needs a new record".into(),
+            ));
+        }
         tx.commit()?;
         Ok(())
     }
@@ -1278,6 +1286,8 @@ mod attachment_tests {
 
     #[test]
     fn attachment_close_keeps_transfer_fenced_without_blocking_store_writes() {
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();

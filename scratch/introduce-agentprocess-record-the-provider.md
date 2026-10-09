@@ -92,8 +92,8 @@ Captured Claude replacement (`6fe75717f`) advances the owner's snapshot without
 refreshing stale operations; `a81397932` shares fenced headless admission.
 `4f7d21ff7` replaces owned native post-spawn recording with pre-exec admission and
 immutable wait snapshots. `961677e04` shares owner lookup and releases SQLite during
-attachment close. These slices remain runtime-unverified; unconditional recording,
-takeover and public-entry acceptance remain open. Local main remains `3e1e6245c`
+attachment close. Focused admission, native replacement and cleanup proofs now run; unconditional
+recording, full takeover and public-entry acceptance remain open. Local main remains `3e1e6245c`
 (#1512); LOO-441 is not integrated, and no remote dependency state was inspected.
 
 `446cfb2b5` uses `processes.kind` (`lf` / `agent`). The Task's one draft
@@ -147,13 +147,16 @@ failure and advance capture settlement together. Waits retain their own attachme
 snapshot; delayed exit reporting refuses a replacement. A settled capture cannot
 spawn again. Child caller provenance uses the newly admitted snapshot. Terminal
 reconnect's remote client remains distinct from its already-running provider.
-New fixtures cover native pre-exec refusal, retained PID/birth and failed attempts,
-stale-launch rejection, PTY descriptors/process-group preservation and capture
-replacement with late-exit refusal. All are unrun, including the earlier
-Claude/admission fixtures: October 9 recovery still refuses verification below
-reserve (30.1/32 GiB).
+Native error cleanup now holds the attachment lock across signal/wait, records
+successful waits and preserves the original publication/opening error. Failed waits
+remain unknown; remote-client cleanup records no provider exit. Stale cleanup cannot
+kill either a replacement or the same AgentProcess after takeover. Admission consumes
+only an unused reservation: duplicate launch refusal happens before fork and cannot
+mark an existing provider as spawn-failed. Focused fixtures cover these boundaries
+and captured native replacement. Native PTY and Claude replacement checks are below;
+full public-reader and installed acceptance remain open.
 
-### Claude replacement snapshots (2026-10-09, source only)
+### Claude replacement snapshots (2026-10-09)
 
 Claude interrupt previously reused a cloned attachment for its next OS process.
 The capture owner now prepares each captured Claude spawn: an unused reservation
@@ -172,20 +175,26 @@ This is an implementation choice under the accepted Task, not new approval.
 
 Added fixtures cover two retained identities, native resume arguments, stale
 pipe-write/signal/connection refusal, current-capture settlement, and refusal to
-replace an uncertain spawn. They have not run: the last verification attempt
-could not meet the disk reserve.
+replace an uncertain spawn. The first runtime check exposed a fixture race: pipe acceptance preceded the
+first provider script instruction. The fixture now waits for provider-written input
+before interruption, rather than treating a successful write as provider readiness.
 Uncaptured/optional launches and other providers still need the same admission;
 this internal slice is not complete Task acceptance or permission to publish.
 
 ## Remaining implementation
 
-1. Verify captured Claude/native replacement, shared headless admission and native
-   pre-exec recording when capacity permits. Eliminate the remaining optional
-   attachment paths in every harness and library/helper launch with invocation-owned
-   admission and one row per actual spawn. Distinguish a remote terminal client
+1. Eliminate the remaining optional attachment paths in every harness and
+   library/helper launch with invocation-owned admission and one row per actual
+   spawn. Distinguish a remote terminal client
    from the provider it connects to. Keep the lock across admission/recording;
    failed spawn is non-start evidence and uncertain spawn remains unknown. Native
    foreground orphan handling must preserve TTY/process-group behavior.
+   `run_agent` already creates an implicit capture, but `claim_conversation_driver`
+   skips attachment for library callers without a recorded invocation; raw harness
+   config also permits None. `native_provider_driver` returns None for both missing
+   provenance and a genuine remote client. Admission belongs at the invocation
+   entry, not in a spawn callback inventing a parent; missing provenance alone
+   cannot establish the remote-client exception.
 2. Remove numeric provider generation from runtime caller/status fences in favor
    of AgentProcess identity. Request correlation already freezes Process, Work and
    capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
@@ -198,11 +207,9 @@ this internal slice is not complete Task acceptance or permission to publish.
    Codex/OpenCode-only, noninteractive selection without applying headless group
    control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
-   unknown attachment liveness stays unknown. Native client-publication and
-   interactive-open error branches in `lf/commands/util.rs` kill/wait their child
-   but omit AgentProcess exit recording, unlike the normal wait path. Preserve
-   the original error and record only a successful exact wait; failed waits stay
-   unknown. Resume must consult the AgentProcess
+   unknown attachment liveness stays unknown. Native publication/opening cleanup
+   now records exact successful waits and preserves the original error. Resume
+   must consult the AgentProcess
    before treating a detached attachment as replaceable. Unfinished rows with
    unknown PID remain diagnosable. Reconcile zombie and unknown-OS readings across gate/top.
 4. Replace remaining predecessor fixture assumptions and restore required
@@ -240,8 +247,8 @@ insert AgentProcesses before setting the Session foreign key, and provider name/
 interactive launch mode belong to the process snapshot rather than mutable
 next-launch Session settings. Orphan settlement cannot hold the SQLite mutex
 while its callback reads attached-process evidence. The Claude respawn ownership
-counterexample is addressed by the source-only replacement slice above; its
-runtime proof is still deferred.
+counterexample is addressed by the replacement slice above; its focused runtime
+fixture now waits for provider readiness.
 
 Earlier origin, token and pre-exec decisions remain in `a55f5345b` and its
 references. The record cut is checkpointed at `446cfb2b5`, local and unpublished.
@@ -263,16 +270,16 @@ Dispatch now uses a blocking worker; only a new harness takes the current owner
 snapshot. Compression now removes the three harness-local launch sequences,
 reuses Claude's owner lookup, and removes settlement's one-read transaction while
 keeping the Session lock. Review rejected an async spawn wrapper because dropping
-its waiter could detach a successfully admitted child. A throwaway-child fixture
-covers shared admission, stale-launch refusal and recoverable spawn failure; it
-remains unrun. Historical capacity evidence remains at `ea205e3d0`, this plan.
+its waiter could detach a successfully admitted child. The throwaway-child fixture
+now passes shared admission, stale-launch refusal and recoverable spawn failure.
+Historical capacity evidence remains at `ea205e3d0`, this plan.
 
 October 9 reconciliation corrected the architecture diagram's obsolete direct
 Session-to-driver generation fence: the AgentProcess owns attachment/token, and
 the accepted LfProcess/LfSession names remain an unintegrated dependency. Local
 `main` and `origin/main` still name `3e1e6245c`; no remote freshness is claimed.
 Request correlation exists already; its AgentProcess identity conversion does not.
-Native failure-cleanup settlement is retained explicitly in remaining work.
+Native failure-cleanup settlement is implemented in the current slice.
 
 Earlier reconciliation corrected dispatch's stale lock documentation: native
 writes retain a per-Session OS lock, not SQLite's mutex/transaction. The store
@@ -289,9 +296,19 @@ Compression also removes SQLite's mutex/transaction from provider close in
 `finish_session_attachment`: the existing Session lock excludes takeover, then
 terminal writes commit together after close. Failure retains the attachment and
 history; nested reads and unrelated saves no longer block behind provider I/O.
-The new focused fixture checks those boundaries and lock release but remains
-unrun. This follows the orphan-settlement boundary rather than adding an owner.
+The focused close fixture checks those boundaries and lock release. This follows
+the orphan-settlement boundary rather than adding an owner.
 A proposed eager typed-row conversion was discarded: parsing historical parent
 IDs before checking for an attachment token would change unclaimed-row reads.
 
-Check: `git diff --check` passes (documentation-only reconciliation); prior fmt pass and 30.1/32 GiB reserve refusal remain at `961677e04`; build, Clippy and replacement/admission/native/close fixtures remain gate/CI-owned, not rerun here.
+Review found a repeated-launch counterexample and two fixture defects. Reusing an attachment for
+another spawn could overwrite its command and mark its existing process as failed
+when pre-exec PID recording refused; admission now consumes the reserved state once.
+The captured Claude fixture interrupted immediately after pipe acceptance, before its
+script necessarily wrote launch evidence; provider-written input now establishes
+readiness. The attachment-close fixture now scrubs inherited capture authority
+before local rename checks. Native launch setup fixtures exercise both publication and opening errors
+through `session_command_status_with_env`, not only the cleanup helper. This proves
+neither the public top/Task-status/scheduled agreement nor installed settlement.
+
+Check: `cargo fmt --all -- --check`, `cargo clippy -p loopflow --all-targets -- -D warnings` and 13 focused lib tests pass (AgentProcess; native setup/capture/pre-exec; Claude replacement; attachment close/respawn). Full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.

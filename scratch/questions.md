@@ -22,9 +22,10 @@ new execution owner.
 capture, with an exact expected snapshot. A reserved record is usable; only
 observed exit/spawn failure permits a fresh identity. Capture settlement and the
 next spawn advance together; pending dispatch/history never consult the mutable
-owner. Current source implements this for captured Claude; tests are unrun.
+owner. Current source implements this for captured Claude; the focused fixture waits for
+provider-written input before interrupting, not merely successful pipe dispatch.
 Captured native launch now follows the same replacement rule, retaining an exact
 wait snapshot and pre-exec recording without headless process-group setup. Native
 foreground orphan cleanup, other providers and optional launches remain open.
 The native PTY fixture covers inherited descriptors/group, not configured terminal
-interaction; all new runtime proofs remain unrun.
+interaction. Focused runtime results are recorded in the plan.

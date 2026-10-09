@@ -739,14 +739,19 @@ fn session_command_status_with_env(
     let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {
         Ok(client) => client,
         Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Err(cleanup) =
+                crate::harness::agent_process::stop_native(&mut child, owned.as_ref())
+            {
+                tracing::warn!(%cleanup, "native client publication cleanup remains unresolved");
+            }
             return Err(error);
         }
     };
     if let Err(error) = record_interactive_opened(environment) {
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Err(cleanup) = crate::harness::agent_process::stop_native(&mut child, owned.as_ref())
+        {
+            tracing::warn!(%cleanup, "native opening cleanup remains unresolved");
+        }
         return Err(error);
     }
     // Completion and another Open can proceed once exact client ownership is visible.
@@ -1818,6 +1823,90 @@ mod tests {
                 .map(|session| session.provider_session_id),
             Some("ses_native".to_string())
         );
+    }
+
+    #[test]
+    fn native_launch_setup_errors_retain_the_error_and_observed_process_exit() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            for opening_error in [false, true] {
+                let capture = crate::session_record::CaptureHandle::begin_at(
+                    home,
+                    crate::session_record::SessionCaptureSpec {
+                        harness: "fixture".into(),
+                        model: None,
+                        surface: "tui".into(),
+                        cwd: home.into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: Vec::new(),
+                        flow: crate::session_record::SessionFlowMembership::Independent,
+                        work: None,
+                    },
+                )?;
+                capture.claim_conversation_driver()?;
+                let (session, attachment) = capture.session_attachment().unwrap();
+                let store = SqliteStore::new(&home.join("loopflow.db"))?;
+                if opening_error {
+                    let process = crate::journal::current_process_lfid().unwrap();
+                    store.retain_session_observation(
+                        &store.session(&session)?.unwrap(),
+                        &crate::session::SessionObservation {
+                            artifact_key: crate::session_record::parse_artifact_key(
+                                &capture.artifact_key(),
+                            )?,
+                            source: format!("interactive_opened:{process}:{session}"),
+                            observed_at: 1,
+                            task_id: None,
+                            wave_id: None,
+                            payload: serde_json::json!({"type": "fixture conflict"}),
+                        },
+                    )?;
+                } else {
+                    std::fs::write(capture.artifact_dir().join("provider-clients"), "occupied")?;
+                }
+                let command = SessionCommand {
+                    program: "/bin/sleep".into(),
+                    args: vec!["60".into()],
+                    cwd: home.into(),
+                };
+                let error = session_command_status_with_env(
+                    &command,
+                    &capture.environment(),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap_err();
+                if opening_error {
+                    assert!(
+                        error.to_string().contains("conflicting interactive_opened"),
+                        "{error:#}"
+                    );
+                } else {
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("cannot record active provider client"),
+                        "{error:#}"
+                    );
+                }
+                let ended = store.process(&attachment.agent_process_lfid)?.unwrap();
+                assert!(ended.completed_at.is_some());
+                assert_eq!(
+                    crate::journal::process_identity_evidence(
+                        ended.pid.unwrap(),
+                        ended.os_started_at.unwrap()
+                    ),
+                    crate::journal::ProcessIdentityEvidence::Dead,
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

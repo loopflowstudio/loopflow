@@ -226,13 +226,15 @@ Jack Heart requested one inventory (#1512 `3e1e6245c`; record/read cuts
 Detached rows survive; duplicate PID/birth and late history grant no control.
 Tokens fence A → B → A.
 
-Source through `961677e04`: native pre-exec retains TTY groups; wait snapshots
-reject late exits. Close/orphan I/O holds only the Session lock. Runtime proofs unrun;
-admission must survive cancellation without reactor progress. Request attribution
-still uses generations; native error cleanup omits exits. Only Codex has FIFO
-handoff; reaping covers noninteractive Codex/OpenCode. Unfinished: optional launches,
-foreground cleanup, generations, death orders, public-entry agreement, two-second
-removal and installed settlement. Earlier proofs: `a55f5345b`.
+Native TTY groups and immutable wait snapshots survive. Close/orphan I/O holds
+only the Session lock. Admission must survive cancellation without reactor progress. Error cleanup records exact successful waits;
+failed waits stay unknown, stale cleanup refuses takeover, and clients cannot
+settle providers. Admission consumes a reservation once: duplicate launches must
+not mark a running record as spawn-failed.
+Only Codex has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
+Unfinished: optional launches, generations, foreground cleanup, death orders,
+public-entry agreement, two-second removal and installed settlement.
+Earlier proofs: `961677e04`, `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

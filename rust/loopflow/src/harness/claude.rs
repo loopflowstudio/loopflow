@@ -726,6 +726,20 @@ mod tests {
     fn interrupted_capture_resumes_with_a_new_process_and_fences_old_snapshots() {
         use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionFlowMembership};
 
+        async fn observed_input(home: &std::path::Path, text: &str) -> String {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let inputs = std::fs::read_to_string(home.join("inputs")).unwrap_or_default();
+                    if inputs.contains(text) {
+                        break inputs;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap()
+        }
+
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _env = crate::test_ambient::EnvGuard::clear(&["PATH", "LF_BIN"]);
@@ -768,6 +782,9 @@ mod tests {
                 });
                 harness.set_capture(Some(capture.clone().into()));
                 harness.send_input("first request").await.unwrap();
+                // Pipe acceptance precedes provider execution. Interrupt only
+                // after this throwaway provider consumed its first request.
+                observed_input(home, "first request").await;
                 let first_pid = harness.process_id().unwrap();
                 // The native conversation survives the OS process's interruption.
                 harness.set_provider_session_id(Some("native-conversation".into()));
@@ -808,19 +825,9 @@ mod tests {
                     .is_none());
                 harness.config.as_mut().unwrap().session_attachment =
                     Some((session.clone(), second.clone()));
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    loop {
-                        let inputs =
-                            std::fs::read_to_string(home.join("inputs")).unwrap_or_default();
-                        if inputs.contains("resumed request") {
-                            assert!(!inputs.contains("stale request"));
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(10)).await;
-                    }
-                })
-                .await
-                .unwrap();
+                assert!(!observed_input(home, "resumed request")
+                    .await
+                    .contains("stale request"));
                 let launches = std::fs::read_to_string(home.join("launches")).unwrap();
                 assert_eq!(launches.lines().count(), 2);
                 assert!(launches

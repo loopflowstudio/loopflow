@@ -105,6 +105,36 @@ pub(crate) fn spawn_native(
         .map_err(Into::into)
 }
 
+/// Failed terminal setup still owns an admitted child. Serialize its cleanup
+/// with takeover and record only an exact successful wait. A remote client has
+/// no provider attachment; ending it must not settle the surviving provider.
+pub(crate) fn stop_native(
+    child: &mut std::process::Child,
+    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+) -> Result<()> {
+    let mut stop = || {
+        let mut wait = || -> std::io::Result<()> {
+            if child.try_wait()?.is_none() {
+                child.kill()?;
+                child.wait()?;
+            }
+            Ok(())
+        };
+        wait().map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        if let Some((store, session, attachment)) = owner {
+            store.record_native_provider_exit(session, attachment, true)?;
+        }
+        Ok(())
+    };
+    match owner {
+        Some((store, session, attachment)) => {
+            store.with_session_attachment(session, attachment, stop)
+        }
+        None => stop(),
+    }
+    .map_err(Into::into)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentProcessReapReport {
     pub orphaned: Vec<u32>,
@@ -317,6 +347,112 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+
+    #[test]
+    fn native_cleanup_records_wait_without_touching_a_replacement_or_remote_provider() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
+        let parent = ProcessLfid::new();
+        let first = store
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let command = || {
+            let mut command = Command::new("/bin/sleep");
+            command.env_clear().arg("60");
+            command
+        };
+        let mut child = super::spawn_native(command(), Some(&first_owner)).unwrap();
+        let pid = child.id();
+        super::stop_native(&mut child, Some(&first_owner)).unwrap();
+        let exited = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(exited.pid, Some(pid));
+        assert!(exited.os_started_at.is_some());
+        assert!(exited.completed_at.is_some());
+
+        let next = store
+            .prepare_session_agent_process(&session.id, &first)
+            .unwrap();
+        let next_owner = (store.clone(), session.id.clone(), next.clone());
+        let mut provider = super::spawn_native(command(), Some(&next_owner)).unwrap();
+        let recorded = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        // Reusing the current attachment is not permission for a second spawn.
+        // Reject before fork, without recording failure on the running process.
+        let duplicate = super::spawn_native(command(), Some(&next_owner));
+        assert!(duplicate.is_err());
+        assert_eq!(
+            store.process(&next.agent_process_lfid).unwrap(),
+            Some(recorded)
+        );
+        // A delayed cleanup has no authority over a replacement, even if it
+        // accidentally receives the replacement's child handle.
+        assert!(super::stop_native(&mut provider, Some(&first_owner)).is_err());
+        let provider_alive = provider.try_wait().unwrap().is_none();
+        let mut client = command().spawn().unwrap();
+        super::stop_native(&mut client, None).unwrap();
+        let remote_unchanged = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        let remote_alive = provider.try_wait().unwrap().is_none();
+        super::stop_native(&mut provider, Some(&next_owner)).unwrap();
+        assert!(provider_alive && remote_alive);
+        assert!(remote_unchanged.completed_at.is_none());
+        assert_eq!(
+            store.process(&first.agent_process_lfid).unwrap(),
+            Some(exited)
+        );
+    }
+
+    #[test]
+    fn native_cleanup_cannot_kill_the_same_agent_after_takeover() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
+        let first = store
+            .claim_session_attachment(&session.id, None, &ProcessLfid::new(), true)
+            .unwrap();
+        let first_owner = (store.clone(), session.id.clone(), first.clone());
+        let mut command = Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        let mut child = super::spawn_native(command, Some(&first_owner)).unwrap();
+        let next = store
+            .claim_session_attachment(&session.id, Some(&first), &ProcessLfid::new(), false)
+            .unwrap();
+        let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
+        let alive = child.try_wait().unwrap().is_none();
+        let unchanged = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        super::stop_native(&mut child, Some(&(store.clone(), session.id, next.clone()))).unwrap();
+        assert_eq!(first.agent_process_lfid, next.agent_process_lfid);
+        assert!(refused && alive);
+        assert!(unchanged.completed_at.is_none());
+    }
+
+    #[test]
+    fn native_cleanup_failed_wait_retains_unknown_exit() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &ProcessLfid::new(), true)
+            .unwrap();
+        let owner = (store.clone(), session.id.clone(), attachment.clone());
+        let mut command = Command::new("/bin/sh");
+        command.env_clear().args(["-c", "exit 42"]);
+        let mut child = super::spawn_native(command, Some(&owner)).unwrap();
+        // Reap only this throwaway child outside its handle, forcing ECHILD.
+        // SAFETY: waitpid observes the exact fixture child; it signals nothing.
+        assert_eq!(
+            unsafe { libc::waitpid(child.id() as i32, std::ptr::null_mut(), 0) },
+            child.id() as i32
+        );
+        assert!(super::stop_native(&mut child, Some(&owner)).is_err());
+        let retained = store
+            .process(&attachment.agent_process_lfid)
+            .unwrap()
+            .unwrap();
+        assert_eq!(retained.pid, Some(child.id()));
+        assert!(retained.completed_at.is_none());
+        assert!(retained.outcome.is_none());
+    }
 
     #[tokio::test]
     async fn headless_spawn_retains_attempts_and_refuses_stale_attachments() {

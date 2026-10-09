@@ -209,21 +209,26 @@ fn release_acceptance_recovers_from_a_revoked_selected_account() {
     let home = TempDir::new().expect("lf home");
     let codex = support::codex_socket_script(
         r#"#!/bin/sh
+thread="thread-${CODEX_HOME##*/}"
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+case "$thread_start" in
+  *'"method":"thread/start"'*) ;;
+  *) echo "failover attempted to resume the old account" >&2; exit 10;;
+esac
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
 echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"inProgress"}}}'
 case "$CODEX_HOME" in
   */revoked)
-    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thread-test","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"failed"}}}';;
+    echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"turn-test","error":{"message":"Your authentication token has been invalidated (token_invalidated). Please sign in again."},"willRetry":false}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"failed"}}}';;
   */fallback)
-    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
-    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}';;
+    echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"turn-test","itemId":"message-test","delta":"fallback account completed"}}'
+    echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"turn-test","status":"completed"}}}';;
   *) echo "unexpected CODEX_HOME" >&2; exit 9;;
 esac
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
@@ -319,6 +324,64 @@ while read -r line; do :; done
         revoked.cooldown_reason.as_deref(),
         Some("token_invalidated")
     );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let agents = db.prepare(
+        "SELECT lfid,agent_session_id,parent_process_lfid,completed_at,spawn_state FROM processes WHERE kind='agent' ORDER BY provider_generation"
+    ).unwrap().query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+        row.get::<_, Option<i64>>(3)?, row.get::<_, String>(4)?,
+    ))).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+    assert_eq!(agents.len(), 2);
+    assert_ne!(agents[0].0, agents[1].0);
+    assert_eq!(agents[0].1, agents[1].1);
+    assert_eq!(agents[0].2, agents[1].2);
+    assert!(agents
+        .iter()
+        .all(|agent| agent.3.is_some() && agent.4 == "exited"));
+    let thread: String = db
+        .query_row(
+            "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+            [&agents[0].1],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(thread, "thread-fallback");
+    let observations = db
+        .prepare("SELECT payload FROM session_events WHERE session_id=?1 ORDER BY seq")
+        .unwrap()
+        .query_map([&agents[0].1], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+        .join("\n");
+    for retained in [
+        "thread-revoked",
+        "thread-fallback",
+        "revoked",
+        "fallback",
+        &agents[0].0,
+        &agents[1].0,
+    ] {
+        assert!(
+            observations.contains(retained),
+            "missing retained history: {retained}"
+        );
+    }
+    for (thread, account) in [
+        ("thread-revoked", "revoked"),
+        ("thread-fallback", "fallback"),
+    ] {
+        let retained: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
+             AND json_extract(payload,'$.evidence.provider_session_id')=?2
+             AND json_extract(payload,'$.evidence.account_id')=?3)",
+                rusqlite::params![agents[0].1, thread, account],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(retained, "native history lost account {account}");
+    }
 }
 
 #[test]

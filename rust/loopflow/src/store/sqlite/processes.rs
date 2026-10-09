@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 
 use crate::id::{AttachmentToken, ProcessLfid};
 use crate::process::{
-    AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessPage,
-    LfProcessWorkFilter, SessionAttachment,
+    AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter,
+    LfProcessPage, LfProcessWorkFilter, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -706,6 +706,65 @@ impl SqliteStore {
         Ok(attachment)
     }
 
+    /// Invocation-owned retry: settle before reserving, retain native history,
+    /// and select the next thread atomically with the new process identity.
+    pub(crate) fn replace_session_agent_process(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        resume_thread: Option<&str>,
+        close: impl FnOnce() -> StoreResult<bool>,
+    ) -> StoreResult<SessionAttachment> {
+        let _dispatch = self.lock_session_attachment(session)?;
+        let ended = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            require_attachment_in(&conn, session, expected)?;
+            conn.query_row(
+                "SELECT completed_at IS NOT NULL FROM processes WHERE lfid=?1",
+                [&expected.agent_process_lfid],
+                |row| row.get::<_, bool>(0),
+            )?
+        };
+        if !ended && !close()? {
+            return Err(StoreError::InvalidAuthority(
+                "Previous AgentProcess has no observed exit".into(),
+            ));
+        }
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        tx.execute(
+            "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
+                spawn_state=CASE WHEN completed_at IS NULL THEN 'exited' ELSE spawn_state END
+             WHERE lfid=?1",
+            params![expected.agent_process_lfid, now],
+        )?;
+        let next = attach_in(
+            &tx,
+            session,
+            Some(expected),
+            expected.process_lfid.as_ref().expect("attachment is owned"),
+            true,
+        )?;
+        // The former thread and all account/native observations remain history.
+        // Never clear a saved thread merely because a new harness omitted it.
+        tx.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,process_lfid,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,?3,?4,json_object('type','agent_process_replaced',
+                'agent_process_lfid',?5,'next_agent_process_lfid',?6,
+                'provider_thread',provider_thread,'next_provider_thread',?7),current_capture
+             FROM agent_sessions WHERE id=?1",
+            params![session, format!("agent-process:{}:replacement", expected.agent_process_lfid),
+                expected.process_lfid, now, expected.agent_process_lfid, next.agent_process_lfid, resume_thread],
+        )?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+            params![session, resume_thread],
+        )?;
+        tx.commit()?;
+        Ok(next)
+    }
+
     pub fn release_session_attachment(
         &self,
         session: &str,
@@ -1368,6 +1427,75 @@ mod attachment_tests {
             "Saved during close"
         );
         fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+    }
+
+    #[test]
+    fn invocation_retry_retains_history_and_refuses_failed_close_or_stale_authority() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", "run_00000000000000000000000000000001");
+        let parent = insert_process(&store, 1, 1);
+        let first = store
+            .claim_session_attachment("conversation", None, &parent, true)
+            .unwrap();
+        store
+            .record_session_provider_launch(
+                "conversation",
+                &first,
+                &std::process::Command::new("fixture"),
+            )
+            .unwrap();
+        store
+            .record_session_connection("conversation", &first, "/fixture.sock", "original-thread")
+            .unwrap();
+        let original = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        for closed in [
+            Ok(false),
+            Err(StoreError::InvalidAuthority("close failed".into())),
+        ] {
+            assert!(store
+                .replace_session_agent_process("conversation", &first, None, || closed)
+                .is_err());
+            assert_eq!(
+                store.process(&first.agent_process_lfid).unwrap(),
+                Some(original.clone())
+            );
+            assert_eq!(
+                store.session_thread("conversation").unwrap().as_deref(),
+                Some("original-thread")
+            );
+            assert_eq!(
+                store.session_attachment("conversation").unwrap(),
+                Some(first.clone())
+            );
+        }
+        let next = store
+            .replace_session_agent_process("conversation", &first, None, || Ok(true))
+            .unwrap();
+        assert_ne!(first.agent_process_lfid, next.agent_process_lfid);
+        assert_eq!(first.process_lfid, next.process_lfid);
+        assert!(store
+            .process(&first.agent_process_lfid)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
+        assert_eq!(store.session_thread("conversation").unwrap(), None);
+        assert!(store
+            .replace_session_agent_process("conversation", &first, None, || panic!(
+                "stale retry must never close the replacement"
+            ))
+            .is_err());
+        let conn = store.conn.lock().unwrap();
+        let retained: String = conn
+            .query_row(
+                "SELECT json_extract(payload,'$.provider_thread') FROM session_events
+             WHERE json_extract(payload,'$.type')='agent_process_replaced'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, "original-thread");
     }
 
     #[test]

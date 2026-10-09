@@ -222,20 +222,20 @@ unpublished code retained, without deletion or delivery authorization.
 ## AgentProcess (LOO-443, 2026-10-09)
 
 Jack Heart requested one inventory; #1512/#1516 are integrated. Tokens fence
-A → B → A; duplicate PID/birth grants no control. Other preservation constraints
-and proofs: `48aaf72a1`, this heading.
+A → B → A; duplicate PID/birth grants no control. Proofs:
+`48aaf72a1`, this heading.
 
 Native admission requires attachment; remote clients never settle providers.
-Library failover fails against retained Codex threads. Replacement needs exact
-settlement and preserved history, not weaker thread checks. Raw headless admission
-remains optional.
+Invocation retry settles the exact old AgentProcess before reserving another,
+retaining account/native history. Failover selects a fresh thread; same-account
+retry retains it. Failed close/stale authority refuses replacement; generic stop
+preserves takeover. Raw headless admission remains optional.
 
-One OS parser does not establish reader agreement: top omits unknown agents and
+Readers disagree: top omits unknown agents and
 receipt-less lf rows; sampling failure aborts it. The gate retains unknown
-blockers. Keep them visible by LFID without control; zombies are dead. Release's
-entry-point lesson applies. Codex alone has FIFO handoff; live reaping covers
-noninteractive Codex/OpenCode. Generations, foreground cleanup, death orders,
-public agreement, two-second removal and installed settlement remain open.
+blockers. Show LFIDs without control; zombies are dead. Codex alone has FIFO handoff; live reaping covers noninteractive
+Codex/OpenCode. Generations, foreground cleanup, death orders, public agreement,
+two-second removal and installed settlement remain open.
 
 ## Execution ownership names (LOO-441, 2026-10-09)
 

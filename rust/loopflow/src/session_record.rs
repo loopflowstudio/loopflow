@@ -2468,13 +2468,40 @@ impl CaptureHandle {
         });
     }
 
-    pub(crate) fn fail_and_begin_attempt(
+    pub(crate) fn retry_agent_process(
         &self,
         provider: String,
         model: Option<String>,
         account_id: Option<crate::store::ProviderAccountId>,
-    ) {
-        self.with_capture(|capture| capture.fail_and_begin_attempt(provider, model, account_id));
+        resume_thread: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let mut capture = self.0.lock().expect("Session capture mutex poisoned");
+        if capture.settled_outcome.is_some() {
+            anyhow::bail!("Capture already settled");
+        }
+        let (session, expected) = capture.driver.as_ref().ok_or_else(|| {
+            StoreError::InvalidAuthority("AgentProcess retry has no attachment".into())
+        })?;
+        let store = row_store(&capture.dir)?;
+        let saved_thread = store
+            .session_thread(session)?
+            .or_else(|| capture.provider_session_id.clone());
+        let account_changed = capture.account_observed && capture.account_id != account_id;
+        if (account_changed && resume_thread.is_some())
+            || (!account_changed && saved_thread.as_deref() != resume_thread)
+        {
+            anyhow::bail!(
+                "AgentProcess retry must retain its thread unless the selected account changes"
+            );
+        }
+        let next = store.replace_session_agent_process(session, expected, resume_thread, || {
+            runtime::close_session_agent_process(&store, session)
+        })?;
+        capture.driver = Some((session.clone(), next));
+        if let Err(error) = capture.fail_and_begin_attempt(provider, model, account_id) {
+            capture.warn_telemetry(error);
+        }
+        Ok(())
     }
 
     pub(crate) fn observe_provider(
@@ -3521,7 +3548,12 @@ mod tests {
         let capture =
             CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context).unwrap();
         capture.mark_spawn_requested();
-        capture.fail_and_begin_attempt("claude".to_string(), None, None);
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt("claude".to_string(), None, None)
+            .unwrap();
         capture.finish("completed").unwrap();
 
         // Fixed recorded times distinguish preparation, first attempt and retry
@@ -4507,7 +4539,12 @@ mod tests {
             read_provider_session(&dir).unwrap().unwrap().account_id,
             Some(first)
         );
-        capture.fail_and_begin_attempt("proof".into(), None, Some(second.clone()));
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
+            .unwrap();
         capture.observe_provider(Some("second-session".into()), Some(second.clone()));
         capture.0.lock().unwrap().recorder.drain_after_settlement();
         assert!(!dir.join("provider-session.json").exists());
@@ -4518,7 +4555,12 @@ mod tests {
         let recovered = read_provider_session(&dir).unwrap().unwrap();
         assert_eq!(recovered.provider_session_id, "second-session");
         assert_eq!(recovered.account_id, Some(second));
-        capture.fail_and_begin_attempt("proof".into(), None, None);
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt("proof".into(), None, None)
+            .unwrap();
         capture.observe_provider(Some("ambient-session".into()), None);
         capture.finish("completed").unwrap();
 
@@ -4674,11 +4716,16 @@ mod tests {
             output_tokens: Some(4),
             cache_read_tokens: None,
         });
-        capture.fail_and_begin_attempt(
-            "proof-fallback".to_string(),
-            None,
-            Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
-        );
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt(
+                "proof-fallback".to_string(),
+                None,
+                Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
+            )
+            .unwrap();
         capture.record_stream_event(&StreamEvent::Usage {
             input_tokens: Some(12),
             output_tokens: Some(5),
@@ -4715,7 +4762,12 @@ mod tests {
         };
 
         capture.mark_spawn_requested();
-        capture.fail_and_begin_attempt("fallback".to_string(), Some("next".to_string()), None);
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt("fallback".to_string(), Some("next".to_string()), None)
+            .unwrap_err();
 
         let state = capture.0.lock().unwrap();
         assert_eq!(state.attempt, 2);
@@ -4784,7 +4836,12 @@ mod tests {
             output_tokens: Some(4),
             cache_read_tokens: None,
         });
-        capture.fail_and_begin_attempt("fallback".to_string(), None, None);
+        capture
+            .0
+            .lock()
+            .unwrap()
+            .fail_and_begin_attempt("fallback".to_string(), None, None)
+            .unwrap();
         capture.record_stream_event(&StreamEvent::Usage {
             input_tokens: Some(12),
             output_tokens: Some(3),

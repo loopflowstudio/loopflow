@@ -1348,6 +1348,7 @@ fn _run_with_transient_retries(
             AgentFailure::AccountSubscriptionLimit { .. } => {
                 account_failure = Some(result.clone());
                 attempt_config.provider_account_id = None;
+                attempt_config.resume_token = None;
                 attempt_config.task_prompt = format!(
                     "{LIMIT_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1357,6 +1358,7 @@ fn _run_with_transient_retries(
             AgentFailure::AccountCredentialInvalidated => {
                 account_failure = Some(result.clone());
                 attempt_config.provider_account_id = None;
+                attempt_config.resume_token = None;
                 attempt_config.task_prompt = format!(
                     "{CREDENTIAL_FAILOVER_PROMPT}\n\nOriginal task:\n\n{}",
                     launch.task_prompt
@@ -1664,13 +1666,16 @@ fn _run_harness_once(
     };
     if retry {
         if let Some(capture) = capture {
-            capture.fail_and_begin_attempt(
-                provider.clone(),
-                model,
-                account_route
-                    .as_ref()
-                    .map(|route| route.account_id().clone()),
-            );
+            capture
+                .retry_agent_process(
+                    provider.clone(),
+                    model,
+                    account_route
+                        .as_ref()
+                        .map(|route| route.account_id().clone()),
+                    launch.resume_token.as_deref(),
+                )
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
 
@@ -1826,7 +1831,8 @@ fn _run_harness_once(
             },
             None => drive.await,
         };
-        let _ = harness.stop().await;
+        harness.stop().await
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result.map(|result| AgentAttempt::Finished {
             result,
             can_failover,
@@ -1992,13 +1998,16 @@ fn _run_agent_once(
     let capture = process.capture.as_ref().map(|capture| &capture.0);
     if retry {
         if let Some(capture) = capture {
-            capture.fail_and_begin_attempt(
-                harness.clone(),
-                model.clone(),
-                account_route
-                    .as_ref()
-                    .map(|route| route.account_id().clone()),
-            );
+            capture
+                .retry_agent_process(
+                    harness.clone(),
+                    model.clone(),
+                    account_route
+                        .as_ref()
+                        .map(|route| route.account_id().clone()),
+                    launch.resume_token.as_deref(),
+                )
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         }
     }
     apply_harness_env(&harness, &mut cmd, launch, process);
@@ -3238,6 +3247,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: Some("claude:opus".to_string()),
             task_prompt: "compress the branch".to_string(),
+            resume_token: Some("session-123".into()),
             ..Default::default()
         };
         let process = auto_process();

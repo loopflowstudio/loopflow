@@ -26,8 +26,13 @@ pub(crate) fn close_agent_process(
     started: i64,
 ) -> Result<()> {
     let same_process = || -> Result<bool> {
-        Ok(crate::journal::process_started_at(pid)?
-            .is_some_and(|actual| (actual - started).abs() <= 3))
+        match crate::journal::process_identity_evidence(pid, started) {
+            crate::journal::ProcessIdentityEvidence::Live => Ok(true),
+            crate::journal::ProcessIdentityEvidence::Dead => Ok(false),
+            crate::journal::ProcessIdentityEvidence::Unknown => {
+                Err(anyhow!("AgentProcess OS identity is unavailable"))
+            }
+        }
     };
     if !same_process()? {
         return Ok(());

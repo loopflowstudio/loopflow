@@ -124,25 +124,15 @@ The prior cut-by-cut inventory and evidence remain at
 `b0f2a00702ccdbe1b11c22fa55f472cc649bf8d1:scratch/work-on-another-machine-name.md`,
 this heading. Keep these replacements deleted:
 
-- Copied `TaskSource.planning`, issue-derived `TaskId::from_issue`, UUID-v5,
-  host callbacks and exclusive adoption fixtures. SSH carries saved identity and
-  pushed-code requirements; common planning supplies the target. The cold-worker
-  fixture uses dispatch publication/acquisition, never manual import.
-- Repository-wide export, alias-addressed transport and selection coupled to moves.
-  One destination-scoped hold calculation excludes whole private histories and
-  dependents without vetoing independent exchange. Returning to a shared parent
-  cannot release private historical references; only explicit selection can.
-- Value-only and copied causal-head indexes, full-journal scans per object and
-  repeated provider-frontier selection on projection retries. The borrowed object
-  view carries winning mutations and eligible provider observations, prepared once
-  for unheld objects. Original history stays in the immutable snapshot; latest
-  revision groups retain contradictions and acquisition ages.
-- Raw Project Markdown mutations, duplicate workflow representation, a SQL
-  content parser and the `project_content::capture_content` forwarding wrapper.
-  `project_content.rs` owns parsing/persistence; `planning_peers::capture_project_content`
-  reads that canonical content and only its three field heads. Import returns before
-  reading it, suppressing echo without a redundant Markdown round trip. Migration
-  and common writers call the same capture owner; list receipt granularity stays.
+- Earlier transport/selection/content deletions remain at
+  `b4a91632e:scratch/work-on-another-machine-name.md`, this heading: copied
+  planning, issue-derived IDs, host callbacks, repository-global export,
+  alias-addressed routing, move-coupled selection and duplicate content parsers.
+  Preserve saved identity, pushed-code checks, private-history holds, causal
+  journals and the common semantic-content writer.
+- Evidence-only mapping validation and the duplicate-mapping fixture's raw SQL
+  unmapping shortcut. One import check owns scalar/evidence mapping preservation;
+  retain both IDs, mutation history, effects and independent projection.
 - Peer-only scalar/state/comment receipt writers, reconstructed comment provenance,
   identical-body acquisition bypasses and replay of superseded provider revisions.
   Common acquisition owns validation; savepoints isolate valid contradictions and
@@ -228,8 +218,8 @@ and has focused headless proof; per-Work membership, authorship/assignees and
 losing-edit recovery do not. Legacy identity association and composed public
 Git/Linear acquisition remain implementation/acceptance work. The temporary
 mixed-provider refusal in `ops/planning_peer.rs` stays enabled; retained storage
-receipts are not an end-to-end result. No additional product decision is needed
-for those remaining cuts under Jack Heart's recorded direction.
+receipts are not an end-to-end result. Jack Heart's direction remains; legacy
+association needs the preservation revision recorded in item 3 below.
 
 Deletion composition and its counterexamples remain at
 `506efbbfe:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -471,7 +461,21 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    No automatic turn/Flow retry exists.
 
 3. Resolve divergent legacy IDs through explicit provider associations without
-   renumbering stored Work. Conflict isolation is implemented with new regressions
+   renumbering stored Work. **October 9 counterexample:** clearing the legacy
+   mapping is not association. `planning_exports` then treats that retained Task
+   or Project as a new provider creation; the old issue identifier also remains
+   in selector lookup. Pending effects still belong to the legacy ID. The old
+   duplicate-mapping test's raw SQL shortcut established projection only, not
+   safe recovery, and is removed. An explicit association must preserve both IDs,
+   local execution lookup, common effect ownership, uncertain receipts and private
+   selection. Neither transferring a mapping nor merging execution is an accepted
+   implementation. The association representation needs revision before dependent
+   implementation; no association command or completed recovery is claimed.
+   Scalar peer imports also bypassed the mapping check used by independent
+   provider evidence. That check now precedes either acquisition or projection,
+   retaining contradictory mutations and independent progress. This is a
+   preservation repair, not association implementation.
+   Conflict isolation is implemented with regressions
    for duplicate mappings, dependent comments, retained Sessions, selection and
    idempotent retry; the focused storage suite passes. CLI `planning status`
    and Desktop now read projection conflicts through the same status reader.
@@ -617,7 +621,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (realign, prose only): `git diff --check` passes; focused Rust/order and headless Desktop passes remain at `5b8eda933`, **Acceptance for review**; combined foreground/native-resume, partial-list and mixed-provider checks remain with gate.
+Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; network-isolated binary passes 3 mapping/creation regressions (replacement failed before repair). Gate owns combined foreground/native-resume, partial-list and Git/Linear acceptance; association recovery is still unimplemented.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

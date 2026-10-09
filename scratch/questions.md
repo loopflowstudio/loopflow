@@ -63,25 +63,11 @@ remain separate. No new product decision is selected.
   grouped Linear receipts now exist; legacy association and mixed-provider
   activation remain unfinished. Local-only exchange uses the foreground lifetime.
 
-- October 8 provenance implementation: replace the origin-only boolean with the
-  accepted provider body, identity/revision and original acquisition time in the
-  same mutation journal. Reuse existing provider acquisition tables/checks on import;
-  do not add another frontier store. One field map governs capture and validation.
-  Only values matching the actual provider fact gain Linear priority; preserved
-  local intentions retain local origin. Equal-value acquisitions capture missing
-  provider frontiers, including migrated baselines. Causal receipt baselines retain
-  provider revisions, not the receiving machine's clock. This reversible representation
-  duplicates the immutable observation across field receipts; the existing document
-  size bound still applies. It is not a new product decision from Jack Heart.
-- `e608b0d2d` supplies the requested provider-frontier representation. October 8
-  repairs move acquisition before projection
-  and reassert typed membership-conflict evidence after the object's rollback.
-  Identical bodies still undergo removal/archive checks; superseded entity revision
-  groups remain journal history, not reacquisition. Common no-op upserts preserve
-  readback idempotence. The October 9 storage suite covers these regressions. Grouped
-  receipts and removal/archive/Team transport are implemented. Public invalidation
-  verification, legacy association and per-Work Desktop presentation remain. No mixed-provider
-  completion or compare-and-swap is claimed.
+- Provider-frontier representation and acquisition-before-projection rationale:
+  `b4a91632e:scratch/questions.md`, October 8 provenance. The existing journal
+  retains raw provider bodies, revisions and original ages; only matching values
+  receive Linear priority. Common acquisition, independent evidence and savepoints
+  remain the owners. Storage proof is not mixed-provider acceptance.
 
 - October 8 foreground safety choice: until all provider paths are composed and
   verified, Linear-connected repositories retain plans and report the gap instead
@@ -227,3 +213,13 @@ remain separate. No new product decision is selected.
   frame. Read failures retain last-good evidence; scope/Machine changes fence old
   replies. No status cache, sync worker, setup action or mixed activation is added.
   Per-Work selection and losing-edit recovery remain unfinished.
+
+- October 9 association finding: the earlier duplicate-mapping fixture cleared
+  `external_issue_id` directly. The common export view makes that legacy Task a
+  creation candidate while retaining its old issue selector and effect receipts.
+  This is not safe association. Preserve the existing mapping against ordinary
+  peer replacement/removal, and retain the rejected journal. An explicit
+  planning-only correspondence must resolve local lookup and effect ownership
+  without renumbering either Work, exporting private history or merging execution.
+  Representation remains unfinished; no product decision or transfer approval is
+  attributed to Jack Heart. The design's item 3 replaces the raw-SQL recovery path.

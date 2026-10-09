@@ -270,7 +270,7 @@ mod tests {
                 store.project(&project).unwrap().unwrap().plan.workflow,
                 "review"
             );
-            let changed = "nodes: {}\nedges: []\n";
+            let changed = "nodes: {}\nedges: [{from: start, to: end, flow: debug}]\n";
             store
                 .select_project_workflow(&project, "review", changed)
                 .unwrap();

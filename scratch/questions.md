@@ -19,7 +19,8 @@ Jack Heart revised completion on October 8: end triggers `task complete`; it doe
 not define Task status. Linear completion changes status without moving Workflow
 or stopping Processes. This supersedes the earlier alias. Local implementation preserves durable failed-trigger retries, newer reopen
 decisions, and unresolved delivery facts. Shared local planning is integrated. Combined Rust and disposable installation
-checks pass; Swift remains with capable CI and configured acceptance with Jack's demo.
+checks pass; headless Swift build/view evidence now exists. Configured acceptance
+remains with Jack's demo.
 
 Implemented defaults below remain unreviewed by Jack:
 
@@ -37,10 +38,10 @@ Implemented defaults below remain unreviewed by Jack:
 The original four slices, landing corrections and independent completion trigger
 are present. Earlier checks cover the predecessor; current focused evidence is
 in the design. The composed simulated-provider lifecycle has CLI/monitor wire proof; updated
-Swift fixtures still need capable-CI execution. The local filing/completion and held-Flow composition now pass in Docker.
+Swift fixtures now have headless execution evidence. The local filing/completion and held-Flow composition now pass in Docker.
 Completion-before-filing recovery is implemented, including the operator’s finishing
-Flow and retained checkout. Historical remote-export uncertainty, Swift
-verification and the complete configured demo remain. Jack authorized landing on October 9; installed-Home migration remains unauthorized.
+Flow and retained checkout. Historical remote-export uncertainty and the
+complete configured demo remain. Jack authorized landing on October 9; installed-Home migration remains unauthorized.
 
 Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. New local receipts pin child ID, Project, content and date; provider Team/state
 are resolved by common export, not pinned at filing. Historical receipts retain
@@ -65,12 +66,9 @@ Jack Heart (October 8) requested no duplicate Task data types and explicit
 optional placement/identity and local follow-up filing/completion, not DTO merging
 alone. Existing LOO-406 types are reused; its active checkout is unchanged.
 
-October 8 integration: Jack Heart authorized stacking on committed LOO-406
-`558a39232`. Merge `9f54c5b43` and its repairs adopt local creation/status while
-retaining independent completion and durable end requests. Jack retained Linear-wins
-for observed conflicts and best effort for unseen edits. The enabled counterexample
-records an overwritten unseen reopening without claiming an atomic write. Foreground export now owns provider relation delivery. Atomic filing/recovery and independent local reopening are implemented. Historical
-remote-creation uncertainty and remaining configured acceptance stay explicit in the design. Neither permits restoring Workflow/status coupling or a parallel provider writer. Jack authorized landing on October 9.
+October 8 integration and retained export uncertainty are recorded in the design.
+Jack authorized the LOO-406 stack and retained Linear-wins for observed conflicts;
+unseen concurrency remains best effort. No parallel provider writer is restored.
 
 October 8 implementation review: a locally filed child could export without its
 relation, and displayed links kept their old local name/date. Foreground export
@@ -112,4 +110,4 @@ Workflow/completion alias was restored. The merge is recorded; follow-up local
 checkpoints retain integration repairs. Push remains with the original sync caller; publication and landing are outside
 this conflict-resolution boundary.
 
-Check: Docker `cargo test -p loopflow --lib ops::task::follow_through::tests::lifecycle::merged_follow_up_completion_and_arrival_share_cli_monitor_and_desktop_evidence -- --exact --test-threads=1` passed (1 test), after repairing the repository-export compile error; broader gate and Swift remain deferred.
+Post-sync gate results and fixture repairs are recorded in the design.

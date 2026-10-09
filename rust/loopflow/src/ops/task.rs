@@ -3216,7 +3216,7 @@ impl CompletionGate {
             if pr.phase() != PrPhase::Merged {
                 blockers.push("Pull request has not merged; merge it or abandon the Task".into());
             } else if !follow_through.resolved() {
-                blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up --none REASON`".into());
+                blockers.push("Merged · Follow-through pending; file follow-ups or record `lf task follow-up <issue> --none REASON`".into());
             }
         }
         Self { blockers }
@@ -5254,7 +5254,7 @@ mod tests {
             work,
             database_path,
             ..
-        } = task_fixture_at("LOO-248", repository.path().to_path_buf()).await;
+        } = task_fixture_at("LOO-248", repository.path().canonicalize().unwrap()).await;
         let now = time::OffsetDateTime::now_utc();
         let mut pr = store.active_task_pr(&task.id).await.unwrap().unwrap();
         pr.branch = "HEAD".to_string();

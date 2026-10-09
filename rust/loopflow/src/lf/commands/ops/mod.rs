@@ -1644,7 +1644,7 @@ mod cron_catalog_tests {
             },
             local_machine: home.clone(),
             placed_machine: home,
-            repo: repo.path().to_path_buf(),
+            repo: repo.path().canonicalize().unwrap(),
         };
         std::env::set_var("LF_HOME", &authority.host.lf_home);
         let store = crate::store::sqlite::SqliteStore::open_ephemeral(
@@ -1652,7 +1652,7 @@ mod cron_catalog_tests {
         )
         .unwrap();
         store
-            .ensure_wave(repo.path().to_str().unwrap(), "infrastructure")
+            .ensure_wave(authority.repo.to_str().unwrap(), "infrastructure")
             .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);

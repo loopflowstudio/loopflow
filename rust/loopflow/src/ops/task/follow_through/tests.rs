@@ -279,7 +279,7 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
                 runtime
                     .block_on(crate::ops::planning_export::sync_repository_exports(
                         &store,
-                        repo.path().to_str().unwrap(),
+                        wave.repo(),
                     ))
                     .unwrap()
             };
@@ -287,7 +287,7 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
             let lost_creation = runtime
                 .block_on(crate::ops::planning_export::sync_export(
                     &store,
-                    repo.path(),
+                    std::path::Path::new(wave.repo()),
                     &crate::durable::WorkRef::Task(child.id.clone()),
                 ))
                 .unwrap_err();
@@ -756,7 +756,7 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                 assert_eq!(export.input["description"], intent.notes);
                 let result = runtime.block_on(crate::ops::planning_export::sync_export(
                     &store,
-                    repo.path(),
+                    std::path::Path::new(wave.repo()),
                     &crate::durable::WorkRef::Task(child.id.clone()),
                 ));
                 if created_remotely {

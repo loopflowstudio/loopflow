@@ -1795,7 +1795,10 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join(".lf/loopflow.db"))
                 .unwrap();
         store
-            .ensure_wave(repo.path().to_str().unwrap(), "release")
+            .ensure_wave(
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+                "release",
+            )
             .unwrap();
         let cli = Cli::parse_from(["lf", "-i", "--wave", "release", "design"]);
         let built = build_prompt_at(

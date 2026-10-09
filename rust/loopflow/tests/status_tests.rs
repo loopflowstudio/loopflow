@@ -38,7 +38,7 @@ fn seed(home: &Path, wave_name: &str) -> Wave {
     let wave = Wave::new(
         WaveId::new(),
         wave_name.to_string(),
-        repo.display().to_string(),
+        repo.canonicalize().unwrap().display().to_string(),
     );
     store.create_wave(&wave).expect("register wave");
     wave

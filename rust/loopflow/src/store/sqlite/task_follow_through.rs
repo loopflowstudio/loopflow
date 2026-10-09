@@ -198,7 +198,7 @@ impl SqliteStore {
         }
         if !none && (current.intents.is_empty() || !current.links_confirmed()) {
             return Err(StoreError::InvalidAuthority(
-                "follow-up filing or relation is still unconfirmed".into(),
+                "follow-up filing or local link is still unconfirmed".into(),
             ));
         }
         insert_task_event_in(

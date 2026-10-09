@@ -12,8 +12,9 @@ without discarding unresolved delivery. The prior iteration's filing refusal is
 repaired, not remaining implementation.
 Task completion remains independent of Workflow position and Process liveness.
 Focused Docker evidence covers that recovery and its resolved-disposition guards;
-the combined Rust gate and populated upgrades now pass. Swift remains with capable
-CI; configured stacked/due-return proof and Jack's complete demo remain. Jack Heart accepted usable local Tasks with historical export pending; unseen
+the combined Rust gate and populated upgrades pass. Post-sync Swift builds and
+headless lifecycle views now run; configured stacked/due-return proof and Jack's
+complete demo remain. Jack Heart accepted usable local Tasks with historical export pending; unseen
 Linear concurrency remains a documented best-effort limit. Jack Heart authorized shipping on October 9 after accepting the HTML review;
 configured native acceptance and Swift evidence remain distinct.
 
@@ -543,11 +544,12 @@ serial PR chain. If independent work is split later, each additional PR needs
 its own Task and child-specific design. The original four slices, independent
 completion trigger and completion-before-filing recovery exist locally.
 The common planning integration and crash/local-reopening repairs exist;
-historical remote-creation uncertainty, combined acceptance and the complete
-demo remain within that same boundary.
+historical remote-creation uncertainty and the complete configured demo remain
+within that same boundary.
 
-**Remaining work:** capable-CI Swift build/tests and Jack's complete configured
-lifecycle demo, including stacked delivery and the dated follow-up return path.
+**Remaining work:** Jack's complete configured lifecycle demo, including stacked
+delivery and the dated follow-up return path. Headless Swift build/view proof now
+exists; it does not establish provider or native interaction acceptance.
 The combined Rust population and disposable installation proofs now pass. The
 race test matches Jack's existing policy and retains the overwrite counterexample;
 additional reads do not guarantee atomic writes. Historical export stays pending
@@ -572,7 +574,7 @@ choices, not separate decisions attributed to Jack. Native acceptance is unprove
 3. **Linked follow-through.** Durable filing/retry, dates, waited landing,
    finishing Flows and pending/done projections replace keep-open obligations.
    The skill and operators must use the independent completion operation. The composed provider fixture now covers filing, independent completion and actual
-   arrival through CLI/monitor; combined Swift proof remains.
+   arrival through CLI/monitor and Swift decode/view tests.
 4. **Selected design handoff.** Checkout transfers an explicit child design;
    retries preserve edited/deleted child notes and conflicts retain both inputs.
    `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
@@ -584,7 +586,7 @@ choices, not separate decisions attributed to Jack. Native acceptance is unprove
    preserves execution and supersedes old requests. CLI, shared projections,
    Desktop, instructions and the one migration draft use the new contract.
    Settlement now queues local state and optional provider delivery in the same
-   transaction; combined acceptance remains.
+   transaction; configured acceptance remains.
 
 Gate runs the changed-aware headless plan once:
 
@@ -648,9 +650,9 @@ already authorized in the brief. These are reversible implementation choices,
 not separate approvals attributed to Jack. Their review belongs in the complete
 demo, with the liveness, retry, history and migration protections above intact.
 
-PR #1499 remains the single delivery boundary. Live Home migration, closing LOO-385,
-automatic filing of unrelated improvements, landing this branch and claimed
-production acceptance remain excluded. Gate findings and remaining acceptance
+PR #1499 remains the single delivery boundary; Jack authorized landing on October 9.
+Live Home migration, closing LOO-385, automatic filing of unrelated improvements
+and claimed production acceptance remain excluded. Gate findings and remaining acceptance
 are recorded below; the Docker installation ran in isolation.
 
 Earlier compression, sync and gate repair details remain at
@@ -674,10 +676,9 @@ the inherited local-planning draft and this Task's optional-PR draft remain
 separate Task-owned drafts, not two revisions of this Task's schema.
 No new Task type, watcher or worker was introduced.
 
-The historical `scratch/pr-review.html` retains revision-pinned excerpts from the
-superseded alias model. Its notice now distinguishes the implemented trigger from
-remaining integration; it is not a walkthrough of the current contract. A current
-walkthrough remains part of the complete demo preparation.
+The October 9 `scratch/pr-review.html` walkthrough supersedes the historical
+alias-model excerpts. Jack Heart accepted it and requested shipping; this is
+code-review approval, not configured native acceptance.
 
 Reconciliation (2026-10-08): the delivery guide still described Linear as the
 planning owner and prerequisite for checkout. It now matches the common local
@@ -720,37 +721,37 @@ stalled in `_dyld_start` before the build script ran and was stopped; disposable
 Docker supplied focused compilation and execution instead. Earlier focused
 evidence remains at `b92683789:scratch/make-a-task-up-to.md`.
 
-## Combined gate (2026-10-09)
+## Gate evidence (2026-10-09)
 
-The final combined Rust population passes. Real repairs mark Started through the
-shared checkout association, propagate ambient Wave selection, read Wave policy
-from the supplied store, handle an absent store without inventing planning, and
-resolve historical Task identity without requiring a missing title. Fixture repairs
-stop treating placement as publication, Workflow movement as completion/reopening,
-status reads as remote reconciliation, or edited files as mutable captured Workflows.
-Saved definitions and native profile hooks now use the integrated LOO-406 contract.
-Its accepted stored-definition cut is recorded at
-`558a39232:scratch/explore-loopflow-s-own-store.md`; no file-backed reader was restored.
+The pre-sync Docker gate and its repairs are retained at
+`51dd1ea90:scratch/make-a-task-up-to.md`, “Combined gate”: 2,328 Rust passes,
+15 ignored, two populated upgrades and seven installed-CLI proofs. Earlier
+1,884/111 and 2,308/20 populations remain evidence, not erased attempts. One
+completed-Session liveness failure passed later with diagnostic-only changes;
+its cause remains unexplained. Earlier native helpers stalled in `_dyld_start`.
 
-The populated upgrade starts before both drafts, preserving historical PR links,
-pending delivery, Workflow, Process and Session identity. All seven disposable
-installed-CLI proofs pass, including delegated launch and captured loop returns.
-The Linux harness uses Git 2.47 (trixie): bookworm's Git 2.39 lacked the merge-tree
-option used by stacked sync. No installed Home was touched.
+The post-sync native gate now builds Desktop and exercises its headless
+lifecycle views. Review corrected obsolete `land -c` guidance and a completion
+hint missing its issue argument; local filing no longer calls an optional remote
+relation a prerequisite. A newly merged fixture omitted Task-owned placement.
+Other failures exposed noncanonical macOS fixture paths, a missing CheckoutReady
+event, an invalid captured Workflow and a doubled planning-revision expectation.
+The installed-artifact test now uses its own executable rather than a copied
+macOS platform shell. Materialized tests clear inherited Work and CLI selection;
+the doctor fixture pins its nested CLI instead of entering the installed version.
 
-The earlier gate had 1,884 passes/111 failures; the first continuation population
-had 2,308 passes/20 failures. Those failures and intermediate fixture repairs remain
-in `.lf/tmp/gate-loo418/` and `.lf/tmp/gate-repair-continued/`. One completed-Session
-liveness assertion failed in the first population, then passed focused and combined
-runs with diagnostic-only changes; its original failure remains unexplained, not
-claimed fixed. Earlier Python harness attempts lacked jq/a fixture repository;
-final isolated Python passes. Prior native helpers and Swift stalled in `_dyld_start`;
-Swift compilation/testing remains a capable-CI deferral, not a pass.
+The Swift reader's 64 MiB fixture lost to the valid ten-second silence deadline,
+including a focused reproduction. That throughput-dependent case is removed;
+small exact-limit tests cover both terminated and unterminated overflow through
+the existing line-reader API. Production limits and timeout are unchanged.
+Python checkout failures used an old binary against the host store; the disposable
+OS-account suite passes. The nested-sandbox test passes under its own sandbox.
+Logs remain under `.lf/tmp/gate-post-sync*`; the original runner failed, followed
+by focused repairs, not a second whole-matrix claim.
 
-Review: the unseen-write test is enabled and asserts the overwrite that actually
-occurs; observed conflicts and uncertain effects have separate passing coverage.
-No atomic-write guarantee, live provider acceptance, scheduled Wave operation,
-rendered Desktop proof or chapter KR follows. Historical export remains usable
-locally. Jack's full demo remains; no publication, landing or Task completion occurred.
+No live provider, scheduled Wave pass, configured stacked/due-return acceptance,
+or chapter KR follows. Historical export stays locally usable while pending;
+the unseen-write counterexample remains enabled. Jack authorized shipping after
+HTML code review; this gate neither lands nor completes the Task.
 
-Check: Docker `cargo test -p loopflow --lib --tests --no-fail-fast -- --test-threads=1` 2,328 passed/15 ignored; `cargo clippy --all-targets -- -D warnings` passed; `scripts/test_task_installation.py` two populated upgrades and seven installed-CLI proofs passed; isolated `pytest python/tests/` 407 passed/1 skipped; website 76 passed; architecture coverage and Swift boundary lint passed; `cargo fmt --all -- --check` and `git diff --check` passed. Native Swift remains with capable CI; configured acceptance remains with Jack's demo.
+Check: changed-aware `scripts/test.py --reuse-passing --base d20c56daf` retained initial failures; materialized nextest 2,331 passed/12 failed/17 skipped, all 12 failures repaired in focused runs (11 passes plus doctor suite 6/6); Desktop build/headless lifecycle passed, transport repair 8/8; isolated Python checkout 19/19, sandbox 1/1 and materializer 3/3; installation harness two populated upgrades and seven CLI proofs passed; website 76, architecture, Swift boundaries, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check` and `git diff --check` passed. Configured native acceptance remains with demo, not headless gate.

@@ -203,9 +203,11 @@ Workflow sources without changing them. Repeating it preserves stored edits.
 `lf wave edit` saves to SQLite in both connection modes.
 
 Placement, native Sessions, workflow skills and GitHub delivery use the same Task
-identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
-settles it. A repository without a code remote supports local work and refuses
-hosted landing. Local planning does not require Linear at any of these boundaries.
+identity. `lf land` requests merge; `lf pr reconcile` observes delivery. After
+merge, follow-through files accepted obligations or records none, then
+`lf task complete <task-id>` completes the source. A repository without a code
+remote supports local work and refuses hosted landing. Local planning does not
+require Linear at any of these boundaries.
 
 ## Connect planning and create work
 

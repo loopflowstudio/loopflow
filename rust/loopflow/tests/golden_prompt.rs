@@ -81,7 +81,7 @@ fn golden_prompts_match() {
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
         let fixture = tempfile::tempdir().unwrap();
-        let repo = fixture.path().to_path_buf();
+        let repo = fixture.path().canonicalize().unwrap();
         copy_fixture(&root.join(&case.repo), &repo);
         if let Some(wave) = &case.wave {
             store.ensure_wave(repo.to_str().unwrap(), wave).unwrap();

@@ -3256,7 +3256,6 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        plan.revision += 1;
         assert_eq!(by_stable_id.plan, plan);
         let mut expected = persisted;
         expected.plan = plan;

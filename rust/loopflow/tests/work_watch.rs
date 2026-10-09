@@ -14,7 +14,7 @@ use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::PmSnapshotRow;
 #[cfg(target_os = "macos")]
-use loopflow::work::task::{TaskPr, TaskPrId};
+use loopflow::work::task::{TaskEventKind, TaskPr, TaskPrId};
 use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
@@ -151,6 +151,15 @@ impl Machine {
                 task.worktree.as_ref().unwrap(),
                 &task.workspace_slug,
                 &pr,
+            )
+            .unwrap();
+        self.store
+            .append_task_event(
+                &task.id,
+                &TaskEventKind::CheckoutReady {
+                    branch: pr.branch,
+                    base_commit: pr.base_commit,
+                },
             )
             .unwrap();
         worktree

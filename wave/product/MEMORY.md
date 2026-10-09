@@ -36,9 +36,11 @@ disposition blocks new scope; unresolved delivery retains its checkout (`0865e43
 Fixtures prove no scheduled or native acceptance.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
-Flow/Started commit atomically after placement. Docker Rust and populated-upgrade
-checks pass: filing, completion, CLI/monitor arrival, reopening, end retry and stacked
-handoff. Swift/native proof and Jack's demo remain. Settlement rechecks merge/disposition.
+Flow/Started commit atomically after placement. Rust and populated-upgrade checks
+cover filing, completion, arrival, reopening, end retry and stacked handoff.
+Post-sync gate adds Swift build/headless lifecycle views; configured native and
+Jack's demo remain. Fixtures must use canonical paths and their own nested CLI.
+Settlement rechecks merge/disposition.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -224,10 +226,9 @@ flow -b) apis."
   checkout; an empty unpublished PR is retired at `end` (reverses part of
   W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
   settles the landing, the Task stays active and flagged until forced.
-- The earlier `feature` without a design-review pause is superseded: inspected
-  at `6448e3c9e` on October 7, its nodes are `design` and `demo`, with `ship`
-  reaching `end`. `code` equals `pursue`. Main's `lf flow end` (#1435) is
-  dropped. `lf commit -p` pushes; plain commit stays local.
+- Superseded Flow-template and `lf commit -p` observations remain at
+  `51dd1ea90:wave/product/MEMORY.md`, this heading. The accepted Workflow
+  names and owner-scoped commands are recorded above.
 - Waiting is one reading per Session, saved at most every 5 s: an unanswered
   question, or no open tool call and a hand-back or 120 s of quiet. Codex
   approvals count as questions; OpenCode permissions do not.

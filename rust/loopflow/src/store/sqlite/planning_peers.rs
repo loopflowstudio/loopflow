@@ -6,6 +6,7 @@ use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
+use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
     PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
@@ -13,6 +14,7 @@ use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
 use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 
+use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -223,6 +225,13 @@ impl SqliteStore {
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
         let objects = merged.resolved();
+        let mut winners: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (id, change) in merged.winners() {
+            winners
+                .entry(change.object.clone())
+                .or_default()
+                .push((id, change));
+        }
         let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
@@ -253,7 +262,7 @@ impl SqliteStore {
             let mut conflicts = BTreeSet::new();
             for (object, fields) in pending {
                 tx.execute_batch("SAVEPOINT peer_projection")?;
-                match insert_and_project(&tx, object, fields, repo) {
+                match insert_and_project(&tx, object, fields, repo, &winners[object], &merged) {
                     Ok(()) => {
                         tx.execute_batch("RELEASE peer_projection")?;
                     }
@@ -667,6 +676,8 @@ fn insert_and_project(
     object: &PlanningObject,
     fields: &BTreeMap<String, Value>,
     repo: &str,
+    winners: &[(&str, &PlanningMutation)],
+    snapshot: &PlanningSnapshot,
 ) -> StoreResult<()> {
     if !exists(conn, object)? {
         let required = |key: &str| {
@@ -702,6 +713,7 @@ fn insert_and_project(
     if object.kind == PlanningKind::Wave {
         validate_wave(conn, object, fields, repo)?;
     }
+    let previous = delivery_fields(conn, object)?;
     project_fields(
         conn,
         object,
@@ -712,7 +724,105 @@ fn insert_and_project(
             })
             .map(|(field, value)| (field.as_str(), value)),
     )?;
+    project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
+}
+
+// These are the scalar fields delivered by the common field writer. State,
+// comments, deletion, creation and order keep their distinct receipt protocols.
+fn delivery_field(kind: PlanningKind, field: &str) -> Option<&'static str> {
+    match (kind, field) {
+        (PlanningKind::Task, "issue_title") | (PlanningKind::Project, "project_name") => {
+            Some("name")
+        }
+        (PlanningKind::Task, "issue_description") => Some("description"),
+        (PlanningKind::Task, "planning_assignee") => Some("assignee"),
+        (PlanningKind::Task, "project_id") => Some("project_id"),
+        (PlanningKind::Project, "project_summary") => Some("summary"),
+        (PlanningKind::Project, "workflow") => Some("workflow"),
+        (PlanningKind::Project, "status") => Some("status"),
+        _ => None,
+    }
+}
+
+fn delivery_fields(
+    conn: &Connection,
+    object: &PlanningObject,
+) -> StoreResult<BTreeMap<String, Value>> {
+    let columns = object
+        .kind
+        .fields()
+        .iter()
+        .filter(|field| delivery_field(object.kind, field).is_some())
+        .map(|field| format!("'{field}',{field}"))
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let body: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT json_object({}) FROM {} WHERE id=?1",
+                columns.join(","),
+                table(object.kind)
+            ),
+            [&object.id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    body.map(|body| serde_json::from_str(&body).map_err(Into::into))
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn project_delivery_fields(
+    conn: &Connection,
+    object: &PlanningObject,
+    winners: &[(&str, &PlanningMutation)],
+    snapshot: &PlanningSnapshot,
+    previous: &BTreeMap<String, Value>,
+) -> StoreResult<()> {
+    let task = TaskId::from_raw(&object.id);
+    let project = ProjectId::from_raw(&object.id);
+    let owner = match object.kind {
+        PlanningKind::Task => PlanningChanges::Task(&task),
+        PlanningKind::Project => PlanningChanges::Project(&project),
+        _ => return Ok(()),
+    };
+    for &(id, change) in winners {
+        let Some(field) = delivery_field(object.kind, &change.field) else {
+            continue;
+        };
+        if change.linear {
+            owner.adopt_peer_linear(conn, field, id, change.value.clone())?;
+        } else if previous.get(&change.field) != Some(&change.value) {
+            owner.record_value(
+                conn,
+                field,
+                &format!("peer:{id}:{field}"),
+                change.value.clone(),
+                linear_predecessor(snapshot, change),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn linear_predecessor(snapshot: &PlanningSnapshot, change: &PlanningMutation) -> Option<Value> {
+    let mut pending: Vec<_> = change.parents.iter().map(String::as_str).collect();
+    let mut visited = BTreeSet::new();
+    let mut latest = None;
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        let prior = &snapshot.changes[id];
+        if prior.linear && latest.is_none_or(|(clock, key)| (prior.clock, id) > (clock, key)) {
+            latest = Some((prior.clock, id));
+        }
+        pending.extend(prior.parents.iter().map(String::as_str));
+    }
+    latest.map(|(_, id)| snapshot.changes[id].value.clone())
 }
 
 fn projection_conflict(error: &StoreError) -> bool {
@@ -921,6 +1031,323 @@ mod tests {
             .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
             .unwrap();
         task
+    }
+
+    fn linear_seed(store: &SqliteStore) -> (WaveId, crate::store::PmSnapshotRow, TaskId) {
+        let wave = Wave::new(WaveId::new(), "planning".into(), "/source".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.items.truncate(1);
+        snapshot.items[0].revision = Some("2026-10-08T10:00:00Z".into());
+        let row = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 42,
+            snapshot,
+        };
+        store.put_pm_snapshot(&row).unwrap();
+        store
+            .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
+            .unwrap();
+        let task = store
+            .task_by_issue(&row.snapshot.items[0].id)
+            .unwrap()
+            .unwrap()
+            .id;
+        (wave.id().clone(), row, task)
+    }
+
+    fn edit_title(store: &SqliteStore, task: &TaskId, title: &str) {
+        let current = store.task(task).unwrap().unwrap();
+        store
+            .edit_task(
+                task,
+                current.plan.revision,
+                &crate::pm::PmItemUpdate {
+                    name: Some(title.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn peer_field_delivery_keeps_source_baseline_identity_and_late_saves() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, row, task) = linear_seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        assert!(target.pending_task_changes(&task).unwrap().is_empty());
+        edit_title(&source, &task, "Peer title");
+        let project = source.task(&task).unwrap().unwrap().project_id;
+        source
+            .edit_project(&project, Some("Peer project"), Some("Peer summary"))
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "edited", &incoming)
+            .unwrap();
+        let receipts = target.pending_task_changes(&task).unwrap();
+        let title = receipts.iter().find(|c| c.field == "name").unwrap();
+        assert_eq!(title.value, "Peer title");
+        assert_eq!(
+            title.base.as_ref().unwrap()["value"],
+            row.snapshot.items[0].name
+        );
+        let project_receipts = target.pending_project_changes(&project).unwrap();
+        assert!(project_receipts
+            .iter()
+            .any(|c| c.field == "name" && c.value == "Peer project"));
+        assert!(project_receipts
+            .iter()
+            .any(|c| c.field == "summary" && c.value == "Peer summary"));
+        let revisions = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "edited", &incoming)
+            .unwrap();
+        assert_eq!(target.pending_task_changes(&task).unwrap(), receipts);
+        assert_eq!(
+            target.pending_project_changes(&project).unwrap(),
+            project_receipts
+        );
+        assert_eq!(target.revisions().unwrap(), revisions);
+        // Repeating an older acquisition cannot erase a save made after import.
+        edit_title(&target, &task, "Later local save");
+        let later = target.pending_task_changes(&task).unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "edited", &incoming)
+            .unwrap();
+        assert_eq!(
+            target.task(&task).unwrap().unwrap().plan.title,
+            "Later local save"
+        );
+        assert_eq!(target.pending_task_changes(&task).unwrap(), later);
+    }
+
+    #[test]
+    fn peer_linear_winner_retires_delivery_without_acknowledging_uncertain_write() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        target
+            .import_peer_planning(
+                "/target",
+                &destination(),
+                "base",
+                &source
+                    .export_peer_planning("/source", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        edit_title(&target, &task, "Uncertain local title");
+        let receipt = target
+            .pending_task_changes(&task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "name")
+            .unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET attempted=1,error='lost response' WHERE id=?1",
+                [&receipt.id],
+            )
+            .unwrap();
+        let mut item = row.snapshot.items[0].clone();
+        item.name = "Linear title".into();
+        item.revision = Some("2026-10-08T11:00:00Z".into());
+        source
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item,
+                    project: Some(row.snapshot.projects[0].clone()),
+                    observed_at: 43,
+                },
+                Some((&wave, "initiative")),
+            )
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "linear", &incoming)
+            .unwrap();
+        assert_eq!(
+            target.task(&task).unwrap().unwrap().plan.title,
+            "Linear title"
+        );
+        assert!(target.pending_task_changes(&task).unwrap().is_empty());
+        let conn = target.conn.lock().unwrap();
+        let saved: (bool, bool, String, String, String) = conn.query_row(
+            "SELECT attempted,acknowledged,value_json,conflict_json,error FROM task_changes WHERE id=?1",
+            [&receipt.id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
+        ).unwrap();
+        assert!(saved.0);
+        assert!(!saved.1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&saved.2).unwrap(),
+            "Uncertain local title"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&saved.3).unwrap()["value"],
+            "Linear title"
+        );
+        assert_eq!(saved.4, "lost response");
+        drop(conn);
+        let status = target.task_planning_sync(&task).unwrap();
+        assert!(status
+            .changes
+            .iter()
+            .any(|c| c.id == receipt.id
+                && c.state == crate::planning::PlanningSyncState::AdoptedLinear));
+        let revision = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "linear", &incoming)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn peer_local_winner_preserves_older_attempt_and_receipts_rollback_with_import() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let task = seed(&source);
+        let base = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        edit_title(&target, &task, "Attempted");
+        let receipt = target
+            .pending_task_changes(&task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "name")
+            .unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET attempted=1 WHERE id=?1",
+                [&receipt.id],
+            )
+            .unwrap();
+        source
+            .import_peer_planning(
+                "/source",
+                &destination(),
+                "attempted",
+                &target
+                    .export_peer_planning("/target", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        edit_title(&source, &task, "Successor");
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let before = target.pending_task_changes(&task).unwrap();
+        let journal_before = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_peer_receipt BEFORE INSERT ON task_changes
+             WHEN NEW.id LIKE 'peer:%' BEGIN SELECT RAISE(ABORT,'receipt failure'); END;",
+            )
+            .unwrap();
+        assert!(target
+            .import_peer_planning("/target", &destination(), "successor", &incoming)
+            .is_err());
+        assert_eq!(target.task(&task).unwrap().unwrap().plan.title, "Attempted");
+        assert_eq!(target.pending_task_changes(&task).unwrap(), before);
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            journal_before
+        );
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("base")
+        );
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TRIGGER fail_peer_receipt")
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "successor", &incoming)
+            .unwrap();
+        let successor = target
+            .pending_task_changes(&task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "name")
+            .unwrap();
+        assert_eq!(successor.value, "Successor");
+        assert_ne!(successor.id, receipt.id);
+        let conn = target.conn.lock().unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT attempted,acknowledged,conflict_json FROM task_changes WHERE id=?1",
+                [&receipt.id],
+                |r| Ok((
+                    r.get::<_, bool>(0)?,
+                    r.get::<_, bool>(1)?,
+                    r.get::<_, Option<String>>(2)?
+                ))
+            )
+            .unwrap(),
+            (true, false, None)
+        );
+        drop(conn);
+        // The common sender cannot start the successor until the older effect is
+        // observed. That readback then advances its unchanged baseline, not its value.
+        assert!(!target
+            .attempt_planning_field(super::PlanningChanges::Task(&task), &successor, None,)
+            .unwrap());
+        let conn = target.conn.lock().unwrap();
+        let accepted: serde_json::Value = super::PlanningChanges::Task(&task)
+            .reconcile(
+                &conn,
+                &json!({"name":"Attempted","revision":"2026-10-08T12:00:00Z"}),
+            )
+            .unwrap();
+        assert_eq!(accepted["name"], "Successor");
+        assert!(conn
+            .query_row(
+                "SELECT acknowledged FROM task_changes WHERE id=?1",
+                [&receipt.id],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap());
+        drop(conn);
+        let pending = target.pending_task_changes(&task).unwrap();
+        let retained = pending.iter().find(|c| c.id == successor.id).unwrap();
+        assert_eq!(retained.value, "Successor");
+        assert_eq!(retained.base.as_ref().unwrap()["value"], "Attempted");
     }
 
     #[test]

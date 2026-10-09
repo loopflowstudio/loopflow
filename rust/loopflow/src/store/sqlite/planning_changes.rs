@@ -281,27 +281,75 @@ impl<'a> PlanningChanges<'a> {
         if previous == value {
             return Ok(false);
         }
+        self.record_value(conn, field, &uuid::Uuid::new_v4().to_string(), value, None)?;
+        Ok(true)
+    }
+
+    /// One receipt writer for ordinary edits and imported intentions. A caller
+    /// with a retained mutation identity can repeat the save without a new effect.
+    pub(super) fn record_value(
+        self,
+        conn: &Connection,
+        field: &str,
+        receipt: &str,
+        value: Value,
+        baseline: Option<Value>,
+    ) -> StoreResult<()> {
+        let value = self.normalize(conn, field, value)?;
         let (owner, id) = self.owner();
-        let body = self.observation(conn)?;
-        let base = body
-            .map(|body| -> StoreResult<Value> {
-                Ok(serde_json::json!({"revision": body["revision"], "value": self.normalize(conn, field, body[field].clone())?}))
-            })
-            .transpose()?;
+        // A peer's observed predecessor is stronger than this machine's older
+        // cache. The peer protocol carries values, not a provider revision.
+        let base = match baseline {
+            Some(value) => Some(serde_json::json!({
+                "revision": null, "value": self.normalize(conn, field, value)?
+            })),
+            None => self
+                .observation(conn)?
+                .map(|body| -> StoreResult<Value> {
+                    Ok(serde_json::json!({"revision":body["revision"],
+                    "value":self.normalize(conn, field, body[field].clone())?}))
+                })
+                .transpose()?,
+        };
         conn.execute(
             &format!(
                 "INSERT INTO {owner}_changes(id,{owner}_id,field,value_json,base_json)
-                VALUES(?1,?2,?3,?4,?5)"
+                VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO NOTHING"
             ),
             params![
-                uuid::Uuid::new_v4().to_string(),
+                receipt,
                 id,
                 field,
                 value.to_string(),
                 base.map(|v| v.to_string())
             ],
         )?;
-        Ok(true)
+        Ok(())
+    }
+
+    /// Importing a Linear winner retires local intentions, not their history or
+    /// attempted flags. It is not an acknowledgement of our own provider write.
+    pub(super) fn adopt_peer_linear(
+        self,
+        conn: &Connection,
+        field: &str,
+        mutation: &str,
+        value: Value,
+    ) -> StoreResult<()> {
+        let value = self.normalize(conn, field, value)?;
+        let (owner, id) = self.owner();
+        conn.execute(
+            &format!(
+                "UPDATE {owner}_changes SET conflict_json=?3
+                WHERE {owner}_id=?1 AND field=?2 AND acknowledged=0 AND conflict_json IS NULL"
+            ),
+            params![
+                id,
+                field,
+                serde_json::json!({"value":value,"peer_change":mutation}).to_string()
+            ],
+        )?;
+        Ok(())
     }
 
     // Membership receipts retain durable identity even when a provider mapping arrives later.

@@ -137,21 +137,32 @@ impl PlanningSnapshot {
         self.changes.values().map(|change| &change.object).collect()
     }
 
-    pub fn resolved(&self) -> BTreeMap<PlanningObject, BTreeMap<String, Value>> {
-        let mut objects: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
-        for ((object, field), heads) in self.heads() {
-            // Causal successors retire predecessors regardless of origin/clock.
+    /// Keep winner identity and origin available to delivery projection. Values
+    /// alone cannot distinguish a local intention from an observed Linear fact.
+    pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
+        self.heads().into_values().map(move |heads| {
             let winner = heads
-                .iter()
+                .into_iter()
                 .max_by_key(|id| {
-                    let change = &self.changes[*id];
-                    (change.linear, change.clock, *id)
+                    let change = &self.changes[id];
+                    (change.linear, change.clock, id.clone())
                 })
                 .expect("a field has at least one head");
+            let (id, change) = self
+                .changes
+                .get_key_value(&winner)
+                .expect("a head belongs to the snapshot");
+            (id.as_str(), change)
+        })
+    }
+
+    pub fn resolved(&self) -> BTreeMap<PlanningObject, BTreeMap<String, Value>> {
+        let mut objects: BTreeMap<_, BTreeMap<_, _>> = BTreeMap::new();
+        for (_, change) in self.winners() {
             objects
-                .entry(object)
+                .entry(change.object.clone())
                 .or_default()
-                .insert(field, self.changes[winner].value.clone());
+                .insert(change.field.clone(), change.value.clone());
         }
         objects
     }

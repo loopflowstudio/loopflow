@@ -32,11 +32,14 @@ impl SqliteStore {
              FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
              WHERE c.task_id=?1 AND (d.conflicting_comment_json IS NOT NULL OR (?2 AND d.acknowledged=0))
              ORDER BY c.created_at,c.id", task.as_str(), connected)?;
-        append(&tx, &mut changes,
-            "SELECT c.task_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),json_object('title',c.title,'description',c.description)),
-                c.export_attempted,c.export_error,NULL FROM task_creation_intents c
-             JOIN tasks t ON t.id=c.task_id WHERE c.task_id=?1 AND ?2 AND t.external_issue_id IS NULL
-             AND (t.planning_deleted_at IS NULL OR c.export_attempted=1)", task.as_str(), connected)?;
+        append(
+            &tx,
+            &mut changes,
+            "SELECT id,'creation',input,attempted,error,NULL FROM planning_exports
+             WHERE kind='task' AND id=?1 AND ?2",
+            task.as_str(),
+            connected,
+        )?;
         tx.commit()?;
         Ok(PlanningSyncStatus { connected, changes })
     }
@@ -51,11 +54,14 @@ impl SqliteStore {
         )?;
         let connected = crate::ops::linear_observe::connected(&repo);
         let mut changes = fields(&tx, "project", project.as_str(), connected, false)?;
-        append(&tx, &mut changes,
-            "SELECT p.id,'creation',COALESCE(json_extract(p.export_json,'$.input'),c.local_plan_json),p.export_attempted OR p.export_link_attempted,p.export_error,NULL
-             FROM projects p LEFT JOIN project_transitions c ON p.id=c.successor_id AND p.wave_id=c.wave_id
-             WHERE p.id=?1 AND ?2 AND p.external_project_id IS NULL AND (c.local_plan_json IS NOT NULL OR p.export_json IS NOT NULL)",
-            project.as_str(), connected)?;
+        append(
+            &tx,
+            &mut changes,
+            "SELECT id,'creation',input,attempted,error,NULL FROM planning_exports
+             WHERE kind='project' AND id=?1 AND ?2",
+            project.as_str(),
+            connected,
+        )?;
         tx.commit()?;
         Ok(PlanningSyncStatus { connected, changes })
     }

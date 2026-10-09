@@ -453,9 +453,14 @@ unknown or live execution prevents cleanup before provider inspection. Cancellat
 uses the same state delivery path as completion and reopening. Resolve the issue
 team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
-An independent foreground export loop selects unmapped local Projects and Tasks,
-using their saved UUIDs. Project transitions and Task creation receipts retain the
-captured payload, attempted effects and errors; no second creation owner exists.
+An independent foreground export loop selects unmapped local or peer-born Projects
+and Tasks, plus mapped creations still awaiting readback, using their saved UUIDs.
+One derived `planning_exports` view feeds discovery and status. Project rows and
+Task creation receipts retain captured payloads, attempts, acknowledgement and
+errors; no Project transition is synthesized for imported planning. Preparation
+creates a missing Task receipt from its saved planning. A mapping alone never
+acknowledges creation. Project acknowledgement also requires the captured Initiative
+attachment; after acknowledgement, a later accepted move does not reopen creation.
 Exact observations attach mappings in the common ingestion transaction before
 inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still

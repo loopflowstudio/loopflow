@@ -621,35 +621,34 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync under Plan ownership. Review-only; no landing
-or real public-remote planning export. Joining publishes nothing. Malformed input
-aborts import; contradictions isolate objects. Execution stays local.
+Jack Heart selected custom-ref sync. Review-only; no landing
+or public-remote planning export. Joining publishes nothing. Malformed input aborts
+import; contradictions isolate objects. Execution stays local.
 
-`88cd47572` transports prepared creation/link receipts through common owners with
-captured save IDs, original parent and uncertain attempts. Project rows replace
-transition columns; imports create no rotation or settlement. Readback reconciles
-captured saves; competing effects retain both histories.
-Foreground composition remains: unprepared peer creations lack export eligibility,
-and mapped-record filters hide uncertain receipts from acquisition/status.
-Release's lesson applies: storage readback proves no public recovery.
+Creation/link receipts retain captured saves, parent and attempts. Project rows replace transition columns; imports create no rotation or
+settlement. Competing effects retain both histories. One common view exposes unprepared plans and mapped uncertainty to foreground
+sync/status. Only readback acknowledges creation/attachment, never mapping alone.
+Settled receipts reject late errors.
 
-Peer acquisition preserves provider age; entity revisions do not order relationships.
+Linux public work-watch proves creation/link response-loss recovery, later saves
+and execution preservation after import, not mixed-provider Git exchange.
+It exposed acquisition-side Project placement; that call is removed. Wave status still rejects
+unplaced Waves: Rust/Swift must represent absent Machine placement. Full gate, mixed-provider, SSH and installation remain.
+
+Acquisition preserves provider age; entity revisions never order relationships.
 Missing inventory is not negative membership; archive, unresolved membership and
-configured-Initiative contradictions still block. Lookup and launch freshness stay
-separate. Imports stay unplaced; first local placement uses this machine when its
-parent is unplaced. Existing placements survive.
-
-Linux storage/export and work-watch proofs predate dependency-only sync `eeb98aa89`;
-combined, mixed-provider, SSH and installed acceptance remain unproved.
+configured-Initiative contradictions block. Lookup and launch freshness differ.
+Imports stay unplaced; explicit placement uses this machine without a placed parent
+and preserves existing placement.
 
 Fetch/import/publication stay separate; effect locks block neither saves nor
 acquisition. Damaged journals retain unknown pending state without hiding plans.
 Private moves hold whole histories/dependents, including retained Git documents,
 until explicit selection; omission is not convergence. Recovery/losing-edit UX,
-order/deletion receipts, alternate paths, relationship ordering, legacy association
-and Desktop remain before mixed-provider activation.
-Design: `scratch/work-on-another-machine-name.md`; earlier evidence:
-`a6cb48664:wave/infrastructure/MEMORY.md`, this heading.
+order/deletion receipts, alternate acquisition, relationship ordering, legacy
+association and Desktop remain before mixed-provider activation.
+Design: `scratch/work-on-another-machine-name.md`; earlier proofs:
+`a67c7f7cb:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

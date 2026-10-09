@@ -42,14 +42,21 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
         return Ok(());
     };
     let attempt = async {
-        let (wave_id, mapped) = match owner {
+        if !store
+            .sqlite
+            .planning_export_pending(owner)
+            .map_err(message)?
+        {
+            return Ok(());
+        }
+        let wave_id = match owner {
             PlanningChanges::Task(id) => {
                 let task = store
                     .get_task(id)
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Task is missing"))?;
-                (task.wave_id, task.plan.linear_id.is_some())
+                task.wave_id
             }
             PlanningChanges::Project(id) => {
                 let project = store
@@ -57,12 +64,9 @@ pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> O
                     .await
                     .map_err(message)?
                     .ok_or_else(|| message("Project is missing"))?;
-                (project.wave_id, project.plan.linear_id.is_some())
+                project.wave_id
             }
         };
-        if mapped {
-            return Ok(());
-        }
         let wave = store
             .get_wave(&wave_id)
             .await

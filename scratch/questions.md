@@ -34,8 +34,8 @@ The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
 October 9's 49 passing peer-storage tests at `b21429d9b` cover the storage
 choices below, including prepared creation/link effects. The later dependency-only
-sync has no new executable proof.
-Public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
+sync preceded the current focused foreground-creation checks in the design.
+Broader public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
 remain separate. No new product decision is selected.
 
 - October 8 selection choice: selecting a Wave includes its descendants; joining
@@ -164,8 +164,8 @@ remain separate. No new product decision is selected.
   remain possible. Project/link readback therefore stays with its existing
   owner pending full receipt composition. The later receipt-transport cut below
   supersedes the missing-transport finding;
-  foreground creation, independent relationship ordering and mixed-provider
-  activation remain unfinished. No new product policy is selected.
+  foreground creation is covered by the current cut below; independent relationship
+  ordering and mixed-provider activation remain unfinished. No new product policy is selected.
 
 - October 9 receipt transport exposed an ownership error: importing Project export
   columns through `project_transitions` would fabricate a local rotation or its
@@ -177,4 +177,13 @@ remain separate. No new product decision is selected.
   Review removed per-object journal rescans and corrected imported Task receipts
   to retain the captured parent after a later move. Their immutable delivery
   snapshot is not the current Task membership. Source authoring inputs remain
-  unchanged; transport of unprepared local-born creation remains unfinished.
+  unchanged; foreground preparation now discovers unprepared local-born plans.
+
+- October 9 foreground choice: common receipts now retain explicit acknowledgement,
+  distinct from mapping and attempts. One derived SQL view serves acquisition and
+  status. An unprepared imported Task gains its ordinary intent only at preparation;
+  imported Projects need no local transition. Matching peer receipts union the
+  acknowledgement; late errors cannot reopen it. Provider acquisition's placement
+  inheritance was removed after the public fixture demonstrated an execution write.
+  The fixture also exposed unplaced Wave status rejection; nullable Rust/Swift
+  Machine presentation remains necessary, not permission to assign a Machine on read.

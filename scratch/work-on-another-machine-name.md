@@ -157,6 +157,11 @@ this heading. Keep these replacements deleted:
   update triggers alone capture preparation and attempts; migration still seeds
   retained receipts and imports suppress echo. Readback prepares its two field
   statements and serializes captured IDs once per receipt, not once per field.
+- Transition/intent-only export discovery, mapping-only completion shortcuts and
+  duplicate status eligibility filters. One `planning_exports` view reads common
+  receipt acknowledgement; preparation alone creates missing Task receipts.
+- Acquisition-side `inherit_project_placement`: provider readback is planning,
+  not first local execution. Explicit placement retains its existing owner.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
   rejection and required ancestor placement on first local use. Readback reconciles
   captured saves, not later intentions; local execution placement stays local.
@@ -182,8 +187,8 @@ Current checkpoint: `eeb98aa89`, integrating parent `a4678d242` (LOO-406).
 `b21429d9b` simplifies capture and records 49 peer-storage plus four export tests.
 This supersedes the prior feedback's request to implement that storage boundary.
 The final conflict-free sync changes dependencies only: shlex 2.0.1, libc 0.2.190,
-uuid 1.27.0 and Python lock updates. Its combined candidate has no new executable
-proof; the pre-sync results are retained evidence, not an identical-tree gate pass.
+uuid 1.27.0 and Python lock updates. Current focused foreground/storage checks
+are below; the older pre-sync results are not an identical-tree gate pass.
 Task admission, cold-worker behavior and connected-provider recovery remain affected
 checks. The preceding `ffbe0ad42` sync supplied terminal-Task guidance and fixture
 isolation; neither sync completes peer composition.
@@ -201,24 +206,42 @@ a receipt after a mapping-only import. Entity readback does not clear an uncerta
 attachment without matching Initiative evidence, and later accepted moves remain
 legal. Import fabricates no local transition or execution.
 
-The next boundary is foreground creation composition through the existing common
-owner, not another receipt transport:
-- Unprepared peer-born Tasks have no `task_creation_intents` row; imported Projects
-  have neither an export snapshot nor a local transition. `planning_export_owners`
-  therefore cannot discover them. Eligibility must follow portable planning without
-  fabricating rotation, selection, activation or execution.
-- `planning_export_owners` and `planning_sync.rs` exclude mapped records, and
-  `ops/planning_export.rs::sync_export` returns immediately when mapped. A peer
-  mapping can therefore hide an uncertain creation/link receipt and bypass its
-  recovery. Retained effect state must drive acquisition and status independently
-  of mapping; mapping alone is never acknowledgement or permission to repeat a write.
-- Public connected-provider fixtures must cover both cases, lost creation/link
-  responses, later saves, repeated readback and unchanged execution. The Project
-  storage fixture seeds mapping directly and imports accepted observations; it
-  does not exercise those foreground exits.
-These are substantial remaining implementation changes, not a check-only gap.
-Ordering/deletion receipts and alternate provider/relationship acquisition follow,
-then legacy association and Desktop.
+Foreground creation now uses the existing common owner for unprepared peer-born
+Tasks and Projects. One derived `planning_exports` view feeds acquisition,
+`sync_export` eligibility and CLI/DTO status; local transitions and preexisting
+Task creation intents no longer determine eligibility. Preparation creates a
+missing Task intent transactionally from saved planning. No Project transition,
+rotation, selection, activation or execution is fabricated.
+
+Mapped receipts stay eligible until explicit common readback acknowledgement.
+Task acknowledgement requires the attempted saved UUID; Project acknowledgement
+also requires the captured Initiative. Acknowledgement travels with the same
+receipt, merges monotonically only for matching captured effects, and suppresses
+late errors. Mapping alone never grants acknowledgement or another write. A later
+accepted Project move does not reopen its acknowledged creation. Existing attempts,
+errors, original parent and captured-save boundaries remain.
+
+The passing isolated Linux connected-provider fixture imports unprepared plans
+before connecting Linear, then exercises public work-watch, Task edits/status and Project edits/workflow
+readback against synthetic HTTPS. It withholds creation/link responses, inserts
+mapping-only evidence, saves later edits, then requires acknowledgement without
+repeated writes or execution changes. It does not enable mixed-provider Git
+exchange or establish simultaneous cross-machine creation authority.
+
+Executable feedback exposed two distinct presentation/execution boundaries:
+- `wave status` rejects imported Waves without Machine placement;
+  `WaveSnapshot.machine` is nonoptional in Rust/Swift. Keep imports unplaced.
+  The remaining presentation cut must represent absence, not allocate execution
+  on reads. The existing public `project workflow show --json` reader exposes
+  Project sync receipts independently; it proves no Wave/Desktop acceptance.
+- Common provider acquisition called `inherit_project_placement`, allocating
+  placement during creation readback. That call is deleted. Explicit local
+  creation/placement keeps its owner; acquisition preserves existing placement
+  and absence. The public fixture retains the full execution-table comparison
+  that exposed this failure rather than relaxing it.
+
+Next: ordering/deletion receipts and alternate provider/relationship acquisition,
+then legacy association and unplaced-Wave/Desktop presentation.
 Mixed-provider exchange stays disabled until those owners compose. Existing mapping
 or an import checkpoint is never effect acknowledgement. These are implementation
 gaps, not a missing parent dependency or verification-only work. Publication still
@@ -364,8 +387,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    Task test preserves a pending local value on an unchanged provider baseline.
    The focused storage suite passes; connected-provider composition remains unproved.
 
-   Prepared creation/link receipts now compose at storage; foreground completion,
-   ordering and deletion remain uncomposed. Comments now use the common owners
+   Creation/link receipts and foreground discovery/readback now share their common
+   owner; ordering and deletion remain uncomposed. Comments now use the common owners
    described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
@@ -415,8 +438,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    field loop. Source inspection identifies the remaining seams:
    - `planning_export.rs` owns creation/link attempts. Prepared receipts now travel
      through the storage boundary described at the start of **Remaining integration**.
-     Full foreground recovery, unprepared creations and mapped uncertainty remain;
-     do not treat import or an existing mapping as acknowledgement.
+     The foreground cut above discovers unprepared creations and mapped uncertainty;
+     import and existing mappings still cannot acknowledge an effect.
    - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
      `insert_authored_comment`. Comment ID remains delivery identity; reimport
      retains errors/acknowledgement/conflicts, and acquired comments create no
@@ -569,7 +592,7 @@ sync-status proof is at `5ebcc877e:scratch/work-on-another-machine-name.md`,
 establish the dependency-updated candidate, provider-lifetime, cold-worker or
 mixed-provider acceptance.
 
-Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, no product suites rerun; gate owns the combined candidate and connected-provider/Desktop acceptance.
+Check (October 9 implement): network-isolated Rust `planning_export_` (4), `peer_creation` (4), `peer_project_creation` (1), populated peer migration (1), and Linux `planning_reconnect_tests public_watch_exports` (1) pass; fmt, all-target Clippy, Ruff, diff and context checks pass; gate retains broader combined-candidate/Wave/Desktop acceptance.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

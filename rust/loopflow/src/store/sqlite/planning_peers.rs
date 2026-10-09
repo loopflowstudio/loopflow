@@ -1745,6 +1745,81 @@ mod tests {
     }
 
     #[test]
+    fn peer_creation_prepares_unprepared_plans_without_execution_or_transitions() {
+        use super::super::planning_changes::PlanningChanges;
+        use crate::durable::WorkRef;
+
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let task = seed(&source);
+        import(
+            &target,
+            "/target",
+            "unprepared",
+            &export(&source, "/source"),
+        );
+        let project = target.task(&task).unwrap().unwrap().project_id;
+        assert_eq!(
+            target.planning_export_owners("/target").unwrap(),
+            vec![
+                WorkRef::Project(project.clone()),
+                WorkRef::Task(task.clone()),
+            ]
+        );
+        let empty_execution = || {
+            let conn = target.conn.lock().unwrap();
+            for table in [
+                "project_transitions",
+                "agent_sessions",
+                "processes",
+                "task_workflows",
+                "task_prs",
+                "work_placements",
+            ] {
+                assert_eq!(
+                    conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    0,
+                    "{table}"
+                );
+            }
+        };
+        empty_execution();
+        let project_owner = PlanningChanges::Project(&project);
+        let export = target
+            .prepare_planning_export(project_owner, "team", "initiative")
+            .unwrap();
+        assert!(target
+            .attempt_planning_export(project_owner, &export.input, false)
+            .unwrap());
+        // A mapped receipt remains discoverable until accepted readback.
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET external_project_id=?2 WHERE id=?1",
+                params![project.as_str(), export.id],
+            )
+            .unwrap();
+        assert!(target.planning_export_pending(project_owner).unwrap());
+        let task_owner = PlanningChanges::Task(&task);
+        let creation = target
+            .prepare_planning_export(task_owner, "team", "initiative")
+            .unwrap();
+        assert_eq!(creation.parent, project.as_str());
+        assert_eq!(creation.input["title"], "Original");
+        assert_eq!(
+            target
+                .prepare_planning_export(task_owner, "ignored", "ignored")
+                .unwrap(),
+            creation
+        );
+        empty_execution();
+    }
+
+    #[test]
     fn peer_creation_readback_reconciles_attempt_after_mapping_only_import() {
         use super::super::planning_changes::PlanningChanges;
 
@@ -2097,6 +2172,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(error().as_deref(), Some("lost attachment response"));
+        assert!(target.planning_export_pending(owner).unwrap());
         let mut observed: crate::pm::PmProject =
             serde_json::from_value(creation.model.clone()).unwrap();
         observed.id = creation.id.clone();
@@ -2112,6 +2188,9 @@ mod tests {
             .peer_projection_conflicts("/target")
             .unwrap()
             .is_empty());
+        assert_eq!(error(), None);
+        assert!(!target.planning_export_pending(owner).unwrap());
+        target.planning_export_error(owner, "late timeout").unwrap();
         assert_eq!(error(), None);
         let retained: (bool, String) = target
             .conn
@@ -4692,6 +4771,22 @@ mod tests {
         assert_eq!(migrated.input, receipt["input"]);
         assert!(attempted && linked);
         assert_eq!(error, "lost attachment");
+        assert!(!conn
+            .query_row(
+                "SELECT export_acknowledged FROM projects WHERE id=?1",
+                [created.as_str()],
+                |r| r.get::<_, bool>(0),
+            )
+            .unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM planning_exports WHERE kind='project' AND id=?1",
+                [created.as_str()],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
         assert_eq!(
             conn.query_row(
                 "SELECT settled_at FROM project_transitions WHERE successor_id=?1",

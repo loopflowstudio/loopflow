@@ -582,7 +582,6 @@ fn project_accepted_planning(
         )?;
         super::project_content::capture_content(tx, &id)?;
         super::planning_peers::clear_observation(tx)?;
-        super::durable::inherit_project_placement(tx, &id)?;
     }
     for item in items {
         if let Some(body) = tx.query_row("SELECT body FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND needs_refresh=0",

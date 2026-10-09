@@ -94,12 +94,12 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context: complete launch source
-`.lf/tmp/context/fe859f5700adfc6678decd4f413807a6bc43019000c8bd633e9530b1f6625d13.md`
-was inspected, including its manifest and repeated historical Task bodies/steers.
-`lf context --skill implement` reports 32,671 Work-seed tokens (16,671 over).
-Authored notes fit; curation cannot fix this generated-input producer gap.
-Historical inputs and budget limits remain unchanged.
+October 9 context: launch source
+`.lf/tmp/context/ffb729ed3034d0af4b88cfb44e2e3486066786ba94b5cb6d531097c16db6f902.md`
+contains the Task brief, full changed-file manifest and iteration direction.
+`lf context --skill compress` reports about 32,670 stored Work-seed tokens
+(16,670 over the 16,000 limit). Authored notes fit; shrinking them cannot fix this
+generated-input producer gap. Historical inputs and limits remain unchanged.
 
 ## Explicit repository association — October 9
 

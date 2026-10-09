@@ -1578,6 +1578,15 @@ fn insert_and_project(
         }))?;
         super::project_content::save_content(conn, &ProjectId::from_raw(&object.id), &content)?;
     }
+    if object.kind == PlanningKind::Task {
+        project_disposition(
+            conn,
+            &TaskId::from_raw(&object.id),
+            winners["disposition"],
+            snapshot,
+            &previous["disposition"],
+        )?;
+    }
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     // Projection may add receipts captured on a peer. Reconcile those too
     // against the same accepted readback, never acknowledging a later local save.
@@ -1592,20 +1601,6 @@ fn insert_and_project(
         }
     }
     require_repository(conn, object, repo)?;
-    if object.kind == PlanningKind::Task && winners["disposition"].1.linear.is_none() {
-        // An accepted authored status supersedes earlier completion intent even
-        // when completion and reopening arrived together (open -> open). Use
-        // the winning mutation, not value changes or retained losing history.
-        // Local saves are already observed; replay cannot cancel a newer request.
-        // Linear status changes use put_item above: a new entity revision alone
-        // (for example, a title edit) must not supersede completion intent.
-        conn.execute(
-            "UPDATE tasks SET completion_request=NULL,completion_error=NULL
-             WHERE id=?1 AND completion_request IS NOT NULL AND NOT EXISTS (
-                 SELECT 1 FROM planning_peer_observed WHERE object_id=?1 AND id=?2)",
-            params![object.id, winners["disposition"].0],
-        )?;
-    }
     let mut observed = projected;
     observed.extend(
         changes
@@ -2158,6 +2153,51 @@ fn delivery_fields(
     Ok(fields)
 }
 
+// Disposition has two independent consequences: newly accepted authored intent
+// supersedes a local completion request; changed values may need provider delivery.
+// Both stay inside the object's projection savepoint and precede its observation.
+fn project_disposition(
+    conn: &Connection,
+    task: &TaskId,
+    (id, change): (&str, &PlanningMutation),
+    snapshot: &PlanningSnapshot,
+    previous: &Value,
+) -> StoreResult<()> {
+    if let Some(observation) = &change.linear {
+        // put_item already handles actual provider status changes. An unrelated
+        // entity revision (for example, a title edit) cannot supersede intent.
+        return super::task_state_delivery::adopt_peer_in(
+            conn,
+            task,
+            &serde_json::from_value(observation.body.clone())?,
+        );
+    }
+    // Offline complete/reopen can arrive as open -> open. Compare mutation
+    // identity, not values; replay and local saves cannot cancel newer requests.
+    conn.execute(
+        "UPDATE tasks SET completion_request=NULL,completion_error=NULL
+         WHERE id=?1 AND completion_request IS NOT NULL AND NOT EXISTS (
+             SELECT 1 FROM planning_peer_observed WHERE object_id=?1 AND id=?2)",
+        params![task.as_str(), id],
+    )?;
+    if previous != &change.value {
+        // Cached states such as started/backlog are not lifecycle decisions.
+        if let Some(target @ ("completed" | "unstarted" | "canceled")) =
+            change.value["planning_state"].as_str()
+        {
+            super::task_state_delivery::record_in(
+                conn,
+                task,
+                &format!("peer:{id}:disposition"),
+                target,
+                None,
+                linear_predecessor(snapshot, change).as_ref(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn project_delivery_fields(
     conn: &Connection,
     object: &PlanningObject,
@@ -2173,31 +2213,6 @@ fn project_delivery_fields(
         _ => return Ok(()),
     };
     for &(id, change) in winners.values() {
-        if object.kind == PlanningKind::Task && change.field == "disposition" {
-            if let Some(observation) = &change.linear {
-                super::task_state_delivery::adopt_peer_in(
-                    conn,
-                    &task,
-                    &serde_json::from_value(observation.body.clone())?,
-                )?;
-            } else if previous.get("disposition") != Some(&change.value) {
-                // Only lifecycle decisions have state delivery. Cached states such
-                // as started/backlog remain planning, not invented local decisions.
-                if let Some(target @ ("completed" | "unstarted" | "canceled")) =
-                    change.value["planning_state"].as_str()
-                {
-                    super::task_state_delivery::record_in(
-                        conn,
-                        &task,
-                        &format!("peer:{id}:disposition"),
-                        target,
-                        None,
-                        linear_predecessor(snapshot, change).as_ref(),
-                    )?;
-                }
-            }
-            continue;
-        }
         let Some(field) = delivery_field(object.kind, &change.field) else {
             continue;
         };

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use loopflow::engine::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
 use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
+use loopflow::ops::pm::TaskCommentAuthor;
 use loopflow::store::{
     open_ephemeral_store, sqlite::SqliteStore, PeerPlanningStatus, StorageConfig,
 };
@@ -268,8 +269,6 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let remote = Path::new(binding.endpoint());
     let disconnected = remote.with_extension("disconnected");
     fs::rename(remote, &disconnected).unwrap();
-    let worker_conn = Connection::open(right.path().join("loopflow.db")).unwrap();
-    worker_conn.busy_timeout(Duration::from_secs(5)).unwrap();
     run(
         &source,
         left.path(),
@@ -397,60 +396,35 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     );
     assert_eq!(worker.list_tasks(None).unwrap().len(), 4);
     assert_eq!(source_store.list_tasks(None).unwrap().len(), 4);
-    for connection in [&conn, &worker_conn] {
-        let comments: i64 = connection
-            .query_row(
-                "SELECT count(*) FROM task_comments WHERE task_id=?1",
-                [fixture.task.id.as_str()],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            comments, 2,
-            "repeated exchange must not duplicate either comment"
-        );
-    }
-    let comments = |connection: &Connection| {
-        connection
-            .prepare(
-                "SELECT id,body,author,created_at FROM task_comments WHERE task_id=?1 ORDER BY id",
-            )
-            .unwrap()
-            .query_map([fixture.task.id.as_str()], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    };
-    let saved = comments(&conn);
-    assert_eq!(saved, comments(&worker_conn));
+    let saved = source_store
+        .task_comments(&fixture.task.id)
+        .unwrap()
+        .comments;
+    assert_eq!(
+        saved,
+        worker.task_comments(&fixture.task.id).unwrap().comments
+    );
+    assert_eq!(
+        saved.len(),
+        2,
+        "repeated exchange must not duplicate comments"
+    );
+    assert!(saved.iter().all(|comment| comment.created_at.is_some()));
     let mut authors: Vec<_> = saved
         .iter()
-        .map(|(_, _, author, _)| {
-            serde_json::from_str::<serde_json::Value>(author).unwrap()["name"]
-                .as_str()
-                .unwrap()
-                .to_owned()
+        .map(|comment| match &comment.author {
+            TaskCommentAuthor::Person { name: Some(name) } => name.as_str(),
+            author => panic!("expected a named author, got {author:?}"),
         })
         .collect();
     authors.sort();
     assert_eq!(authors, ["Lee", "Maya"]);
-    let printed = command(&target, right.path())
-        .args(["planning", "status", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        printed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&printed.stderr)
-    );
-    let printed: serde_json::Value = serde_json::from_slice(&printed.stdout).unwrap();
+    let printed: serde_json::Value = serde_json::from_str(&run(
+        &target,
+        right.path(),
+        &["planning", "status", "--json"],
+    ))
+    .unwrap();
     assert_eq!(printed["destinations"][0]["publication_state"], "confirmed");
     assert!(printed["destinations"][0].get("endpoint").is_none());
 }

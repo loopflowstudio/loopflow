@@ -204,19 +204,17 @@ delivery. Failure logs: `/tmp/loo427-integrated-*.log`.
 lookup, admission and the later historical-branch repository check. Its focused
 13-test pass and stale missing-PR/retired-run assertion failures remain there.
 
-`37cd026a7` identified missing request coverage. The public foreground fixture
-reproduced retained failed end intent after imported completion
-(`/tmp/loo427-completion-counterexample.log`). Projection now supersedes requests
-using newly accepted local-authored disposition winners in its existing transaction.
-Requests stay local; execution remains untouched.
+`e79451d05:scratch/findings.md`, this heading, preserves the public completion
+counterexample, title-only Linear refresh regression and failed fixture compile
+(`/tmp/loo427-completion-{counterexample,refresh,first}.log`). The two-Home fixture
+uses public commands, file-only Git, work-watch and an owned fake provider. It
+covers offline same-value reopening, stale/replayed facts, newer failed requests
+and ordinary end retry while retaining Workflow/PR/placement and draft bytes.
 
-Review reproduced a title-only Linear revision wrongly clearing intent in the first
-repair (`/tmp/loo427-completion-refresh.log`); Linear now retains `put_item`'s
-status-change rule. The first fixture compile failed on an untyped empty vector;
-it now asserts emptiness (`/tmp/loo427-completion-first.log`).
-
-Public commands, file-only Git, two isolated Homes, work-watch and an owned fake
-provider exercise offline same-value reopening, stale/replayed facts, newer failed
-requests and ordinary end retry. Workflow/PR/placement and draft bytes survive.
-Store cases cover receipt rollback and provider refresh versus status changes.
-The plan retains mixed-provider, delegation, admission, remote and native limits.
+Disposition projection now keeps request supersession beside its delivery receipt,
+separate from generic scalar delivery. Mutation observation governs request
+supersession; changed values govern delivery. Both roll back together on receipt
+failure. Linear still uses its status-change owner, not entity revisions.
+Foreground comment checks use the common typed thread reader instead of a second
+SQL/JSON decoder, retaining exact IDs, bodies, dates, named authors and deduplication.
+Mixed-provider, delegation, admission, remote and native limits remain in the plan.

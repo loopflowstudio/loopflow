@@ -234,8 +234,10 @@ not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition
 
 Receipt import/lookup, accepted-frontier and per-origin deletion details:
 `a44ddcb5f`, this section. Import creates no local requests or execution authority.
-Git disposition projection no longer leaves old completion intent untouched;
-accepted winners supersede it without replacing the common intent owner.
+Git disposition projection keeps request supersession and state delivery together,
+removing the separate completion-update tail and disposition branch in scalar
+delivery. Accepted mutations supersede intent; value changes drive delivery.
+Both stay in the existing projection savepoint, without a new lifecycle owner.
 
 Preview dispatch shares Task/location resolution, agent-input classification and
 writer validation without preparation, locks or recovery. Compression details and
@@ -365,13 +367,11 @@ complete/reopen returning to the same open value; replay must preserve a newer
 request. Linear's existing status-change owner stays authoritative: review reproduced
 a title-only provider refresh wrongly clearing intent in the first repair.
 
-The fixture covers public complete/reopen, offline recovery, stale completion,
-replayed reopening, same-value causal reopening and ordinary retry at retained end.
-It retains Workflow/PR/placement, draft bytes and an owned fake provider through
-exchange. Explicit `task complete` authors a new intention after reopening; an
-end retry does not. Receipt failure rollback and provider-refresh/status cases have
-focused store coverage. Mixed Linear/Git remains disabled; native and configured
-provider proof remain. Failed attempts: [findings](findings.md#task-completion-integration--october-9).
+Explicit `task complete` authors new intent after reopening; an end retry does not.
+[Findings](findings.md#task-completion-integration--october-9) retain public-command,
+provider-status and rollback coverage, including unchanged execution/draft/provider
+lifetime and failed attempts. Mixed Linear/Git remains disabled; native and
+configured-provider proof remain.
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -528,4 +528,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test --no-run` build + `scripts/test_network.py` focused completion/exchange, provider-status and rollback tests PASS (3); `cargo fmt`, Clippy all-targets and diff PASS; broader suites/migrations gate/CI, native demo.
+Check: `cargo test -p loopflow --lib --test planning_foreground_tests --no-run` + `scripts/test_network.py` focused completion/exchange, provider-status, rollback and non-lifecycle tests PASS (5); `cargo fmt`, Clippy all-targets and diff PASS; broader suites/migrations gate/CI, native demo.

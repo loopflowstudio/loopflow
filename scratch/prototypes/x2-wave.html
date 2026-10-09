@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow: the page as a goal</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+:root { --wine:#9B1A4A; --burgundy:#722f37; --ink:#1a1a1a; --soft:#555; --rule:#e4e3df; --paper:#f8f5ef;
+  --serif:'Instrument Serif',Georgia,serif; --sans:'Inter',-apple-system,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace; }
+* { box-sizing:border-box; } html { -webkit-text-size-adjust:100%; }
+body { margin:0; font:16px/1.6 var(--sans); color:var(--ink); background:#fff; }
+a { color:inherit; } img { max-width:100%; height:auto; display:block; }
+.bar { display:flex; justify-content:space-between; align-items:center; padding:18px 16px; max-width:1180px; margin:0 auto; font-size:14px; }
+.bar b { font-weight:600; } .bar nav a { margin-left:22px; text-decoration:none; color:var(--soft); }
+.btn { display:inline-block; background:var(--wine); color:#fff; padding:12px 20px; border-radius:3px; text-decoration:none; font-weight:500; font-size:14px; }
+.mono { font:500 11px/1.6 var(--mono); text-transform:uppercase; letter-spacing:.1em; color:var(--soft); }
+
+body { background:var(--paper); }
+.app { max-width:1040px; margin:26px auto 80px; padding:0 16px; }
+.win { background:#fdfbf7; border:1px solid #d9d4cc; border-radius:12px; box-shadow:0 24px 60px rgba(60,30,20,.12); display:grid; grid-template-columns:220px 1fr; overflow:hidden; }
+.side { background:#f1ece4; padding:22px 18px; border-right:1px solid #e2dcd2; font-size:13px; }
+.side h4 { font:400 20px var(--serif); color:var(--burgundy); margin:0 0 16px; }
+.side p { margin:0 0 4px; color:var(--soft); } .side .on { color:var(--ink); font-weight:600; border-left:2px solid var(--wine); padding-left:8px; margin-left:-10px; }
+.side ul { list-style:none; margin:0 0 14px; padding:0 0 0 12px; } .side li { padding:3px 0; color:var(--soft); }
+.main { padding:34px 38px 38px; min-width:0; }
+h1 { font:400 clamp(32px,4vw,52px)/1.05 var(--serif); letter-spacing:-.02em; color:var(--burgundy); margin:6px 0 14px; }
+.obj { font:17px/1.6 var(--serif); color:#3a3532; max-width:60ch; margin:0 0 26px; }
+.krs { list-style:none; padding:0; margin:8px 0 28px; } .krs li { padding:5px 0 5px 26px; position:relative; font-size:14.5px; }
+.krs li::before { content:""; position:absolute; left:2px; top:10px; width:12px; height:12px; border:1.5px solid #b9b1a6; border-radius:50%; }
+.tasks { border:1px solid var(--rule); border-radius:8px; background:#fff; margin:8px 0 0; padding:0; list-style:none; counter-reset:t; }
+.tasks li { counter-increment:t; display:grid; grid-template-columns:28px 1fr auto; gap:10px; align-items:baseline; padding:11px 14px; border-bottom:1px solid var(--rule); font-size:14.5px; }
+.tasks li:last-child { border-bottom:0; } .tasks li::before { content:counter(t); font:12px var(--mono); color:var(--soft); }
+.tasks small { display:block; color:var(--soft); font-size:13px; }
+.who { font:500 10.5px var(--mono); text-transform:uppercase; letter-spacing:.08em; padding:3px 8px; border-radius:20px; background:#ece8e0; color:#5a524a; white-space:nowrap; }
+.who.you { background:#f6dfe7; color:var(--wine); }
+.foot { display:flex; gap:16px 24px; align-items:center; flex-wrap:wrap; margin-top:30px; } .foot p { margin:0; font-size:13px; color:var(--soft); max-width:46ch; }
+.note { font:12px/1.6 var(--mono); color:var(--soft); margin:18px 2px 0; }
+@media (max-width:720px) { .win { grid-template-columns:1fr; } .side { display:none; } .main { padding:24px 18px; } .tasks li { grid-template-columns:20px 1fr; } .who { grid-column:2; justify-self:start; } }
+
+</style></head><body>
+<header class="bar"><b>loopflow</b><nav><a href="#">CLI</a><a href="#">Docs</a><a href="#">Company</a></nav></header>
+<main class="app">
+<div class="win">
+  <aside class="side">
+    <h4>your app</h4>
+    <p class="on">ship it</p>
+    <ul><li>Design the sign-up</li><li>Build it</li><li>Demo</li></ul>
+    <p>later</p>
+    <ul><li>Payments</li><li>A mobile layout</li></ul>
+  </aside>
+  <section class="main">
+    <p class="mono">Goal</p>
+    <h1>Build something you can actually ship to users.</h1>
+    <p class="obj">We’ll get you building whatever software you want like a software engineer, by guiding you through workflows that get the most out of you and ensure high quality software, not slop.</p>
+    <p class="mono">Key results</p>
+    <ul class="krs">
+      <li>People you have never met use it.</li>
+      <li>You can change one thing without breaking three others.</li>
+      <li>You know what is in it, and why.</li>
+    </ul>
+    <p class="mono">Tasks · how Loopflow gets you there</p>
+    <ol class="tasks">
+      <li><div>Give every change its own copy of the code<small>An idea that goes wrong never touches what works.</small></div><span class="who">Loopflow</span></li>
+      <li><div>Agree on the design before anything is built<small>You talk it through with your agent first.</small></div><span class="who you">You</span></li>
+      <li><div>Build it, test it, open a pull request<small>Claude Code, Codex, or OpenCode, on your account.</small></div><span class="who">Your agent</span></li>
+      <li><div>Look at it running before it ships<small>The work stops and waits for you here.</small></div><span class="who you">You</span></li>
+      <li><div>Merge it when the checks pass</div><span class="who">Loopflow</span></li>
+      <li><div>Keep every conversation with the work it was about<small>Leave, come back, pick it up.</small></div><span class="who">Loopflow</span></li>
+    </ol>
+    <div class="foot"><a class="btn" href="#">Download for Mac</a><p>You need a coding agent and a GitHub account. Free and open source; the agent has its own cost.</p></div>
+  </section>
+</div>
+<p class="note">Prototype. The page is laid out as a Loopflow goal with its key results and tasks. It is a drawing, not a capture of the app.</p>
+</main>
+</body></html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loopflow: watch</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+:root { --wine:#9B1A4A; --burgundy:#722f37; --ink:#1a1a1a; --soft:#555; --rule:#e4e3df; --paper:#f8f5ef;
+  --serif:'Instrument Serif',Georgia,serif; --sans:'Inter',-apple-system,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace; }
+* { box-sizing:border-box; } html { -webkit-text-size-adjust:100%; }
+body { margin:0; font:16px/1.6 var(--sans); color:var(--ink); background:#fff; }
+a { color:inherit; } img { max-width:100%; height:auto; display:block; }
+.bar { display:flex; justify-content:space-between; align-items:center; padding:18px 16px; max-width:1180px; margin:0 auto; font-size:14px; }
+.bar b { font-weight:600; } .bar nav a { margin-left:22px; text-decoration:none; color:var(--soft); }
+.btn { display:inline-block; background:var(--wine); color:#fff; padding:12px 20px; border-radius:3px; text-decoration:none; font-weight:500; font-size:14px; }
+.mono { font:500 11px/1.6 var(--mono); text-transform:uppercase; letter-spacing:.1em; color:var(--soft); }
+
+body { background:#17120f; color:#f3ede4; } .bar nav a { color:#b9ae9f; }
+.stage { max-width:1320px; margin:0 auto; padding:6px 16px 40px; }
+.top { display:flex; justify-content:space-between; align-items:end; gap:20px 40px; flex-wrap:wrap; margin:22px 0 26px; }
+h1 { font:400 clamp(34px,4.6vw,64px)/1.02 var(--serif); letter-spacing:-.02em; margin:0; max-width:14ch; }
+.top .right { max-width:360px; font-size:14px; color:#b9ae9f; } .top .right p { margin:0 0 14px; }
+.frame { border-radius:12px; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.6); border:1px solid #3a2f28; position:relative; }
+.beats { display:grid; grid-template-columns:repeat(3,1fr); gap:0; margin:0; padding:0; list-style:none; }
+.beats li { padding:16px 18px 0 0; border-top:2px solid #3a2f28; margin-top:22px; animation:beat 9s infinite; }
+.beats li:nth-child(2) { animation-delay:3s; } .beats li:nth-child(3) { animation-delay:6s; }
+@keyframes beat { 0%,33% { border-top-color:#e2527f; color:#fff; } 34%,100% { border-top-color:#3a2f28; color:#8f8477; } }
+.beats b { display:block; font:400 24px/1.15 var(--serif); margin:6px 0 4px; } .beats span { font-size:14px; }
+.beats .mono { color:inherit; }
+.note { font:12px/1.6 var(--mono); color:#8f8477; margin:18px 0 0; }
+@media (max-width:720px) { .beats { grid-template-columns:1fr; } .beats li { margin-top:14px; } }
+@media (prefers-reduced-motion:reduce) { .beats li { animation:none; color:#f3ede4; } }
+
+</style></head><body>
+<header class="bar"><b>loopflow</b><nav><a href="#">CLI</a><a href="#">Docs</a><a href="#">Company</a></nav></header>
+<main class="stage">
+<div class="top">
+  <h1>Build something you can actually ship to users.</h1>
+  <div class="right">
+    <p>Loopflow for Mac. Bring a coding agent (Claude Code, Codex, or OpenCode) and a GitHub account.</p>
+    <a class="btn" href="#">Download for Mac</a>
+    <p class="note" style="margin-top:12px">Free and open source. Your coding agent has its own cost.</p>
+  </div>
+</div>
+<div class="frame"><img src="../../website/static/wave-surface.png" width="2880" height="1800" alt="Loopflow for Mac showing a goal and its tasks"></div>
+<ol class="beats">
+  <li><span class="mono">0:00</span><b>One conversation</b><span>Open your repository and start talking to your agent.</span></li>
+  <li><span class="mono">0:03</span><b>The work takes shape</b><span>Goals, and the tasks under each one, with what is done and what is waiting on you.</span></li>
+  <li><span class="mono">0:06</span><b>Many at once</b><span>Several tasks side by side, each one designed, built, checked and shown to you before it ships.</span></li>
+</ol>
+<p class="note">Prototype. The frame is the one real capture; the video it stands in for is not recorded. The three captions are its three stages.</p>
+</main>
+</body></html>

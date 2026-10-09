@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Loopflow — The CLI for agent workflows</title>
+    <link rel="canonical" href="https://localhost:5001/cli">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.7/dist/htmx.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/fasthtml-js@1.0.12/fasthtml.js"></script><script src="https://cdn.jsdelivr.net/gh/answerdotai/surreal@main/surreal.js"></script><script src="https://cdn.jsdelivr.net/gh/gnat/css-scope-inline@main/script.js"></script>    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@latest/css/pico.min.css">
+    <style>:root { --pico-font-size: 100%; }</style>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="../../website/static/logo.svg" type="image/svg+xml">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+    <link rel="stylesheet" href="../../website/static/style.css?v=338b76b3cc89">
+  <style>.home-page .reading.wide{max-width:none}.home-page .reading.wide .plain,.home-page .reading.wide .more{max-width:900px}.home-page .closing .actions{margin-bottom:14px}</style></head>
+  <body>
+<a href="#main-content" class="skip-link">Skip to main content</a>    <div class="home-page">
+      <header>
+<a href="/" class="brand"><img src="../../website/static/logo.svg" alt="">loopflow</a>        <nav aria-label="Main navigation">
+<a href="/#mac" class="optional">For you</a><a href="/cli" aria-current="page">CLI</a><a href="/docs">Docs</a><details><summary>Company</summary>            <div class="menu">
+<a href="/studio">Loopflow Studio</a><a href="/etude">Etude</a><a href="/fantasia">Fantasia</a><a href="/about">About</a>            </div>
+</details><a href="https://github.com/loopflowstudio/loopflow" class="optional">GitHub ↗</a><a href="/#start" class="button solid">Install</a>        </nav>
+      </header>
+<main id="main-content" class="home">
+<section class="home-hero">
+  <h1 aria-label="Loopflow is where you design, build, review and ship software with agents.">
+  <span aria-hidden="true">Loopflow is where you <span class="rotating"><span>design</span><span>build</span><span>review</span><span>ship</span></span> software with agents.</span></h1>
+</section>
+<section id="mac" class="reading wide">
+  <div class="window"><img src="../../website/static/wave-surface.png" width="2880" height="1800" alt="Loopflow for Mac showing a goal, its key results, and ten tasks with their status"></div>
+  <ul class="plain">
+<li><b>A terminal</b> At its most basic, Loopflow for Mac is a terminal. Open a repository and start a Session with Claude Code, Codex, or OpenCode, the same way every time.</li>
+<li><b>Skills</b> Start a Session from a Skill instead of an empty prompt, so you stop retyping how you like work done. Pick one when you open the Session.</li>
+<li><b>Sessions</b> Every conversation is kept, whichever agent ran it. Close the window and it is still there when you come back.</li>
+<li><b>Waves and Tasks</b> The sidebar is your work, not a list of chats: Waves (long-lived streams), the Tasks under each (concrete outcomes, i.e. PRs), and the Sessions under each Task.</li>
+<li><b>One Task, one copy of the code</b> Each Task works in its own copy, on its own branch, toward one pull request, so many agents can work without colliding.</li>
+<li><b>Workflows</b> A Task’s header shows the stages it goes through to become a shipped and validated PR: where it is now, and where it waits for you.</li>
+<li><b>Waiting on you</b> A Task that needs you is marked, so you look where you are needed and leave the rest running.</li>
+<li><b>Side by side</b> Split the window to follow several Sessions, or several Tasks, at once.</li>
+  </ul>
+  <p class="more"><a href="/cli">Underneath, it is all <code>lf</code> ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>
+</section>
+<section id="yours" class="reading">
+  <h2>Build something you can actually ship to users.</h2>
+  <ul class="plain">
+<li><b>What you need</b> A coding agent (Claude Code, Codex, or OpenCode) and a GitHub account.</li>
+<li><b>What you get</b> We’ll get you building whatever software you want like a software engineer, by guiding you through workflows that get the most out of you and ensure high quality software, not slop.</li>
+<li><b>It is yours</b> Your code stays in your GitHub and on your Mac. Nothing is hosted, so there is nothing to move off later.</li>
+<li><b>Change whatever you want</b> Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.</li>
+  </ul>
+</section>
+<section id="start" class="reading closing">
+  <p class="eyebrow">Install</p>
+  <div class="actions"><a class="button solid" href="#">Download for Mac</a></div>
+  <p class="cost">Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on your own account and has its own cost.</p>
+</section>
+</main>      <footer>
+<span>Loopflow · An open-source software instrument.</span>        <div>
+<a href="/studio">Loopflow Studio</a><a href="/docs/getting-started">Get started ↗</a><a href="https://github.com/loopflowstudio/loopflow">Source ↗</a>        </div>
+      </footer>
+<script>
+document.querySelectorAll('[data-copy]').forEach(function (button) {
+  var label = button.textContent;
+  button.addEventListener('click', function () {
+    navigator.clipboard.writeText(button.dataset.copy).then(function () {
+      button.textContent = 'Copied';
+      setTimeout(function () { button.textContent = label; }, 1600);
+    });
+  });
+});
+</script>    </div>
+  </body>
+</html>

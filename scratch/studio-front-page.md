@@ -295,3 +295,22 @@ list and paragraph, and replaces the numbered claims with one plain list of
 five; the FAQ is cut to four. "Loopflow lets anyone craft software." is off
 the page. Left to settle: Tasks need a Linear workspace and the "You need"
 list does not say so; the video; a structural pass on both pages.
+
+## Main page: experiments (Oct 9)
+
+Jack Heart on the rebuilt `/`: "this isnt it. give me 3 more experimental
+directions". Mid-turn: "try harder to just make the \"product experience\"
+version of the \"architecture guide\" of the cli page".
+
+Prototypes in `scratch/prototypes/`:
+- `x4-product.html`: the twin of `/cli`. Rotating headline, the app where
+  `/cli` has the command block, the same concepts in the same order told as
+  what you see in the window, then Jack Heart's line and paragraph, download.
+- `x1-watch.html`: dark, almost wordless; the app fills the page with the
+  video's three stages as captions.
+- `x2-wave.html`: the page drawn as a Loopflow goal with key results and tasks.
+- `x3-letter.html`: a short letter from the studio, one narrow column.
+
+Not checked against the running app: the Skill picker on a new Session, the
+Task header showing its Workflow, the waiting mark, and splits across Tasks.
+These come from reading the source.

@@ -548,9 +548,10 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         assert result.returncode == 0, result.stderr
         return result.stdout
 
-    def acknowledged(table: str, key: str, identity: str) -> bool:
+    def acknowledged(kind: str, identity: str) -> bool:
         return db.execute(
-            f"SELECT export_acknowledged FROM {table} WHERE {key}=?", (identity,)
+            "SELECT export_acknowledged FROM planning_creations WHERE kind=? AND origin_id=?",
+            (kind, identity),
         ).fetchone() == (1,)
 
     def uncertain(kind: str, identity: str) -> bool:
@@ -589,13 +590,13 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         with server.lock:
             exports["project_visible"] = True
         _await(lambda: exports["link_writes"] == 1, "mapped Project bypassed attachment recovery")
-        assert not acknowledged("projects", "id", peer["project"])
+        assert not acknowledged("project", peer["project"])
         assert uncertain("project", peer["project"])
         run("project", "edit", peer["project"], "--summary", "Later peer summary")
         with server.lock:
             exports["project"]["initiatives"] = _page([{"id": exports["initiative"]}])
         _await(
-            lambda: acknowledged("projects", "id", peer["project"]),
+            lambda: acknowledged("project", peer["project"]),
             "attachment readback did not settle",
         )
         _await(lambda: exports["task_writes"] == 1, "unprepared peer Task was not exported")
@@ -608,7 +609,7 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
         with server.lock:
             exports["task_visible"] = True
         _await(
-            lambda: acknowledged("task_creation_intents", "task_id", peer["task"]),
+            lambda: acknowledged("task", peer["task"]),
             "mapped Task bypassed creation readback",
         )
         assert not uncertain("task", peer["task"])

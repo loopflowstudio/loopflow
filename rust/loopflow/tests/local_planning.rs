@@ -2721,9 +2721,18 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         .unwrap()
     };
     let before = revision();
-    conn.execute("UPDATE task_creation_intents SET export_attempted=1,export_error='Lost creation reply' WHERE task_id=?1", [id]).unwrap();
-    assert!(revision() > before);
-    conn.execute("UPDATE projects SET export_attempted=1,export_link_attempted=1,export_error='Lost attachment reply' WHERE id=?1", [project]).unwrap();
+    conn.execute(
+        "INSERT INTO planning_creations(kind,origin_id,task_id,export_error)
+        VALUES('task',?1,?1,'Discovery unavailable')",
+        [id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO planning_creations(kind,origin_id,project_id,export_error)
+        VALUES('project',?1,?1,'Discovery unavailable')",
+        [project],
+    )
+    .unwrap();
     conn.execute(
         "UPDATE task_changes SET attempted=1,error='Lost field reply' WHERE task_id=?1",
         [id],
@@ -2734,16 +2743,20 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
         [comments["comments"][0]["id"].as_str().unwrap()],
     )
     .unwrap();
+    assert!(revision() > before);
     let uncertain = status();
     assert!(uncertain["changes"]
         .as_array()
         .unwrap()
         .iter()
-        .all(|c| (c["state"] == "uncertain" || c["field"] == "comment") && c["error"].is_string()));
-    assert_eq!(
-        read_project()["changes"][0]["error"],
-        "Lost attachment reply"
-    );
+        .all(|c| if c["field"] == "creation" {
+            c["state"] == "pending" && c["error"] == "Discovery unavailable"
+        } else {
+            (c["state"] == "uncertain" || c["field"] == "comment") && c["error"].is_string()
+        }));
+    // Unprepared creation has no attempted receipt. The connected-provider
+    // fixture exercises real lost-response creation and attachment readback.
+    assert_eq!(read_project()["changes"][0]["state"], "pending");
     // Model provider confirmation and an observed losing field receipt; projection is read-only.
     conn.execute(
         "UPDATE tasks SET external_issue_id='fixture-issue' WHERE id=?1",

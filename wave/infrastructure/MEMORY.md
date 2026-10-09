@@ -624,21 +624,21 @@ Joining publishes nothing; imports remain unplaced. Malformed input aborts impor
 contradictions defer effects, never saves/acquisition. Retain baselines, uncertainty
 and losers. Readback settles effects, not mappings/errors or removal via creation.
 
-Complete lists alone settle order progress; primary-only moves retain exact input.
-Effect updates cannot promote losers. Independent provider facts retain separate
-savepoints, original ages/baselines and causal frontiers. Entity revisions cannot
-order relationships; scalar/list replay cannot clear freshness. Preserve revision
-floors, private histories/dependents and unknown pending on unreadable journals.
-Omission is not convergence. Desktop retains scoped receipts/holds and last-good
-readings. Mixed exchange stays disabled; sharing/recovery and composition remain.
-Prior proofs/limits: `b4a91632e`, this heading.
+Ordering, causal freshness, private-history holds and unknown-journal proofs:
+`9dfb95451`, this heading. Retain ages, baselines and losers; omission is not
+convergence. Desktop keeps last-good scoped status. Mixed exchange stays disabled;
+sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. Clearing a mapping makes retained Work a
-provider-creation candidate while leaving selectors and uncertain effects behind;
-the raw-SQL fixture proved no recovery. Scalar import also bypassed evidence's
-mapping check. One mapping check now precedes both paths. Association must preserve IDs, lookup,
-effects and execution. Plan/check result:
-`scratch/work-on-another-machine-name.md`.
+Legacy association remains unfinished. Clearing mappings creates new provider-creation
+candidates; issue-name fallback persists no association. Projection and cross-ID
+effect deferral share one derived query of retained mappings/creation inputs,
+including losers; nulling a rejected mapping cannot hide ownership. This grants
+no association.
+Effect origin is not projection ownership: common creation receipts now retain
+original UUIDs/models separately from local Work foreign keys. Correspondence,
+lookup and deterministic projection remain unfinished. The earlier 68-test pass
+proves refusal/preservation, not recovery. Preserve execution and private selection.
+Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

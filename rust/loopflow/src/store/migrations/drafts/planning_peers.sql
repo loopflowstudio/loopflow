@@ -20,6 +20,16 @@ CREATE TABLE planning_peer_changes (
 );
 CREATE INDEX planning_peer_changes_object ON planning_peer_changes(kind,object_id,field);
 CREATE INDEX planning_peer_changes_clock ON planning_peer_changes(clock);
+-- Projection and effect acquisition consult the same retained provider claims.
+-- Losing mappings and captured creation inputs still name their original object;
+-- this view neither associates Work IDs nor changes sharing selection.
+CREATE VIEW planning_peer_provider_claims AS
+SELECT kind,object_id,
+    CASE field WHEN 'creation' THEN json_extract(value,'$.export.id')
+        ELSE json_extract(value,'$') END AS provider_id
+FROM planning_peer_changes
+WHERE (kind='task' AND field IN ('external_issue_id','creation'))
+   OR (kind='project' AND field IN ('external_project_id','creation'));
 CREATE TABLE planning_peer_heads (
     id TEXT PRIMARY KEY REFERENCES planning_peer_changes(id),
     kind TEXT NOT NULL,
@@ -305,72 +315,97 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_planning_peer_imports_delete AFTER DELETE ON planning_peer_imports
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
--- Project creation is planning, not a local rotation or activation receipt.
-ALTER TABLE projects ADD COLUMN export_json TEXT CHECK(export_json IS NULL OR json_valid(export_json));
-ALTER TABLE projects ADD COLUMN export_attempted INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE projects ADD COLUMN export_link_attempted INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE projects ADD COLUMN export_error TEXT;
-ALTER TABLE projects ADD COLUMN export_acknowledged INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE task_creation_intents ADD COLUMN export_acknowledged INTEGER NOT NULL DEFAULT 0;
+-- Creation origin names the captured operation, not its local projection.
+-- Multiple origins may retain attempts against one local Work without rewriting
+-- their captured models, provider UUIDs, or private sharing membership.
+CREATE TABLE planning_creations (
+    kind TEXT NOT NULL CHECK(kind IN ('task','project')),
+    origin_id TEXT NOT NULL,
+    task_id TEXT REFERENCES tasks(id) ON DELETE RESTRICT,
+    project_id TEXT REFERENCES projects(id) ON DELETE RESTRICT,
+    export_json TEXT CHECK(export_json IS NULL OR json_valid(export_json)),
+    export_attempted INTEGER NOT NULL DEFAULT 0 CHECK(export_attempted IN (0,1)),
+    export_link_attempted INTEGER NOT NULL DEFAULT 0 CHECK(export_link_attempted IN (0,1)),
+    export_error TEXT,
+    export_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(export_acknowledged IN (0,1)),
+    PRIMARY KEY(kind,origin_id),
+    CHECK((kind='task' AND task_id IS NOT NULL AND project_id IS NULL AND export_link_attempted=0)
+       OR (kind='project' AND project_id IS NOT NULL AND task_id IS NULL)),
+    CHECK(export_attempted=0 OR export_json IS NOT NULL),
+    CHECK(export_link_attempted=0 OR export_attempted=1),
+    CHECK(export_acknowledged=0 OR export_attempted=1)
+);
+CREATE INDEX planning_creations_task ON planning_creations(task_id);
+CREATE INDEX planning_creations_project ON planning_creations(project_id);
 
--- One pending-creation reader for foreground acquisition and presentation.
--- A mapping is not readback. Unprepared peer plans need no local transition.
-CREATE VIEW planning_exports AS
-SELECT 'project' AS kind,p.id,w.repo,
-    COALESCE(json_extract(p.export_json,'$.input'),json_object('name',p.project_name)) AS input,
-    p.export_attempted OR p.export_link_attempted AS attempted,p.export_error AS error
-FROM projects p JOIN waves w ON w.id=p.wave_id
-WHERE p.external_project_id IS NULL OR (p.export_json IS NOT NULL AND p.export_acknowledged=0)
-UNION ALL
-SELECT 'task',t.id,w.repo,
-    COALESCE(json_extract(c.export_json,'$.input'),json_object('title',t.issue_title,'description',t.issue_description)),
-    COALESCE(c.export_attempted,0),c.export_error
-FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-LEFT JOIN task_creation_intents c ON c.task_id=t.id
-WHERE (t.external_issue_id IS NULL OR (c.export_json IS NOT NULL AND c.export_acknowledged=0))
-AND (t.planning_deleted_at IS NULL OR c.export_attempted=1);
-UPDATE projects SET (export_json,export_attempted,export_link_attempted,export_error)=(
-    SELECT export_json,export_attempted,export_link_attempted,export_error FROM project_transitions c
-    WHERE c.successor_id=projects.id AND c.wave_id=projects.wave_id)
-WHERE EXISTS(SELECT 1 FROM project_transitions c WHERE c.successor_id=projects.id AND c.wave_id=projects.wave_id AND c.export_json IS NOT NULL);
+-- Migrate the released owners directly into the final representation.
+INSERT INTO planning_creations(kind,origin_id,task_id,export_json,export_attempted,export_error)
+SELECT 'task',c.task_id,c.task_id,
+    json_remove(json_set(c.export_json,'$.parent',(SELECT p.id FROM projects p WHERE
+        p.id=json_extract(c.export_json,'$.model.project_id') OR p.external_project_id=json_extract(c.export_json,'$.model.project_id')),
+        '$.captured',json((SELECT json_group_array(id) FROM task_changes WHERE task_id=c.task_id
+            AND seq<=json_extract(c.export_json,'$.through')))),'$.through'),
+    c.export_attempted,c.export_error
+FROM task_creation_intents c WHERE c.export_json IS NOT NULL OR c.export_error IS NOT NULL;
+INSERT INTO planning_creations(kind,origin_id,project_id,export_json,export_attempted,export_link_attempted,export_error)
+SELECT 'project',p.id,p.id,
+    json_remove(json_set(c.export_json,'$.parent',p.wave_id,'$.captured',json((
+        SELECT json_group_array(id) FROM project_changes WHERE project_id=p.id
+        AND seq<=json_extract(c.export_json,'$.through')))),'$.through'),
+    c.export_attempted,c.export_link_attempted,c.export_error
+FROM project_transitions c JOIN projects p ON p.id=c.successor_id AND p.wave_id=c.wave_id
+WHERE c.export_json IS NOT NULL OR c.export_error IS NOT NULL;
+ALTER TABLE task_creation_intents DROP COLUMN export_json;
+ALTER TABLE task_creation_intents DROP COLUMN export_attempted;
+ALTER TABLE task_creation_intents DROP COLUMN export_error;
 ALTER TABLE project_transitions DROP COLUMN export_json;
 ALTER TABLE project_transitions DROP COLUMN export_attempted;
 ALTER TABLE project_transitions DROP COLUMN export_link_attempted;
 ALTER TABLE project_transitions DROP COLUMN export_error;
 
--- Receipts are prepared by UPDATE after their planning row exists. Capture that
--- preparation and later attempts; import suppresses echo and migration seeds below.
-UPDATE task_creation_intents SET export_json=json_remove(json_set(export_json,'$.parent',(SELECT p.id FROM projects p WHERE p.id=json_extract(task_creation_intents.export_json,'$.model.project_id') OR p.external_project_id=json_extract(task_creation_intents.export_json,'$.model.project_id')),'$.captured',json((
-    SELECT json_group_array(id) FROM task_changes WHERE task_id=task_creation_intents.task_id
-    AND seq<=json_extract(task_creation_intents.export_json,'$.through')))),'$.through')
-WHERE export_json IS NOT NULL;
-CREATE TRIGGER peer_task_creation_update AFTER UPDATE ON task_creation_intents
-WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.export_json IS NOT OLD.export_json OR NEW.export_attempted IS NOT OLD.export_attempted OR NEW.export_error IS NOT OLD.export_error OR NEW.export_acknowledged IS NOT OLD.export_acknowledged)
+-- One pending-creation reader for foreground delivery and presentation.
+-- Keep each origin visible; a mapping is not acknowledgement.
+CREATE VIEW planning_exports AS
+SELECT 'project' AS kind,p.id,COALESCE(c.origin_id,p.id) AS origin_id,w.repo,
+    COALESCE(json_extract(c.export_json,'$.input'),json_object('name',p.project_name)) AS input,
+    COALESCE(c.export_attempted OR c.export_link_attempted,0) AS attempted,c.export_error AS error
+FROM projects p JOIN waves w ON w.id=p.wave_id
+LEFT JOIN planning_creations c ON c.project_id=p.id
+WHERE (c.export_json IS NULL AND p.external_project_id IS NULL) OR (c.export_json IS NOT NULL AND c.export_acknowledged=0)
+UNION ALL
+SELECT 'task',t.id,COALESCE(c.origin_id,t.id),w.repo,
+    COALESCE(json_extract(c.export_json,'$.input'),json_object('title',t.issue_title,'description',t.issue_description)),
+    COALESCE(c.export_attempted,0),c.export_error
+FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
+LEFT JOIN planning_creations c ON c.task_id=t.id
+WHERE ((c.export_json IS NULL AND t.external_issue_id IS NULL) OR (c.export_json IS NOT NULL AND c.export_acknowledged=0))
+AND (t.planning_deleted_at IS NULL OR c.export_attempted=1);
+
+CREATE TRIGGER peer_creation_insert AFTER INSERT ON planning_creations
+WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json('false'),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),
+    SELECT lower(hex(randomblob(16))),NEW.kind,NEW.origin_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.task_id AND field='creation');
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind=NEW.kind AND object_id=NEW.origin_id AND field='creation');
 END;
-INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-SELECT lower(hex(randomblob(16))),'task',NEW.task_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json('false'),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),0,NULL,'[]'
-FROM task_creation_intents AS NEW WHERE NEW.export_json IS NOT NULL;
-
-UPDATE projects SET export_json=json_remove(json_set(export_json,'$.parent',wave_id,'$.captured',json((
-    SELECT json_group_array(id) FROM project_changes WHERE project_id=projects.id
-    AND seq<=json_extract(projects.export_json,'$.through')))),'$.through')
-WHERE export_json IS NOT NULL;
-CREATE TRIGGER peer_project_creation_update AFTER UPDATE ON projects
+CREATE TRIGGER peer_creation_update AFTER UPDATE ON planning_creations
 WHEN NEW.export_json IS NOT NULL AND (SELECT importing FROM planning_peer_context)=0 AND (NEW.export_json IS NOT OLD.export_json OR NEW.export_attempted IS NOT OLD.export_attempted OR NEW.export_error IS NOT OLD.export_error OR NEW.export_link_attempted IS NOT OLD.export_link_attempted OR NEW.export_acknowledged IS NOT OLD.export_acknowledged)
 BEGIN
     INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-    SELECT lower(hex(randomblob(16))),'project',NEW.id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),
+    SELECT lower(hex(randomblob(16))),NEW.kind,NEW.origin_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),NULL,
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field='creation');
+        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind=NEW.kind AND object_id=NEW.origin_id AND field='creation');
 END;
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
-SELECT lower(hex(randomblob(16))),'project',NEW.id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),0,NULL,'[]'
-FROM projects AS NEW WHERE NEW.export_json IS NOT NULL;
+SELECT lower(hex(randomblob(16))),NEW.kind,NEW.origin_id,'creation',json_object('export',json(NEW.export_json),'attempted',json(CASE WHEN NEW.export_attempted THEN 'true' ELSE 'false' END),'link_attempted',json(CASE WHEN NEW.export_link_attempted THEN 'true' ELSE 'false' END),'error',NEW.export_error,'acknowledged',json(CASE WHEN NEW.export_acknowledged THEN 'true' ELSE 'false' END)),0,NULL,'[]'
+FROM planning_creations AS NEW WHERE NEW.export_json IS NOT NULL;
+CREATE TRIGGER store_revision_planning_creations_insert AFTER INSERT ON planning_creations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_planning_creations_update AFTER UPDATE ON planning_creations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_planning_creations_delete AFTER DELETE ON planning_creations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 -- Capture the removal's original save time, independently of current visibility.
 ALTER TABLE task_changes ADD COLUMN deletion_saved_at INTEGER;

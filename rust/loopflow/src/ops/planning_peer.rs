@@ -84,8 +84,8 @@ fn exchange_destination(store: &SqliteStore, repo: &str, id: &str, publish: bool
         None
     };
     let result = (|| {
-        // Peer provider frontiers/grouped receipts are not composed yet.
-        // Do not activate the known unsafe mixed-provider path.
+        // Receipt transport exists, but legacy association and public Git/Linear
+        // composition remain unfinished. Keep mixed-provider exchange disabled.
         if linear {
             return Err(message(
                 "Git planning awaits Linear provenance reconciliation; local planning is retained",

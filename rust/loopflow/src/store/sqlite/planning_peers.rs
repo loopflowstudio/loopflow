@@ -69,15 +69,36 @@ pub(super) fn require_projected_effects(
     owner: PlanningChanges<'_>,
 ) -> StoreResult<()> {
     let (kind, id) = owner.owner();
-    let conflict: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE kind=?1 AND object_id=?2 AND active=1)",
-        params![kind, id],
-        |row| row.get(0),
-    )?;
-    if conflict {
-        return Err(invalid(
-            "Planning effects deferred: retained peer projection conflict; no new mutation issued",
-        ));
+    let object_kind = match owner {
+        PlanningChanges::Task(_) => PlanningKind::Task,
+        PlanningChanges::Project(_) => PlanningKind::Project,
+    };
+    let (_, mapping) =
+        provider_schema(object_kind).expect("planning effects have a provider mapping");
+    // A rejected incoming ID can name the same provider object as a different
+    // local ID. Its effects have not reached that local owner's receipts. Use
+    // all retained mappings, not just the winning head: a later null/replacement
+    // cannot erase an uncertain effect against the original provider identity.
+    // This is effect deferral only, never implicit association or selection.
+    let conflict: Option<String> = conn
+        .query_row(
+            &format!(
+                "SELECT c.object_id FROM planning_peer_conflicts c
+             WHERE c.kind=?1 AND c.active=1 AND (c.object_id=?2 OR EXISTS(
+                 SELECT 1 FROM planning_peer_provider_claims h JOIN {} local
+                 ON local.id=?2 AND local.{mapping}=h.provider_id
+                 WHERE h.kind=c.kind AND h.object_id=c.object_id))
+             ORDER BY c.object_id LIMIT 1",
+                table(object_kind)
+            ),
+            params![kind, id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(conflict) = conflict {
+        return Err(invalid(format!(
+            "Planning effects deferred: retained peer projection conflict for {kind} {conflict}; no new mutation issued",
+        )));
     }
     Ok(())
 }
@@ -126,20 +147,15 @@ fn changes_by_object(
         let Some(observation) = &change.linear else {
             continue;
         };
-        let mapping = match change.object.kind {
-            PlanningKind::Task => "external_issue_id",
-            PlanningKind::Project => "external_project_id",
+        let matches_mapping = match provider_schema(change.object.kind) {
+            Some((_, mapping)) => object.winners.get(mapping).is_some_and(|(_, winner)| {
+                winner.value.as_str().is_some()
+                    && winner.value.as_str() == observation.body["id"].as_str()
+            }),
             // Comment membership carries provenance too, but content owns acquisition.
-            PlanningKind::Comment if change.field == "content" => {
-                object.observations.push(observation);
-                continue;
-            }
-            _ => continue,
+            None => change.object.kind == PlanningKind::Comment && change.field == "content",
         };
-        if object.winners.get(mapping).is_some_and(|(_, winner)| {
-            winner.value.as_str().is_some()
-                && winner.value.as_str() == observation.body["id"].as_str()
-        }) {
+        if matches_mapping {
             object.observations.push(observation);
         }
     }
@@ -1107,6 +1123,14 @@ fn table(kind: PlanningKind) -> &'static str {
     }
 }
 
+fn provider_schema(kind: PlanningKind) -> Option<(&'static str, &'static str)> {
+    match kind {
+        PlanningKind::Task => Some(("pm_items", "external_issue_id")),
+        PlanningKind::Project => Some(("pm_projects", "external_project_id")),
+        _ => None,
+    }
+}
+
 fn require_repository(conn: &Connection, object: &PlanningObject, repo: &str) -> StoreResult<()> {
     if belongs_elsewhere(conn, object, repo)? {
         return Err(invalid(format!(
@@ -1193,9 +1217,16 @@ fn insert_and_project(
         validate_wave(conn, object, winners, repo)?;
     }
     if let Some((_, winner)) = winners.get("creation") {
+        let task = TaskId::from_raw(&object.id);
+        let project = ProjectId::from_raw(&object.id);
         super::planning_export::import_peer_receipts(
             conn,
             object,
+            match object.kind {
+                PlanningKind::Task => PlanningChanges::Task(&task),
+                PlanningKind::Project => PlanningChanges::Project(&project),
+                _ => return Err(invalid("creation requires a Task or Project")),
+            },
             &winner.value,
             &changes.creation,
         )?;
@@ -1225,6 +1256,8 @@ fn insert_and_project(
         project_confirmed_teams(conn, object, history)?;
     }
     let previous = delivery_fields(conn, object)?;
+    // Creation readback settles captured receipts before a Linear winner can
+    // retire the remaining local intentions during delivery projection.
     acquire_linear_frontier(conn, object, changes, repo)?;
     let deletion_receipts = object.kind == PlanningKind::Task && !changes.deletions.is_empty();
     if deletion_receipts {
@@ -1265,8 +1298,8 @@ fn insert_and_project(
         super::project_content::save_content(conn, &ProjectId::from_raw(&object.id), &content)?;
     }
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
-    // Projection can add baseline-free deliveries after frontier acquisition.
-    // Reconcile those too against the same accepted creation readback.
+    // Projection may add receipts captured on a peer. Reconcile those too
+    // against the same accepted readback, never acknowledging a later local save.
     if let Some(observation) = changes.observations.last() {
         if matches!(object.kind, PlanningKind::Task | PlanningKind::Project) {
             super::planning_export::attach_in(
@@ -1355,41 +1388,29 @@ fn validate_provider_mapping(
     object: &PlanningObject,
     changes: &ObjectChanges<'_>,
 ) -> StoreResult<()> {
-    let mapping = match object.kind {
-        PlanningKind::Task => "external_issue_id",
-        PlanningKind::Project => "external_project_id",
-        _ => return Ok(()),
+    let Some((_, mapping)) = provider_schema(object.kind) else {
+        return Ok(());
     };
     let provider_id = changes.winners[mapping].1.value.as_str();
-    let mapping_conflict = || StoreError::ProviderObservationConflict {
-        entity: "planning mapping",
-        id: object.id.clone(),
-    };
-    // A remote mapping may not redirect evidence for an existing local object.
-    let local: Option<Option<String>> = conn
-        .query_row(
-            &format!("SELECT {mapping} FROM {} WHERE id=?1", table(object.kind)),
-            [&object.id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    if local
-        .flatten()
-        .as_deref()
-        .is_some_and(|id| Some(id) != provider_id)
-    {
-        return Err(mapping_conflict());
-    }
-    let foreign: bool = conn.query_row(
+    // Preserve this Work's existing mapping and every other Work's ownership.
+    // An unmapped Work may attach, but a null winner cannot clear its mapping.
+    let conflict: bool = conn.query_row(
         &format!(
-            "SELECT EXISTS(SELECT 1 FROM {} WHERE {mapping}=?1 AND id!=?2)",
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE
+                (id=?1 AND {mapping} IS NOT NULL AND {mapping} IS NOT ?2)
+                OR (id!=?1 AND ({mapping}=?2 OR EXISTS(
+                    SELECT 1 FROM planning_peer_provider_claims h
+                    WHERE h.kind=?3 AND h.object_id=?1 AND h.provider_id={mapping}))))",
             table(object.kind)
         ),
-        params![provider_id, object.id],
+        params![object.id, provider_id, object.kind.as_str()],
         |row| row.get(0),
     )?;
-    if foreign {
-        return Err(mapping_conflict());
+    if conflict {
+        return Err(StoreError::ProviderObservationConflict {
+            entity: "planning mapping",
+            id: object.id.clone(),
+        });
     }
     Ok(())
 }
@@ -1404,11 +1425,8 @@ fn acquire_provider_evidence(
     field: &str,
     history: &FieldHistory<ProviderEvidence>,
 ) -> StoreResult<()> {
-    let mapping = if object.kind == PlanningKind::Task {
-        "external_issue_id"
-    } else {
-        "external_project_id"
-    };
+    let (_, mapping) =
+        provider_schema(object.kind).expect("provider evidence belongs to mapped Work");
     let provider_id = changes.winners[mapping].1.value.as_str();
     let mapping_conflict = || StoreError::ProviderObservationConflict {
         entity: "planning mapping",
@@ -1605,10 +1623,8 @@ fn acquire_linear_frontier(
     repo: &str,
 ) -> StoreResult<()> {
     let winners = &changes.winners;
-    let (provider_table, mapping) = match object.kind {
-        PlanningKind::Task => ("pm_items", "external_issue_id"),
-        PlanningKind::Project => ("pm_projects", "external_project_id"),
-        _ => return Ok(()),
+    let Some((provider_table, mapping)) = provider_schema(object.kind) else {
+        return Ok(());
     };
     let Some(provider_id) = winners[mapping].1.value.as_str() else {
         return Ok(());
@@ -2869,7 +2885,7 @@ mod tests {
             .unwrap();
         let receipt = || {
             source.conn.lock().unwrap().query_row(
-                "SELECT export_json,export_attempted,export_error FROM task_creation_intents WHERE task_id=?1",
+                "SELECT export_json,export_attempted,export_error FROM planning_creations WHERE kind='task' AND origin_id=?1",
                 [task.as_str()], |r| Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,Option<String>>(2)?)),
             ).unwrap()
         };
@@ -3097,7 +3113,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT export_error FROM projects WHERE id=?1",
+                    "SELECT export_error FROM planning_creations WHERE kind='project' AND origin_id=?1",
                     [project.as_str()],
                     |r| r.get::<_, Option<String>>(0),
                 )
@@ -6389,6 +6405,12 @@ mod tests {
             [retained_content],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO task_creation_intents(task_id,project_id,title,description,export_error)
+            VALUES('task','project','Retain identity','','Discovery unavailable')",
+            [],
+        )
+        .unwrap();
         let created = ProjectId::new();
         conn.execute("INSERT INTO projects(id,wave_id,created_at,project_name,project_slug,project_prompt_context) VALUES(?1,'00000000-0000-0000-0000-000000000001',1,'Created','created','')", [created.as_str()]).unwrap();
         let model = super::super::plan_read::project_in(&conn, &created).unwrap();
@@ -6402,6 +6424,25 @@ mod tests {
         conn.execute("INSERT INTO project_changes(seq,id,project_id,field,value_json) VALUES(1,'captured',?1,'name','\"Created\"'),(2,'later',?1,'name','\"Later\"')", [created.as_str()]).unwrap();
         conn.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,export_json,export_attempted,export_link_attempted,export_error)
             VALUES('00000000-0000-0000-0000-000000000001',?1,1,?2,1,1,'lost attachment')", params![created.as_str(),receipt.to_string()]).unwrap();
+        let created_task = TaskId::new();
+        conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+            VALUES(?1,?2,'NEW-1','Captured task','Brief',1,1,'')",params![created_task.as_str(),created.as_str()]).unwrap();
+        let item = super::super::plan_read::task_in(&conn, &created_task)
+            .unwrap()
+            .record
+            .unwrap()
+            .item;
+        let task_uuid = uuid::Uuid::parse_str(created_task.as_str().strip_prefix("task_").unwrap())
+            .unwrap()
+            .to_string();
+        let task_receipt = json!({"id":task_uuid,"model":item,"through":1,"initiative":"initiative","link_id":uuid::Uuid::new_v4().to_string(),
+            "input":{"id":task_uuid,"teamId":"team","projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee}});
+        conn.execute(r#"INSERT INTO task_changes(seq,id,task_id,field,value_json) VALUES(2,'captured-task',?1,'name','"Captured task"'),(3,'later-task',?1,'name','"Later task"')"#, [created_task.as_str()]).unwrap();
+        // The existing deletion owns sequence 1; this creation captured through 2.
+        let mut task_receipt = task_receipt;
+        task_receipt["through"] = json!(2);
+        conn.execute("INSERT INTO task_creation_intents(task_id,project_id,title,description,export_json,export_attempted,export_error)
+            VALUES(?1,?2,'Captured task','Brief',?3,1,'lost creation')",params![created_task.as_str(),created.as_str(),task_receipt.to_string()]).unwrap();
         let effects = json!([{"before":["task","other"],"after":["other","task"],"issue":"FIX-1",
             "input":{"sortOrder":12,"prioritySortOrder":0},"settled":false}]);
         conn.execute("INSERT INTO project_changes(id,project_id,field,value_json,base_json,order_effects_json,attempted,error)
@@ -6456,7 +6497,7 @@ mod tests {
         }
 
         let (body, attempted, linked, error): (String,bool,bool,String) = conn.query_row(
-            "SELECT export_json,export_attempted,export_link_attempted,export_error FROM projects WHERE id=?1", [created.as_str()],
+            "SELECT export_json,export_attempted,export_link_attempted,export_error FROM planning_creations WHERE kind='project' AND origin_id=?1", [created.as_str()],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
         let migrated: super::super::planning_export::PlanningExport =
             serde_json::from_str(&body).unwrap();
@@ -6466,7 +6507,7 @@ mod tests {
         assert_eq!(error, "lost attachment");
         assert!(!conn
             .query_row(
-                "SELECT export_acknowledged FROM projects WHERE id=?1",
+                "SELECT export_acknowledged FROM planning_creations WHERE kind='project' AND origin_id=?1",
                 [created.as_str()],
                 |r| r.get::<_, bool>(0),
             )
@@ -6492,6 +6533,26 @@ mod tests {
         assert!(conn
             .prepare("SELECT export_json FROM project_transitions")
             .is_err());
+        assert_eq!(conn.query_row(
+            "SELECT export_json,export_attempted,export_error FROM planning_creations WHERE kind='task' AND origin_id='task'",
+            [],|row| Ok((row.get::<_,Option<String>>(0)?,row.get::<_,bool>(1)?,row.get::<_,String>(2)?))).unwrap(),
+            (None,false,"Discovery unavailable".into()));
+        assert!(conn
+            .prepare("SELECT export_json FROM task_creation_intents")
+            .is_err());
+        assert!(conn.prepare("SELECT export_json FROM projects").is_err());
+        let (body,attempted,error,owner): (String,bool,String,String) = conn.query_row(
+            "SELECT export_json,export_attempted,export_error,task_id FROM planning_creations WHERE kind='task' AND origin_id=?1",
+            [created_task.as_str()], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        let migrated: super::super::planning_export::PlanningExport =
+            serde_json::from_str(&body).unwrap();
+        assert_eq!(owner, created_task.as_str());
+        assert_eq!(migrated.parent, created.as_str());
+        assert_eq!(migrated.captured, ["captured-task".into()].into());
+        assert_eq!(migrated.model, task_receipt["model"]);
+        assert_eq!(migrated.input, task_receipt["input"]);
+        assert!(attempted);
+        assert_eq!(error, "lost creation");
 
         conn.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES('/fixture',?1,?2,?3)",
             params![destination(),binding().endpoint(),binding().reference()]).unwrap();
@@ -6782,6 +6843,537 @@ mod tests {
             assert_eq!(target.revisions().unwrap(), after);
             assert_eq!(export(&target, "/target"), retained);
         }
+    }
+
+    #[test]
+    fn creation_origins_preserve_distinct_attempts_on_one_projection() {
+        use super::super::planning_changes::PlanningChanges;
+        use crate::engine::planning_exchange::PlanningKind;
+
+        for kind in [PlanningKind::Task, PlanningKind::Project] {
+            let (_source_home, source) = store();
+            let incoming_task = seed(&source);
+            let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+            let (_target_home, target) = store();
+            let private = Wave::new(WaveId::new(), "private".into(), "/target".into());
+            target.create_wave(&private).unwrap();
+            let local_project = target.ensure_project(private.id(), "Private").unwrap();
+            let local_task = TaskId::new();
+            target
+                .create_task(&crate::planning::NewTask {
+                    id: local_task.clone(),
+                    project_id: local_project.clone(),
+                    title: "Private title".into(),
+                    description: "Private brief".into(),
+                })
+                .unwrap();
+            preserve_execution(&target, private.id(), &local_task);
+            let execution = execution_rows(&target);
+            let (origin, owner) = if kind == PlanningKind::Task {
+                for (store, project) in [(&source, &incoming_project), (&target, &local_project)] {
+                    store.conn.lock().unwrap().execute(
+                        "UPDATE projects SET external_project_id='provider-project' WHERE id=?1",
+                        [project.as_str()],
+                    ).unwrap();
+                }
+                (
+                    PlanningChanges::Task(&incoming_task),
+                    PlanningChanges::Task(&local_task),
+                )
+            } else {
+                (
+                    PlanningChanges::Project(&incoming_project),
+                    PlanningChanges::Project(&local_project),
+                )
+            };
+            source
+                .planning_export_error(origin, "Discovery unavailable")
+                .unwrap();
+            assert!(source.planning_export_pending(origin).unwrap());
+            assert!(source.planning_export_attempts(origin).is_err());
+            assert!(!export(&source, "/source")
+                .changes
+                .values()
+                .any(|change| change.object.kind == kind && change.field == "creation"));
+            let incoming = source
+                .prepare_planning_export(origin, "team", "initiative")
+                .unwrap();
+            let local = target
+                .prepare_planning_export(owner, "team", "initiative")
+                .unwrap();
+            for (store, identity, receipt) in
+                [(&source, origin, &incoming), (&target, owner, &local)]
+            {
+                assert!(store
+                    .attempt_planning_export(identity, &receipt.input, false)
+                    .unwrap());
+                if kind == PlanningKind::Project {
+                    assert!(store
+                        .attempt_planning_export(identity, &receipt.input, true)
+                        .unwrap());
+                }
+                store
+                    .planning_export_error(identity, "lost response")
+                    .unwrap();
+            }
+            edit_title(&target, &local_task, "Later private title");
+            target
+                .edit_project(&local_project, None, Some("Later private summary"))
+                .unwrap();
+            let later_task = target.pending_task_changes(&local_task).unwrap();
+            let later_project = target.pending_project_changes(&local_project).unwrap();
+            let document = export(&source, "/source");
+            let change = document
+                .changes
+                .values()
+                .filter(|change| change.object.kind == kind && change.field == "creation")
+                .max_by_key(|change| change.clock)
+                .unwrap();
+            // This tests the common receipt owner, not correspondence or scalar
+            // projection. Origin validation still uses the unmodified incoming ID.
+            let retain = || {
+                let mut conn = target.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                tx.execute("UPDATE planning_peer_context SET importing=1", [])
+                    .unwrap();
+                super::super::planning_export::import_peer_receipts(
+                    &tx,
+                    &change.object,
+                    owner,
+                    &change.value,
+                    &[&change.value],
+                )
+                .unwrap();
+                tx.execute("UPDATE planning_peer_context SET importing=0", [])
+                    .unwrap();
+                tx.commit().unwrap();
+            };
+            retain();
+            let revisions = target.revisions().unwrap();
+            retain();
+            assert_eq!(target.revisions().unwrap(), revisions);
+            for (identity, receipt) in [(origin, &incoming), (owner, &local)] {
+                assert_eq!(
+                    target
+                        .prepare_planning_export(identity, "ignored", "ignored")
+                        .unwrap(),
+                    *receipt
+                );
+                assert_eq!(
+                    target.planning_export_attempts(identity).unwrap(),
+                    (true, kind == PlanningKind::Project)
+                );
+                assert!(!target
+                    .attempt_planning_export(identity, &receipt.input, false)
+                    .unwrap());
+            }
+            assert_eq!(target.planning_export_origins(owner).unwrap().len(), 2);
+            assert_eq!(
+                target.pending_task_changes(&local_task).unwrap(),
+                later_task
+            );
+            assert_eq!(
+                target.pending_project_changes(&local_project).unwrap(),
+                later_project
+            );
+            assert_eq!(execution_rows(&target), execution);
+            assert!(export(&target, "/target").changes.is_empty());
+
+            // Exact readback settles only the matching origin. The second
+            // captured operation stays uncertain even beside a provider mapping.
+            let mut observed = incoming.model.clone();
+            observed["id"] = json!(incoming.id);
+            observed["revision"] = json!("2026-10-09T12:00:00Z");
+            if kind == PlanningKind::Project {
+                observed["initiative_ids"] = json!(["initiative"]);
+            }
+            {
+                let mut conn = target.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                super::super::planning_export::attach_in(
+                    &tx,
+                    "/target",
+                    kind == PlanningKind::Project,
+                    &observed,
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+            assert!(!target.planning_export_pending(origin).unwrap());
+            assert!(target.planning_export_pending(owner).unwrap());
+            retain();
+            assert!(!target.planning_export_pending(origin).unwrap());
+            assert!(target.planning_export_pending(owner).unwrap());
+            assert_eq!(
+                target
+                    .prepare_planning_export(owner, "ignored", "ignored")
+                    .unwrap(),
+                local
+            );
+            assert_eq!(
+                target
+                    .prepare_planning_export(origin, "ignored", "ignored")
+                    .unwrap(),
+                incoming
+            );
+            let conn = target.conn.lock().unwrap();
+            let receipts: Vec<(String,Option<String>,bool)> = conn.prepare(
+                "SELECT origin_id,export_error,export_acknowledged FROM planning_creations WHERE kind=?1 ORDER BY origin_id"
+            ).unwrap().query_map([kind.as_str()],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+                .unwrap().collect::<Result<_,_>>().unwrap();
+            assert!(receipts.contains(&(origin.owner().1.into(), None, true)));
+            assert!(receipts.contains(&(
+                owner.owner().1.into(),
+                Some("lost response".into()),
+                false
+            )));
+            drop(conn);
+            assert_eq!(execution_rows(&target), execution);
+            assert!(export(&target, "/target").changes.is_empty());
+            assert!(target.task(&incoming_task).unwrap().is_none());
+            assert!(target.project(&incoming_project).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn peer_creation_identity_defers_legacy_effects_and_cannot_be_rekeyed() {
+        use super::super::planning_changes::PlanningChanges;
+        use crate::engine::planning_exchange::PlanningKind;
+
+        for kind in [PlanningKind::Task, PlanningKind::Project] {
+            let (_home, source) = store();
+            let task = seed(&source);
+            let project = source.task(&task).unwrap().unwrap().project_id;
+            let (owner, other) = if kind == PlanningKind::Task {
+                source
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE projects SET external_project_id='provider-project' WHERE id=?1",
+                        [project.as_str()],
+                    )
+                    .unwrap();
+                (PlanningChanges::Task(&task), TaskId::new().to_string())
+            } else {
+                (
+                    PlanningChanges::Project(&project),
+                    ProjectId::new().to_string(),
+                )
+            };
+            let receipt = source
+                .prepare_planning_export(owner, "team", "initiative")
+                .unwrap();
+            assert!(source
+                .attempt_planning_export(owner, &receipt.input, false)
+                .unwrap());
+            source
+                .planning_export_error(owner, "lost creation reply")
+                .unwrap();
+            let original = export(&source, "/source");
+            let mut redirected = original.clone();
+            for change in redirected
+                .changes
+                .values_mut()
+                .filter(|c| c.object.kind == kind && c.object.id == owner.owner().1)
+            {
+                change.object.id.clone_from(&other);
+            }
+            assert!(redirected
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("invalid planning field value"));
+            assert_eq!(
+                source
+                    .prepare_planning_export(owner, "other-team", "other-initiative")
+                    .unwrap(),
+                receipt
+            );
+            assert_eq!(
+                source.planning_export_attempts(owner).unwrap(),
+                (true, false)
+            );
+            assert_eq!(export(&source, "/source"), original);
+
+            // Response loss can leave no mapping on the incoming Work at all.
+            // A different local ID can already own that exact provider UUID.
+            // The captured creation input, not an issue name, links the risk.
+            let (_target_home, target) = store();
+            let legacy_task = seed(&target);
+            let legacy_project = target.task(&legacy_task).unwrap().unwrap().project_id;
+            let legacy_wave = target.project(&legacy_project).unwrap().unwrap().wave_id;
+            target
+                .conn
+                .lock()
+                .unwrap()
+                .execute("UPDATE waves SET name='legacy' WHERE id=?1", [legacy_wave])
+                .unwrap();
+            let (legacy_owner, change) = if kind == PlanningKind::Task {
+                target
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE tasks SET external_issue_id=?2 WHERE id=?1",
+                        params![legacy_task.as_str(), receipt.id],
+                    )
+                    .unwrap();
+                edit_title(&target, &legacy_task, "Legacy save");
+                (
+                    PlanningChanges::Task(&legacy_task),
+                    target.pending_task_changes(&legacy_task).unwrap().remove(0),
+                )
+            } else {
+                target
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .execute(
+                        "UPDATE projects SET external_project_id=?2 WHERE id=?1",
+                        params![legacy_project.as_str(), receipt.id],
+                    )
+                    .unwrap();
+                target
+                    .edit_project(&legacy_project, Some("Legacy save"), None)
+                    .unwrap();
+                (
+                    PlanningChanges::Project(&legacy_project),
+                    target
+                        .pending_project_changes(&legacy_project)
+                        .unwrap()
+                        .remove(0),
+                )
+            };
+            import(&target, "/source", "lost-creation", &original);
+            let error = target
+                .attempt_planning_field(legacy_owner, &change, None)
+                .unwrap_err();
+            assert!(error.to_string().contains(owner.owner().1), "{error}");
+            let retained = export(&target, "/source");
+            assert!(original
+                .changes
+                .iter()
+                .all(|(id, change)| retained.changes.get(id) == Some(change)));
+            assert!(!super::exists(
+                &target.conn.lock().unwrap(),
+                &crate::engine::planning_exchange::PlanningObject {
+                    kind,
+                    id: owner.owner().1.into(),
+                }
+            )
+            .unwrap());
+        }
+    }
+
+    #[test]
+    fn duplicate_provider_ids_defer_legacy_effects_without_sharing_private_work() {
+        use super::super::planning_changes::PlanningChanges;
+
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, mut row, incoming_task) = linear_seed(&source);
+        let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+        let private = Wave::new(WaveId::new(), "private".into(), "/target".into());
+        target.create_wave(&private).unwrap();
+        row.wave_id = private.id().clone();
+        target.put_pm_snapshot(&row).unwrap();
+        let legacy = target
+            .task_by_issue(&row.snapshot.items[0].id)
+            .unwrap()
+            .unwrap();
+        assert_ne!(legacy.id, incoming_task);
+        assert_ne!(legacy.project_id, incoming_project);
+        preserve_execution(&target, private.id(), &legacy.id);
+        target.conn.lock().unwrap().execute(
+            "INSERT INTO task_prs(id,task_id,sequence,slug,branch,base_commit,created_at,updated_at)
+             VALUES(?1,?2,1,'retained','retained-branch','retained-base',1,1)",
+            params![crate::work::task::TaskPrId::new().as_str(), legacy.id.as_str()],
+        ).unwrap();
+        let execution = execution_rows(&target);
+
+        // Keep uncertainty on both sides. The incoming deletion cannot project;
+        // the private legacy field receipts must not be retired or replayed.
+        source.delete_task(&incoming_task).unwrap();
+        let deletion = deletion_change(&source, &incoming_task);
+        assert!(source
+            .attempt_planning_field(
+                PlanningChanges::Task(&incoming_task),
+                &deletion,
+                row.snapshot.items[0].revision.as_deref(),
+            )
+            .unwrap());
+        source
+            .planning_field_error(
+                PlanningChanges::Task(&incoming_task),
+                &deletion,
+                "lost deletion reply",
+            )
+            .unwrap();
+        edit_title(&target, &legacy.id, "Private uncertain title");
+        target
+            .edit_project(&legacy.project_id, Some("Private uncertain Project"), None)
+            .unwrap();
+        let task_change = target.pending_task_changes(&legacy.id).unwrap().remove(0);
+        let project_change = target
+            .pending_project_changes(&legacy.project_id)
+            .unwrap()
+            .remove(0);
+        for (owner, change, revision) in [
+            (
+                PlanningChanges::Task(&legacy.id),
+                &task_change,
+                row.snapshot.items[0].revision.as_deref(),
+            ),
+            (
+                PlanningChanges::Project(&legacy.project_id),
+                &project_change,
+                row.snapshot.projects[0].revision.as_deref(),
+            ),
+        ] {
+            assert!(target
+                .attempt_planning_field(owner, change, revision)
+                .unwrap());
+            target
+                .planning_field_error(owner, change, "lost local reply")
+                .unwrap();
+        }
+
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "divergent", &incoming);
+        assert!(target.task(&incoming_task).unwrap().is_none());
+        assert!(target.project(&incoming_project).unwrap().is_none());
+        // Common acquisition and saves stay available even while delivery waits.
+        target.put_pm_snapshot(&row).unwrap();
+        edit_title(&target, &legacy.id, "Later private title");
+        target
+            .edit_project(&legacy.project_id, None, Some("Later private summary"))
+            .unwrap();
+        let later_task = target
+            .pending_task_changes(&legacy.id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id != task_change.id)
+            .unwrap();
+        let later_project = target
+            .pending_project_changes(&legacy.project_id)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.id != project_change.id)
+            .unwrap();
+        for (owner, change, revision, rejected) in [
+            (
+                PlanningChanges::Task(&legacy.id),
+                &later_task,
+                row.snapshot.items[0].revision.as_deref(),
+                incoming_task.as_str(),
+            ),
+            (
+                PlanningChanges::Project(&legacy.project_id),
+                &later_project,
+                row.snapshot.projects[0].revision.as_deref(),
+                incoming_project.as_str(),
+            ),
+        ] {
+            let error = target
+                .attempt_planning_field(owner, change, revision)
+                .unwrap_err();
+            assert!(error.to_string().contains(rejected), "{error}");
+        }
+        let receipts = || {
+            let conn = target.conn.lock().unwrap();
+            [(&task_change, "task_changes"), (&project_change, "project_changes"),
+             (&later_task, "task_changes"), (&later_project, "project_changes")]
+                .map(|(change, table)| conn.query_row(
+                    &format!("SELECT attempted,acknowledged,error,conflict_json FROM {table} WHERE id=?1"),
+                    [&change.id], |r| Ok((r.get::<_, bool>(0)?, r.get::<_, bool>(1)?, r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?)),
+                ).unwrap())
+        };
+        let before = receipts();
+        assert_eq!(
+            before[0],
+            (true, false, Some("lost local reply".into()), None)
+        );
+        assert_eq!(before[1], before[0]);
+        assert_eq!(before[2], (false, false, None, None));
+        assert_eq!(before[3], before[2]);
+        let retained = export(&target, "/target");
+        assert_eq!(retained, incoming);
+        assert!(!retained
+            .objects()
+            .iter()
+            .any(|o| o.id == legacy.id.as_str() || o.id == legacy.project_id.as_str()));
+        let revisions = target.revisions().unwrap();
+        import(&target, "/target", "divergent", &incoming);
+        assert_eq!(target.revisions().unwrap(), revisions);
+        assert_eq!(receipts(), before);
+        assert_eq!(execution_rows(&target), execution);
+        assert_eq!(
+            target
+                .task_by_issue(&legacy.plan.identifier)
+                .unwrap()
+                .unwrap()
+                .id,
+            legacy.id
+        );
+        assert_eq!(
+            target
+                .task_by_issue(legacy.id.as_str())
+                .unwrap()
+                .unwrap()
+                .id,
+            legacy.id
+        );
+        assert_eq!(export(&target, "/target"), retained);
+
+        // A later null mapping cannot hide the disputed provider ownership or
+        // turn the incoming IDs into new creation candidates. Losing mappings
+        // and the attempted deletion still belong to the retained journal.
+        {
+            let conn = source.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE tasks SET external_issue_id=NULL WHERE id=?1",
+                [incoming_task.as_str()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE projects SET external_project_id=NULL WHERE id=?1",
+                [incoming_project.as_str()],
+            )
+            .unwrap();
+        }
+        let masked = export(&source, "/source");
+        import(&target, "/target", "masked-mapping", &masked);
+        assert!(target.task(&incoming_task).unwrap().is_none());
+        assert!(target.project(&incoming_project).unwrap().is_none());
+        for (owner, change) in [
+            (PlanningChanges::Task(&legacy.id), &later_task),
+            (PlanningChanges::Project(&legacy.project_id), &later_project),
+        ] {
+            assert!(target
+                .attempt_planning_field(owner, change, None)
+                .unwrap_err()
+                .to_string()
+                .contains("retained peer projection conflict"));
+        }
+        assert_eq!(receipts(), before);
+        assert_eq!(execution_rows(&target), execution);
+        assert_eq!(export(&target, "/target"), masked);
+
+        // Exact provider kind and identity, not Project membership or a matching
+        // title, scope deferral. A Task whose provider ID equals the conflicted
+        // Project's ID still has an independent effect.
+        let independent = TaskId::new();
+        target.conn.lock().unwrap().execute(
+            "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+             VALUES(?1,?2,?3,'OTHER-1','Private uncertain title','',1,1,'')",
+            params![independent.as_str(), legacy.project_id.as_str(), row.snapshot.projects[0].id],
+        ).unwrap();
+        edit_title(&target, &independent, "Independent edit");
+        let change = target.pending_task_changes(&independent).unwrap().remove(0);
+        assert!(target
+            .attempt_planning_field(PlanningChanges::Task(&independent), &change, None)
+            .unwrap());
     }
 
     #[test]

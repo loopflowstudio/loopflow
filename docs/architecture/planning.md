@@ -140,10 +140,11 @@ association remains unfinished; neither IDs nor execution histories are merged.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
-Task creation currently has one receipt per Task; Project creation/link fields
-live on the Project row. Association must preserve each original attempt rather
-than overwrite either origin in that single projection slot. This common receipt
-representation remains unfinished; the shared retained-claim query only defers effects.
+Common `planning_creations` separates the original Work ID from its local
+Task/Project projection, retaining each origin's input and uncertain attempts.
+This storage boundary does not implement correspondence or cross-origin field
+projection. Exact readback never replaces an existing different provider mapping;
+those effects remain uncertain pending association recovery.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured
@@ -227,8 +228,9 @@ Terminal, archived, paused or foreign Projects retain their history. Names, cont
 and an empty workflow remain intact. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
-Project export keeps its captured input and creation/attachment attempts on the
-Project row; transition receipts own only local selection and rotation. Peer
+Project export keeps its captured input and creation/attachment attempts in
+`planning_creations`, keyed by original Work identity; transition receipts own
+only local selection and rotation. Peer
 exchange carries the creation evidence, never a transition or activation. Captured
 save IDs—not machine-local sequence positions—bound readback acknowledgement.
 Creation and Initiative attachment retain separate attempted effects and exact
@@ -522,10 +524,13 @@ team and target state before marking a receipt attempted, so failed reads remain
 retryable. A lost mutation reply retains uncertainty until provider observation.
 An independent foreground export loop selects unmapped local or peer-born Projects
 and Tasks, plus mapped creations still awaiting readback, using their saved UUIDs.
-One derived `planning_exports` view feeds discovery and status. Project rows and
-Task creation receipts retain captured payloads, attempts, acknowledgement and
-errors; no Project transition is synthesized for imported planning. Preparation
-creates a missing Task receipt from its saved planning. A mapping alone never
+One derived `planning_exports` view feeds discovery and status. Common
+`planning_creations` rows retain captured payloads, attempts, acknowledgement and
+errors under the original Work ID, separate from the local Task/Project foreign
+key. Multiple origins never overwrite each other's operations. Discovery locks the
+local projection, then reads each origin; status identifies each receipt by origin.
+Task request idempotence is separate from provider effects. No Project transition
+is synthesized for imported planning. Preparation creates a receipt from saved planning. A mapping alone never
 acknowledges creation. Project acknowledgement also requires the captured Initiative
 attachment; after acknowledgement, a later accepted move does not reopen creation.
 Exact observations attach mappings in the common ingestion transaction before

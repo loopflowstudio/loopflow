@@ -1,4 +1,6 @@
-//! Creation effects remain on the original receipt, including after response loss.
+//! Creation/link effects are keyed by their original Work identity.
+//! The local projection is a separate foreign key; captured payloads and journal
+//! mutations always retain the origin. Selection and correspondence live elsewhere.
 use std::collections::BTreeSet;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -22,20 +24,11 @@ pub(crate) struct PlanningExport {
     pub link_id: String,
 }
 
-impl PlanningChanges<'_> {
-    fn receipt(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Task(_) => ("task_creation_intents", "task_id"),
-            Self::Project(_) => ("projects", "id"),
-        }
-    }
-}
-
 impl SqliteStore {
     pub(crate) fn planning_export_owners(&self, repo: &str) -> StoreResult<Vec<WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare("SELECT kind,id FROM planning_exports WHERE repo=?1 ORDER BY kind")?;
+        let mut query = conn
+            .prepare("SELECT DISTINCT kind,id FROM planning_exports WHERE repo=?1 ORDER BY kind")?;
         let rows = query.query_map([repo], |row| {
             let kind: String = row.get(0)?;
             let id: String = row.get(1)?;
@@ -48,11 +41,31 @@ impl SqliteStore {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    pub(crate) fn planning_export_pending(&self, owner: PlanningChanges<'_>) -> StoreResult<bool> {
+    pub(crate) fn planning_export_origins(
+        &self,
+        owner: PlanningChanges<'_>,
+    ) -> StoreResult<Vec<WorkRef>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let (kind, id) = owner.owner();
+        let mut query = conn.prepare(
+            "SELECT origin_id FROM planning_exports WHERE kind=?1 AND id=?2 ORDER BY origin_id",
+        )?;
+        let rows = query.query_map(params![kind, id], |row| {
+            let id: String = row.get(0)?;
+            Ok(if kind == "task" {
+                WorkRef::Task(TaskId::from_raw(id))
+            } else {
+                WorkRef::Project(ProjectId::from_raw(id))
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub(crate) fn planning_export_pending(&self, origin: PlanningChanges<'_>) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let (kind, id) = origin.owner();
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_exports WHERE kind=?1 AND id=?2)",
+            "SELECT EXISTS(SELECT 1 FROM planning_exports WHERE kind=?1 AND origin_id=?2)",
             params![kind, id],
             |row| row.get(0),
         )?)
@@ -60,51 +73,41 @@ impl SqliteStore {
 
     pub(crate) fn planning_export_attempts(
         &self,
-        owner: PlanningChanges<'_>,
+        origin: PlanningChanges<'_>,
     ) -> StoreResult<(bool, bool)> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let (table, key) = owner.receipt();
-        let link = if matches!(owner, PlanningChanges::Project(_)) {
-            "export_link_attempted"
-        } else {
-            "0"
-        };
+        let (kind, id) = origin.owner();
         conn.query_row(
-            &format!("SELECT export_attempted,{link} FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
-            [owner.owner().1], |row| Ok((row.get(0)?,row.get(1)?)),
+            "SELECT export_attempted,export_link_attempted FROM planning_creations WHERE kind=?1 AND origin_id=?2 AND export_json IS NOT NULL",
+            params![kind,id], |row| Ok((row.get(0)?,row.get(1)?)),
         ).optional()?.ok_or_else(|| StoreError::InvalidData("creation receipt is missing".into()))
     }
 
     // Capture before provider discovery; a concurrent local save cannot alter this effect.
     pub(crate) fn prepare_planning_export(
         &self,
-        owner: PlanningChanges<'_>,
+        origin: PlanningChanges<'_>,
         team: &str,
         initiative: &str,
     ) -> StoreResult<PlanningExport> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (kind, id) = owner.owner();
-        let (table, key) = owner.receipt();
-        if let PlanningChanges::Task(id) = owner {
-            tx.execute(
-                "INSERT INTO task_creation_intents(task_id,project_id,title,description)
-                 SELECT id,project_id,issue_title,COALESCE(issue_description,'') FROM tasks WHERE id=?1 AND external_issue_id IS NULL
-                 ON CONFLICT(task_id) DO NOTHING", [id.as_str()],
-            )?;
-        }
-        let retained: Option<String> = tx.query_row(
-            &format!("SELECT export_json FROM {table} WHERE {key}=?1"),
-            [id],
-            |row| row.get(0),
-        )?;
+        let (kind, id) = origin.owner();
+        let retained: Option<String> = tx
+            .query_row(
+                "SELECT export_json FROM planning_creations WHERE kind=?1 AND origin_id=?2",
+                params![kind, id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
         if let Some(retained) = retained {
             return Ok(serde_json::from_str(&retained)?);
         }
         let uuid = uuid::Uuid::parse_str(id.split_once('_').map_or(id, |(_, id)| id))
             .map_err(|error| StoreError::InvalidData(error.to_string()))?
             .to_string();
-        let (model, input) = match owner {
+        let (model, input) = match origin {
             PlanningChanges::Task(id) => {
                 let record = super::plan_read::task_in(&tx, id)?
                     .record
@@ -176,8 +179,10 @@ impl SqliteStore {
             link_id: uuid::Uuid::new_v4().to_string(),
         };
         tx.execute(
-            &format!("UPDATE {table} SET export_json=?2 WHERE {key}=?1"),
-            params![id, serde_json::to_string(&export)?],
+            "INSERT INTO planning_creations(kind,origin_id,task_id,project_id,export_json)
+             VALUES(?1,?2,CASE WHEN ?1='task' THEN ?2 END,CASE WHEN ?1='project' THEN ?2 END,?3)
+             ON CONFLICT(kind,origin_id) DO UPDATE SET export_json=excluded.export_json",
+            params![kind, id, serde_json::to_string(&export)?],
         )?;
         tx.commit()?;
         Ok(export)
@@ -185,45 +190,68 @@ impl SqliteStore {
 
     pub(crate) fn attempt_planning_export(
         &self,
-        owner: PlanningChanges<'_>,
+        origin: PlanningChanges<'_>,
         input: &Value,
         link: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        super::planning_peers::require_projected_effects(&tx, owner)?;
-        let (table, key) = owner.receipt();
+        super::planning_peers::require_projected_effects(&tx, origin)?;
+        let (kind, id) = origin.owner();
+        let local: String = tx.query_row(
+            "SELECT COALESCE(task_id,project_id) FROM planning_creations WHERE kind=?1 AND origin_id=?2",
+            params![kind,id], |row| row.get(0))?;
+        let task = TaskId::from_raw(&local);
+        let project = ProjectId::from_raw(&local);
+        super::planning_peers::require_projected_effects(
+            &tx,
+            if kind == "task" {
+                PlanningChanges::Task(&task)
+            } else {
+                PlanningChanges::Project(&project)
+            },
+        )?;
         let column = if link {
             "export_link_attempted"
         } else {
             "export_attempted"
         };
-        let deleted = if matches!(owner, PlanningChanges::Task(_)) {
-            "AND EXISTS(SELECT 1 FROM tasks WHERE id=task_id AND planning_deleted_at IS NULL AND external_issue_id IS NULL)"
+        let deleted = if matches!(origin, PlanningChanges::Task(_)) {
+            "AND EXISTS(SELECT 1 FROM tasks WHERE id=planning_creations.task_id AND planning_deleted_at IS NULL AND external_issue_id IS NULL)"
         } else if !link {
-            "AND external_project_id IS NULL"
+            "AND EXISTS(SELECT 1 FROM projects WHERE id=planning_creations.project_id AND external_project_id IS NULL)"
         } else {
             ""
         };
-        let attempted = tx.execute(&format!("UPDATE {table} SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
-            WHERE {key}=?1 AND {column}=0 AND export_json IS NOT NULL AND export_acknowledged=0 {deleted}"), params![owner.owner().1,input.to_string(),link])? == 1;
+        let attempted = tx.execute(&format!("UPDATE planning_creations SET {column}=1,export_error=NULL,export_json=CASE WHEN ?3 THEN export_json ELSE json_set(export_json,'$.input',json(?2)) END
+            WHERE origin_id=?1 AND kind=?4 AND {column}=0 AND export_acknowledged=0 {deleted}"), params![id,input.to_string(),link,kind])? == 1;
         tx.commit()?;
         Ok(attempted)
     }
 
     pub(crate) fn planning_export_error(
         &self,
-        owner: PlanningChanges<'_>,
+        origin: PlanningChanges<'_>,
         error: &str,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let (table, key) = owner.receipt();
-        conn.execute(
-            &format!(
-                "UPDATE {table} SET export_error=?2 WHERE {key}=?1 AND export_acknowledged=0 AND export_error IS NOT ?2"
-            ),
-            params![owner.owner().1, error],
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (kind, id) = origin.owner();
+        tx.execute(
+            "UPDATE planning_creations SET export_error=?2 WHERE origin_id=?1 AND kind=?3 AND export_acknowledged=0 AND export_error IS NOT ?2",
+            params![id, error,kind],
         )?;
+        // Discovery can fail before capture (for example, a missing Initiative).
+        // Preserve that diagnostic without inventing an attempted operation.
+        tx.execute(
+            &format!(
+                "INSERT INTO planning_creations(kind,origin_id,{kind}_id,export_error)
+             SELECT ?1,?2,id,?3 FROM {kind}s WHERE id=?2
+             ON CONFLICT(kind,origin_id) DO NOTHING"
+            ),
+            params![kind, id, error],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 }
@@ -236,36 +264,32 @@ pub(super) fn attach_in(
     project: bool,
     observed: &Value,
 ) -> StoreResult<()> {
-    let (kind, table, key, mapping, join) = if project {
+    let (kind, mapping, join) = if project {
         (
             "project",
-            "projects",
-            "id",
             "external_project_id",
             "JOIN waves w ON w.id=o.wave_id",
         )
     } else {
         (
             "task",
-            "task_creation_intents",
-            "task_id",
             "external_issue_id",
             "JOIN projects p ON p.id=o.project_id JOIN waves w ON w.id=p.wave_id",
         )
     };
-    let receipt: Option<(String, String)> = conn
+    let receipt: Option<(String, String, String)> = conn
         .query_row(
             &format!(
-                "SELECT o.id,c.export_json FROM {kind}s o
-        {join} JOIN {table} c ON c.{key}=o.id WHERE w.repo=?1
-        AND (o.{mapping} IS NULL OR o.{mapping}=?2)
+                "SELECT o.id,c.origin_id,c.export_json FROM {kind}s o
+        {join} JOIN planning_creations c ON c.{kind}_id=o.id WHERE w.repo=?1
+        AND c.kind=?3 AND (o.{mapping} IS NULL OR o.{mapping}=?2)
         AND c.export_attempted=1 AND json_extract(c.export_json,'$.id')=?2"
             ),
-            params![repo, observed["id"].as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            params![repo, observed["id"].as_str(), kind],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()?;
-    let Some((id, receipt)) = receipt else {
+    let Some((id, origin, receipt)) = receipt else {
         return Ok(());
     };
     let export: PlanningExport = serde_json::from_str(&receipt)?;
@@ -326,8 +350,8 @@ pub(super) fn attach_in(
         .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&export.initiative)));
     if !project || link_observed {
         conn.execute(
-            &format!("UPDATE {table} SET export_acknowledged=1,export_error=NULL WHERE {key}=?1 AND (export_acknowledged=0 OR export_error IS NOT NULL)"),
-            [id],
+            "UPDATE planning_creations SET export_acknowledged=1,export_error=NULL WHERE origin_id=?1 AND kind=?2 AND (export_acknowledged=0 OR export_error IS NOT NULL)",
+            params![origin,kind],
         )?;
     }
 
@@ -432,45 +456,47 @@ pub(crate) fn validate_peer_receipt(
 pub(super) fn import_peer_receipts(
     conn: &Connection,
     object: &crate::engine::planning_exchange::PlanningObject,
+    owner: PlanningChanges<'_>,
     winner: &Value,
     history: &[&Value],
 ) -> StoreResult<()> {
-    use crate::engine::planning_exchange::PlanningKind;
+    validate_peer_receipt(object, winner)?;
+    let (kind, local) = owner.owner();
+    if kind != object.kind.as_str() {
+        return Err(StoreError::InvalidData(
+            "creation origin and projection kinds differ".into(),
+        ));
+    }
     let mut receipt: CreationReceipt = serde_json::from_value(winner.clone())?;
     for &value in history {
+        validate_peer_receipt(object, value)?;
         merge_receipt(&mut receipt, serde_json::from_value(value.clone())?)?;
     }
-    let task = TaskId::from_raw(&object.id);
-    let project = ProjectId::from_raw(&object.id);
-    let owner = match object.kind {
-        PlanningKind::Task => PlanningChanges::Task(&task),
-        PlanningKind::Project => PlanningChanges::Project(&project),
-        _ => return Ok(()),
-    };
-    let (table, key) = owner.receipt();
-    let link = if object.kind == PlanningKind::Project {
-        "export_link_attempted"
-    } else {
-        "0"
-    };
-    let saved: Option<String> = conn.query_row(
-        &format!("SELECT json_object('export',json(export_json),'attempted',json(CASE WHEN export_attempted THEN 'true' ELSE 'false' END),
-            'link_attempted',json(CASE WHEN {link} THEN 'true' ELSE 'false' END),'error',export_error,
-            'acknowledged',json(CASE WHEN export_acknowledged THEN 'true' ELSE 'false' END))
-            FROM {table} WHERE {key}=?1 AND export_json IS NOT NULL"),
-        [&object.id], |r| r.get(0),
+    let saved: Option<(String,Option<String>)> = conn.query_row(
+        "SELECT COALESCE(task_id,project_id),CASE WHEN export_json IS NOT NULL THEN json_object('export',json(export_json),'attempted',json(CASE WHEN export_attempted THEN 'true' ELSE 'false' END),
+            'link_attempted',json(CASE WHEN export_link_attempted THEN 'true' ELSE 'false' END),'error',export_error,
+            'acknowledged',json(CASE WHEN export_acknowledged THEN 'true' ELSE 'false' END)) END
+            FROM planning_creations WHERE kind=?1 AND origin_id=?2",
+        params![kind,object.id], |r| Ok((r.get(0)?,r.get(1)?)),
     ).optional()?;
-    if let Some(saved) = saved {
-        let mut local = serde_json::from_str(&saved)?;
-        merge_receipt(&mut local, receipt)?;
-        receipt = local;
+    if let Some((projection, saved)) = saved {
+        if projection != local {
+            return Err(StoreError::PlanningReceiptConflict {
+                effect: "creation ownership",
+            });
+        }
+        if let Some(saved) = saved {
+            let mut retained = serde_json::from_str(&saved)?;
+            merge_receipt(&mut retained, receipt)?;
+            receipt = retained;
+        }
     }
-    if let PlanningChanges::Task(_) = owner {
+    if kind == "task" && local == object.id {
         conn.execute(
             "INSERT INTO task_creation_intents(task_id,project_id,title,description)
              VALUES(?1,?2,?3,?4) ON CONFLICT(task_id) DO NOTHING",
             params![
-                object.id,
+                local,
                 receipt.export.parent,
                 receipt.export.model["name"].as_str(),
                 receipt.export.model["description"].as_str()
@@ -478,13 +504,11 @@ pub(super) fn import_peer_receipts(
         )?;
     }
     let export = serde_json::to_string(&receipt.export)?;
-    conn.execute(&format!("UPDATE {table} SET export_json=?2,export_attempted=?3,export_error=?4,export_acknowledged=?5
-        WHERE {key}=?1 AND (export_json IS NOT ?2 OR export_attempted IS NOT ?3 OR export_error IS NOT ?4 OR export_acknowledged IS NOT ?5)"),
-        params![object.id,export,receipt.attempted,receipt.error,receipt.acknowledged])?;
-    if object.kind == PlanningKind::Project {
-        conn.execute("UPDATE projects SET export_link_attempted=?2 WHERE id=?1 AND export_link_attempted IS NOT ?2",
-            params![object.id,receipt.link_attempted])?;
-    }
+    conn.execute("INSERT INTO planning_creations(kind,origin_id,task_id,project_id,export_json,export_attempted,export_link_attempted,export_error,export_acknowledged)
+        VALUES(?1,?2,CASE WHEN ?1='task' THEN ?3 END,CASE WHEN ?1='project' THEN ?3 END,?4,?5,?6,?7,?8)
+        ON CONFLICT(kind,origin_id) DO UPDATE SET export_json=?4,export_attempted=?5,export_link_attempted=?6,export_error=?7,export_acknowledged=?8
+        WHERE export_json IS NOT ?4 OR export_attempted IS NOT ?5 OR export_link_attempted IS NOT ?6 OR export_error IS NOT ?7 OR export_acknowledged IS NOT ?8",
+        params![kind,object.id,local,export,receipt.attempted,receipt.link_attempted,receipt.error,receipt.acknowledged])?;
     Ok(())
 }
 

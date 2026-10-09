@@ -35,7 +35,7 @@ impl SqliteStore {
         append(
             &tx,
             &mut changes,
-            "SELECT id,'creation',input,attempted,error,NULL FROM planning_exports
+            "SELECT origin_id,'creation',input,attempted,error,NULL FROM planning_exports
              WHERE kind='task' AND id=?1 AND ?2",
             task.as_str(),
             connected,
@@ -57,7 +57,7 @@ impl SqliteStore {
         append(
             &tx,
             &mut changes,
-            "SELECT id,'creation',input,attempted,error,NULL FROM planning_exports
+            "SELECT origin_id,'creation',input,attempted,error,NULL FROM planning_exports
              WHERE kind='project' AND id=?1 AND ?2",
             project.as_str(),
             connected,

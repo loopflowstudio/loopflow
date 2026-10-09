@@ -1220,9 +1220,16 @@ fn insert_and_project(
         validate_wave(conn, object, winners, repo)?;
     }
     if let Some((_, winner)) = winners.get("creation") {
+        let task = TaskId::from_raw(&object.id);
+        let project = ProjectId::from_raw(&object.id);
         super::planning_export::import_peer_receipts(
             conn,
             object,
+            match object.kind {
+                PlanningKind::Task => PlanningChanges::Task(&task),
+                PlanningKind::Project => PlanningChanges::Project(&project),
+                _ => return Err(invalid("creation requires a Task or Project")),
+            },
             &winner.value,
             &changes.creation,
         )?;
@@ -2871,7 +2878,7 @@ mod tests {
             .unwrap();
         let receipt = || {
             source.conn.lock().unwrap().query_row(
-                "SELECT export_json,export_attempted,export_error FROM task_creation_intents WHERE task_id=?1",
+                "SELECT export_json,export_attempted,export_error FROM planning_creations WHERE kind='task' AND origin_id=?1",
                 [task.as_str()], |r| Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,Option<String>>(2)?)),
             ).unwrap()
         };
@@ -3099,7 +3106,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT export_error FROM projects WHERE id=?1",
+                    "SELECT export_error FROM planning_creations WHERE kind='project' AND origin_id=?1",
                     [project.as_str()],
                     |r| r.get::<_, Option<String>>(0),
                 )
@@ -6212,6 +6219,12 @@ mod tests {
             [retained_content],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO task_creation_intents(task_id,project_id,title,description,export_error)
+            VALUES('task','project','Retain identity','','Discovery unavailable')",
+            [],
+        )
+        .unwrap();
         let created = ProjectId::new();
         conn.execute("INSERT INTO projects(id,wave_id,created_at,project_name,project_slug,project_prompt_context) VALUES(?1,'00000000-0000-0000-0000-000000000001',1,'Created','created','')", [created.as_str()]).unwrap();
         let model = super::super::plan_read::project_in(&conn, &created).unwrap();
@@ -6225,6 +6238,25 @@ mod tests {
         conn.execute("INSERT INTO project_changes(seq,id,project_id,field,value_json) VALUES(1,'captured',?1,'name','\"Created\"'),(2,'later',?1,'name','\"Later\"')", [created.as_str()]).unwrap();
         conn.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,export_json,export_attempted,export_link_attempted,export_error)
             VALUES('00000000-0000-0000-0000-000000000001',?1,1,?2,1,1,'lost attachment')", params![created.as_str(),receipt.to_string()]).unwrap();
+        let created_task = TaskId::new();
+        conn.execute("INSERT INTO tasks(id,project_id,issue_identifier,issue_title,issue_description,created_at,updated_at,workspace_slug)
+            VALUES(?1,?2,'NEW-1','Captured task','Brief',1,1,'')",params![created_task.as_str(),created.as_str()]).unwrap();
+        let item = super::super::plan_read::task_in(&conn, &created_task)
+            .unwrap()
+            .record
+            .unwrap()
+            .item;
+        let task_uuid = uuid::Uuid::parse_str(created_task.as_str().strip_prefix("task_").unwrap())
+            .unwrap()
+            .to_string();
+        let task_receipt = json!({"id":task_uuid,"model":item,"through":1,"initiative":"initiative","link_id":uuid::Uuid::new_v4().to_string(),
+            "input":{"id":task_uuid,"teamId":"team","projectId":item.project_id,"title":item.name,"description":item.description,"assigneeId":item.assignee}});
+        conn.execute(r#"INSERT INTO task_changes(seq,id,task_id,field,value_json) VALUES(2,'captured-task',?1,'name','"Captured task"'),(3,'later-task',?1,'name','"Later task"')"#, [created_task.as_str()]).unwrap();
+        // The existing deletion owns sequence 1; this creation captured through 2.
+        let mut task_receipt = task_receipt;
+        task_receipt["through"] = json!(2);
+        conn.execute("INSERT INTO task_creation_intents(task_id,project_id,title,description,export_json,export_attempted,export_error)
+            VALUES(?1,?2,'Captured task','Brief',?3,1,'lost creation')",params![created_task.as_str(),created.as_str(),task_receipt.to_string()]).unwrap();
         let effects = json!([{"before":["task","other"],"after":["other","task"],"issue":"FIX-1",
             "input":{"sortOrder":12,"prioritySortOrder":0},"settled":false}]);
         conn.execute("INSERT INTO project_changes(id,project_id,field,value_json,base_json,order_effects_json,attempted,error)
@@ -6279,7 +6311,7 @@ mod tests {
         }
 
         let (body, attempted, linked, error): (String,bool,bool,String) = conn.query_row(
-            "SELECT export_json,export_attempted,export_link_attempted,export_error FROM projects WHERE id=?1", [created.as_str()],
+            "SELECT export_json,export_attempted,export_link_attempted,export_error FROM planning_creations WHERE kind='project' AND origin_id=?1", [created.as_str()],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
         let migrated: super::super::planning_export::PlanningExport =
             serde_json::from_str(&body).unwrap();
@@ -6289,7 +6321,7 @@ mod tests {
         assert_eq!(error, "lost attachment");
         assert!(!conn
             .query_row(
-                "SELECT export_acknowledged FROM projects WHERE id=?1",
+                "SELECT export_acknowledged FROM planning_creations WHERE kind='project' AND origin_id=?1",
                 [created.as_str()],
                 |r| r.get::<_, bool>(0),
             )
@@ -6315,6 +6347,26 @@ mod tests {
         assert!(conn
             .prepare("SELECT export_json FROM project_transitions")
             .is_err());
+        assert_eq!(conn.query_row(
+            "SELECT export_json,export_attempted,export_error FROM planning_creations WHERE kind='task' AND origin_id='task'",
+            [],|row| Ok((row.get::<_,Option<String>>(0)?,row.get::<_,bool>(1)?,row.get::<_,String>(2)?))).unwrap(),
+            (None,false,"Discovery unavailable".into()));
+        assert!(conn
+            .prepare("SELECT export_json FROM task_creation_intents")
+            .is_err());
+        assert!(conn.prepare("SELECT export_json FROM projects").is_err());
+        let (body,attempted,error,owner): (String,bool,String,String) = conn.query_row(
+            "SELECT export_json,export_attempted,export_error,task_id FROM planning_creations WHERE kind='task' AND origin_id=?1",
+            [created_task.as_str()], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?))).unwrap();
+        let migrated: super::super::planning_export::PlanningExport =
+            serde_json::from_str(&body).unwrap();
+        assert_eq!(owner, created_task.as_str());
+        assert_eq!(migrated.parent, created.as_str());
+        assert_eq!(migrated.captured, ["captured-task".into()].into());
+        assert_eq!(migrated.model, task_receipt["model"]);
+        assert_eq!(migrated.input, task_receipt["input"]);
+        assert!(attempted);
+        assert_eq!(error, "lost creation");
 
         conn.execute("INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES('/fixture',?1,?2,?3)",
             params![destination(),binding().endpoint(),binding().reference()]).unwrap();
@@ -6604,6 +6656,196 @@ mod tests {
             import(&target, "/target", "replacement", &incoming);
             assert_eq!(target.revisions().unwrap(), after);
             assert_eq!(export(&target, "/target"), retained);
+        }
+    }
+
+    #[test]
+    fn creation_origins_preserve_distinct_attempts_on_one_projection() {
+        use super::super::planning_changes::PlanningChanges;
+        use crate::engine::planning_exchange::PlanningKind;
+
+        for kind in [PlanningKind::Task, PlanningKind::Project] {
+            let (_source_home, source) = store();
+            let incoming_task = seed(&source);
+            let incoming_project = source.task(&incoming_task).unwrap().unwrap().project_id;
+            let (_target_home, target) = store();
+            let private = Wave::new(WaveId::new(), "private".into(), "/target".into());
+            target.create_wave(&private).unwrap();
+            let local_project = target.ensure_project(private.id(), "Private").unwrap();
+            let local_task = TaskId::new();
+            target
+                .create_task(&crate::planning::NewTask {
+                    id: local_task.clone(),
+                    project_id: local_project.clone(),
+                    title: "Private title".into(),
+                    description: "Private brief".into(),
+                })
+                .unwrap();
+            preserve_execution(&target, private.id(), &local_task);
+            let execution = execution_rows(&target);
+            let (origin, owner) = if kind == PlanningKind::Task {
+                for (store, project) in [(&source, &incoming_project), (&target, &local_project)] {
+                    store.conn.lock().unwrap().execute(
+                        "UPDATE projects SET external_project_id='provider-project' WHERE id=?1",
+                        [project.as_str()],
+                    ).unwrap();
+                }
+                (
+                    PlanningChanges::Task(&incoming_task),
+                    PlanningChanges::Task(&local_task),
+                )
+            } else {
+                (
+                    PlanningChanges::Project(&incoming_project),
+                    PlanningChanges::Project(&local_project),
+                )
+            };
+            source
+                .planning_export_error(origin, "Discovery unavailable")
+                .unwrap();
+            assert!(source.planning_export_pending(origin).unwrap());
+            assert!(source.planning_export_attempts(origin).is_err());
+            assert!(!export(&source, "/source")
+                .changes
+                .values()
+                .any(|change| change.object.kind == kind && change.field == "creation"));
+            let incoming = source
+                .prepare_planning_export(origin, "team", "initiative")
+                .unwrap();
+            let local = target
+                .prepare_planning_export(owner, "team", "initiative")
+                .unwrap();
+            for (store, identity, receipt) in
+                [(&source, origin, &incoming), (&target, owner, &local)]
+            {
+                assert!(store
+                    .attempt_planning_export(identity, &receipt.input, false)
+                    .unwrap());
+                if kind == PlanningKind::Project {
+                    assert!(store
+                        .attempt_planning_export(identity, &receipt.input, true)
+                        .unwrap());
+                }
+                store
+                    .planning_export_error(identity, "lost response")
+                    .unwrap();
+            }
+            edit_title(&target, &local_task, "Later private title");
+            target
+                .edit_project(&local_project, None, Some("Later private summary"))
+                .unwrap();
+            let later_task = target.pending_task_changes(&local_task).unwrap();
+            let later_project = target.pending_project_changes(&local_project).unwrap();
+            let document = export(&source, "/source");
+            let change = document
+                .changes
+                .values()
+                .filter(|change| change.object.kind == kind && change.field == "creation")
+                .max_by_key(|change| change.clock)
+                .unwrap();
+            // This tests the common receipt owner, not correspondence or scalar
+            // projection. Origin validation still uses the unmodified incoming ID.
+            let retain = || {
+                let mut conn = target.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                tx.execute("UPDATE planning_peer_context SET importing=1", [])
+                    .unwrap();
+                super::super::planning_export::import_peer_receipts(
+                    &tx,
+                    &change.object,
+                    owner,
+                    &change.value,
+                    &[&change.value],
+                )
+                .unwrap();
+                tx.execute("UPDATE planning_peer_context SET importing=0", [])
+                    .unwrap();
+                tx.commit().unwrap();
+            };
+            retain();
+            let revisions = target.revisions().unwrap();
+            retain();
+            assert_eq!(target.revisions().unwrap(), revisions);
+            for (identity, receipt) in [(origin, &incoming), (owner, &local)] {
+                assert_eq!(
+                    target
+                        .prepare_planning_export(identity, "ignored", "ignored")
+                        .unwrap(),
+                    *receipt
+                );
+                assert_eq!(
+                    target.planning_export_attempts(identity).unwrap(),
+                    (true, kind == PlanningKind::Project)
+                );
+                assert!(!target
+                    .attempt_planning_export(identity, &receipt.input, false)
+                    .unwrap());
+            }
+            assert_eq!(target.planning_export_origins(owner).unwrap().len(), 2);
+            assert_eq!(
+                target.pending_task_changes(&local_task).unwrap(),
+                later_task
+            );
+            assert_eq!(
+                target.pending_project_changes(&local_project).unwrap(),
+                later_project
+            );
+            assert_eq!(execution_rows(&target), execution);
+            assert!(export(&target, "/target").changes.is_empty());
+
+            // Exact readback settles only the matching origin. The second
+            // captured operation stays uncertain even beside a provider mapping.
+            let mut observed = incoming.model.clone();
+            observed["id"] = json!(incoming.id);
+            observed["revision"] = json!("2026-10-09T12:00:00Z");
+            if kind == PlanningKind::Project {
+                observed["initiative_ids"] = json!(["initiative"]);
+            }
+            {
+                let mut conn = target.conn.lock().unwrap();
+                let tx = conn.transaction().unwrap();
+                super::super::planning_export::attach_in(
+                    &tx,
+                    "/target",
+                    kind == PlanningKind::Project,
+                    &observed,
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+            assert!(!target.planning_export_pending(origin).unwrap());
+            assert!(target.planning_export_pending(owner).unwrap());
+            retain();
+            assert!(!target.planning_export_pending(origin).unwrap());
+            assert!(target.planning_export_pending(owner).unwrap());
+            assert_eq!(
+                target
+                    .prepare_planning_export(owner, "ignored", "ignored")
+                    .unwrap(),
+                local
+            );
+            assert_eq!(
+                target
+                    .prepare_planning_export(origin, "ignored", "ignored")
+                    .unwrap(),
+                incoming
+            );
+            let conn = target.conn.lock().unwrap();
+            let receipts: Vec<(String,Option<String>,bool)> = conn.prepare(
+                "SELECT origin_id,export_error,export_acknowledged FROM planning_creations WHERE kind=?1 ORDER BY origin_id"
+            ).unwrap().query_map([kind.as_str()],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
+                .unwrap().collect::<Result<_,_>>().unwrap();
+            assert!(receipts.contains(&(origin.owner().1.into(), None, true)));
+            assert!(receipts.contains(&(
+                owner.owner().1.into(),
+                Some("lost response".into()),
+                false
+            )));
+            drop(conn);
+            assert_eq!(execution_rows(&target), execution);
+            assert!(export(&target, "/target").changes.is_empty());
+            assert!(target.task(&incoming_task).unwrap().is_none());
+            assert!(target.project(&incoming_project).unwrap().is_none());
         }
     }
 

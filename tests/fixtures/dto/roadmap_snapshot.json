@@ -73,7 +73,8 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": []
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-144/make-lf-roadmap-the-machine-wide-view",
@@ -93,8 +94,7 @@
               "reason": "ready",
               "updated_at": "2026-07-14T23:44:00Z",
               "provider": "claude",
-              "started": false,
-              "pending_sync": "Saved locally; pending Linear synchronization"
+              "started": false
             },
             "next_move": {
               "owner": "task",
@@ -448,7 +448,8 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": []
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-131/show-the-all-wave-roadmap",
@@ -468,8 +469,7 @@
               "reason": "ready",
               "updated_at": "2026-07-14T22:00:00Z",
               "provider": "claude",
-              "started": true,
-              "pending_sync": null
+              "started": true
             },
             "next_move": {
               "owner": "user",
@@ -852,7 +852,8 @@
               "state": "unstarted",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": []
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": null,
@@ -915,7 +916,8 @@
               "state": "completed",
               "completed_at": null,
               "due_date": null,
-              "follow_up_sources": []
+              "follow_up_sources": [],
+              "sync": null
             },
             "reference": {
               "issue_url": "https://linear.app/loopflow/issue/W2-141/now-available-work-views-research",
@@ -935,8 +937,7 @@
               "reason": "done",
               "updated_at": "2026-07-14T21:00:00Z",
               "provider": "claude",
-              "started": true,
-              "pending_sync": null
+              "started": true
             },
             "next_move": {
               "owner": "wave",
@@ -1021,7 +1022,8 @@
                 "text": "A parallel concept anywhere is a failure event",
                 "holds": false
               }
-            ]
+            ],
+            "sync": null
           }
         ],
         "truncated": false

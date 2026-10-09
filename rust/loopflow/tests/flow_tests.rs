@@ -2005,10 +2005,10 @@ fn task_flow_read_keeps_captured_topology_and_counts_both_returns() {
     let home = TempDir::new().unwrap();
     // A Task's Flows are those whose Processes ran in its checkout, as Processes name it.
     let checkout = repo.path().canonicalize().unwrap();
+    repo.create_branch("task-flow-read");
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-flow-read", &repo.head_sha());
     observe_planning(&task, &checkout);
-    repo.create_branch("task-flow-read");
     for skill in [
         "implement-proof",
         "decide-proof",

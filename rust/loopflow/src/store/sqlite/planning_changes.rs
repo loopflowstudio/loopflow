@@ -262,17 +262,9 @@ impl<'a> PlanningChanges<'a> {
             .query_row(observation, [id], |row| row.get(0))
             .optional()?;
         let mut body: Option<Value> = body.map(|body| serde_json::from_str(&body)).transpose()?;
-        if matches!(self, Self::Project(_)) {
-            if let Some(body) = body.as_mut() {
-                let order: Option<String> = conn.query_row(
-                    "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
-                     JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider='linear' WHERE p.id=?1",
-                    [id], |row| row.get(0)).optional()?.flatten();
-                body["task_order"] = order
-                    .map(|order| serde_json::from_str(&order))
-                    .transpose()?
-                    .unwrap_or(Value::Null);
-            }
+        if let (Self::Project(id), Some(body)) = (self, body.as_mut()) {
+            body["task_order"] =
+                serde_json::to_value(super::planning_order::observed_order(conn, id)?)?;
         }
         Ok(body)
     }

@@ -15,7 +15,7 @@ use super::{OpsError, OpsResult};
 use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
-pub(super) fn connected(repo: &str) -> bool {
+pub(crate) fn connected(repo: &str) -> bool {
     crate::engine::config::load_config_or_default(Some(std::path::Path::new(repo)))
         .pm
         .and_then(|pm| pm.linear_team)
@@ -82,7 +82,7 @@ pub(crate) struct PlanningSync {
 }
 
 impl PlanningSync {
-    pub(crate) fn start(store: SharedStore, task: Task) -> std::io::Result<Self> {
+    pub(crate) fn start(store: SharedStore, repo: String) -> std::io::Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
@@ -95,25 +95,24 @@ impl PlanningSync {
                 let drive = async {
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || async {
-                            tokio::time::timeout(Duration::from_secs(5), refresh_task_comments(&store, &task))
-                                .await.map_err(|error| OpsError::Message(error.to_string()))?
+                        _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
+                            refresh_repository_comments(&store, &repo)
                         }) => {},
                         _ = repeat_sync("planning acquisition", Duration::from_secs(15), || async {
-                            tokio::time::timeout(Duration::from_secs(5), refresh_task_planning(&store, &task))
+                            tokio::time::timeout(Duration::from_secs(5), refresh_repository_planning(&store, &repo))
                                 .await.map_err(|error| OpsError::Message(error.to_string()))?
                         }) => {},
                         _ = repeat_sync("comment delivery", Duration::from_secs(1), || {
-                            sync_repository_deliveries(&store, &task, false)
+                            sync_repository_deliveries(&store, &repo, false)
                         }) => {},
                         _ = repeat_sync("planning export", Duration::from_secs(1), || {
-                            super::planning_export::sync_repository_exports(&store, &task)
+                            super::planning_export::sync_repository_exports(&store, &repo)
                         }) => {},
                         _ = repeat_sync("field delivery", Duration::from_secs(1), || {
-                            super::planning_delivery::sync_repository_fields(&store, &task)
+                            super::planning_delivery::sync_repository_fields(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Task state delivery", Duration::from_secs(1), || {
-                            sync_repository_deliveries(&store, &task, true)
+                            sync_repository_deliveries(&store, &repo, true)
                         }) => {},
                     }
                 };
@@ -157,20 +156,55 @@ impl Drop for PlanningSync {
     }
 }
 
-async fn refresh_task_planning(store: &Store, task: &Task) -> OpsResult<()> {
-    let wave = store
-        .get_wave(&task.wave_id)
+async fn refresh_repository_comments(store: &SharedStore, repo: &str) -> OpsResult<()> {
+    if !connected(repo) {
+        return Ok(());
+    }
+    let waves = store
+        .list_waves(Some(repo))
         .await
-        .map_err(|error| OpsError::Message(error.to_string()))?
-        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    futures_util::future::join_all(waves.iter().map(|wave| async {
+        let tasks = store
+            .list_tasks(Some(wave.id()))
+            .await
+            .map_err(|error| OpsError::Message(error.to_string()))?;
+        futures_util::future::join_all(
+            tasks
+                .iter()
+                .filter(|task| task.plan.linear_id.is_some())
+                .map(|task| async {
+                    match tokio::time::timeout(
+                        Duration::from_secs(5),
+                        refresh_task_comments(store, task),
+                    )
+                    .await
+                    {
+                        Ok(Ok(())) => {}
+                        result => {
+                            tracing::debug!(?result, task = %task.id, "comment acquisition pending")
+                        }
+                    }
+                }),
+        )
+        .await;
+        Ok::<(), OpsError>(())
+    }))
+    .await
+    .into_iter()
+    .collect::<OpsResult<Vec<_>>>()?;
+    Ok(())
+}
+
+async fn refresh_repository_planning(store: &Store, repository: &str) -> OpsResult<()> {
     // An absent mapping is not a reason to disable acquisition in a connected
     // repository. Connection configuration, rather than outbound work, selects it.
-    let repo = std::path::Path::new(wave.repo());
-    if !connected(wave.repo()) {
+    let repo = std::path::Path::new(repository);
+    if !connected(repository) {
         return Ok(());
     }
     let owners = store
-        .list_waves(Some(wave.repo()))
+        .list_waves(Some(repository))
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let results = futures_util::future::join_all(owners.iter().map(|owner| async {
@@ -187,18 +221,13 @@ async fn refresh_task_planning(store: &Store, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-async fn sync_repository_deliveries(store: &Store, task: &Task, state: bool) -> OpsResult<()> {
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(|e| OpsError::Message(e.to_string()))?
-        .ok_or_else(|| OpsError::Message("Task Wave is missing".into()))?;
-    if !connected(wave.repo()) {
+async fn sync_repository_deliveries(store: &Store, repository: &str, state: bool) -> OpsResult<()> {
+    if !connected(repository) {
         return Ok(());
     }
     let pending = store
         .sqlite
-        .pending_planning_tasks(wave.repo())
+        .pending_planning_tasks(repository)
         .map_err(|e| OpsError::Message(e.to_string()))?;
     let results = futures_util::future::join_all(pending.iter().map(|task| async {
         if state {
@@ -295,6 +324,9 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
         {
             return Ok(());
         }
+        // Linear has no expected-revision guard here. A reopening between the
+        // observation and this mutation can be overwritten; matching readback
+        // settles observed state, not the absence of an intervening edit.
         client
             .set_item_state(issue.as_str(), &state_id)
             .await
@@ -318,14 +350,14 @@ pub(crate) async fn sync_task_state(store: &Store, task: &Task) -> OpsResult<()>
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
     let error = match result {
         Ok(Ok(())) => return Ok(()),
-        Ok(Err(error)) => Some(error.to_string()),
-        Err(_) => Some(
-            "Task state delivery timed out; saved decision and delivery identity retained".into(),
-        ),
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => {
+            "Task state delivery timed out; saved decision and delivery identity retained".into()
+        }
     };
     store
         .sqlite
-        .settle_task_state(&delivery, error.as_deref())
+        .task_state_error(&delivery, &error)
         .map_err(|e| message(&e))
 }
 

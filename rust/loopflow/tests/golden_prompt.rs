@@ -1,3 +1,5 @@
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -60,7 +62,8 @@ fn normalize_prompt(prompt: &str, repo: &Path) -> String {
 }
 
 #[test]
-fn golden_prompts_match_python() {
+fn golden_prompts_match() {
+    let _env = support::EnvGuard::new(&[]);
     // Goldens are hermetic fixture renders: a run inside a managed wave
     // test process (workers run this suite) must not leak ambient Wave context
     // into them. Safe to set here — this binary runs exactly one test.
@@ -103,6 +106,10 @@ fn golden_prompts_match_python() {
         let actual = normalize_prompt(&prompt, &repo);
 
         let expected_path = case_path.with_extension("md");
+        if std::env::var("LOOPFLOW_UPDATE_GOLDENS").as_deref() == Ok("1") {
+            fs::write(&expected_path, format!("{actual}\n")).expect("update golden prompt");
+            continue;
+        }
         let expected = fs::read_to_string(&expected_path).unwrap_or_else(|_| {
             panic!(
                 "missing golden file {} (run tests/goldens/update_goldens.py)",

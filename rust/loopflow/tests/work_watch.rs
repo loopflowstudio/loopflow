@@ -44,7 +44,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
-        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
             command.env_remove(key);
         }
     }
@@ -52,6 +52,8 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("HOME", home)
         .stderr(Stdio::inherit());
     command
 }
@@ -810,23 +812,43 @@ fn selection_only_commit_reaches_two_open_work_readers() {
 fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: team-product\n",
+    )
+    .unwrap();
     home.plan(1);
     let mut watch = home.watch();
     let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
-        "headless":false, "task":"FIX-1", "wave":null, "activity":null});
+        "headless":false, "task":null, "wave":null, "activity":null});
     watch.request(scope.clone());
     let await_state = |watch: &Watch, expected| {
         let deadline = Instant::now() + Duration::from_secs(10);
+        let mut last = None;
         loop {
             let frame = watch
                 .next(deadline.saturating_duration_since(Instant::now()))
-                .expect("saved decision did not reach Desktop");
+                .unwrap_or_else(|| {
+                    panic!("saved decision did not reach Desktop; last planning: {last:?}")
+                });
+            if let Some(error) = &frame.unavailable {
+                last = Some(error.clone());
+            }
             if let WorkContent::Planning(Some(part)) = frame.content {
+                last = Some(format!("{part:?}"));
                 for wave in part.roadmap.waves {
                     if let Evidence::Ok { items, .. } = wave.tasks {
                         for task in items {
                             if let Some(runtime) = task.runtime {
-                                if runtime.status == expected && runtime.pending_sync.is_some() {
+                                if runtime.status == expected
+                                    && task.task.sync.as_ref().is_some_and(|sync| {
+                                        sync.changes.iter().any(|change| {
+                                            change.field == "state" && change.error.is_some()
+                                        })
+                                    })
+                                {
                                     assert_eq!(
                                         task.task.completed,
                                         expected == loopflow::durable::TaskState::Done
@@ -880,6 +902,13 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
 fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: team-product\n",
+    )
+    .unwrap();
     home.plan(1);
     let mut watch = home.watch();
     let scope = serde_json::json!({

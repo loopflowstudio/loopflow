@@ -4,7 +4,7 @@
 //! part is projected again only then, on a read-only connection, and sent only
 //! when its content differs from the last frame. Bodies are the same wire types
 //! the one-shot `--json` reads print. Projections remain read-only. A separate
-//! foreground synchronization lifetime updates the selected Task's planning;
+//! foreground synchronization lifetime updates the selected repository's planning;
 //! those commits wake the reader just like edits from another connection.
 
 mod checkouts;
@@ -397,30 +397,26 @@ impl Reader {
     }
 
     fn sync_planning(&mut self) {
-        if self.planning_sync.as_ref().map(|(task, _)| task) == self.scope.task.as_ref() {
+        if self.planning_sync.as_ref().map(|(repo, _)| repo) == self.scope.repo.as_ref() {
             return;
         }
         self.planning_sync = None;
-        let Some(selector) = &self.scope.task else {
+        let Some(repo) = &self.scope.repo else {
             return;
         };
-        if !self.database.exists() {
+        if self.store.is_none() {
             return;
         }
         let result = self.runtime.block_on(async {
             let store = Arc::new(
                 crate::store::open_store(&StorageConfig::sqlite(self.database.clone())).await?,
             );
-            let task = store
-                .get_task_by_issue(selector)
-                .await?
-                .ok_or_else(|| anyhow!("Task {selector} is not stored"))?;
-            crate::ops::linear_observe::PlanningSync::start(store, task)
+            crate::ops::linear_observe::PlanningSync::start(store, repo.clone())
                 .map_err(anyhow::Error::from)
         });
         match result {
-            Ok(sync) => self.planning_sync = Some((selector.clone(), sync)),
-            Err(error) => tracing::warn!(%error, "cannot start Task planning sync"),
+            Ok(sync) => self.planning_sync = Some((repo.clone(), sync)),
+            Err(error) => tracing::warn!(%error, "cannot start repository planning sync"),
         }
     }
 

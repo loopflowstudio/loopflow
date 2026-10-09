@@ -333,14 +333,24 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             .into_iter()
             .enumerate()
             {
+                // Each refusal has its own active baseline. An observation in a
+                // foreign Project cannot reopen the preceding canceled Task.
+                let mut restored = original.clone();
+                restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
+                runtime
+                    .block_on(store.put_pm_task(&scope, "linear", restored, None, None))
+                    .unwrap();
                 let mut observed = original.clone();
-                observed.item.revision = Some(format!("2026-09-30T12:00:0{index}Z"));
+                observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
                 if condition == "canceled" {
                     observed.item.state = Some("canceled".into());
                 }
                 if condition == "moved" {
                     observed.item.project_id = Some("project-2".into());
                     observed.project.as_mut().unwrap().id = "project-2".into();
+                }
+                if condition == "team" {
+                    observed.item.team_id = Some("another-team".into());
                 }
                 runtime
                     .block_on(store.put_pm_task(&scope, "linear", observed, None, None))

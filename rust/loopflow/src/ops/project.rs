@@ -92,7 +92,7 @@ pub async fn update_plan(
         .sqlite
         .update_project_content(&project.id, &content)
         .map_err(project_error)?;
-    planning(&store, &project, repo)
+    planning(&store, &project)
 }
 
 /// One-time supported import at an explicit mutation boundary. A failed read is
@@ -257,7 +257,7 @@ pub async fn edit(
         .sqlite
         .edit_project(&project.id, name, summary)
         .map_err(project_error)?;
-    planning(&store, &project, repo)
+    planning(&store, &project)
 }
 
 pub async fn workflow(
@@ -286,30 +286,26 @@ pub async fn workflow(
             .select_project_workflow(&project.id, name, &definition)
             .map_err(project_error)?;
     }
-    planning(&store, &project, repo)
+    planning(&store, &project)
 }
 
 #[derive(Debug, serde::Serialize)]
 pub struct ProjectPlanning {
+    pub sync: crate::planning::PlanningSyncStatus,
     #[serde(flatten)]
     pub project: PmProject,
-    pub sync_enabled: bool,
-    pub pending_changes: Vec<crate::planning::PlanningChange>,
 }
 
-fn planning(store: &Store, project: &Project, repo: &Path) -> OpsResult<ProjectPlanning> {
-    let (project, pending_changes) = store
+fn planning(store: &Store, project: &Project) -> OpsResult<ProjectPlanning> {
+    let sync = store
         .sqlite
-        .project_with_changes(&project.id)
+        .project_planning_sync(&project.id)
         .map_err(project_error)?;
-    Ok(ProjectPlanning {
-        project,
-        sync_enabled: crate::engine::config::load_config_or_default(Some(repo))
-            .pm
-            .and_then(|pm| pm.linear_team)
-            .is_some(),
-        pending_changes,
-    })
+    let project = store
+        .sqlite
+        .planning_project(&project.id)
+        .map_err(project_error)?;
+    Ok(ProjectPlanning { project, sync })
 }
 
 pub(crate) fn load_workflow(

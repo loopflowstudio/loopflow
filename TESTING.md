@@ -601,6 +601,14 @@ accounts or installed data. Ordinary retry, usage, binding and review behavior
 belong in `session_lifecycle_tests`; Chapter convergence belongs in
 `ops::chapter::tests`, including interrupted rotation and second-Machine sync.
 
+`planning_reconnect_tests` runs the public work-watch and Flow reconnect fixtures
+on Linux, using disposable TLS trust and synthetic Linear state. They exercise
+repository/Wave scope without Task selection, selection changes, stdin close/reopen,
+lost replies and independent propagation during rejected field delivery. The
+portable `work_watch` offline-completion test requires a foreground delivery error
+with no Task selected; local frame propagation alone cannot establish sync lifetime.
+Run these through the same external-network denial wrapper as other CLI fixtures.
+
 Task-planning fixtures also need an explicit `LF_BIN`: Task status validates
 launch authority before reconciling a user merge. Pin the test executable when
 no child is launched; an installed `lf` on PATH can hide this missing fixture.
@@ -608,6 +616,19 @@ no child is launched; an installed `lf` on PATH can hide this missing fixture.
 After Project ownership or uniqueness changes, run the Task-planning consumers
 against CI's materialized schema. Planning sync already creates the local Project;
 registered-Task fixtures must reuse it rather than insert a second owner.
+
+Planning-owner changes must cover context/catalog reads, Wave relocation, Task
+initialization, Workflow completion/reopening and PR delivery fixtures alongside
+the new planning APIs. Seed stored definitions explicitly; writing a fixture file
+is not a planning mutation.
+An existing checkout fixture must settle initialization before testing delivery.
+Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
+checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
+a source archive alone does not exercise that boundary.
+Include the shared DTO fixtures and Desktop planning states in the affected gate.
+Repository-wide Linear fixtures must return comments only for their owning issue;
+exercise acquisition in a different order from Task creation. Process-sensitive
+cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
 uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::pm::task_planning_tests::)' --no-fail-fast
@@ -803,8 +824,9 @@ Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
 
 When changing Task planning lookup or provider response shapes, run the affected
-installation proofs and the paired `local_planning` deletion proof. The independent abandonment
-`task_deletion_tests` binary fixture runs only on Linux, and the regular Rust suite skips installation proofs. Keep
+installation proofs and the paired `local_planning` deletion proof. The portable `task_abandonment`
+fixture retains unresolved Sessions, Processes, published PRs and files in both
+connection modes. The regular Rust suite skips installation proofs. Keep
 simulated provider revisions and checkout Team/Initiative bindings consistent
 with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
@@ -880,19 +902,18 @@ tests/e2e/test_full_cycle.sh
 tests/e2e/test_sync_safety.sh
 ```
 
-Exercise retained execution during abandonment through the real CLI on Linux:
+Exercise repository planning reconnect through real work-watch and Flow commands on Linux:
 
 ```bash
-cargo test -p loopflow --test task_deletion_tests
+cargo test -p loopflow --test planning_reconnect_tests
 ```
 
-Requires `uv`, Python and OpenSSL. The test creates an isolated Machine/store and a
+Requires `uv`, Python and OpenSSL. The fixture uses an isolated Machine/store and
 local HTTPS proxy with synthetic Linear state and credentials. Its CA is trusted
 only by CLI children through `SSL_CERT_FILE`; macOS platform TLS ignores that
-setting, so this test is Linux-only. It verifies an immediate cancellation save, stable pending delivery and retained
-Sessions, Processes, PRs and files. `local_planning` covers deletion in both connection
-modes, rollback, retry identity and retained execution without provider access. No installation or live provider is
-used.
+setting, so reconnect is Linux-only. `task_abandonment` and `local_planning` cover
+portable local decisions and deletion, retry identity and retained execution in
+both connection modes without provider access. No installation or live provider is used.
 
 Exercise Linear expiry and rejection through an explicit experimental CLI:
 

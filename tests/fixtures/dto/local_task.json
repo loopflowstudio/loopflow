@@ -84,7 +84,11 @@
       "identifier": "lf-0123456",
       "name": "Retain quoted input",
       "rank": 0,
-      "state": "unstarted"
+      "state": "unstarted",
+      "sync": {
+        "connected": false,
+        "changes": []
+      }
     },
     "workflow_name": null
   }

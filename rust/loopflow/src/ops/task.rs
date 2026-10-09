@@ -785,6 +785,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             WorkStatus::Ready => {}
         }
+        store
+            .sqlite
+            .validate_task_planning(&task)
+            .map_err(task_error)?;
         if !acquired && options.directive.is_some() {
             return Err(task_error(format!(
                 "Task {} already exists; use `lf task comment {} <new-direction>`",
@@ -2887,6 +2891,7 @@ async fn reconcile_task_pr_observation(
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TaskStatus {
+    pub sync: Option<crate::planning::PlanningSyncStatus>,
     pub planning: Option<crate::store::PmTaskRecord>,
     pub planning_error: Option<String>,
     pub planning_stale: bool,
@@ -2896,14 +2901,21 @@ pub struct TaskStatus {
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     if let Some(task) = task_execution_status(repo, issue)? {
-        let read = block_on_task(async {
+        let (read, sync) = block_on_task(async {
             let store = task_store().await?;
-            Ok(crate::ops::pm::TaskPlanningInspection {
-                observation: store.sqlite.planning_task(&task.id).map_err(task_error)?,
-                refresh_error: None,
-            })
+            Ok((
+                crate::ops::pm::TaskPlanningInspection {
+                    observation: store.sqlite.planning_task(&task.id).map_err(task_error)?,
+                    refresh_error: None,
+                },
+                store
+                    .sqlite
+                    .task_planning_sync(&task.id)
+                    .map_err(task_error)?,
+            ))
         })?;
         return Ok(TaskStatus {
+            sync: Some(sync),
             planning_stale: task.plan.linear_id.is_some() && read.is_stale(),
             planning_state: read.observation.state,
             planning: read.observation.record,
@@ -2915,6 +2927,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
     let read =
         crate::ops::pm::inspect_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto)?;
     Ok(TaskStatus {
+        sync: None,
         planning_stale: read.is_stale(),
         planning_state: read.observation.state,
         planning: read.observation.record,
@@ -3955,8 +3968,7 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
 pub struct TaskEdit {
     pub wave: String,
     pub id: String,
-    pub sync_enabled: bool,
-    pub pending_changes: Vec<crate::planning::PlanningChange>,
+    pub sync: crate::planning::PlanningSyncStatus,
 }
 
 pub fn task_edit(
@@ -3984,26 +3996,13 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
-        let mut pending_changes = store
-            .sqlite
-            .pending_task_changes(&edited.id)
-            .map_err(task_error)?;
-        pending_changes.extend(
-            store
-                .sqlite
-                .pending_project_changes(&edited.project_id)
-                .map_err(task_error)?
-                .into_iter()
-                .filter(|change| change.field == "task_order"),
-        );
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
-            sync_enabled: crate::engine::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some(),
-            pending_changes,
+            sync: store
+                .sqlite
+                .task_planning_sync(&edited.id)
+                .map_err(task_error)?,
         })
     })
 }

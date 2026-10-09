@@ -34,7 +34,7 @@ fn success(output: Output) -> String {
 }
 
 #[test]
-fn context_budget_preview_reads_saved_wave_policy_and_checkout_notes() {
+fn context_budget_preview_reads_saved_wave_and_refreshes_local_edits() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
@@ -56,7 +56,6 @@ fn context_budget_preview_reads_saved_wave_policy_and_checkout_notes() {
         "---\ncontext_budgets:\n  memory_tokens: 400\n---\nLocal objective.\n",
     )
     .unwrap();
-    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let memory = repo.path().join("wave/local/MEMORY.md");
     let scratch = repo.path().join("scratch/plan.md");
     fs::write(
@@ -65,8 +64,12 @@ fn context_budget_preview_reads_saved_wave_policy_and_checkout_notes() {
     )
     .unwrap();
     fs::write(&scratch, "Pending work. ".repeat(500)).unwrap();
-    let project = store
-        .ensure_wave_project(repo.path().to_str().unwrap(), "local")
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let wave = store
+        .ensure_wave(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "local",
+        )
         .unwrap();
     let query = || -> serde_json::Value {
         serde_json::from_str(&success(
@@ -104,7 +107,7 @@ fn context_budget_preview_reads_saved_wave_policy_and_checkout_notes() {
     }
     assert!(usage.last().unwrap()["submitted_tokens"].as_u64().unwrap() > 100);
     store
-        .update_wave_document(&project.wave_id, "MEMORY.md", "Live decision retained.")
+        .update_wave_document(&wave, "MEMORY.md", "Live decision retained.")
         .unwrap();
     fs::write(scratch, "Pending work retained.").unwrap();
     let refreshed = query();
@@ -304,10 +307,12 @@ fn global_wave_listing_and_repository_catalog_use_real_checkout_scope() {
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     for (name, root) in [("first", repo.path()), ("second", other.path())] {
-        let wave = Wave::new(WaveId::new(), name.into(), root.display().to_string());
-        store.create_wave(&wave).unwrap();
         store
-            .update_wave_document(wave.id(), "GOAL.md", "Saved Wave objective.")
+            .create_wave(&Wave::new(
+                WaveId::new(),
+                name.into(),
+                root.display().to_string(),
+            ))
             .unwrap();
     }
     for (cwd, count, local_catalog) in [

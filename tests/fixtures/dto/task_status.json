@@ -45,6 +45,7 @@
     },
     "planning_error": null,
     "planning_stale": false,
+    "sync": null,
     "execution": null,
     "planning_state": "available"
   },
@@ -94,6 +95,7 @@
     },
     "planning_error": "Linear unavailable",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "unavailable"
   },
@@ -101,6 +103,7 @@
     "planning": null,
     "planning_error": "Planning needs refresh",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "unavailable"
   },
@@ -150,6 +153,7 @@
     },
     "planning_error": null,
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "invalid"
   },
@@ -199,6 +203,7 @@
     },
     "planning_error": null,
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "removed"
   },
@@ -248,6 +253,7 @@
     },
     "planning_error": "Task absent from repository planning",
     "planning_stale": true,
+    "sync": null,
     "execution": null,
     "planning_state": "absent"
   }

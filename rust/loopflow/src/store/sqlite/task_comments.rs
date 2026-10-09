@@ -128,6 +128,12 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let task = super::children::task_on(&tx, task)?.ok_or(StoreError::NotFound)?;
+        let repo: String = tx.query_row(
+            "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+            [task.project_id.as_str()],
+            |row| row.get(0),
+        )?;
+        let connected = crate::ops::linear_observe::connected(&repo);
         let mut thread = TaskComments {
             identifier: task.plan.identifier,
             comments: Vec::new(),
@@ -147,8 +153,7 @@ impl SqliteStore {
             let mut rows = query.query([task.id.as_str()])?;
             while let Some(row) = rows.next()? {
                 let comment = read_comment(row)?;
-                if task.plan.linear_id.is_some() && row.get::<_, Option<bool>>(4)?.unwrap_or(false)
-                {
+                if connected && row.get::<_, Option<bool>>(4)?.unwrap_or(false) {
                     thread.pending_sync.push(comment.id.clone());
                 }
                 if let Some(body) = row.get::<_, Option<String>>(5)? {

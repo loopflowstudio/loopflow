@@ -227,23 +227,14 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     let terminal = r#"#!/bin/sh
 case "$*" in
   --version) exit 0 ;;
-  "--dangerously-bypass-hook-trust --model")
+  '--dangerously-bypass-hook-trust --model')
     echo "a value is required for '--model <MODEL>'" >&2; exit 2 ;;
   *app-server*) ;;
   *resume*)
     case "$*" in *terminal-fixture*) exit 0 ;; *) exit 91 ;; esac ;;
   *--profile*)
     printf '%s\n' "$LF_CAPTURE_KEY" >> "$LF_HOME/launched"
-    python3 - "$@" <<'PYTHON'
-import os, pathlib, subprocess, sys, tomllib
-args = sys.argv[1:]
-home = pathlib.Path(os.environ.get("CODEX_HOME", pathlib.Path.home() / ".codex"))
-profile = home / (args[args.index("--profile") + 1] + ".config.toml")
-config = tomllib.loads(profile.read_text())
-for group in config["hooks"]["SessionStart"]:
-    for hook in group["hooks"]:
-        subprocess.run(hook["command"], shell=True, input='{"session_id":"terminal-fixture"}', text=True, check=True)
-PYTHON
+    printf '%s\n' '{"session_id":"terminal-fixture"}' | "$LF_BIN" __provider-session
     exit $? ;;
   *) echo 'unexpected native provider command' >&2; exit 92 ;;
 esac
@@ -279,7 +270,7 @@ esac
     let worktree = Path::new(placed["worktree"].as_str().unwrap());
     let launch = fixture
         .command(&[
-            "--interactive",
+            "-i",
             "--task",
             task_id,
             "--agent",

@@ -14,20 +14,6 @@ use super::planning_changes::PlanningChanges;
 use super::SqliteStore;
 
 impl SqliteStore {
-    pub(crate) fn project_with_changes(
-        &self,
-        project: &ProjectId,
-    ) -> StoreResult<(crate::pm::PmProject, Vec<PlanningChange>)> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
-        let result = (
-            super::plan_read::project_in(&tx, project)?,
-            PlanningChanges::Project(project).pending(&tx)?,
-        );
-        tx.commit()?;
-        Ok(result)
-    }
-
     pub fn pending_project_changes(&self, project: &ProjectId) -> StoreResult<Vec<PlanningChange>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         PlanningChanges::Project(project).pending(&conn)
@@ -104,6 +90,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = super::plan_read::project_in(&tx, project)?;
+        let repo: String = tx.query_row(
+            "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
+            [project.as_str()],
+            |row| row.get(0),
+        )?;
+        crate::engine::workflow::parse_workflow(name, definition, std::path::Path::new(&repo))
+            .map_err(StoreError::InvalidData)?;
         write_content(
             &tx,
             project,

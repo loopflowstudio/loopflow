@@ -266,12 +266,8 @@ fn repository_team_matrix() {
     drop(store);
 
     let old_home = std::env::var_os("LF_HOME");
-    // SAFETY: this integration binary contains one test; no sibling thread can
-    // observe the temporary storage selection.
-    unsafe {
-        std::env::set_var("LF_HOME", &home);
-    }
-    // Recursive discovery and durable ancestry make nested titles legible.
+    std::env::set_var("LF_HOME", &home);
+    // Stored discovery and durable ancestry make nested titles legible.
     assert_eq!(
         list_local_waves(&repo).unwrap(),
         ["intelligence", "survival", "survival/infrastructure"]
@@ -369,8 +365,8 @@ fn repository_team_matrix() {
         .join("fixture.a-real-task-reaches-done")
         .exists());
 
-    // Legacy provider configuration does not block local reads or Task creation.
-    // Remote migration is separate; local saving grants no provider write.
+    // Legacy provider configuration cannot prevent a local save. Delivery
+    // remains pending until the connection is repaired.
     let legacy_repo = fixture.path().join("legacy");
     std::fs::create_dir_all(legacy_repo.join(".lf")).unwrap();
     std::fs::write(
@@ -446,19 +442,14 @@ fn repository_team_matrix() {
             "--wave",
             "product",
             "--title",
-            "Saved offline",
+            "Retain offline work",
             "--json",
         ],
     );
-    let task: serde_json::Value =
-        serde_json::from_str(&assert_success(&saved, "local legacy Task")).unwrap();
-    let stored = SqliteStore::new(&database)
-        .unwrap()
-        .task_by_issue(task["id"].as_str().unwrap())
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.plan.title, "Saved offline");
-    assert!(stored.plan.linear_id.is_none());
+    let item: serde_json::Value =
+        serde_json::from_str(&assert_success(&saved, "save local Task")).unwrap();
+    assert_eq!(item["name"], "Retain offline work");
+    assert!(String::from_utf8_lossy(&saved.stderr).contains("pending Linear sync"));
 
     // PRD-44 leaves the repository Team as the sole PM authority after the
     // provider migration verifies successfully.

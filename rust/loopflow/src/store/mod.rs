@@ -593,10 +593,12 @@ impl Store {
     pub(crate) async fn wave_retirement_blockers(
         &self,
         wave_id: &WaveId,
+        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let wave_id = wave_id.clone();
+        let replacement = replacement.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
+            store.wave_retirement_blockers(&wave_id, &replacement)
         })
         .await
     }
@@ -2599,7 +2601,12 @@ mod tests {
         assert_eq!(accepted.snapshot.projects, vec![confirmed.clone()]);
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(durable.plan.pm_snapshot_synced_at, Some(10));
-        assert!(durable.plan.prompt_context.starts_with("## Metric targets"));
+        assert_eq!(
+            crate::pm::parse_project_content(&durable.plan.prompt_context)
+                .unwrap()
+                .metric_targets,
+            confirmed.metric_targets
+        );
         assert!(!durable.plan.prompt_context.contains("flow:"));
         assert!(durable.plan.prompt_context.contains(&confirmed.krs[0].text));
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
@@ -3249,6 +3256,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        plan.revision += 1;
         assert_eq!(by_stable_id.plan, plan);
         let mut expected = persisted;
         expected.plan = plan;

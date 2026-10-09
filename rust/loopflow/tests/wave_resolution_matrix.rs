@@ -19,12 +19,6 @@ use loopflow::work::wave::Wave;
 
 // ─── Command registry ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Read,
-    Mutation,
-}
-
 /// How a command accepts its explicit `--wave` override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WaveForm {
@@ -41,7 +35,6 @@ struct Cmd {
     /// Full args after `lf` (subcommand path + extra flags/values).
     base_args: &'static [&'static str],
     wave_form: WaveForm,
-    kind: Kind,
     /// With no context, read all Waves instead of requiring one.
     global_default: bool,
 }
@@ -57,13 +50,10 @@ const AMBIENT_ONLY: &[&[&str]] = &[];
 /// ownership. Ambient Wave selection must not redirect an explicit Task.
 const ISSUE_OWNED: &[&[&str]] = &[&["task", "edit"], &["task", "comment"]];
 
-/// Follow-up filing defaults to the source Task's Wave; an explicit Wave selects
-/// the new Task's destination without rebinding the source. Filing retry coverage
-/// lives in ops::task::follow_through::tests.
-const FOLLOW_UP_DESTINATION: &[&[&str]] = &[&["task", "follow-up"]];
-
 /// Local context previews accept authored Wave directories without registration.
 /// `global_commands` covers their config, usage and refresh behavior.
+const FOLLOW_UP_DESTINATION: &[&[&str]] = &[&["task", "follow-up"]];
+
 const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Scheduling requires an explicit Wave or repository, never ambient selection.
@@ -105,7 +95,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["wave", "status"],
         base_args: &["wave", "status", "--json"],
         wave_form: WaveForm::Positional,
-        kind: Kind::Read,
         global_default: false,
     },
     Cmd {
@@ -113,7 +102,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["roadmap"],
         base_args: &["roadmap", "--json"],
         wave_form: WaveForm::Flag,
-        kind: Kind::Read,
         global_default: true,
     },
     // ── Mutations ────────────────────────────────────────────────────────
@@ -122,7 +110,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["repo", "connect"],
         base_args: &["repo", "connect"],
         wave_form: WaveForm::Positional,
-        kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
@@ -130,7 +117,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["repo", "refresh"],
         base_args: &["repo", "refresh"],
         wave_form: WaveForm::Positional,
-        kind: Kind::Mutation,
         global_default: true,
     },
     Cmd {
@@ -146,7 +132,6 @@ const COMMANDS: &[Cmd] = &[
             "daily",
         ],
         wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
@@ -154,7 +139,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["task", "create"],
         base_args: &["task", "create", "--title", "Fixture task"],
         wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
         global_default: false,
     },
     Cmd {
@@ -162,7 +146,6 @@ const COMMANDS: &[Cmd] = &[
         path: &["wave", "update-plan"],
         base_args: &["wave", "update-plan", "--plan", "plan.json"],
         wave_form: WaveForm::Flag,
-        kind: Kind::Mutation,
         global_default: false,
     },
 ];
@@ -434,55 +417,32 @@ fn run_lf(home: &Path, repo: &Path, cmd: &Cmd, env: &Env) -> std::process::Outpu
 /// invents its own resolution rule — fails a cell.
 #[test]
 fn matrix_every_command_every_environment() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let home = tmp.path().join("home");
-    let repo = tmp.path().join("repo");
-    let wave = seed(&home, &repo);
-    let product_uuid = wave.id().as_str().to_string();
-    let stale_uuid = WaveId::new().to_string();
-    let envs = make_envs(&product_uuid, &stale_uuid);
-
     let mut failures = Vec::new();
     let mut total = 0usize;
-
-    for env in &envs {
-        // Run reads before mutations so `lf project start` sees a clean repo.
-        let mut reads: Vec<&Cmd> = Vec::new();
-        let mut mutations: Vec<&Cmd> = Vec::new();
+    // Each cell gets its own plan: explicit Task creation can provision a Wave.
+    for index in 0..make_envs("", "").len() {
         for cmd in COMMANDS {
-            if matches!(cmd.kind, Kind::Read) {
-                reads.push(cmd);
-            } else {
-                mutations.push(cmd);
-            }
-        }
-
-        for cmd in reads.iter().chain(mutations.iter()) {
-            // Every cell owns its saved plan: an earlier creation must not make
-            // a later unknown selector appear registered.
-            let cell = tempfile::tempdir().unwrap();
-            let home = cell.path().join("home");
-            let repo = cell.path().join("repo");
+            let tmp = tempfile::tempdir().unwrap();
+            let home = tmp.path().join("home");
+            let repo = tmp.path().join("repo");
             let wave = seed(&home, &repo);
-            let environments = make_envs(wave.id().as_str(), &stale_uuid);
-            let env = environments
-                .iter()
-                .find(|value| value.id == env.id)
-                .unwrap();
-
+            let env = make_envs(wave.id().as_str(), WaveId::new().as_str()).remove(index);
             total += 1;
-            let output = run_lf(&home, &repo, cmd, env);
+            let output = run_lf(&home, &repo, cmd, &env);
             let outcome = classify(&output);
-            let expected = expected_outcome(cmd, env);
-
+            let expected = if cmd.id == "task create"
+                && matches!(
+                    env.default_expected,
+                    Outcome::NoContext | Outcome::UnknownExplicit
+                ) {
+                Outcome::Resolved
+            } else {
+                expected_outcome(cmd, &env)
+            };
             if outcome != expected {
                 failures.push(format!(
                     "  `{}` in `{}` → {:?} (expected {:?})\n    exit: {}\n    stdout: {}\n    stderr: {}",
-                    cmd.id,
-                    env.id,
-                    outcome,
-                    expected,
-                    output.status,
+                    cmd.id, env.id, outcome, expected, output.status,
                     String::from_utf8_lossy(&output.stdout).trim(),
                     String::from_utf8_lossy(&output.stderr).trim(),
                 ));
@@ -563,8 +523,8 @@ fn registry_is_complete() {
     let filter_paths: HashSet<Vec<String>> = FILTER_ONLY
         .iter()
         .chain(ISSUE_OWNED)
-        .chain(FOLLOW_UP_DESTINATION)
         .chain(AUTHORED_CONTEXT)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
@@ -612,8 +572,8 @@ fn registry_is_complete() {
         .iter()
         .chain(FILTER_ONLY)
         .chain(ISSUE_OWNED)
-        .chain(FOLLOW_UP_DESTINATION)
         .chain(AUTHORED_CONTEXT)
+        .chain(FOLLOW_UP_DESTINATION)
         .chain(REPOSITORY_OR_WAVE)
         .chain(REPOSITORY_DEFAULT)
     {

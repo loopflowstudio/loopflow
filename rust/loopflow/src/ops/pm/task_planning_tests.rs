@@ -391,12 +391,13 @@ async fn planning_graphql(
             return axum::Json(json!({"errors":[{"message":"completion unavailable"}]}));
         }
         state.completion_writes += 1;
-        let outcome = state
-            .completion_state
-            .take()
-            .unwrap_or_else(|| vars["stateId"].as_str().unwrap().to_string());
-        state.issues[0]["state"] = json!({"type":outcome});
+        state.issues[0]["state"] = json!({"type":vars["stateId"]});
         mark_issue_updated(&mut state.issues[0]);
+        if let Some(outcome) = state.completion_state.take() {
+            // A separate Linear edit after our mutation, visible to readback.
+            state.issues[0]["state"] = json!({"type":outcome});
+            mark_issue_updated(&mut state.issues[0]);
+        }
         if state.lose_completion {
             state.lose_completion = false;
             return axum::Json(json!({"errors":[{"message":"lost completion response"}]}));
@@ -417,15 +418,53 @@ async fn planning_graphql(
             .find(|issue| issue["id"] == vars["id"])
             .unwrap()
             .clone();
-        issue["comments"] = page(state.comments.clone());
+        issue["comments"] = page(
+            state
+                .comments
+                .iter()
+                .filter(|comment| {
+                    // Unqualified fixture comments belong to the initial issue,
+                    // never to every issue a repository-wide reader discovers.
+                    comment["issue"]["id"].as_str().unwrap_or("issue-1")
+                        == vars["id"].as_str().unwrap()
+                })
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
         json!({"issue":issue})
     } else if query.contains("query IssueComments") {
-        json!({"issue":{"comments":page(state.comments.clone())}})
+        json!({"issue":{"comments":page(state.comments.iter().filter(|comment| {
+            comment["issue"]["id"].as_str().unwrap_or("issue-1") == vars["id"].as_str().unwrap()
+        }).cloned().collect::<Vec<_>>())}})
+    } else if query.contains("query CommentDelivery") {
+        let mut comment = state
+            .comments
+            .iter()
+            .find(|c| c["id"] == vars["id"])
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        if !comment.is_null() && comment["issue"].is_null() {
+            comment["issue"] = json!({"id":"issue-1"});
+        }
+        json!({"comment":comment})
+    } else if query.contains("mutation SyncComment") {
+        let id = vars["id"].as_str().unwrap();
+        if state.comments.iter().any(|c| c["id"] == id) {
+            return axum::Json(json!({"errors":[{"message":"ID already exists"}]}));
+        }
+        state.comments.push(
+            json!({"id":id,"body":vars["body"],"user":null,"issue":{"id":vars["issueId"]},
+            "createdAt":"2026-10-08T12:00:01Z","updatedAt":"2026-10-08T12:00:01Z"}),
+        );
+        if std::mem::take(&mut state.lose_comment) {
+            return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
+        }
+        json!({"commentCreate":{"comment":{"id":id}}})
     } else if query.contains("mutation CreateComment") {
         let id = format!("comment-{}", state.comments.len() + 1);
         state
             .comments
-            .push(json!({"id":id,"body":vars["body"],"user":null}));
+            .push(json!({"id":id,"body":vars["body"],"user":null,"issue":{"id":vars["issueId"]}}));
         if state.lose_comment {
             state.lose_comment = false;
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
@@ -607,9 +646,11 @@ fn task_deletion_active_sync_reconnect_retains_execution_and_history() {
             .pending_task_changes(&task.id)
             .unwrap()
             .remove(0);
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::timeout(std::time::Duration::from_secs(8), async {
                 loop {
@@ -705,9 +746,12 @@ fn task_deletion_lost_reply_requires_positive_trash_evidence_without_replay() {
             crate::ops::planning_delivery::sync_fields(&fixture.store, repo, &work)
                 .await
                 .unwrap();
-            crate::ops::planning_delivery::sync_repository_fields(&fixture.store, task)
-                .await
-                .unwrap();
+            crate::ops::planning_delivery::sync_repository_fields(
+                &fixture.store,
+                repo.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
             assert_eq!(state.lock().await.deletion_writes, 1);
         });
         assert!(fixture
@@ -924,9 +968,11 @@ fn task_abandonment_active_sync_delivers_after_reconnect() {
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             // Observe the foreground connection's failed attempt, then restore the
             // provider without another command, agent turn or manual refresh.
@@ -1318,10 +1364,18 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             .sqlite
             .put_pm_task(&repo.display().to_string(), "linear", &remote, None)
             .unwrap();
+        let mut late = remote.item.clone();
+        late.state = Some("completed".into());
+        late.completed = true;
+        assert!(!fixture
+            .store
+            .sqlite
+            .observe_task_state(&delivery, &late)
+            .unwrap());
         fixture
             .store
             .sqlite
-            .settle_task_state(&delivery, None)
+            .task_state_error(&delivery, "late failure")
             .unwrap();
         assert!(fixture
             .store
@@ -1449,16 +1503,12 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             Some("unstarted")
         );
         assert_eq!(reopened.target, "unstarted");
+        // A superseded attempt stays uncertain. Neither its readback nor its
+        // failure can settle the newer reopening or invent successful delivery.
         fixture
             .store
             .sqlite
-            .settle_task_state(&completed, None)
-            .unwrap();
-        // A stale failure cannot erase the receipt for that completed effect.
-        fixture
-            .store
-            .sqlite
-            .settle_task_state(&completed, Some("late failure"))
+            .task_state_error(&completed, "late failure")
             .unwrap();
         assert_eq!(
             fixture
@@ -1489,7 +1539,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(receipt, (true, None));
+        assert_eq!(receipt, (false, Some("late failure".into())));
         assert!(conn
             .query_row(
                 "SELECT attempted FROM task_state_deliveries WHERE id=?1",
@@ -1515,9 +1565,11 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
             added["state"] = json!({"type":"completed"});
             provider.issues.push(added);
         });
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::timeout(std::time::Duration::from_secs(8), async {
                 loop {
@@ -1569,11 +1621,493 @@ fn task_completion_active_sync_acquires_membership_while_delivery_is_pending() {
 }
 
 #[test]
-fn task_completion_documents_unseen_linear_reopening_overwrite() {
-    // Counterexample, not an atomic-write guarantee. Observed conflicts adopt
-    // Linear (covered above/below); an edit between read and mutation is best effort.
+fn repository_sync_acquires_comments_without_a_task_anchor() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let item = seed_provider_task(
+            runtime,
+            &state,
+            repo,
+            "Unselected work",
+            "Keep local execution",
+        )
+        .unwrap();
+        let other = runtime
+            .block_on(fixture.store.get_task_by_issue(&item.id))
+            .unwrap()
+            .unwrap();
+        runtime.block_on(async {
+            state.lock().await.comments.push(json!({
+                "id":"unselected-comment", "body":"Incoming repository direction",
+                "issue":{"id":item.id}, "user":{"id":"maya", "name":"Maya"},
+                "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z"
+            }));
+            state.lock().await.comments.push(json!({
+                "id":"first-task-comment", "body":"Direction for the first Task",
+                "user":{"id":"maya", "name":"Maya"},
+                "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z"
+            }));
+            // Read the other Task first: provider comments cannot change owners
+            // just because independent acquisition requests arrive in this order.
+            crate::ops::linear_observe::refresh_task_comments(&fixture.store, &other)
+                .await
+                .unwrap();
+        });
+        let workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
+        runtime.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(8), async {
+                loop {
+                    if fixture
+                        .store
+                        .sqlite
+                        .task_comments(&other.id)
+                        .unwrap()
+                        .comments
+                        .iter()
+                        .any(|comment| comment.id == "unselected-comment")
+                        && fixture
+                            .store
+                            .sqlite
+                            .task_comments(&task.id)
+                            .unwrap()
+                            .comments
+                            .iter()
+                            .any(|comment| comment.id == "first-task-comment")
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            })
+            .await
+            .unwrap();
+        });
+        drop(sync);
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_comments(&task.id)
+                .unwrap()
+                .comments
+                .len(),
+            1
+        );
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task_comments(&other.id)
+                .unwrap()
+                .comments
+                .len(),
+            1
+        );
+        assert_eq!(fixture.store.sqlite.workflow(&other.id).unwrap(), workflow);
+        assert!(runtime
+            .block_on(fixture.store.get_task(&other.id))
+            .unwrap()
+            .unwrap()
+            .worktree
+            .is_none());
+    });
+}
+
+#[test]
+fn native_runner_reconnects_planning_without_another_turn() {
+    for (agent, auto) in [("codex", false), ("claude", false), ("claude", true)] {
+        with_planning_task(|runtime, fixture, repo, task, state| {
+            seed_provider_task(runtime, &state, repo, "Remote work", "Keep execution local")
+                .unwrap();
+            let other = runtime
+                .block_on(fixture.store.get_task_by_issue("FIX-2"))
+                .unwrap()
+                .unwrap();
+            let _environment = crate::test_ambient::EnvGuard::clear(&[
+                "HOME",
+                "LF_HOME",
+                "LF_BIN",
+                "PATH",
+                "CODEX_HOME",
+                "CLAUDE_CONFIG_DIR",
+            ]);
+            let home = fixture.directory.path().join("provider-home");
+            let bin = fixture.directory.path().join("bin");
+            std::fs::create_dir_all(&home).unwrap();
+            std::fs::create_dir_all(&bin).unwrap();
+            std::env::set_var("HOME", &home);
+            std::env::set_var("LF_HOME", fixture.directory.path());
+            std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+            let path = format!("{}:/usr/bin:/bin", bin.display());
+            std::env::set_var("PATH", &path);
+            let started = home.join("started");
+            let stop = home.join("stop");
+            let executable = bin.join(agent);
+            std::fs::write(
+                &executable,
+                r#"#!/bin/sh
+: > "$FIXTURE_STARTED"
+i=0
+while [ ! -e "$FIXTURE_STOP" ] && [ "$i" -lt 600 ]; do
+    /bin/sleep 0.1
+    i=$((i+1))
+done
+exit 0
+"#,
+            )
+            .unwrap();
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+            runtime.block_on(async { state.lock().await.field_outage = true });
+            // Unrelated rejected text delivery must not hold state or comment acquisition.
+            fixture
+                .store
+                .sqlite
+                .edit_task(
+                    &task.id,
+                    task.plan.revision,
+                    &crate::pm::PmItemUpdate {
+                        name: Some("Pending local title".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            crate::ops::task::task_complete(repo, task.id.as_str(), Some("Saved offline")).unwrap();
+            let comment =
+                crate::ops::task::append_task_comment(&fixture.store, task, "Saved offline", true)
+                    .unwrap();
+            let receipt = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+            let other_workflow = fixture.store.sqlite.workflow(&other.id).unwrap();
+            let process = crate::engine::agent::ProcessConfig {
+                auto,
+                task_input: Some(crate::ops::task_input::TaskInput::new(
+                    fixture.store.clone(),
+                    crate::ops::task_input::TaskSeed {
+                        task: task.clone(),
+                        message: String::new(),
+                        steers: Vec::new(),
+                        steer: 0,
+                        interrupt: 0,
+                    },
+                )),
+                ..Default::default()
+            };
+            let launch = crate::engine::agent::AgentConfig {
+                agent: Some(agent.into()),
+                cwd: Some(repo.to_path_buf()),
+                env: std::collections::BTreeMap::from([
+                    ("PATH".into(), path),
+                    ("FIXTURE_STARTED".into(), started.display().to_string()),
+                    ("FIXTURE_STOP".into(), stop.display().to_string()),
+                ]),
+                ..Default::default()
+            };
+            let context = PM_TEST_CONTEXT.with(Clone::clone);
+            runtime.block_on(async {
+                let running = tokio::task::spawn_blocking(move || {
+                    PM_TEST_CONTEXT.sync_scope(context, || {
+                        crate::engine::agent::run_agent(
+                            &launch,
+                            &process,
+                            &crate::engine::agent::AgentCapabilities::default(),
+                        )
+                    })
+                });
+                let observed = tokio::time::timeout(std::time::Duration::from_secs(45), async {
+                    loop {
+                        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+                        if started.exists()
+                            && sync
+                                .changes
+                                .iter()
+                                .any(|c| c.id == receipt.id && c.error.is_some())
+                        {
+                            break;
+                        }
+                        assert!(!running.is_finished(), "provider exited during outage");
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                    assert_eq!(
+                        fixture
+                            .store
+                            .sqlite
+                            .pending_task_state(&task.id)
+                            .unwrap()
+                            .unwrap()
+                            .id,
+                        receipt.id
+                    );
+                    assert!(fixture
+                        .store
+                        .sqlite
+                        .task_comments(&task.id)
+                        .unwrap()
+                        .pending_sync
+                        .contains(&comment));
+                    {
+                        let mut provider = state.lock().await;
+                        provider.field_outage = false;
+                        provider.field_reject_write = true;
+                        provider.lose_completion = true;
+                        provider.lose_comment = true;
+                        provider.issues[1]["state"] = json!({"type":"completed"});
+                        mark_issue_updated(&mut provider.issues[1]);
+                        let mut added = provider.issues[1].clone();
+                        added["id"] = json!("issue-3");
+                        added["identifier"] = json!("FIX-3");
+                        added["state"] = json!({"type":"unstarted"});
+                        provider.issues.push(added);
+                        provider.comments.push(
+                            json!({"id":"incoming-reconnect", "body":"Arrived during outage",
+                            "issue":{"id":task.plan.linear_id.as_ref().unwrap()},
+                            "createdAt":"2026-10-08T12:00:00Z", "updatedAt":"2026-10-08T12:00:00Z",
+                            "user":{"id":"fixture-person","displayName":"Maya","name":"Maya"}}),
+                        );
+                    }
+                    loop {
+                        let thread = fixture.store.sqlite.task_comments(&task.id).unwrap();
+                        let remote = fixture
+                            .store
+                            .sqlite
+                            .planning_task(&other.id)
+                            .unwrap()
+                            .record
+                            .unwrap();
+                        if fixture
+                            .store
+                            .sqlite
+                            .pending_task_state(&task.id)
+                            .unwrap()
+                            .is_none()
+                            && thread.pending_sync.is_empty()
+                            && thread.comments.iter().any(|c| c.id == "incoming-reconnect")
+                            && remote.item.completed
+                            && fixture
+                                .store
+                                .get_task_by_issue("FIX-3")
+                                .await
+                                .unwrap()
+                                .is_some()
+                        {
+                            break;
+                        }
+                        assert!(!running.is_finished(), "provider exited before catch-up");
+                        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    }
+                })
+                .await;
+                // Always release the exact stub before asserting the bounded observation.
+                std::fs::write(&stop, "stop").unwrap();
+                assert_eq!(running.await.unwrap().unwrap().exit_code, 0);
+                observed.expect("active native runner did not catch up after reconnect");
+                let provider = state.lock().await;
+                assert_eq!(provider.completion_writes, 1);
+                assert_eq!(
+                    provider
+                        .comments
+                        .iter()
+                        .filter(|c| c["id"] == comment)
+                        .count(),
+                    1
+                );
+                assert_eq!(provider.issues[0]["state"]["type"], "completed");
+                assert_ne!(provider.issues[0]["title"], "Pending local title");
+            });
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .pending_task_changes(&task.id)
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+            assert_eq!(
+                fixture.store.sqlite.workflow(&other.id).unwrap(),
+                other_workflow
+            );
+            assert_eq!(
+                runtime
+                    .block_on(
+                        fixture
+                            .store
+                            .work_status(&crate::durable::WorkRef::Task(other.id.clone()))
+                    )
+                    .unwrap(),
+                WorkStatus::Done
+            );
+            assert!(fixture
+                .store
+                .sqlite
+                .task(&other.id)
+                .unwrap()
+                .unwrap()
+                .worktree
+                .is_none());
+        });
+    }
+}
+
+#[test]
+fn task_completion_preserves_linear_reopening_during_delivery() {
+    assert_completion_adopts_reopening(true);
+}
+
+#[test]
+fn task_completion_preserves_linear_reopening_before_delivery() {
+    assert_completion_adopts_reopening(false);
+}
+
+fn assert_completion_adopts_reopening(during_delivery: bool) {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        if !during_delivery {
+            runtime.block_on(async {
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type":"started"});
+                mark_issue_updated(&mut provider.issues[0]);
+                drop(provider);
+                super::load_show_snapshot(repo, "product", PmRefresh::Force, &NullProgress)
+                    .await
+                    .unwrap();
+            });
+        }
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
+        let original = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        assert!(!original.attempted);
+        let planning = || {
+            fixture
+                .store
+                .sqlite
+                .planning_task(&task.id)
+                .unwrap()
+                .record
+                .unwrap()
+                .item
+        };
+        assert!(
+            planning().completed,
+            "local completion saves before delivery"
+        );
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let execution = || {
+            [
+                "processes",
+                "agent_sessions",
+                "task_prs",
+                "task_workflows",
+                "task_workflow_moves",
+            ]
+            .iter()
+            .map(|table| {
+                let mut query = conn
+                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                    .unwrap();
+                let columns = query.column_count();
+                query
+                    .query_map([], |row| {
+                        (0..columns)
+                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            })
+            .collect::<Vec<_>>()
+        };
+        let before = execution();
+        runtime.block_on(async {
+            let mut provider = state.lock().await;
+            assert_eq!(provider.completion_writes, 0);
+            if during_delivery {
+                // Return to the original state, but at a new provider revision
+                // after our attempted write: readback must still adopt it.
+                provider.completion_state = Some("unstarted".into());
+            } else {
+                provider.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut provider.issues[0]);
+            }
+            drop(provider);
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            // A retired loser must not overwrite Linear on a subsequent connection.
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "unstarted");
+            assert_eq!(provider.completion_writes, usize::from(during_delivery));
+        });
+        assert_eq!(planning().state.as_deref(), Some("unstarted"));
+        assert!(!planning().completed);
+        assert_eq!(
+            execution(),
+            before,
+            "planning adoption has no execution authority"
+        );
+        let sync = fixture.store.sqlite.task_planning_sync(&task.id).unwrap();
+        let retained = sync
+            .changes
+            .iter()
+            .find(|change| change.id == original.id)
+            .unwrap();
+        assert_eq!(
+            retained.state,
+            crate::planning::PlanningSyncState::AdoptedLinear
+        );
+        assert_eq!(retained.local_value, json!("completed"));
+        assert_eq!(retained.linear_value, Some(json!("unstarted")));
+        assert!(retained.error.is_none());
+        assert!(!fixture.store.sqlite.attempt_task_state(&original).unwrap());
+        let receipt: (bool, bool, String, String) = conn.query_row(
+            "SELECT attempted,settled,target,conflict_json FROM task_state_deliveries WHERE id=?1",
+            [&original.id],
+            |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).unwrap();
+        assert_eq!(
+            (receipt.0, receipt.1, receipt.2.as_str()),
+            (during_delivery, true, "completed")
+        );
+        let conflict: crate::pm::PmItem = serde_json::from_str(&receipt.3).unwrap();
+        assert_eq!(conflict.state.as_deref(), Some("unstarted"));
+    });
+}
+
+#[test]
+fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery() {
+    // Jack Heart selected observed Linear-wins, not unseen-write atomicity.
+    // Keep the original counterexample: no ownership read sees this reopening.
     with_planning_task(|runtime, fixture, repo, task, state| {
         crate::ops::task::task_complete(repo, task.id.as_str(), Some("Delivered locally")).unwrap();
+        let original = fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .unwrap();
+        let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
         runtime.block_on(async {
             state.lock().await.reopen_during_completion = true;
             crate::ops::linear_observe::sync_task_state(&fixture.store, task)
@@ -1581,13 +2115,35 @@ fn task_completion_documents_unseen_linear_reopening_overwrite() {
                 .unwrap();
             let provider = state.lock().await;
             assert!(!provider.reopen_during_completion);
-            let retained = fixture.store.sqlite.pending_task_state(&task.id).unwrap();
             assert_eq!(
-                (&provider.issues[0]["state"]["type"], retained.is_some()),
-                (&json!("completed"), false),
-                "an unconditional write can overwrite an unseen reopening; matching readback cannot detect it"
+                provider.issues[0]["state"]["type"], "completed",
+                "the unconditional write overwrites the unobserved reopening"
             );
+            assert_eq!(provider.completion_writes, 1);
+            drop(provider);
+            assert!(fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .is_none());
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert_eq!(state.lock().await.completion_writes, 1);
         });
+        assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+        // Matching readback settles only the observed state. It cannot record a
+        // conflict it never saw or certify that no intermediate edit was lost.
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let receipt: (bool, bool, Option<String>) = conn
+            .query_row(
+                "SELECT attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1",
+                [&original.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt, (true, true, None));
     });
 }
 
@@ -1654,12 +2210,15 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                 .unwrap(),
             WorkStatus::Ready
         );
-        // A delayed acknowledgement cannot erase an already observed collision.
-        fixture
+        // A delayed matching readback cannot erase an already observed collision.
+        let mut late = adopted.clone();
+        late.state = Some("completed".into());
+        late.completed = true;
+        assert!(!fixture
             .store
             .sqlite
-            .settle_task_state(&original, None)
-            .unwrap();
+            .observe_task_state(&original, &late)
+            .unwrap());
         assert!(fixture
             .store
             .sqlite
@@ -2595,12 +3154,12 @@ impl crate::ops::Progress for LifecycleMessages {
 
 #[test]
 fn planning_fields_active_connection_delivers_offline_saves_after_recovery() {
-    with_planning_task(|runtime, fixture, _repo, task, state| {
+    with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
             let sync = crate::ops::linear_observe::PlanningSync::start(
                 fixture.store.clone(),
-                task.clone(),
+                repo.to_string_lossy().into_owned(),
             )
             .unwrap();
             fixture
@@ -3247,9 +3806,11 @@ fn planning_export_foreground_reconnect_keeps_distinct_saved_identities() {
             })
             .unwrap();
         state.blocking_lock().field_outage = true;
-        let sync =
-            crate::ops::linear_observe::PlanningSync::start(fixture.store.clone(), task.clone())
-                .unwrap();
+        let sync = crate::ops::linear_observe::PlanningSync::start(
+            fixture.store.clone(),
+            repo.to_string_lossy().into_owned(),
+        )
+        .unwrap();
         runtime.block_on(async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             assert_eq!(state.lock().await.creation_writes, 0);

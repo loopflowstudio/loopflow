@@ -9,7 +9,6 @@ use crate::pm::linear::LinearClient;
 use crate::store::sqlite::planning_changes::PlanningChanges;
 use crate::store::sqlite::planning_export::PlanningExport;
 use crate::store::{PmTaskRecord, Store};
-use crate::work::task::Task;
 
 use super::{OpsError, OpsResult};
 
@@ -17,22 +16,13 @@ fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-pub(crate) async fn sync_repository_exports(store: &Store, task: &Task) -> OpsResult<()> {
-    let wave = store
-        .get_wave(&task.wave_id)
-        .await
-        .map_err(message)?
-        .ok_or_else(|| message("Task Wave is missing"))?;
-    if !super::linear_observe::connected(wave.repo()) {
+pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsResult<()> {
+    if !super::linear_observe::connected(repo) {
         return Ok(());
     }
     // Projects precede Tasks; each failure is bounded and leaves other exports eligible.
-    for work in store
-        .sqlite
-        .planning_export_owners(wave.repo())
-        .map_err(message)?
-    {
-        if let Err(error) = sync_export(store, Path::new(wave.repo()), &work).await {
+    for work in store.sqlite.planning_export_owners(repo).map_err(message)? {
+        if let Err(error) = sync_export(store, Path::new(repo), &work).await {
             tracing::debug!(%error, "planning export pending");
         }
     }

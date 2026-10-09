@@ -192,8 +192,11 @@ pub(crate) fn try_read_wave_chat_config(
 /// `## Objective`, falling back to the first prose paragraph when that section
 /// is absent.
 pub fn read_wave_summary(repo: &Path, name: &str) -> std::io::Result<String> {
-    let content = read_wave_document(repo, name, "GOAL.md")?;
-    Ok(wave_summary(&content))
+    match read_wave_document(repo, name, "GOAL.md") {
+        Ok(content) => Ok(wave_summary(&content)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn wave_summary(content: &str) -> String {

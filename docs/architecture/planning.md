@@ -140,9 +140,15 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Relative-order delivery, complete Desktop
-pending presentation and composed reconnect remain
-unfinished. Ingestion adopts observed Linear conflicts and retains the losing
+CLI and Desktop project creation, field/order edits, state and comments through
+`PlanningSyncStatus`, derived from their existing receipts. Unmapped creation is
+pending in connected repositories; attempted effects retain uncertainty and errors.
+Observed conflicts show both values after adopting Linear. Disconnected repositories
+show no pending Linear delivery; retained losing values remain inspectable.
+A foreground connection synchronizes its repository, independent of Desktop Task
+selection. Inventory, comments and delivery use separate bounded loops; closing
+or clearing the repository connection ends them. Read projections stay read-only.
+Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.
@@ -346,9 +352,9 @@ and selected membership, preserving later edits. Pre-cutover unfinished provider
 transitions remain unresolved with their original receipts; local rotation does not
 claim to recover their uncertain external effects.
 
-The planning store can retain explicit archival acknowledgements. Integrating
-archival into the provider-backed chapter operation and preserving old acknowledgements
-across the combined migration frontier remain unfinished.
+Historical provider transitions and archival acknowledgements remain evidence;
+local rotation does not recreate the removed provider-first chapter operation
+or infer that its uncertain effects settled.
 
 ## Capture a Flow once
 
@@ -425,11 +431,20 @@ effect, so it cannot settle a newer decision. State acquisition and delivery sha
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
 the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
-concurrent Linear edit between them. An unseen reopening can be overwritten by
-completion, and matching readback cannot reveal that lost edit. The enabled
-`task_completion_documents_unseen_linear_reopening_overwrite` test retains this
-counterexample; observed-conflict precedence is tested separately. Delivery is
-best effort, not an atomic provider write. Abandonment saves the decision and cancellation
+concurrent Linear edit between them. Matching readback settles the observed target;
+it does not prove that no intermediate edit was overwritten. An unseen complete/reopen
+cycle can disappear under the unconditional write, leaving no observed conflict
+to retain. Another read cannot close that race.
+
+Jack Heart's October 8 conflict decision and subsequent regression-repair request
+replace the former test's absolute unseen-reopening protection and pending-loser
+expectations. Enabled operation tests now distinguish reopening observed before
+delivery or in readback (Linear wins, both values retained, loser retired, no
+execution changes) from the original unseen interleaving (overwrite remains
+possible). Lost replies retain attempt identity and reconcile without replay.
+This is an explicit concurrency limit, not a provider atomicity guarantee.
+
+Abandonment saves the decision and cancellation
 receipt together without provider access. Cleanup failures preserve the decision;
 unknown or live execution prevents cleanup before provider inspection. Cancellation
 uses the same state delivery path as completion and reopening. Resolve the issue
@@ -443,7 +458,8 @@ inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still
 win and retain the losing receipt. Removed Tasks export only when an attempted
 creation needs reconciliation, then their existing deletion receipt owns removal.
-Complete pending-state presentation and composed CLI/Desktop reconnect remain unfinished.
+Creation receipt changes advance the planning revision, so active readers acquire
+new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unproved.
 
 ## Read each step's result
 
@@ -537,8 +553,9 @@ SQLite owns every Task comment. A save records the comment and its stable delive
 UUID in one transaction, before contacting Linear. CLI and Desktop read the thread,
 pending IDs and losing local bodies from one SQLite snapshot. An observed comment
 conflict adopts Linear’s body, author and time while the receipt retains both
-complete comments; no replacement comment is created. Mapped Tasks show pending sync;
-a foreground Task Session or Desktop Task connection delivers saved comments and
+complete comments; no replacement comment is created. Connected repositories show
+pending sync, including comments on unmapped Tasks;
+a foreground Task Session or Desktop repository connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved direction. The shared skill path supplies Task context and live steers when

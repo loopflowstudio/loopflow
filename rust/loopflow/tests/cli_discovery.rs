@@ -529,6 +529,14 @@ fn git_commands_keep_their_root_ownership() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["pr", "wt", "sync", "commit"] {
         assert!(tree.find_subcommand(name).is_some());
+        if name == "sync" {
+            continue;
+        } // Task planning sync is separate from Git sync.
+        assert!(tree
+            .find_subcommand("task")
+            .unwrap()
+            .find_subcommand(name)
+            .is_none());
     }
 }
 
@@ -727,7 +735,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
 }
 
 #[test]
-fn wave_catalog_uses_saved_definitions_and_keeps_empty_goals() {
+fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
@@ -742,7 +750,10 @@ fn wave_catalog_uses_saved_definitions_and_keeps_empty_goals() {
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     store
-        .ensure_wave(repo.path().to_str().unwrap(), "parent/child")
+        .ensure_wave(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "parent/child",
+        )
         .unwrap();
     let rows = json_entries(repo.path(), home.path(), &["list", "wave", "--json"]);
     assert_eq!(rows.len(), 2);

@@ -118,12 +118,12 @@ fn assert_no_conflicts(fixture: &Fixture) {
 
 #[test]
 fn planning_order_active_connection_delivers_after_outage() {
-    with_order(|runtime, fixture, _repo, tasks, state| {
+    with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
             let sync = crate::ops::linear_observe::PlanningSync::start(
                 fixture.store.clone(),
-                tasks[0].clone(),
+                repo.to_string_lossy().into_owned(),
             )
             .unwrap();
             reorder(&fixture.store, &tasks[3], 0);
@@ -206,7 +206,6 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                 .project_order_delivery(&tasks[0].project_id)
                 .unwrap()
                 .unwrap()
-                .change
                 .id;
             state.lock().await.field_reply_lost = true;
             assert!(deliver(&fixture.store, repo, &tasks[0]).await.is_err());
@@ -224,7 +223,6 @@ fn planning_order_lost_reply_recovers_partial_reorder_after_reopen() {
                     .project_order_delivery(&tasks[0].project_id)
                     .unwrap()
                     .unwrap()
-                    .change
                     .id,
                 receipt
             );
@@ -335,10 +333,9 @@ fn planning_order_observed_conflict_adopts_linear_and_retains_losing_list() {
             let receipt = fixture
                 .store
                 .sqlite
-                .project_order_delivery(&tasks[0].project_id)
+                .pending_project_changes(&tasks[0].project_id)
                 .unwrap()
-                .unwrap()
-                .change;
+                .remove(0);
             {
                 let mut provider = state.lock().await;
                 provider.issues[2]["prioritySortOrder"] = json!(-10.0);

@@ -11,7 +11,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -69,7 +70,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -127,7 +129,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -185,7 +188,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -243,7 +247,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -301,7 +306,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -359,7 +365,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -417,7 +424,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -475,7 +483,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -533,7 +542,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -591,7 +601,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -649,7 +660,8 @@
       "completed_at": "2026-10-01T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -707,7 +719,8 @@
       "completed_at": "2026-09-12T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -765,7 +778,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -823,7 +837,8 @@
       "completed_at": "2026-09-01T12:00:00Z",
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -881,7 +896,8 @@
       "completed_at": null,
       "assignee": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,

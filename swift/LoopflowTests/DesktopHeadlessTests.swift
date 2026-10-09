@@ -38,6 +38,20 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")
+    func planningSync() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("planning_sync.json"))
+        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: data)
+        let view = PlanningSyncView(sync: sync)
+        for change in sync.changes {
+            #expect(try view.inspect().find(text: change.text).string() == change.text)
+        }
+        for connected in [true, false] {
+            let settled = try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{\"connected\":\(connected),\"changes\":[]}".utf8))
+            #expect(try PlanningSyncView(sync: settled).inspect().findAll(ViewType.Text.self).isEmpty)
+        }
+    }
+
     @Test("Workflows render and save through the store without creating a repository file")
     func storedWorkflow() async throws {
         var roadmap = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:
@@ -513,7 +527,20 @@ struct DesktopHeadlessTests {
                            workActivity: .loading, repos: [])
         _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
 
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: data)
+        var saved = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var waves = try #require(saved["waves"] as? [[String: Any]])
+        var tasks = try #require(waves[0]["tasks"] as? [String: Any])
+        var items = try #require(tasks["items"] as? [[String: Any]])
+        var planning = try #require(items[0]["task"] as? [String: Any])
+        planning["sync"] = ["connected": true, "changes": [[
+            "id": "pending-title", "field": "title", "state": "pending",
+            "local_value": "Saved title", "linear_value": NSNull(), "error": NSNull(),
+        ]]]
+        items[0]["task"] = planning
+        tasks["items"] = items
+        waves[0]["tasks"] = tasks
+        saved["waves"] = waves
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
         let wave = try #require(roadmap.waves.first).wave
         model.applyFixture(roadmap: .available(roadmap), waves: .available([wave.toWave()]),
                            workActivity: .loading, repos: [])
@@ -528,8 +555,8 @@ struct DesktopHeadlessTests {
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         model.select(.task(id: task.id))
-        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "task-pending-sync").text().string()
-        #expect(pending == "Saved locally; pending Linear synchronization")
+        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "planning-sync-pending-title").text().string()
+        #expect(pending == "Saved locally; pending Linear sync · title")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

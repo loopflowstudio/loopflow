@@ -1,4 +1,4 @@
-mod planning;
+pub mod planning;
 
 use std::env;
 use std::ffi::OsString;

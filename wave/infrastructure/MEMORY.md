@@ -37,15 +37,20 @@ can proceed now; integration consumes a coherent committed writer cut, never dir
 code or duplicated planning. Ownership is independently reviewable. Jack invoked ship-decomposed. No competing Flow, machine
 replication here or real plan publication to the public code repo is authorized.
 
-Foreground connections independently acquire comments/inventory and deliver mapped
-Tasks' comments/state plus Task/Project field receipts. Attempted writes retain
-identity and uncertainty. Matching observations acknowledge only that attempt and
-advance later saves' unchanged baselines, preserving newer edits. Linear conflicts
-retain losing values and retire their delivery. Effect locks block neither saves
-nor acquisition. Project ordering now uses one receipt and captured individual moves.
-Complete-list acquisition recognizes partial progress before reconciling later saves;
-detail reads never set rank. Fixtures prove reconnect, lost-reply recovery, late-save
-preservation and Linear conflict adoption, not composed or installed acceptance.
+Foreground acquisition and delivery are independent; effect locks block neither
+saves nor acquisition. Matching observations settle captured attempts and advance
+later saves' unchanged baselines; retired receipts retain losing values.
+`b1f175bbf` delivers Project ordering with captured moves; only complete-list
+acquisition recognizes partial progress, never detail reads.
+`6bb8b935a` supplies receipt-backed CLI/Desktop sync status; `086d3560c` deletes
+pending-only projections, retaining baselines. Configuration selects pending display;
+creation receipts advance revision. `29777b8cb` scopes sync to repositories;
+`b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
+`078a6642e`'s Linux migration, native/public Flow/work-watch reconnect and adoption
+passed after fixture/DTO repairs. `ffe986160` removes synthetic settlement;
+queue gate's 15-second lock refusal leaves receipt verification open.
+Swift/full matrix need CI. After queue, Jack Heart authorized landing and CI checks.
+PR #1503's classifier proves no acceptance.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -53,40 +58,36 @@ internal delivery retains it. His `34c1739a-8831-4578-96c9-797aeaa87743` propose
 complete Task/Project planning with machine-local execution linked by Task ID.
 No rewrite is authorized; Linear Done beside a running Flow remains unanswered.
 
-The enabled `task_completion_preserves_linear_reopening_during_delivery` regression
-still fails: an unseen reopening is overwritten and matching readback falsely
-settles delivery. Linear's schema at `7d2bc4279f` exposes no expected-revision
-issue update. More reads cannot prove atomic preservation; Linear-wins selects
-precedence, not atomicity. The design retains exact race and schema evidence.
+Jack Heart authorized this regression repair. Tests distinguish observed reopening
+(adopt Linear, retain both values, retire delivery, preserve execution) from unseen
+reopening (unconditional writes can overwrite it). This supersedes frozen test
+disposition. Readback settles state, not atomicity; `7d2bc4279f`'s Linear schema
+has no expected-revision update. [Rationale](../../docs/architecture/planning.md).
+Linux: 54 tests, fmt/Clippy pass; CI remains open.
 
-Comments adopt provider body/author/time, retaining the loser without echo.
-`67ee4024a` delivers cancellation. Resolve the issue Team's lowest-position state
-before marking attempted; failed discovery stays retryable.
-`fc056bb6b` delivers deletion: trash/acknowledgement settles; absence permits no replay.
-A newer explicitly active Linear revision
-restores visibility, retaining the loser. Inventory proves neither trash nor
-restoration. Fixtures preserve execution/history; composed/installed acceptance is unproved.
+Comments retain provider authorship and losing edits without echo. Cancellation
+resolves the Team's lowest-position state before attempting; failed discovery stays
+retryable. Deletion settles only on trash or acknowledgement, never absence.
+Newer explicitly active Linear evidence restores visibility and retains the loser;
+inventory grants neither restoration nor execution authority. Exact slice proofs:
+`078a6642e:wave/infrastructure/MEMORY.md`, this heading; installed acceptance is unproved.
 
-Proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading; LOO-412 boundary:
-`84664e661`. SQLite owns Wave documents/relocation; ingestion preserves IDs/files.
-Personal owners and provider-first deletion are removed; execution, PRs, checkouts
-and uncertain effects survive. Exact Project IDs precede slugs; the draft retains
-attempt errors and acknowledged revisions.
-`e68f2a423` exports Task/Project UUIDs through existing creation receipts. Separate
-Project creation/Initiative attachment attempts retain uncertainty without replay.
-Exact ingestion attaches identities before inventory can duplicate them, preserving
-later saves against captured baselines. Operation fixtures prove reconnect and lost-reply
-recovery; composed CLI/Desktop acceptance remains unproved, per Release's entry-point lesson.
-Installed conversion, historical uncertainty, pending presentation and composed reconnect remain unfinished.
+SQLite owns Wave definitions/relocation, preserving IDs, files, execution, PRs,
+checkouts and uncertain effects. Personal owners and provider-first deletion stay
+removed; Project IDs precede slugs. Common-writer boundary: `84664e661`;
+earlier proofs: `bbc6eb8d3:wave/infrastructure/MEMORY.md`, this heading.
+`e68f2a423` exports saved UUIDs. Separate creation/link attempts retain uncertainty
+without replay; identity attachment precedes inventory and preserves later saves.
+Composed/installed export acceptance is unproved.
 
 Jack selected Git-like Task prefixes: four or more hex digits, bare or prefixed;
 reject ambiguity, retain full IDs and lengthen display abbreviations as needed.
-Identity, creation receipts, mapping and placement stay distinct. Publication is
-for review only; no landing or installation. Design: `scratch/explore-loopflow-s-own-store.md`.
+Identity, receipts, mappings and placement stay distinct. No landing/installation.
+Design: `scratch/explore-loopflow-s-own-store.md`.
 
 Superseded split proofs and recovery evidence: `dfe18ab6060901992b55e64842e23c4295673b08:wave/infrastructure/MEMORY.md`.
 
-Laptop authorship and disposable workers prove neither backup nor private, unique export.
+Disposable workers prove no backup or private export.
 
 ## Session titles (LOO-439, 2026-10-08)
 
@@ -266,10 +267,8 @@ unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
 
-## Retained capture storage and autonomous cleanup (2026-10-05)
-
-LOO-370's current decision is under Capture cutover. PR #1450 is integrated;
-exact earlier delegation/steer: `2d333d18c:wave/infrastructure/MEMORY.md`, this heading.
+Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
+“Retained capture storage and autonomous cleanup.” Current direction is under Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 

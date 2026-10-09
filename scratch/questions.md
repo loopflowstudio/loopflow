@@ -32,10 +32,9 @@ at `b040c7c8d:scratch/questions.md`.
 
 The integrated cut remains unpublished. The current design owns verification and
 remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
-October 9's 63 peer-storage passes at `25cbc0a09` cover alternate acquisition,
-not the later invalidation cut. `6ccbbabe3` records four focused passes for that
-cut; earlier 49-test evidence remains at `b21429d9b`. The design separates these
-storage proofs from public composition and remaining implementation.
+The pre-cut 68-test storage pass at `e08dc9312` supersedes the earlier subset-only
+coverage (`25cbc0a09`, `6ccbbabe3`, `b21429d9b`), including invalidation and mapping
+preservation. It establishes neither association recovery nor public composition.
 Broader public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider acceptance
 remain separate. No new product decision is selected.
 
@@ -182,49 +181,23 @@ remain separate. No new product decision is selected.
   **Implemented boundaries, not remaining implementation**, Ordering; detailed
   rationale stays at `fcd64901f:scratch/questions.md`.
 
-- October 9 alternate-acquisition choice: common removal/archive evidence commits
-  before scalar projection, so rejecting a stale body cannot erase the negative
-  fact. Team confirmation keeps its causal heads and prior Team set; concurrent
-  contradictory confirmations or unrelated retained membership block projection,
-  never choose by entity revision or receiving time. Legacy negative evidence has
-  unknown acquisition age; no Team evidence is fabricated by migration. This is
-  an implementation choice, not a new product decision. Mixed-provider exchange
-  remains disabled; full-list acquisition is still an independent boundary.
-  The later causal invalidation cut below supersedes omission of non-removal
-  notifications; public composition remains unproved before mixed activation.
-  Unknown legacy ages never
-  rewrite a Task's removal timestamp. Each independent fact gets its own savepoint,
-  so Team contradictions cannot roll back an accepted archive.
+- October 9 alternate-acquisition, causal invalidation, unplaced-Wave and scoped
+  Desktop representation choices remain in the design's implemented boundaries;
+  full rationale: `e08dc9312:scratch/questions.md`, the four entries after Ordering.
+  Independent negative facts, original ages, unknown placement and last-good scoped
+  readings remain required; none enables mixed-provider exchange.
 
-- October 9 replay-safe invalidation choice: use causal heads in one optional
-  `provider_invalidation` journal field. Notifications and successful detail
-  readbacks share that field; a detail retires only notifications it observed.
-  Concurrent/unseen notifications remain invalid, irrespective of receiving time.
-  Acknowledgements carry identity/revision/age only and clear freshness after an
-  accepted matching-or-newer frontier; no duplicate body or parent mapping travels.
-  List/scalar replay cannot clear freshness. Null-detail invalidation uses the same
-  capture path, and migration retains unknown-age invalid caches. No new provider
-  revision, execution authority or mixed-provider activation is introduced.
+- October 9 association finding and representation boundary are consolidated in
+  the design, **Remaining integration**, item 3. Original rationale and refusal
+  proofs: `63d292896:scratch/questions.md`, final entry. No correspondence is
+  implemented or new product decision selected. Compression shares retained
+  mapping/creation claims through a derived view; it neither rewrites attempts
+  nor changes private selection. Mixed-provider exchange remains disabled.
 
-- October 9 unplaced-Wave presentation uses the existing optional placement query;
-  execution's required reader stays strict. Null means unplaced, never local by
-  default. Rust/Swift share the nullable DTO; no migration or new authority is added.
-
-- October 9 Desktop status reuses the common destination reader in a scoped Work
-  frame. Read failures retain last-good evidence; scope/Machine changes fence old
-  replies. No status cache, sync worker, setup action or mixed activation is added.
-  Per-Work selection and losing-edit recovery remain unfinished.
-
-- October 9 association finding: clearing mappings is unsafe and dispatch's
-  issue-name fallback persists no correspondence. Cross-ID effect deferral now
-  considers retained provider mappings/creation inputs, including losing mappings;
-  private selection and common acquisition remain independent. This is a safety
-  repair, not association. Re-keying incoming A's projection to local B contradicts
-  creation validation: its provider UUID and captured model still belong to A.
-  The common one-receipt-per-Work layout also cannot combine two original attempts.
-  Dependent alias/projection work stops at that representation boundary. Item 3
-  of the design now requires preserving receipt origin separately from local
-  projection ownership, then composing lookup, deterministic projection and
-  effect settlement without a second queue or execution rewrite. The storage
-  shape remains an implementation decision; no new policy or approval is
-  attributed to Jack Heart. Mixed-provider exchange stays disabled.
+- October 9 receipt-origin implementation choice: one common `planning_creations`
+  table replaces provider-effect columns on Task creation requests and Project rows.
+  `(kind, origin_id)` identifies the captured operation; exclusive Task/Project foreign
+  keys select its local projection. Capture and status retain origin IDs; repeated
+  import merges monotonic attempt/readback evidence without replacing either origin.
+  Request idempotence remains on `task_creation_intents`; no second delivery queue
+  is added. Correspondence and cross-origin field winners remain unfinished.

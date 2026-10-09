@@ -231,9 +231,10 @@ each Task/Project after reversed and repeated imports.
 
 Delete same-origin-only capture and blanket cross-origin rejection for exact
 Linear observations. One derived capture-head view serves scalar/content writers;
-no alias payload or second journal is added. Preserve per-origin heads, source
-mutation IDs, baseline traversal and private-history holds. Joint projection is
-still the remaining deletion below, not enabled by this cut.
+it now also owns missing-parent detection, replacing three copies of the same
+ancestry query and five origin joins. No alias payload or second journal is added.
+Preserve per-origin heads, source mutation IDs, baseline traversal and private-history
+holds. Joint projection remains unfinished; this reduction releases no holds.
 
 ## Remaining integration — October 9
 
@@ -507,10 +508,11 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Export reads causal dependency closure for validation, then holds unselected
    origins and their dependents without enrolling or publishing them.
 
-   The new fixture enters ordinary association and common acquisition, checks
-   unchanged readback after a local save, Task/Project predecessor and baseline
-   readback after serialization, repeat import, private destination separation and
-   populated execution preservation. Execution remains deferred. It does **not**
+   The fixture enters ordinary association and common acquisition, checks
+   unchanged readback after local Task/Project scalar and Project workflow saves,
+   predecessor and baseline readback after serialization, repeat import, private
+   destination separation and populated execution preservation. Execution remains
+   deferred; SQL preparation is not behavioral evidence. It does **not**
    prove joint import observes a winner: held import still acquires no associated
    scalar frontier. The earlier same-object limitation and counterexample remain
    at `8f3472eda:scratch/work-on-another-machine-name.md`, item 3.
@@ -696,7 +698,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, changed SQL parse and `git diff --check` pass; resource recovery leaves 30.3 GiB below the 32 GiB reserve, so build/focused causal-observation and prior correspondence tests remain with capable gate, alongside combined acceptance.
+Check: `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, in-memory released/draft SQL plus capture-query `EXPLAIN`, and `git diff --check` pass; disk remains 30.2 GiB after resource recovery, below the 32 GiB reserve, so build/focused causal-observation and correspondence tests remain with capable gate, alongside combined acceptance.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

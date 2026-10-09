@@ -241,23 +241,21 @@ pub(super) fn capture_project_content(conn: &Connection, project: &ProjectId) ->
                     })
             })
         });
-        let missing_origin = linear.is_some() && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_capture_heads h
-             JOIN planning_peer_changes c ON c.id=h.id
-             WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND c.object_id!=?1
-             AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
-                 JOIN json_each(saved.parents) parent ON parent.value=h.id
-                 WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))",
-            params![project.as_str(), field], |row| row.get(0),
-        )?;
+        let missing_origin = linear.is_some()
+            && conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM planning_peer_capture_heads
+             WHERE kind='project' AND object_id=?1 AND field=?2 AND missing_parent)",
+                params![project.as_str(), field],
+                |row| row.get(0),
+            )?;
         if unchanged && frontier_retained && !missing_origin {
             continue;
         }
         conn.execute("INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
             SELECT lower(hex(randomblob(16))),'project',?1,?2,?3,
                 max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),?4,
-                (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
-                    WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND (c.object_id=?1 OR ?4 IS NOT NULL))",
+                (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h
+                    WHERE h.kind='project' AND h.object_id=?1 AND h.field=?2 AND (h.origin_id=?1 OR ?4 IS NOT NULL))",
             params![project.as_str(),field,value.to_string(),linear.map(serde_json::to_string).transpose()?])?;
     }
     Ok(())
@@ -7367,6 +7365,16 @@ mod tests {
         target
             .edit_project(&local.project_id, Some("After observed Project fact"), None)
             .unwrap();
+        target
+            .update_project_content(
+                &local.project_id,
+                &crate::pm::ProjectContent {
+                    workflow: "review".into(),
+                    krs: row.snapshot.projects[0].krs.clone(),
+                    metric_targets: row.snapshot.projects[0].metric_targets.clone(),
+                },
+            )
+            .unwrap();
         assert_eq!(execution_rows(&target), execution);
         assert!(!export(&target, "/target")
             .objects()
@@ -7422,6 +7430,13 @@ mod tests {
                 local.project_id.as_str(),
                 "project_name",
                 "After observed Project fact",
+            ),
+            (
+                PlanningKind::Project,
+                incoming_project.as_str(),
+                local.project_id.as_str(),
+                "workflow",
+                "review",
             ),
         ] {
             let (_, saved) = exchanged

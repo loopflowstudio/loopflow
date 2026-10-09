@@ -1,12 +1,11 @@
 # product wave memory
 
-Renamed from `concerto` July 8, 2026. Product owns API/CLI, Mac,
-iOS, agent and worker surfaces.
+Formerly `concerto`. Product owns API/CLI, Mac, iOS, agent and worker surfaces.
 
 ## Current direction after the October 7 Tasks
 
-LOO-387–430 briefs and LOO-427 non-progress comments supersede older designs/help.
-LOO-389's brief was read; comments failed on an unbound Initiative.
+LOO-387–430 briefs and LOO-427 steers supersede older designs.
+LOO-389 comments failed on an unbound Initiative.
 
 - **Machine replaces Home** (LOO-394); one OS user and data directory.
   `LF_HOME`, provider homes and stored opaque IDs keep their meanings. LOO-411
@@ -17,8 +16,9 @@ LOO-389's brief was read; comments failed on an unbound Initiative.
   One repository window across machines, identified by Work. Jack accepted
   CLI Session+diff opening, inspection and arrangement. Execution
   and display machines differ; takeover is explicit. Partial below.
-- Jack: delegation applies to open, unstarted and future Tasks. Started Tasks stay
-  on their machine across later runs. Inheritance remains proposed.
+- Jack (October 9): unstarted/future Tasks inherit the nearest explicit Machine
+  assignment; narrower Task/sub-Wave overrides win. Started Tasks stay on their
+  recorded Machine across later runs. Unknown historical provenance stays unknown.
 - Jack: Desktop control is macOS-only (LOO-426/427); Linux errors name a terminal
   alternative before launch or Work mutation. Ordinary lf remains cross-platform;
   displaying and execution machines differ.
@@ -45,7 +45,7 @@ authorized through demo review. Owned cmux probe cleaned up; no Desktop proof.
 
 October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
 removes copied placements, preserves legacy overrides and routes known Tasks
-without rewriting Machine defaults. Inheritance is unapproved; placement suites remain with gate.
+without rewriting Machine defaults. Placement suites remain with gate.
 Neither negative peer observation nor local SQLite reserves first start; runtime
 must not synchronize. Seeded IDs prove routing, not exchange/admission.
 

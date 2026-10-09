@@ -162,5 +162,4 @@ and never executed, even when they could launch an agent. This previews a fresh
 Flow, not an existing cursor. Sorted alternatives and backward edges retain the
 shared graph's identity; no predicted routes or synthetic feedback are supplied.
 Native skill arguments retain the original message, separately from router
-instructions. This presentation is an implementation choice, not Jack Heart's
-approval or the one-PR acceptance boundary.
+instructions. This reversible choice is not Jack Heart's approval or complete-PR acceptance.

@@ -118,6 +118,7 @@ pub struct PmKrSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PmTaskSummary {
+    pub sync: Option<crate::planning::PlanningSyncStatus>,
     pub id: String,
     pub identifier: String,
     pub name: String,
@@ -157,7 +158,6 @@ pub struct TaskRuntimeSnapshot {
     pub status: TaskState,
     /// Linear calls the Task complete while it is active here.
     pub planning_conflict: Option<String>,
-    pub pending_sync: Option<String>,
     pub reason: String,
     pub updated_at: String,
     pub provider: String,
@@ -402,6 +402,7 @@ pub struct WaveRoadmap {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSummary {
+    pub sync: Option<crate::planning::PlanningSyncStatus>,
     pub current: bool,
     pub id: String,
     pub work_id: Option<String>,
@@ -423,28 +424,31 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
         )?;
         let projects = observed
             .into_iter()
-            .map(|project| ProjectSummary {
-                current: current.as_deref() == Some(project.id.as_str()),
-                work_id: registered
-                    .iter()
-                    .find(|work| {
-                        work.id.as_str() == project.id
-                            || work
-                                .plan
-                                .linear_id
-                                .as_ref()
-                                .is_some_and(|id| id.as_str() == project.id)
-                    })
-                    .map(|work| work.id.to_string()),
-                id: project.id,
-                slug: project.slug,
-                name: project.name,
-                workflow: project.workflow,
-                status: project.status,
-                metric_targets: project.metric_targets,
-                krs: project.krs,
+            .map(|project| -> Result<ProjectSummary> {
+                let work = registered.iter().find(|work| {
+                    work.id.as_str() == project.id
+                        || work
+                            .plan
+                            .linear_id
+                            .as_ref()
+                            .is_some_and(|id| id.as_str() == project.id)
+                });
+                Ok(ProjectSummary {
+                    sync: work
+                        .map(|work| store.sqlite.project_planning_sync(&work.id))
+                        .transpose()?,
+                    current: current.as_deref() == Some(project.id.as_str()),
+                    work_id: work.map(|work| work.id.to_string()),
+                    id: project.id,
+                    slug: project.slug,
+                    name: project.name,
+                    workflow: project.workflow,
+                    status: project.status,
+                    metric_targets: project.metric_targets,
+                    krs: project.krs,
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         Ok((projects, false))
     }
     .await;
@@ -460,6 +464,11 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
                     "  project   {} ({}) · workflow {}",
                     project.name, project.id, project.workflow
                 );
+                if let Some(sync) = &project.sync {
+                    for line in sync.lines() {
+                        println!("    {line}");
+                    }
+                }
                 for kr in &project.krs {
                     println!("  [{}] {}", if kr.holds { "x" } else { " " }, kr.text);
                 }
@@ -1017,10 +1026,6 @@ fn snapshot_task_runtime(
         },
         status,
         planning_conflict,
-        pending_sync: match &task.pm_writeback {
-            crate::work::task::PmWritebackState::Current => None,
-            crate::work::task::PmWritebackState::Pending { error, .. } => Some(error.clone()),
-        },
         updated_at: format_time(task.updated_at).unwrap_or_default(),
         provider,
         started,
@@ -1413,7 +1418,11 @@ async fn snapshot_task_detail(
     }
     .or_else(|| (!recommended.is_empty()).then_some(recommended));
     Ok(TaskDetailSnapshot {
-        task: task_summary(item),
+        task: task_summary(
+            item,
+            task.map(|task| store.sqlite.task_planning_sync(&task.id))
+                .transpose()?,
+        ),
         reference,
         runtime,
         direction,
@@ -1704,8 +1713,9 @@ async fn current_direction(
     Ok(Some(DirectionSnapshot { text }))
 }
 
-fn task_summary(item: PmItem) -> PmTaskSummary {
+fn task_summary(item: PmItem, sync: Option<crate::planning::PlanningSyncStatus>) -> PmTaskSummary {
     PmTaskSummary {
+        sync,
         id: item.id,
         identifier: item.identifier,
         name: item.name,
@@ -1886,6 +1896,11 @@ fn print_status(status: &WaveDetailSnapshot) {
                     "  {}  {:<10}  {}  {}",
                     task.task.identifier, state, task.task.name, task.next_move.reason
                 );
+                if let Some(sync) = &task.task.sync {
+                    for line in sync.lines() {
+                        println!("    {line}");
+                    }
+                }
                 if let Some(workspace) = &task.reference.workspace {
                     println!("    workspace  {}  {}", workspace.slug, workspace.worktree);
                 }
@@ -2208,7 +2223,16 @@ fn task_roadmap_row(task: &RoadmapTask, now: time::OffsetDateTime) -> RoadmapRow
             .as_ref()
             .map(|workspace| workspace.slug.clone()),
         condition: Some(task.condition.state),
-        reason: task.condition.reason.clone(),
+        reason: std::iter::once(task.condition.reason.clone())
+            .chain(
+                task.task
+                    .sync
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|sync| sync.lines()),
+            )
+            .collect::<Vec<_>>()
+            .join(" · "),
     }
 }
 
@@ -3035,7 +3059,6 @@ mod tests {
                 provider: "codex".to_string(),
                 started: true,
                 planning_conflict: None,
-                pending_sync: None,
             };
             derive_task_condition(
                 Some(&runtime),
@@ -3087,7 +3110,6 @@ mod tests {
             provider: "codex".to_string(),
             started: true,
             planning_conflict: None,
-            pending_sync: None,
         };
         let next_move = NextMove {
             owner: NextMoveOwner::Task,
@@ -3198,7 +3220,6 @@ mod tests {
                         provider: "codex".into(),
                         started: true,
                         planning_conflict: None,
-                        pending_sync: None,
                     };
                     let terminal = derive_task_condition(
                         Some(&runtime),

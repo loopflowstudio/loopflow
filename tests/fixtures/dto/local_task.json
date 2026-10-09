@@ -62,8 +62,7 @@
       "started": false,
       "status": "not_ready",
       "updated_at": "2026-10-08T00:00:00Z",
-      "work_id": "task_0123456789ab40008000000000000001",
-      "pending_sync": null
+      "work_id": "task_0123456789ab40008000000000000001"
     },
     "section": "waiting",
     "task": {
@@ -75,7 +74,8 @@
       "identifier": "lf-0123456",
       "name": "Retain quoted input",
       "rank": 0,
-      "state": "unstarted"
+      "state": "unstarted",
+      "sync": null
     },
     "workflow_name": null
   }

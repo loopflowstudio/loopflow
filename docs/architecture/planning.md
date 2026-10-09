@@ -140,9 +140,12 @@ Malformed observations retain fields and diagnostics. Ingestion and migration
 preserve editable KRs and targets.
 
 The personal namespace and provider-first planning writers are deleted. Connected
-CLI edits report pending sync. Relative-order delivery, complete Desktop
-pending presentation and composed reconnect remain
-unfinished. Ingestion adopts observed Linear conflicts and retains the losing
+CLI and Desktop project creation, field/order edits, state and comments through
+`PlanningSyncStatus`, derived from their existing receipts. Unmapped creation is
+pending in connected repositories; attempted effects retain uncertainty and errors.
+Observed conflicts show both values after adopting Linear. Disconnected repositories
+show no pending Linear delivery; retained losing values remain inspectable.
+Composed reconnect acceptance remains unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.
@@ -439,7 +442,8 @@ inventory can allocate another local identity. The creation snapshot establishes
 field baselines without acknowledging later edits. Observed Linear conflicts still
 win and retain the losing receipt. Removed Tasks export only when an attempted
 creation needs reconciliation, then their existing deletion receipt owns removal.
-Complete pending-state presentation and composed CLI/Desktop reconnect remain unfinished.
+Creation receipt changes advance the planning revision, so active readers acquire
+new attempt errors and confirmations. Composed CLI/Desktop reconnect remains unproved.
 
 ## Read each step's result
 
@@ -533,7 +537,8 @@ SQLite owns every Task comment. A save records the comment and its stable delive
 UUID in one transaction, before contacting Linear. CLI and Desktop read the thread,
 pending IDs and losing local bodies from one SQLite snapshot. An observed comment
 conflict adopts Linear’s body, author and time while the receipt retains both
-complete comments; no replacement comment is created. Mapped Tasks show pending sync;
+complete comments; no replacement comment is created. Connected repositories show
+pending sync, including comments on unmapped Tasks;
 a foreground Task Session or Desktop Task connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally

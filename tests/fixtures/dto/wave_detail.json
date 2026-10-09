@@ -112,7 +112,64 @@
           "completed": false,
           "assignee": "user-1",
           "state": "unstarted",
-          "completed_at": null
+          "completed_at": null,
+          "sync": {
+            "connected": true,
+            "changes": [
+              {
+                "id": "create-task",
+                "field": "creation",
+                "state": "pending",
+                "local_value": {
+                  "title": "Saved offline"
+                },
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "order-project",
+                "field": "task_order",
+                "state": "uncertain",
+                "local_value": [
+                  "task-b",
+                  "task-a"
+                ],
+                "linear_value": null,
+                "error": "Reply lost; awaiting readback"
+              },
+              {
+                "id": "title-task",
+                "field": "name",
+                "state": "adopted_linear",
+                "local_value": "Local title",
+                "linear_value": "Linear title",
+                "error": null
+              },
+              {
+                "id": "assignee-task",
+                "field": "assignee",
+                "state": "adopted_linear",
+                "local_value": "person-id",
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "comment-task",
+                "field": "comment",
+                "state": "pending",
+                "local_value": {
+                  "body": "Saved comment",
+                  "author": {
+                    "kind": "person",
+                    "name": "Maya"
+                  },
+                  "created_at": "2026-10-08T12:00:00Z"
+                },
+                "linear_value": null,
+                "error": "Offline"
+              }
+            ]
+          }
         },
         "reference": {
           "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
@@ -131,8 +188,7 @@
           "reason": "ready",
           "updated_at": "2026-07-13T19:00:00Z",
           "provider": "codex",
-          "started": true,
-          "pending_sync": "Saved locally; pending Linear synchronization"
+          "started": true
         },
         "directive": {
           "version": 2,
@@ -518,7 +574,64 @@
           "completed": false,
           "assignee": null,
           "state": "unstarted",
-          "completed_at": null
+          "completed_at": null,
+          "sync": {
+            "connected": true,
+            "changes": [
+              {
+                "id": "create-task",
+                "field": "creation",
+                "state": "pending",
+                "local_value": {
+                  "title": "Saved offline"
+                },
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "order-project",
+                "field": "task_order",
+                "state": "uncertain",
+                "local_value": [
+                  "task-b",
+                  "task-a"
+                ],
+                "linear_value": null,
+                "error": "Reply lost; awaiting readback"
+              },
+              {
+                "id": "title-task",
+                "field": "name",
+                "state": "adopted_linear",
+                "local_value": "Local title",
+                "linear_value": "Linear title",
+                "error": null
+              },
+              {
+                "id": "assignee-task",
+                "field": "assignee",
+                "state": "adopted_linear",
+                "local_value": "person-id",
+                "linear_value": null,
+                "error": null
+              },
+              {
+                "id": "comment-task",
+                "field": "comment",
+                "state": "pending",
+                "local_value": {
+                  "body": "Saved comment",
+                  "author": {
+                    "kind": "person",
+                    "name": "Maya"
+                  },
+                  "created_at": "2026-10-08T12:00:00Z"
+                },
+                "linear_value": null,
+                "error": "Offline"
+              }
+            ]
+          }
         },
         "reference": {
           "issue_url": null,
@@ -602,7 +715,33 @@
             "text": "Every failed run has an owner",
             "holds": false
           }
-        ]
+        ],
+        "sync": {
+          "connected": true,
+          "changes": [
+            {
+              "id": "create-task",
+              "field": "creation",
+              "state": "pending",
+              "local_value": {
+                "title": "Saved offline"
+              },
+              "linear_value": null,
+              "error": null
+            },
+            {
+              "id": "order-project",
+              "field": "task_order",
+              "state": "uncertain",
+              "local_value": [
+                "task-b",
+                "task-a"
+              ],
+              "linear_value": null,
+              "error": "Reply lost; awaiting readback"
+            }
+          ]
+        }
       }
     ],
     "truncated": false

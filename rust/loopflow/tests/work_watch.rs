@@ -44,7 +44,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
-        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") {
+        if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
             command.env_remove(key);
         }
     }
@@ -52,6 +52,7 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
+        .env("HOME", home)
         .stderr(Stdio::inherit());
     command
 }
@@ -810,6 +811,13 @@ fn selection_only_commit_reaches_two_open_work_readers() {
 fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: fixture-team\n",
+    )
+    .unwrap();
     home.plan(1);
     let mut watch = home.watch();
     let scope = serde_json::json!({"action":"scope", "id":1, "repo":home.wave.repo(),
@@ -826,7 +834,11 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
                     if let Evidence::Ok { items, .. } = wave.tasks {
                         for task in items {
                             if let Some(runtime) = task.runtime {
-                                if runtime.status == expected && runtime.pending_sync.is_some() {
+                                if runtime.status == expected
+                                    && task.task.sync.as_ref().is_some_and(|sync| {
+                                        sync.changes.iter().any(|change| change.field == "state")
+                                    })
+                                {
                                     assert_eq!(
                                         task.task.completed,
                                         expected == loopflow::durable::TaskState::Done
@@ -890,6 +902,13 @@ fn offline_cli_completion_and_reopening_reach_desktop_without_refresh() {
 fn an_offline_cli_comment_reaches_the_open_desktop_thread() {
     let home = Machine::new();
     repository(Path::new(home.wave.repo()));
+    let config = Path::new(home.wave.repo()).join(".lf");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join("config.yaml"),
+        "pm:\n  linear_team: fixture-team\n",
+    )
+    .unwrap();
     home.plan(1);
     let mut watch = home.watch();
     let scope = serde_json::json!({

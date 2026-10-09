@@ -242,6 +242,11 @@ jobs:
       - name: Build CLI for Swift transport tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         run: /usr/bin/time -l cargo build -p loopflow --bin lf
+      - name: Test macOS installation process discovery
+        if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
+        run: |
+          cargo test -p loopflow --lib app_process_tests --no-run
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
       - name: Build Desktop and run headless model and view tests
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true' || steps.swift-cache.outputs.cache-hit != 'true'
         shell: bash

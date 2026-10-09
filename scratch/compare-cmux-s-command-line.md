@@ -226,9 +226,12 @@ Repository resolution and restored-scene validation now share the router;
 pre-registration failures are inspectable. Mounted Task content, not selection,
 settles the request generation.
 
-Removed in the invocation cut: Workflow choice embedded in `traverse_workflow`
-and fallback Process observation after parsed previews. Shared selection and ordinary
-command observation survive; no second dry-run planner exists.
+Removed in the invocation cut: Workflow choice embedded in `traverse_workflow`,
+caller-supplied Project selection, duplicate preview option validation and route
+provenance inference, and fallback Process observation after parsed previews.
+Selection reads the Project only when taking up its default; routing returns its
+source in the same transaction. Launch and preview share Task option checks.
+Ordinary command observation survives; no second dry-run planner exists.
 
 Remaining removals are `Commands::Project` and `Commands::Roadmap`, with consumer
 cutover to Wave planning. `Context { explain }`, validation-only scope checks,
@@ -268,26 +271,22 @@ normalization survive. The repeated-node steer filter still requires operating
 guidance in its regression fixture. Detailed fixtures and the original missing-Workflow-node repair:
 `1f42a98e4:scratch/compare-cmux-s-command-line.md`, Implementation sequence.
 
-### Local invocation previews and recorded location — implemented locally
+### Local invocation previews and recorded location
 
-Local skill/inline previews share launch Work assembly without storage or excerpt
-writes. `task run --explain` now reports invocation action and impediments; other
-action explanation and remote/Flow previews remain.
-`tasks.checkout_machine_id` separates recorded execution from delegation; missing
-Machine evidence stays unknown. The one migration draft changes no installed store.
-Prior focused evidence: `0cb4ff2c5:scratch/compare-cmux-s-command-line.md`, Local
-invocation previews / Separate recorded checkout location. Gate owns full lifecycle
-and installed migration checks.
+Local skill/inline previews share launch assembly without storage/excerpt writes.
+`tasks.checkout_machine_id` separates execution from delegation; missing Machine
+stays unknown. The draft changes no installed store. Prior proof:
+`0cb4ff2c5:scratch/compare-cmux-s-command-line.md`; gate owns lifecycle/migrations.
 
 ### Task run invocation explanation — October 9
 
-Implemented locally: text/JSON carries identity resolution, the selected edge or
-ad-hoc Flow, impediments and unavailable evidence. `select_task_run` replaces the
-choice embedded in `traverse_workflow`; launch and preview share it and the existing
-launch-admission reader. Only launch takes up/moves Workflow or prepares Work.
-Omitted Task selection uses the existing checkout/declaration resolver in both
-paths. Recorded execution wins for started Tasks; effective delegation is a proposed
-destination for locally unstarted Tasks, never first-start permission.
+Implemented locally: text/JSON carries identity, selected edge/ad-hoc Flow,
+impediments and unavailable evidence. Launch and preview share `select_task_run`,
+Task option validation and launch admission; only launch prepares Work or moves
+Workflow. Selection owns Project fallback without cloning its definition.
+Routing returns provenance with the destination, not a later rereading of Started.
+Omitted Tasks use checkout/declaration resolution in both paths. Recorded execution
+wins for started Tasks; delegation for unstarted Tasks never grants first-start permission.
 
 Remote Workflow state is not read from a caller's copy. Missing/corrupt registries,
 unknown Machine, absent checkout, future placement, completion reconciliation and
@@ -314,30 +313,21 @@ subsequent reads retain the originating Task and complete Session inventory.
 No CLI checkout preparation or automatic routing to the execution Machine remains.
 Explicit `--machine` still selects the command's machine, not a viewing relay.
 
-Links retain literal paths, full IDs and `diff` on relocation; lookup accepts planning
-and durable Task IDs. Changes reuse the Files document cache and drafts. Generation
-checks fence late navigation/insertion, and unchanged Task reopening avoids needless
-writes. Chooser and direct links share failure receipts.
+Request generations fence lookup, registration, preparation and pane readiness;
+repeated URLs are new requests. Links preserve literal paths, full IDs and `diff`.
+Chooser/direct failures share receipts, including pre-registration failures.
+LaunchServices returns `opening`; selection, insertion and `.prepared` are not usable.
+Plain Task links await mounted content; composed links await Session surface and
+Files comparison with the original visible pane occurrences. Closure, replacement,
+hiding or zoom fails pending requests; navigation cancels them without stopping
+shared preparation. Late callbacks cannot settle another generation.
 
-LaunchServices returns `opening`; `.prepared` and layout insertion are not usable.
-The destination generation follows Session connection/surface readiness, Files comparison
-and the original visible pane occurrences. Repeated URLs are new requests. Closing,
-hiding, replacing or zooming away a requested pane fails the pending request without
-waiting for another Session event. Navigation cancels the request without stopping shared
-preparation; late callbacks/comparisons cannot settle replacements. Session, Files and
-multiplexer all use Observation, replacing the Combine/notification bridges and refresh
-counters. Native creation failures propagate, including builds without Ghostty.
-
-Composed `--diff` clears zoom to reveal both panes; ordinary companion commands retain
-zoom. Pending exact links suppress automatic primary entry. These are model receipts,
-not rendering or provider acceptance.
-
-Pre-registration failures are inspectable through the router. Registration retains
-validated request IDs; a later request confirms the retained shell through its own
-view callback. Plain Task links wait for mounted page content or fail on its
-unavailable surface. Pane visibility is observed even before a Session reading
-arrives, so absence cannot mask closure. These callbacks prove model/view readiness,
-not compositor or provider usability. Receipts retain only the latest outcome.
+Session/Files/multiplexer Observation owns readiness, including visibility before
+Session evidence. Composed Changes clears zoom while keeping drafts; ordinary
+companions retain zoom. Pending exact links suppress primary entry. Native creation
+failure propagates, including Ghostty-disabled builds. Latest-only receipts prove
+model/view readiness, not compositor or provider usability. Detailed implementation
+and failed observations: `2b924f3fd:scratch/compare-cmux-s-command-line.md`, this heading.
 
 **Remaining opening implementation/proof:** remote composition and native endpoints.
 Headless fixtures cover supersession, cancellation, delayed registration, failures,
@@ -590,4 +580,4 @@ original input target and draft survive. Demo owns native usability; preserve co
 Earlier failed attempts and check archives: [findings](findings.md) and
 `f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9 sync): network-isolated `cli_discovery` filters `desktop_input_keeps_text_separate_from_keys_and_requires_surface_identity` and `portable_help_describes_exact_kind_selection` PASS (2); broader gate/CI and native demo remain. Prior checks: `b7f7a234c:scratch/compare-cmux-s-command-line.md`.
+Check (October 9 sync): two focused network-isolated `cli_discovery` tests PASS; earlier eight focused tests/build/Clippy PASS are preserved in `/tmp/loo427-desktop-explain/scratch/`. Affected suites gate/CI; native usability demo.

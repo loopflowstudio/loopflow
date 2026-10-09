@@ -104,10 +104,10 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 realign measured generated goal input at 23343/16000 tokens (7343 over):
-stored direction plus generated inventory. The complete supplied source adds no
-instruction in its omitted inventory. Local memory/scratch edits cannot fix this
-separate generated budget; context-producer changes remain outside this cut. No limit changed.
+October 9 compress measured generated goal input at 23351/16000 tokens (7351 over):
+stored direction plus generated inventory. The supplied omitted text is inventory,
+not additional instructions. This generated source cannot be curated through
+memory/scratch edits; context-producer work remains outside this cut. No limit changed.
 
 ## Reversible preview limits — October 9
 

@@ -167,13 +167,15 @@ uncommitted notes are preserved at `/tmp/loo427-task-run-explain/scratch/`.
 
 ## Invocation-level Task run explanation — October 9
 
-The Workflow choice inside `traverse_workflow` is now a shared read-only selection;
-launch alone takes up/moves it. Explanation reuses launch admission and execution
-routing, distinguishes recorded location from effective delegation, and reports
-remote/missing checkout/registry evidence as unavailable. Missing local execution
-still cannot prove peer-exclusive first start. An omitted Task uses the existing
-checkout/declaration resolver, also for ordinary launch; remote forwarding carries
-the inferred Task rather than asking the destination to infer it again.
+Workflow selection and Task option checks are shared with launch; only launch
+prepares/moves Work. Compression found preview had different empty-directive
+wording and recomputed route provenance in a later read. Options now share checks,
+and the routing transaction returns its own source. Project defaults load only
+when needed, without cloning the definition. A new retired-checkout fixture first
+failed because it fabricated Started without work; it now reserves a Session through
+the existing owner before removing the checkout. Logs: `/tmp/loo427-compress-explain/`.
+An omitted Task shares checkout/declaration selection; remote forwarding carries
+that ID. Missing local execution still cannot prove peer-exclusive first start.
 
 The first state-preservation regression failed after checkpointing SQLite's WAL:
 `journal::with_process` logged an early Process after the preview returned. Earlier

@@ -137,25 +137,7 @@ fn changes_by_object<'a>(
         }
     }
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
-    // A causal edge retires another origin only inside an explicitly associated
-    // projection. The portable journal and its per-origin heads stay unchanged.
-    let retired: BTreeSet<_> = snapshot
-        .changes
-        .values()
-        .flat_map(|change| {
-            change.parents.iter().filter(|id| {
-                let parent = &snapshot.changes[*id];
-                owners[&parent.object] == owners[&change.object]
-                    && (change.field != "creation" || parent.object == change.object)
-            })
-        })
-        .collect();
-    let heads: BTreeMap<_, _> = snapshot
-        .changes
-        .iter()
-        .filter(|(id, _)| !retired.contains(id))
-        .map(|(id, change)| (id.as_str(), change))
-        .collect();
+    let heads: BTreeMap<_, _> = snapshot.heads_by(|origin| &owners[origin]).collect();
     for (id, change) in winning_heads(heads.iter().map(|(&id, &change)| (id, change)), |change| {
         (&owners[&change.object], change.field.as_str())
     }) {
@@ -220,15 +202,6 @@ fn changes_by_object<'a>(
     // Retain decoded evidence outside dependency retries. Removal ages
     // select the first known timestamp, never random mutation-ID traversal order.
     for (object, changes) in &mut objects {
-        // Validated mutations have known fields and one winner per field.
-        if !object
-            .kind
-            .fields()
-            .iter()
-            .all(|field| changes.winners.contains_key(field))
-        {
-            return Err(invalid(format!("incomplete planning record {}", object.id)));
-        }
         match object.kind {
             PlanningKind::Wave => {
                 crate::id::WaveId::parse(&object.id).map_err(invalid)?;
@@ -825,22 +798,23 @@ impl SqliteStore {
         let objects = changes_by_object(&merged, &owners)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
         retain_mutations(&tx, &saved, incoming)?;
+        let (held_objects, eligible): (Vec<_>, Vec<_>) =
+            objects.iter().partition(|(_, changes)| {
+                changes
+                    .origins
+                    .iter()
+                    .any(|origin| held.contains_key(*origin))
+            });
         // Correspondence can retain each creation origin on its local owner
         // even when sharing holds scalar projection. This releases no effect:
         // the sharing/projection conflict below still fences every new attempt.
         // Import suppression keeps private local edits out of the peer journal.
-        for (object, changes) in &objects {
-            if !changes
-                .origins
-                .iter()
-                .any(|origin| held.contains_key(*origin))
-                || changes.creation.is_empty()
-            {
+        for (object, changes) in held_objects {
+            if changes.creation.is_empty() {
                 continue;
             }
-            let local = &object.id;
             let receipt = tx.savepoint()?;
-            match project_creation(&receipt, local, changes) {
+            match project_creation(&receipt, &object.id, changes) {
                 Ok(()) => receipt.commit()?,
                 // Contradictory captured operations remain in the journal and
                 // behind the existing hold; never replace the retained receipt.
@@ -848,15 +822,7 @@ impl SqliteStore {
                 Err(error) => return Err(error),
             }
         }
-        let mut pending = objects
-            .iter()
-            .filter(|(_, changes)| {
-                !changes
-                    .origins
-                    .iter()
-                    .any(|origin| held.contains_key(*origin))
-            })
-            .collect::<Vec<_>>();
+        let mut pending = eligible.clone();
         let mut conflicts = loop {
             let count = pending.len();
             let mut retry = Vec::new();
@@ -917,14 +883,8 @@ impl SqliteStore {
         };
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
-        for (object, changes) in &objects {
-            if object.kind != PlanningKind::Wave
-                || changes
-                    .origins
-                    .iter()
-                    .any(|origin| held.contains_key(*origin))
-                || !exists(&tx, object)?
-            {
+        for &(object, changes) in &eligible {
+            if object.kind != PlanningKind::Wave || !exists(&tx, object)? {
                 continue;
             }
             match project_fields(
@@ -944,17 +904,13 @@ impl SqliteStore {
         }
         // Project lists can refer to Tasks first created by this import. Apply
         // only after their projection; no receipt is settled by this pass.
-        for (object, changes) in objects
+        for &(object, changes) in eligible
             .iter()
             .filter(|(o, _)| o.kind == PlanningKind::Project)
         {
-            if !changes
-                .origins
+            if !conflicts
                 .iter()
-                .any(|origin| held.contains_key(*origin))
-                && !conflicts
-                    .iter()
-                    .any(|(failed, _)| changes.origins.contains(failed))
+                .any(|(failed, _)| changes.origins.contains(failed))
                 && exists(&tx, object)?
             {
                 super::planning_order::project_pending(&tx, &ProjectId::from_raw(&object.id))?;
@@ -1655,20 +1611,18 @@ fn observe_projected_fields(
     changes: &ObjectChanges<'_>,
     fields: &[&str],
 ) -> StoreResult<()> {
-    let selected = fields;
-    let fields = serde_json::to_string(fields)?;
+    let fields_json = serde_json::to_string(fields)?;
     conn.execute(
         "DELETE FROM planning_peer_observed WHERE object_id=?1 AND EXISTS (
             SELECT 1 FROM planning_peer_changes c WHERE c.id=planning_peer_observed.id
                 AND c.kind=?2 AND c.field IN (SELECT value FROM json_each(?3)))",
-        params![object.id, object.kind.as_str(), fields],
+        params![object.id, object.kind.as_str(), fields_json],
     )?;
+    let mut insert =
+        conn.prepare("INSERT INTO planning_peer_observed(object_id,id) VALUES(?1,?2)")?;
     for (id, change) in &changes.heads {
-        if selected.contains(&change.field.as_str()) {
-            conn.execute(
-                "INSERT INTO planning_peer_observed(object_id,id) VALUES(?1,?2)",
-                params![object.id, id],
-            )?;
+        if fields.contains(&change.field.as_str()) {
+            insert.execute(params![object.id, id])?;
         }
     }
     Ok(())

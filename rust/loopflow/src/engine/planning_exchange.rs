@@ -258,16 +258,26 @@ impl PlanningSnapshot {
 
     /// Head mutations in change-ID order, borrowed from the retained journal.
     pub fn heads(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        // Cross-origin observation links retain the other origin's own frontier.
-        // They carry causal evidence, not ownership of that origin's projection.
+        // Portable links retain each origin's own frontier; only the receiver
+        // can associate identities for joint projection.
+        self.heads_by(|object| object)
+    }
+
+    /// Evaluate causality within the caller's projection owners. Creation
+    /// receipts always retain their original identity, even after association.
+    pub(crate) fn heads_by<'a, K: Eq>(
+        &'a self,
+        owner: impl Fn(&'a PlanningObject) -> K,
+    ) -> impl Iterator<Item = (&'a str, &'a PlanningMutation)> {
         let retired: BTreeSet<_> = self
             .changes
             .values()
             .flat_map(|change| {
                 change.parents.iter().filter(|id| {
-                    self.changes
-                        .get(*id)
-                        .is_some_and(|parent| parent.object == change.object)
+                    self.changes.get(*id).is_some_and(|parent| {
+                        owner(&parent.object) == owner(&change.object)
+                            && (change.field != "creation" || parent.object == change.object)
+                    })
                 })
             })
             .collect();

@@ -177,9 +177,11 @@ execution, or grant provider priority. Linear bodies retain their own validation
 Heads remain per-origin; joint projection traverses ancestry across the resolved
 group before ranking its frontier. Delivery baselines traverse the same links.
 Export validates causal closure but holds unselected origins and dependents.
-Scalar Task/Project and comment references resolve only at projection; original
-journal values and captured delivery inputs remain unchanged. Associated order
-or deletion histories retain a projection conflict rather than partially applying
+Scalar Task/Project and comment references resolve at projection. Membership
+delivery and baseline comparison resolve Project references without rewriting the
+saved receipt. Exact readback rebases later unattempted saves only when their
+resolved baselines match. Associated order or deletion histories retain a
+projection conflict rather than partially applying
 them. Relationship, state and non-creation receipt composition still needs its
 remaining implementation and public proof; retained history is not convergence.
 

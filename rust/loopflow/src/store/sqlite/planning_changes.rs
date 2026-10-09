@@ -194,10 +194,7 @@ impl<'a> PlanningChanges<'a> {
             };
             let remote = self.comparison_value(conn, &field, remote.clone())?;
             let value = self.comparison_value(conn, &field, value)?;
-            let base_value = base
-                .as_ref()
-                .map(|base| self.comparison_value(conn, &field, base["value"].clone()))
-                .transpose()?;
+            let base_value = self.comparison_base(conn, &field, base.as_ref())?;
             if super::planning::revision_nanos(observed["revision"].as_str())?
                 < super::planning::revision_nanos(
                     base.as_ref().and_then(|b| b["revision"].as_str()),
@@ -207,26 +204,25 @@ impl<'a> PlanningChanges<'a> {
             }
             if remote == value {
                 let baseline =
-                    serde_json::json!({"revision": observed["revision"], "value": remote});
+                    serde_json::json!({"revision": observed["revision"], "value": remote})
+                        .to_string();
                 let mut later = conn.prepare(&format!(
-                    "SELECT id,field,value_json,base_json FROM {owner}_changes
+                    "SELECT id,base_json FROM {owner}_changes
                      WHERE {owner}_id=?1 AND field=?2
                      AND seq>(SELECT seq FROM {owner}_changes WHERE id=?3)
                      AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL"
                 ))?;
                 let later = later
-                    .query_and_then(params![id, field, receipt], read_change)?
-                    .collect::<StoreResult<Vec<_>>>()?;
-                for change in later {
-                    let later_base = change
-                        .base
-                        .as_ref()
-                        .map(|base| self.comparison_value(conn, &field, base["value"].clone()))
-                        .transpose()?;
-                    if later_base == base_value {
+                    .query_map(params![id, field, receipt], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (receipt, base) in later {
+                    let base = base.map(|base| serde_json::from_str(&base)).transpose()?;
+                    if self.comparison_base(conn, &field, base.as_ref())? == base_value {
                         conn.execute(
                             &format!("UPDATE {owner}_changes SET base_json=?2 WHERE id=?1"),
-                            params![change.id, baseline.to_string()],
+                            params![receipt, baseline],
                         )?;
                     }
                 }
@@ -401,6 +397,16 @@ impl<'a> PlanningChanges<'a> {
         Ok(value)
     }
 
+    fn comparison_base(
+        self,
+        conn: &Connection,
+        field: &str,
+        base: Option<&Value>,
+    ) -> StoreResult<Option<Value>> {
+        base.map(|base| self.comparison_value(conn, field, base["value"].clone()))
+            .transpose()
+    }
+
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
@@ -429,11 +435,7 @@ impl<'a> PlanningChanges<'a> {
             };
             let remote = self.comparison_value(conn, &change.field, value.clone())?;
             let desired = self.comparison_value(conn, &change.field, change.value.clone())?;
-            let base = change
-                .base
-                .as_ref()
-                .map(|base| self.comparison_value(conn, &change.field, base["value"].clone()))
-                .transpose()?;
+            let base = self.comparison_base(conn, &change.field, change.base.as_ref())?;
             if remote != desired && base.as_ref() != Some(&remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),

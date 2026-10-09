@@ -422,5 +422,7 @@ fn public_association_preserves_ids_and_reports_unfinished_projection() {
         local.project_id.as_str(),
     ]
     .contains(&change.object.id.as_str())));
-    assert!(run(repo.path(), home.path(), &["status"]).contains("joint planning projection"));
+    let status = run(repo.path(), home.path(), &["status"]);
+    assert!(status.contains("relationship and receipt composition is unfinished"));
+    assert!(status.contains("exchange and effects remain held"));
 }

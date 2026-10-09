@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
-    winning_heads_by, LinearObservation, PlanningKind, PlanningMutation, PlanningObject,
-    PlanningSnapshot,
+    winning_heads, winning_heads_by, LinearObservation, PlanningKind, PlanningMutation,
+    PlanningObject, PlanningSnapshot,
 };
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
@@ -120,8 +120,11 @@ fn changes_by_object<'a>(
     snapshot: &'a PlanningSnapshot,
     owners: &'a BTreeMap<PlanningObject, PlanningObject>,
 ) -> StoreResult<BTreeMap<PlanningObject, ObjectChanges<'a>>> {
+    let heads: BTreeMap<_, _> = snapshot.heads().collect();
     let mut fields = BTreeMap::<_, BTreeSet<_>>::new();
-    for change in snapshot.changes.values() {
+    // Every retained field has a head. Check each origin's completeness before
+    // grouping aliases, without revisiting all of its superseded mutations.
+    for change in heads.values() {
         fields
             .entry(&change.object)
             .or_default()
@@ -138,7 +141,6 @@ fn changes_by_object<'a>(
         }
     }
     let mut objects: BTreeMap<_, ObjectChanges<'_>> = BTreeMap::new();
-    let heads: BTreeMap<_, _> = snapshot.heads().collect();
     let frontier = snapshot.frontier_by(|object| &owners[object]);
     for (id, change) in winning_heads_by(frontier.iter().copied(), |change| &owners[&change.object])
     {
@@ -155,10 +157,14 @@ fn changes_by_object<'a>(
             .observed
             .push((id, change));
     }
-    for (_, change) in snapshot
-        .winners()
-        .filter(|(_, change)| change.field == "creation")
-    {
+    // Creation keeps per-origin winners, not the joint scalar owner. Reuse the
+    // same head index used below for receipt histories.
+    for (_, change) in winning_heads(
+        heads
+            .iter()
+            .filter(|(_, change)| change.field == "creation")
+            .map(|(id, change)| (*id, *change)),
+    ) {
         objects
             .get_mut(&owners[&change.object])
             .expect("creation has an owner")

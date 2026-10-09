@@ -82,3 +82,6 @@ readiness proof.
 
 `task_run_explanations.json` covers edge take-up, no-Flow completion, ad-hoc Flow
 selection and unavailable execution evidence. Explanation never grants admission.
+
+`session_connect_explanations.json` preserves connection intent, preparation versus
+takeover, shared legal actions and unavailable evidence without client acquisition.

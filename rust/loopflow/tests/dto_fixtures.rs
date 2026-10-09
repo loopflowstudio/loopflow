@@ -860,3 +860,41 @@ fn desktop_open_explanations_preserve_proposals_and_impediments() {
     missing[0].as_object_mut().unwrap().remove("impediments");
     assert!(serde_json::from_value::<Vec<DesktopOpenExplanation>>(missing).is_err());
 }
+
+#[test]
+fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
+    use loopflow::lf::commands::context::{
+        OpenMode, SessionConnectExplanation, SessionConnectIntent,
+    };
+    let wire: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/session_connect_explanations.json"
+    ))
+    .unwrap();
+    let reports: Vec<SessionConnectExplanation> = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(
+        reports[0].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Start
+    );
+    assert_eq!(reports[0].action.as_ref().unwrap().mode, OpenMode::Refuse);
+    assert_eq!(
+        reports[1].action.as_ref().unwrap().intent,
+        SessionConnectIntent::Resume
+    );
+    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Replace);
+    assert!(reports[1].action.as_ref().unwrap().prepare_only);
+    assert_eq!(
+        reports[2].action.as_ref().unwrap().intent,
+        SessionConnectIntent::ConnectOrResume
+    );
+    assert_eq!(reports[2].action.as_ref().unwrap().mode, OpenMode::Try);
+    assert!(!reports[2].unavailable.is_empty());
+    assert!(reports[3].action.is_none());
+    assert!(reports[3].state.is_none());
+    assert!(reports[3].actions.is_empty());
+    assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
+    for field in ["resolution", "actions", "impediments", "unavailable"] {
+        let mut missing = wire[0].clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<SessionConnectExplanation>(missing).is_err());
+    }
+}

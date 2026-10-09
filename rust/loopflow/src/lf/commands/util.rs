@@ -294,7 +294,14 @@ pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let session = store
         .session_for_artifact(&input)?
         .ok_or_else(|| anyhow!("Input {input} is not recorded on this Machine"))?;
-    let Some(task_id) = session.task_id else {
+    require_session_task(&store, &session)
+}
+
+pub(crate) fn require_session_task(
+    store: &SqliteStore,
+    session: &crate::session::AgentSession,
+) -> Result<()> {
+    let Some(task_id) = &session.task_id else {
         return Ok(());
     };
     let task = store

@@ -1,6 +1,9 @@
 //! Inspect the same budgets and local source snapshot used at launch.
 
 pub mod preview;
+pub use crate::ops::human_session::{
+    OpenMode, SessionConnectAction, SessionConnectExplanation, SessionConnectIntent,
+};
 
 use anyhow::{anyhow, Result};
 use serde::Serialize;
@@ -184,4 +187,30 @@ fn read_registry() -> Result<crate::store::SharedStore> {
         .map_err(|error| anyhow!("Local registry unavailable: {error}"))?
         .map(std::sync::Arc::new)
         .ok_or_else(|| anyhow!("Local registry is absent"))
+}
+
+/// Explain connection without admitting a provider conversation or acquiring its client.
+pub fn explain_session_connect(
+    id: Option<&str>,
+    replace: bool,
+    try_open: bool,
+    prepare_only: bool,
+) -> Result<SessionConnectExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::human_session::explain_connect(
+                    &store,
+                    &cwd,
+                    id,
+                    OpenMode::from_flags(replace, try_open),
+                    prepare_only,
+                )
+                .await
+            }
+            Err(error) => SessionConnectExplanation::unavailable(error),
+        }
+    }))
 }

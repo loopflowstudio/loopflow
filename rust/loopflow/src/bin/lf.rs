@@ -1773,9 +1773,45 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         }
         return Ok(());
     }
+    let connection = match &cli.command {
+        Some(Commands::Session {
+            cmd:
+                loopflow::lf::SessionCommand::Open {
+                    id,
+                    replace,
+                    try_open,
+                    json,
+                },
+        }) => Some((Some(id.as_str()), *replace, *try_open, *json)),
+        Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::Resume { id, message: None },
+        }) if !cli.batch => Some((id.as_deref(), false, false, false)),
+        _ => None,
+    };
+    if let Some((id, replace, try_open, prepare_only)) = connection {
+        anyhow::ensure!(
+            !cli.context,
+            "--context requires an agent invocation; nothing was executed"
+        );
+        anyhow::ensure!(
+            cli.task.is_none() && cli.wave.is_none(),
+            "select Work or a Session, not several independent targets"
+        );
+        let report = loopflow::lf::commands::context::explain_session_connect(
+            id,
+            replace,
+            try_open,
+            prepare_only,
+        )?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", report.render());
+        }
+        return Ok(());
+    }
     let mut task = cli.task.as_deref();
     let wave = cli.wave.as_deref();
-    let mut session = None;
     let mut process = None;
     let invocation = definition_invocation(cli)?;
     let mut message = None;
@@ -1790,9 +1826,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             task = cmd.selector().or(task);
         }
         None => {}
-        Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::Open { id, .. },
-        }) => session = Some(id.as_str()),
         Some(Commands::History {
             cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
             ..
@@ -1809,7 +1842,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         "--context requires a skill, Flow or inline agent request; use --explain to inspect Work without launch");
     let explanation = cli
         .explain
-        .then(|| loopflow::lf::commands::context::explain(wave, task, session, process))
+        .then(|| loopflow::lf::commands::context::explain(wave, task, None, process))
         .transpose()?;
     let input = cli
         .context

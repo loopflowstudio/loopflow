@@ -1404,3 +1404,285 @@ fn task_run_explain_preserves_absent_and_unreadable_registries() {
         }
     }
 }
+
+fn connection_session(home: &Path, cwd: &Path) -> loopflow::session::AgentSession {
+    let store = SqliteStore::new(&home.join(".lf/loopflow.db")).unwrap();
+    store
+        .create_session(
+            loopflow::session::AgentSession {
+                captured: None,
+                caller_artifact_key: None,
+                task_id: None,
+                wave_id: None,
+                flow_process_lfid: None,
+                work_source: None,
+                bound_at: None,
+                id: "connection-proof".into(),
+                artifact_key: uuid::Uuid::new_v4().simple().to_string(),
+                input_published: true,
+                cwd: cwd.to_path_buf(),
+                skill: None,
+                provider: Some("opencode".into()),
+                model: None,
+                node: None,
+                iterations: None,
+                interactive: true,
+                repo: None,
+                title: "Connection proof".into(),
+                title_source: loopflow::session::TitleSource::Human,
+                request: None,
+                ready_summary: None,
+                completed_at: None,
+                created_at: 1,
+            },
+            None,
+        )
+        .unwrap()
+}
+
+fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::AgentSession) {
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'observed',?2,1,?3)",
+        rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key),
+        serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();
+}
+
+#[test]
+fn session_connect_explain_shares_explicit_native_and_inferred_selection_without_effects() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let session = connection_session(home.path(), repo.path());
+    let db_path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    connection_history(&db, &session);
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&db_path).unwrap();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let explicit = read(&["session", "connect", &session.id, "--explain", "--json"]);
+    let native = read(&["session", "connect", "native-proof", "--explain", "--json"]);
+    let inferred = read(&["--json", "session", "resume", "--explain"]);
+    assert_eq!(explicit["resolution"]["session"]["value"], session.id);
+    assert_eq!(
+        explicit["resolution"]["session"],
+        native["resolution"]["session"]
+    );
+    assert_eq!(inferred["resolution"]["session"]["value"], session.id);
+    assert_eq!(
+        inferred["resolution"]["session"]["source"],
+        "latest_interactive_in_checkout"
+    );
+    assert_eq!(explicit["action"]["intent"], "resume");
+    assert_eq!(explicit["action"]["prepare_only"], true);
+    assert_eq!(inferred["action"]["prepare_only"], false);
+    assert!(explicit["impediments"].as_array().unwrap().is_empty());
+    let replace = read(&[
+        "session",
+        "connect",
+        &session.id,
+        "--replace",
+        "--explain",
+        "--json",
+    ]);
+    let try_open = read(&[
+        "session",
+        "connect",
+        &session.id,
+        "--try",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(replace["action"]["mode"], "replace");
+    assert_eq!(try_open["action"]["mode"], "try");
+    let text = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["session", "connect", &session.id, "--replace", "--explain"],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert!(text.contains("Resume saved provider history"), "{text}");
+    assert!(text.contains("unsent text there is lost"));
+    assert!(text.contains("Nothing was executed"));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(before, fs::read(db_path).unwrap());
+    assert!(!home.path().join(".lf/runs").exists());
+    assert!(!home.path().join(".lf/human-sessions").exists());
+    let prepared = read(&["session", "connect", "native-proof", "--json"]);
+    assert_eq!(prepared["id"], explicit["resolution"]["session"]["value"]);
+    assert_eq!(prepared["state"], explicit["state"]);
+    assert_eq!(prepared["actions"], explicit["actions"]);
+}
+
+#[test]
+fn session_connect_explain_preserves_missing_and_stale_evidence() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let read = |id: &str| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(
+                home.path(),
+                repo.path(),
+                &["session", "connect", id, "--explain", "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap()
+    };
+    assert!(read("missing")["action"].is_null());
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+    let session = connection_session(home.path(), repo.path());
+    let db_path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&db_path).unwrap();
+    let missing = read("unrecorded-native-conversation");
+    assert!(missing["action"].is_null());
+    assert_eq!(missing["resolution"]["session"]["state"], "unavailable");
+    assert!(missing["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("admission"));
+    assert_eq!(read(&session.id)["action"]["intent"], "start");
+    let clients = home
+        .path()
+        .join(".lf/runs")
+        .join(&session.artifact_key[..2])
+        .join(&session.artifact_key)
+        .join("provider-clients");
+    fs::create_dir_all(&clients).unwrap();
+    let receipt = clients.join("stale.json");
+    fs::write(&receipt, serde_json::json!({"schema_version":1,"pid":std::process::id(),"terminal_id":"stale","started_at":"2000-01-01T00:00:00Z"}).to_string()).unwrap();
+    let stale = read(&session.id);
+    assert_eq!(stale["state"], "unknown");
+    assert!(stale["actions"][0]["unavailable_reason"].is_null());
+    fs::write(&receipt, "unreadable receipt").unwrap();
+    let invalid = read(&session.id);
+    assert!(invalid["state"].is_null());
+    assert!(invalid["actions"].as_array().unwrap().is_empty());
+    assert!(invalid["unavailable"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().contains("cannot read provider clients")));
+    assert_eq!(fs::read_to_string(&receipt).unwrap(), "unreadable receipt");
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(before, fs::read(db_path).unwrap());
+}
+
+#[test]
+fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let session = connection_session(home.path(), repo.path());
+    let script = home.path().join("opencode");
+    fs::write(&script, "#!/bin/sh\nread line\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut child = Command::new(&script)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let clients = home
+            .path()
+            .join(".lf/runs")
+            .join(&session.artifact_key[..2])
+            .join(&session.artifact_key)
+            .join("provider-clients");
+        fs::create_dir_all(&clients).unwrap();
+        let receipt = clients.join("client.json");
+        let bytes = serde_json::json!({"schema_version":1,"pid":child.id(),"terminal_id":"owned","started_at":time::OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap()}).to_string();
+        fs::write(&receipt, &bytes).unwrap();
+        let db_path = home.path().join(".lf/loopflow.db");
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        connection_history(&db, &session);
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        let before = fs::read(&db_path).unwrap();
+        for (flag, blocked) in [
+            (None, true),
+            (Some("--replace"), false),
+            (Some("--try"), false),
+        ] {
+            let mut args = vec!["session", "connect", &session.id, "--explain", "--json"];
+            args.extend(flag);
+            let report: serde_json::Value = serde_json::from_str(&success(
+                command(home.path(), repo.path(), &args).output().unwrap(),
+            ))
+            .unwrap();
+            assert_eq!(report["state"], "active");
+            assert_eq!(
+                !report["impediments"].as_array().unwrap().is_empty(),
+                blocked,
+                "{report}"
+            );
+            assert_eq!(report["actions"][1]["kind"], "move_here");
+            assert!(child.try_wait().unwrap().is_none());
+            assert_eq!(fs::read_to_string(&receipt).unwrap(), bytes);
+        }
+        db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+        assert_eq!(before, fs::read(db_path).unwrap());
+        assert_eq!(fs::read_dir(clients.parent().unwrap()).unwrap().count(), 1);
+    }));
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Err(error) = result {
+        std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
+fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
+    use std::os::unix::net::UnixListener;
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let session = connection_session(home.path(), repo.path());
+    let db_path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    connection_history(&db, &session);
+    let socket_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let endpoint = socket_dir.path().join("live.sock");
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    // Owned endpoint with a retained driver: no provider or account is started.
+    db.execute(
+        "INSERT INTO processes(lfid,trace_id,started_at) VALUES('connection-driver','fixture',1)",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE agent_sessions SET provider='codex',driver_process_lfid='connection-driver',driver_generation=1,provider_generation=1,provider_endpoint=?1,provider_thread='native-proof' WHERE id=?2",
+        rusqlite::params![endpoint.to_str().unwrap(), session.id]).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&db_path).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["--json", "session", "resume", &session.id, "--explain"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(report["action"]["intent"], "connect_or_resume");
+    assert_eq!(report["action"]["prepare_only"], false);
+    assert!(report["unavailable"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().contains("not probed")));
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert_eq!(before, fs::read(db_path).unwrap());
+    assert!(!home.path().join(".lf/runs").exists());
+    assert!(!home.path().join(".lf/human-sessions").exists());
+}

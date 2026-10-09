@@ -108,15 +108,19 @@ Headless callbacks prove neither compositor usability nor native Session readine
 
 October 9 planning reads use read-only storage and skip Process admission;
 missing-registry/checkpointed-WAL tests exposed fallback writes. Resolve chapters
-once on the operation's store; Workflow reads and writes have separate APIs.
-Previews share launch's Task admission/Workflow, URL validation and definition syntax.
-Only launch prepares Work; Linux previews report platform impediments.
-Explicit-Machine previews skip probes/credentials. Entry-level identity
-validation replaces shell/dispatch checks, protecting early readers; rejection cannot
-write a fallback Process. Transport retains the parsed CLI.
+once on the operation's store; Workflow reads/writes have separate APIs. Preview
+shares launch admission, Workflow, URL validation and definition syntax; only
+launch prepares Work. Linux previews report platform impediments. Explicit-Machine
+previews skip probes/credentials; entry validates addressed identity before early
+readers and suppresses fallback Process writes. Parsed transport retains scoped IDs.
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
-Two-CLI fixtures cover routing/Flow previews, not configured SSH, native
-acceptance or exclusive start.
+Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
+
+Session connection explanation shares selection and native-client refusal with
+opening. JSON preparation is not takeover. Socket probes enter a live driver's
+protocol: read recorded endpoints without probing, retain reachability
+as unavailable, and re-resolve on opening. Fixtures preserve client receipts
+and checkpointed stores, not native/provider acceptance.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -519,12 +523,10 @@ authorize an automatic Project reset, Task cancellation or claims of measured ga
 
 ## CI watcher decisions (2026-10-01)
 
-Jack Heart's LOO-365 selected one optional repo-wide watcher for terminal, launchd
-or Desktop, independent of correctness. It starts ci-fix once per PR/failing head
-without an owning conversation; taskless PRs are reported, not repaired. Jack
-preferred removing the one-minute cron; only its repair path was retired.
-Unreviewed: standalone Taskless `lf land` still repairs; unarmed Task PRs only
-report; Desktop has no watcher view. No real failing landing was proved. Details: `d421741f6:wave/product/MEMORY.md`, this heading.
+Jack Heart's LOO-365 optional watcher and retired cron-repair decisions:
+`6c1bc2029:wave/product/MEMORY.md`, this heading. Unreviewed: taskless landing
+repairs, unarmed Task PRs only report, Desktop lacks a watcher view. No real
+failing landing was proved.
 
 ## Skill reduction decisions (2026-09-28)
 

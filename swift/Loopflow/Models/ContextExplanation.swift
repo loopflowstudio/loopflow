@@ -107,3 +107,32 @@ public struct DesktopOpenExplanation: Codable, Equatable, Sendable {
     public let impediments: [String]
     public let unavailable: [String]
 }
+
+public enum SessionConnectIntent: String, Codable, Equatable, Sendable {
+    case start, resume
+    case connectOrResume = "connect_or_resume"
+}
+
+public enum SessionOpenMode: String, Codable, Equatable, Sendable {
+    case refuse, replace, `try`
+}
+
+public struct SessionConnectAction: Codable, Equatable, Sendable {
+    public let intent: SessionConnectIntent
+    public let mode: SessionOpenMode
+    public let prepareOnly: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case intent, mode
+        case prepareOnly = "prepare_only"
+    }
+}
+
+public struct SessionConnectExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let action: SessionConnectAction?
+    public let state: SessionState?
+    public let actions: [SessionAction]
+    public let impediments: [String]
+    public let unavailable: [String]
+}

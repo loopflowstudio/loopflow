@@ -511,6 +511,16 @@ opening the app. Display stays on the command's Machine, separate from Task
 execution. The URL is not a window reservation, readiness receipt or input target;
 installed-app and retained-window state remain uninspected.
 
+`session connect SESSION --explain` reports start, native resume or possible live
+connection, replacement/try intent and the shared Session actions.
+`session resume --explain` selects the latest interactive conversation in the checkout, just like
+ordinary resume. JSON adds `action`, `state`, `actions`, `impediments` and
+`unavailable` to `resolution`. `session connect --json` normally prepares launch
+arguments without takeover; its explanation preserves that distinction. Live
+endpoints are not probed, unrecorded native conversations are not admitted, and
+missing workspace/provider/account evidence stays explicit. Nothing acquires or
+signals a client, prepares a checkout or launches a provider.
+
 Use `lf --machine mini --repo project debug --context --explain --json` to preview
 on an added Machine. The receiving CLI checks its identity read-only and resolves
 its own repository, Work and input. Preview skips provider/account preparation,

@@ -7,6 +7,27 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func sessionConnectExplanationsPreserveIntentAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("session_connect_explanations.json")
+        let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
+        #expect(reports[0].action?.intent == .start)
+        #expect(reports[0].action?.mode == .refuse)
+        #expect(reports[1].action?.mode == .replace)
+        #expect(reports[1].action?.prepareOnly == true)
+        #expect(reports[2].action?.intent == .connectOrResume)
+        #expect(reports[2].action?.mode == .try)
+        #expect(!reports[2].unavailable.isEmpty)
+        #expect(reports[3].state == nil)
+        #expect(reports[3].action == nil)
+        #expect(reports[3].actions.isEmpty)
+        #expect(try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "actions")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func desktopOpenExplanationsPreserveProposalsAndImpediments() throws {
         let data = try loadFixtureData("desktop_open_explanations.json")
         let reports = try JSONDecoder().decode([DesktopOpenExplanation].self, from: data)

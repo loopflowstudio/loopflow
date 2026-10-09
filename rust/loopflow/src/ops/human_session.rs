@@ -1,3 +1,7 @@
+mod connection;
+pub(crate) use connection::explain_connect;
+pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
+
 mod workspace;
 pub use workspace::SessionWorkspace;
 
@@ -91,11 +95,46 @@ pub(crate) enum HumanSessionToken {
     Primary { id: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OpenMode {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenMode {
     Refuse,
     Replace,
     Try,
+}
+
+impl OpenMode {
+    pub(crate) fn from_flags(replace: bool, try_open: bool) -> Self {
+        if replace {
+            Self::Replace
+        } else if try_open {
+            Self::Try
+        } else {
+            Self::Refuse
+        }
+    }
+
+    fn require_action(self, active: bool) -> Result<()> {
+        if self == Self::Refuse && active {
+            require_session_action(SessionState::Active, SessionActionKind::Open)?;
+        }
+        Ok(())
+    }
+}
+
+/// The ordinary resume command and its preview choose the same conversation.
+pub(crate) async fn select_connection(
+    store: &SharedStore,
+    cwd: &Path,
+    id: Option<&str>,
+) -> Result<String> {
+    match id {
+        Some(id) => Ok(id.to_owned()),
+        None => latest_interactive_session(store, cwd)
+            .await?
+            .map(|session| session.id)
+            .context("No interactive session found in this worktree"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -686,8 +725,8 @@ pub(crate) async fn open(
     if resume && mode == OpenMode::Replace {
         native.stop_clients(crate::session_record::ProviderClientStopReason::Moved)?;
     }
-    if mode == OpenMode::Refuse && !native.clients()?.is_empty() {
-        require_session_action(SessionState::Active, SessionActionKind::Open)?;
+    if mode == OpenMode::Refuse {
+        mode.require_action(!native.clients()?.is_empty())?;
     }
     let mut result = surface(store, session).await?;
     if resume {

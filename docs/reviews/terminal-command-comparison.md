@@ -69,7 +69,14 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   retaining selection and drafts and reusing existing Task companions.
   `caa48b5c1` shares pane insertion and publishes command/focus/Undo together;
   isolated production smoke passed, packaged execution still timed out.
-  Bounded terminal reads/input, peer composition and native acceptance remain unfinished. The command tables still describe October 7's baseline.
+  `13cf98bf5` qualifies terminal/Session-reading keys by Machine and exposes an
+  existing native surface lifetime without allocation or exit cleanup; `6fec74d2d`
+  removes dormant Session-list cleanup. Membership moves prune panes/Undo without
+  releasing surfaces or touching another Machine's same-ID Session. Focused fixtures
+  typecheck; native exited/replaced-surface reads remain unproved. The pinned reader
+  allocates its whole result, so bounded extraction needs a Ghostty patch, not Swift
+  truncation. Terminal reads/input, peer composition and native acceptance remain
+  unfinished. The command tables still describe October 7's baseline.
   No cmux/herdr behavior was re-exercised for these deltas.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below

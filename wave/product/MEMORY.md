@@ -47,21 +47,23 @@ and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
-October 8: LOO-427's checkout cut (`f5f742058`) leaves unknown location unavailable.
-Prototypes through `92cafe61d` remove copied placements, preserve legacy overrides
-and add plan identity plus known-Task SSH routing without rewriting Machine defaults.
-Inheritance remains unapproved; Rust compilation is unverified. Local absence or
-negative observation cannot reserve first start against a peer. One store's SQLite transaction cannot exclude peer allocation; never
-synchronize runtime to solve it.
+October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
+removes copied placements, preserves legacy overrides and routes known Tasks
+without rewriting Machine defaults. Inheritance is unapproved; Rust unverified.
+Neither negative peer observation nor local SQLite reserves first start; runtime
+must not synchronize. Seeded IDs prove routing, not exchange/admission.
 
 LOO-427 keys windows/queues by plan, fencing cancellation. Task/Session actions
 stay separate; saved/failed reads grant none. Session time is unknown. Move retains
 leaves/commands/surfaces; Undo renews closed tokens. Zoom grants no focus.
-`caa48b5c1` publishes command/focus/Undo together; companions preserve selection.
-Lost replies grant no replay; view tokens grant no input. Passive reads cannot
-allocate (`view(for:)`) or clean up (`hasSurface`); empty differs from unavailable.
-Machine-qualified bounded reads, peer composition and packaged/native proof remain.
-Seeded IDs prove routing, not exchange/admission.
+`caa48b5c1` publishes insertion atomically; companions preserve selection.
+Lost replies grant no replay; view tokens grant no input. `13cf98bf5` qualifies
+terminals/readings by Machine; `6fec74d2d` prunes membership moves without releasing
+surfaces. Filtered absence proves no deletion; same-ID peers stay separate.
+Passive inspection uses ProgramStatusSurface's lifetime, never allocating lookup
+or exit cleanup. Bounded extraction needs a Ghostty patch: truncating Swift's copy
+cannot bound C allocation. Empty differs from unavailable. Text I/O, peer composition
+and packaged/native proof remain.
 
 Jack selected local operations and Git-ref Task sync: 406 owns writes/Linear,
 412 exchange. Imported completion cannot move local Workflow or clean execution.

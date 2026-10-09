@@ -128,7 +128,8 @@ associated origins share scalar winner selection on their local owner. Causal
 ancestry retires observed predecessors before concurrent-head ranking; retained
 per-origin heads alone cannot make that decision. Accepted source IDs commit on
 the local owner, including foreign peer-authored IDs, without an echo mutation.
-Association exchange/effect holds remain until receipt composition is complete.
+Association exchange/effect holds remain pending per-Work recovery presentation
+and public Git/Linear composition; storage receipt composition alone is insufficient.
 
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
@@ -186,7 +187,10 @@ across origins are invalid. Order selection uses the original save's clock;
 projection, delivery and complete-list comparison resolve member references without
 rewriting captured lists or effect inputs. Associated receipt projection no longer
 requires a blanket refusal, but association exchange/effects remain held pending
-complete relationship/state composition and public proof.
+per-Work recovery presentation and public proof. Associated state/comment/Wave
+imports retain uncertain attempts, authorship and losing values; association alone
+changes no Wave selection. State delivery readback enters common accepted-planning
+projection so the observation reaches peers, not only the local receipt.
 Task capture compares complete provider bodies: a detail and a later list may
 share an issue revision while carrying different list ranks. Revision equality
 alone cannot establish that the later observation is retained.

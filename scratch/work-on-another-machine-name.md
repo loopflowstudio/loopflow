@@ -204,9 +204,12 @@ receipt composition boundaries are unchanged.
 Receipt origins and full-ID correspondence exist. Ordinary import now projects
 associated creation receipts onto their local owner without releasing holds
 (`39dba32c1`).
-**Joint scalar projection now exists; complete association recovery remains
-unfinished.** Item 3 owns private-group presentation and public composition before
-releasing exchange/effect holds. Private or failed groups never advance observations.
+**Scalar and receipt composition now have focused storage proof, including
+state/comment/Wave readback (`8a6f8f807`).** Item 3 now owns per-Work private-group
+and losing-edit recovery presentation, followed by public Git/HTTPS composition
+before releasing exchange/effect holds. Private or failed groups never advance
+observations. The preceding state/comment/Wave direction is implemented, not a
+second implementation step.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -418,7 +421,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
 
    **October 9 receipt composition:** ordinary import consumes explicit
    correspondence and projects each creation origin through the existing common
-   receipt writer, independently of the held scalar projection. Savepoints retain
+   receipt writer, even when private selection holds scalar projection. Savepoints retain
    contradictory operations without replacing receipts or stopping other objects.
    Import suppression avoids echo; neither private selection nor execution moves.
    No reassignment API is needed: correspondence already refuses physical incoming
@@ -440,9 +443,9 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Project selector resolve associated full IDs only; direct identity readers
    remain exact. Membership, captured effects and execution foreign keys do not
    change. Lookup rechecks mapping/repository. Selected origins can jointly
-   project scalar fields; association/reimport retains exchange/effect holds until
-   receipt composition is complete. These are incomplete implementation boundaries,
-   not Jack Heart's final policy.
+   project scalar fields; association/reimport retains exchange/effect holds pending
+   recovery presentation and public composition. Storage receipt composition is
+   implemented; these holds are not Jack Heart's final product policy.
 
    The Store correspondence fixture imports older/newer snapshots in both orders,
    repeats association and resolves both IDs. It asserts unchanged private planning,
@@ -496,7 +499,7 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    Deletion readback retains origins and private uncertainty. Return imports use
    retained journals, not public exchange; Git/HTTPS acceptance remains unproved.
 
-   **October 9 state/comment/Wave composition.**
+   **October 9 state/comment/Wave composition (`8a6f8f807`), implemented.**
    State/comment/Wave composition now has ordinary association/import fixtures,
    reversing/repeating snapshots and returning local saves after accepted peer
    observations. They preserve mutation IDs, authored losers, uncertain local
@@ -513,10 +516,12 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    These are storage proofs, not public Git/HTTPS or running-control acceptance.
 
    **Remaining association work, in order:**
-   - Complete public recovery presentation for private groups. Associating private
-     B with selected A cannot enroll B, its comments, losing edits or private parent
-     references. The storage hold exists; per-Work selection and losing-edit
-     recovery remain implementation work, not only gate coverage.
+   - Complete public recovery presentation for private groups. The existing
+     CLI/Desktop destination view lists held IDs and reasons; it does not expose
+     per-Work membership, authorship/assignees or recoverable losing values.
+     Associating private B with selected A cannot enroll B, its comments, losing
+     edits or private parent references. This presentation remains implementation
+     work, not only gate coverage; no new membership model is required.
    - Complete public Git/HTTPS composition and exact-origin readback before
      releasing association exchange/effect holds or the mixed-provider refusal.
      Storage readback is not foreground acceptance. Gate owns the combined
@@ -614,6 +619,16 @@ Loopflow-owned records LfSession/LfProcess. Wire/storage bytes, ProcessLfid and
 product Session/Process remain unchanged. Recorded checks precede this merge;
 the combined candidate remains gate-owned.
 
+`6fdd7f09e` integrates main `e69d5103f` (#1511). Native Codex terminal
+launches now add `--no-daemon`; explicit account selection reconciles the shared
+Codex daemon with a five-minute turn grace period. Launch-time selection leaves
+that daemon alone. The flag was verified upstream with Codex 0.161.0; older
+unsupported binaries reject it. Native peer-lifetime acceptance must use this
+combined launch path, not the earlier 0.160.1 evidence. The existing Claude
+stand-in supplies no Codex account/reconnect proof. This merge changes neither
+planning authority nor the prohibition on automatic peer-triggered turn retries;
+no daemon/account implementation belongs in LOO-412.
+
 Readback of historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still leaves
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without completion or exit evidence.
 The new local recovery implementation does not settle that history.
@@ -682,9 +697,11 @@ Earlier checks and limits: `9b59e9b71` and `b5b491099`, this file's
 **Acceptance for review**. They do not prove this ordering cut, combined public
 behavior or Desktop acceptance.
 
-The prior state/comment/Wave and completion checks remain at `8a6f8f807`, this heading; they predate creation-payload compression.
+State/comment/Wave and completion checks remain at `8a6f8f807`, this heading;
+creation-payload compression checks remain at `1012a6cad`, this heading. Both
+precede the #1511 merge; neither proves the combined native launch path.
 
-Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` pass; `scripts/test_network.py <lib-test> peer_creation_ peer_project_creation_and_link_readback correspondence_import_retains_creation_origins --test-threads=1`: 7 pass. Gate owns released-frontier, public Git/HTTPS and Desktop acceptance.
+Check (realign): `git diff --check` passes; prose-only reconciliation, no product rerun. Gate owns combined launch, released-frontier, public Git/HTTPS and headless Desktop acceptance.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

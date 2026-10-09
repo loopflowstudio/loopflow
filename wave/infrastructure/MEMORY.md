@@ -273,14 +273,11 @@ Earlier cleanup history: `66da3fdf7:wave/infrastructure/MEMORY.md` under
 
 ## Project configuration and review direction (2026-10-05)
 
-LOO-366's October 5 decisions are under Optional chapters and Task workflows;
-source and configured acceptance remain unfinished. Infrastructure recommends
-`code`; KRs and reviews remain. Earlier evidence, including v0.13.3 review:
-`470382987:wave/infrastructure/MEMORY.md` under this heading.
-LOO-326 and LOO-370 completed October 6 under the decisions below. LOO-367's
-retry recorded boot witness 819671 but stopped on that same boot; preserve its
-conversation and saved Flow. A later authorized restart, not unchanged evidence,
-can establish old-provider death. No successful continuation is claimed.
+LOO-366 follows Optional chapters below; source/configured acceptance remains open.
+LOO-326/370 completed October 6. LOO-367's retry stayed on boot 819671: preserve
+its conversation/Flow; only a later authorized restart can prove old-provider death.
+No continuation success. Earlier review/recommendations:
+`6fdd7f09e:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -626,18 +623,18 @@ Jack Heart selected review-only custom-ref sync, not landing/real export.
 Joining publishes nothing; imports remain unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
 uncertainty and losers. Mappings/errors and creation never settle removal.
-Desktop retains scoped last-good status; per-Work recovery remains unfinished.
-Association/mixed exchange stays held; storage proves no public/installed acceptance.
+Association/mixed exchange stays held pending per-Work recovery presentation and
+public Git/HTTPS proof. Destination-level Desktop retains scoped last-good status.
 
 Causality precedes ranking. Correspondence reuses accepted observations, never
 identity or authority; private references hold groups. Journal origins and alias
 comparisons preserve inputs and rebase later saves. Equal revisions can carry
 different ranks; retain bodies. Earlier proofs: `6f1869e9b`, this heading.
-`8a6f8f807`: state readback enters common planning projection; cache/receipt settlement alone
-omits the observation from peer history. Association fixtures cover state, comment
-authorship, Wave selection and private uncertainty without changing execution;
-association alone selects nothing. Public Git/HTTPS proof remains.
-Plan: `scratch/work-on-another-machine-name.md`.
+`8a6f8f807`: delivery readback must enter common planning projection, not only
+settle a receipt, to reach peers. State/comment/Wave association fixtures retain
+authorship, uncertainty and execution; association alone selects nothing. These
+are storage proofs, not public or installed acceptance. Plan:
+`scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 
@@ -697,6 +694,10 @@ rejection. Native refresh, sole browser ownership and installed acceptance remai
 unproved; no installed repair is authorized. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../docs/subscriptions.md).
+
+Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
+Explicit account selection, not launch-time switching, reconciles the shared daemon
+with five-minute turn grace. Configured acceptance remains open.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-08)
 

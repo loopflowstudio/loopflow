@@ -611,3 +611,24 @@ fn planning_sync_preserves_delivery_and_losing_values() {
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert!(sync.lines()[3].contains("Linear: null"));
 }
+
+#[test]
+fn peer_planning_status_keeps_unknown_local_state_and_retained_receipts() {
+    let value: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/peer_planning_status.json"
+    ))
+    .unwrap();
+    let statuses: Vec<loopflow::store::PeerPlanningStatus> =
+        serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(statuses[0].pending_local, None);
+    assert_eq!(
+        statuses[0].publication_state.as_deref(),
+        Some("unconfirmed")
+    );
+    assert_eq!(statuses[0].conflicts.len(), 1);
+    assert_eq!(statuses[1].pending_local, Some(true));
+    assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
+    let mut missing = value[1].clone();
+    missing.as_object_mut().unwrap().remove("conflicts");
+    assert!(serde_json::from_value::<loopflow::store::PeerPlanningStatus>(missing).is_err());
+}

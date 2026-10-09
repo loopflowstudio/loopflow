@@ -634,16 +634,16 @@ Peer comments now share acquisition/delivery owners, stable comment IDs, raw
 provider observations and retained losing receipts. Import creates no steer or
 echo. Acquired migration rows await real observation before export, never inferred
 authorship. SQL passes; Rust/composed/installed acceptance remains unproved.
-Creation, structured Project/order, deletion, alternate acquisition, legacy
-association and Desktop remain. Design: `scratch/work-on-another-machine-name.md`.
-Prior proofs: `ae6f392c2:wave/infrastructure/MEMORY.md`, this heading.
+Creation, Project/order, deletion, alternate acquisition, legacy association and
+Desktop remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs:
+`ae6f392c2:wave/infrastructure/MEMORY.md`.
 
-Parent `ffe986160` replaces synthetic state settlement with observations/errors;
-this sync integrates that owner and updates the peer lost-reply fixture.
+Integrated parent `ffe986160` settles state from observations, not synthetic success.
 Joining publishes nothing; mixed Linear exchange stays disabled pending composition,
 not by policy. Fetch/import/publication stay separate; readback settles only the
 attempted save. Workers retain effect locks through cancellation without blocking
-saves/acquisition. Damaged journals break status, not independent exchange.
+saves/acquisition. Status now isolates damaged journals too: unknown local changes,
+retained receipts/conflicts, independent plans visible. Unverified.
 
 Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
 history/dependents, including retained Git documents, until explicit selection.

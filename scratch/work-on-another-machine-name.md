@@ -156,6 +156,9 @@ Keep these replacements deleted:
 - Direct peer comment INSERT/UPDATE and reconstructed provider provenance are
   deleted. Common acquisition and authored insertion own thread/receipt writes;
   typed author conversion is shared with transport validation.
+- Separate repository-wide conflict/status readers are removed. One per-destination
+  status snapshot supplies pending state and conflicts; malformed journals retain
+  unknown state rather than hiding independent plans.
 - Task-attributed sync startup, status rendering as a dispatch prerequisite and
   async waiters owning blocking-worker locks. Repository/provider lifetimes drive
   exchange; each worker retains its effect lock through readback and status writes.
@@ -260,10 +263,15 @@ provenance gap; revise it with the completed composition, not as a product limit
    idempotent retry, but Rust execution remains unproved. CLI `planning status`
    already reads projection conflicts; Desktop still needs that presentation.
    A durable import checkpoint is not completed projection.
-   Dispatch now survives another destination's damaged journal, but CLI status
-   still aborts when `peer_planning_status` cannot export any one journal. The
-   existing damaged-journal regression asserts that limitation; per-destination
-   error presentation remains separate work from exchange isolation.
+   Dispatch and CLI status now isolate malformed destination journals. The common
+   status snapshot includes each destination's retained projection conflicts and
+   current sharing holds, with `pending_local: null` and a sanitized local error
+   when the journal cannot be read. Stored fetch/import/publication receipts remain
+   visible and unchanged; SQL failures still fail the read. The separate conflict
+   reader is deleted, preventing a second all-or-nothing read from hiding healthy
+   plans. Public JSON/text and recovery, exchange isolation and DTO regressions are
+   authored; executable acceptance remains with capable gate/CI. Desktop still
+   needs the same presentation, and status never repairs a damaged journal.
 4. Complete optional Linear composition. Task title/brief/assignee/membership and
    Project name/summary/workflow/status use the common scalar receipt writer in the
    import savepoint. Stable peer mutation IDs supply delivery identity. The latest
@@ -368,10 +376,15 @@ provenance gap; revise it with the completed composition, not as a product limit
      Non-lifecycle cached states (for example started/backlog) project without
      inventing a local state intention. Alternate-provider-path coverage and Rust
      execution remain; imported completion-time preservation is asserted explicitly.
+   - Project content still travels as `project_prompt_context`, with `workflow`
+     separately ordered. `project_content.rs::write_content` already owns semantic
+     workflow/KR/target receipts. Merely parsing the winning Markdown to enqueue
+     receipts would still let independent KR and target edits replace each other;
+     finish semantic capture/ordering before claiming composition, removing the
+     raw-content winner and duplicated Workflow representation together.
    - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
-     revisions and scalar peer fields cannot settle a captured move. Project
-     structured content and `planning_changes.rs` deletion also retain their own
-     grouped baselines and attempts.
+     revisions and scalar peer fields cannot settle a captured move. Deletion
+     retains its separate baselines and attempts in `planning_changes.rs`.
 
    Cover alternate accepted provider writers, including reteam, archive/removal,
    complete-list order and public comment acquisition, not only Task/Project detail reads.
@@ -451,7 +464,7 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 comment implementation): `cargo fmt --all -- --check`, `git diff --check` and production comment SQL on released migrations plus drafts pass; focused `cargo test -p loopflow --lib peer_comments --no-run` and `cargo clippy --all-targets -- -D warnings` time out after 120 seconds without reaching test or lint results; the prior startup diagnosis is retained below. Capable gate/CI owns executable checks and composed acceptance; checkpoint CI skips the matrix while scratch remains.
+Check (October 8 status isolation): `cargo fmt --all -- --check` and `git diff --check` pass; `cargo test -p loopflow --test planning_setup_tests public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journal` and `cargo clippy --all-targets -- -D warnings` each time out at 120 seconds before test/lint results; capable gate/CI owns executable acceptance. Earlier comment SQL and timeout evidence: `9241c1da5:scratch/work-on-another-machine-name.md`.
 
 The timeout investigation found Cargo waiting on its build-script child, not
 compiling Rust or waiting for a Cargo lock. Both children had 96 KiB footprints
@@ -459,11 +472,15 @@ and no CPU activity; a fresh-inode copy also timed out before entry. Codesign
 verification returned success. Samples: `/tmp/loo412-cargo-sample.txt`,
 `/tmp/loo412-build-sample.txt`, `/tmp/loo412-clippy-sample.txt`; compression
 reproductions: `/tmp/loo412-compress-build-sample.txt` and
-`/tmp/loo412-compress-clippy-sample.txt`. This identifies
+`/tmp/loo412-compress-clippy-sample.txt`. The status pass reproduces the same
+96 KiB `_dyld_start` boundary in `/tmp/loo412-status-build-sample.txt`. This identifies
 the stall boundary, not its cause; no security settings or installed binaries changed.
 Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
 inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
 
-Sync check (October 8): `cargo test -p loopflow --lib peer_disposition_queues_delivery_without_workflow_and_retains_uncertain_attempts` timed out after 120 seconds before a test result; executable proof remains with capable gate/CI.
+October 8 status review removed the second conflict read, which would otherwise
+still abort the public command after destination-local status succeeded. Unknown
+pending state is explicit rather than false; malformed journal messages never
+include raw values. No new product decision or mixed-provider activation is claimed.

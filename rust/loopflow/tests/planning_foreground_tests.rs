@@ -201,7 +201,10 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     .unwrap();
     let before = execution(&conn, fixture.task.id.as_str());
     let placement = fixture.task.worktree.clone();
-    assert!(status(&runtime, &fixture.store, source_key).pending_local);
+    assert_eq!(
+        status(&runtime, &fixture.store, source_key).pending_local,
+        Some(true)
+    );
     // Short commands exchange without a watcher, and identical create requests
     // remain different intentions, unlike repeated delivery of the same journal.
     let first = create(&source, left.path(), "task-pr-tests");
@@ -308,8 +311,14 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             .acquisition_error
             .is_some()
     });
-    assert!(status(&runtime, &worker, target_key).pending_local);
-    assert!(status(&runtime, &fixture.store, source_key).pending_local);
+    assert_eq!(
+        status(&runtime, &worker, target_key).pending_local,
+        Some(true)
+    );
+    assert_eq!(
+        status(&runtime, &fixture.store, source_key).pending_local,
+        Some(true)
+    );
     let lock_path = left
         .path()
         .join("locks/planning-peers")
@@ -367,8 +376,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     wait_for(|| {
         let a = status(&runtime, &fixture.store, source_key);
         let b = status(&runtime, &worker, target_key);
-        !a.pending_local
-            && !b.pending_local
+        a.pending_local == Some(false)
+            && b.pending_local == Some(false)
             && a.publication_state.as_deref() == Some("confirmed")
             && b.publication_state.as_deref() == Some("confirmed")
     });
@@ -624,16 +633,16 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         right.path(),
         &["task", "edit", &id, "--notes", "Target offline"],
     );
-    assert!(status(&runtime, &a, source_key).pending_local);
-    assert!(status(&runtime, &b, target_key).pending_local);
+    assert_eq!(status(&runtime, &a, source_key).pending_local, Some(true));
+    assert_eq!(status(&runtime, &b, target_key).pending_local, Some(true));
     fs::rename(&disconnected, remote).unwrap();
     wait_for(|| {
         let source = runtime.block_on(a.get_task(&task_id)).unwrap().unwrap();
         let target = runtime.block_on(b.get_task(&task_id)).unwrap().unwrap();
         source.plan.description == "Target offline"
             && target.plan.title == "Source offline"
-            && !status(&runtime, &a, source_key).pending_local
-            && !status(&runtime, &b, target_key).pending_local
+            && status(&runtime, &a, source_key).pending_local == Some(false)
+            && status(&runtime, &b, target_key).pending_local == Some(false)
     });
     source_agent.finish();
     target_agent.finish();

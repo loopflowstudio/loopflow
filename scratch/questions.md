@@ -124,3 +124,10 @@ is retained at `5d336868f:scratch/questions.md`.
   rather than inventing a comment-edit delivery protocol. These are reversible
   representation choices, not new product policy. Review removed incomplete-record
   export and corrected grouped JSON ordering; public composed acceptance remains.
+
+- October 8 status choice: pending local changes become unknown when a destination's
+  journal cannot be read. Conflicts belong inside that destination's status, read in
+  the same transaction. Retained receipts/conflicts survive; unavailable sharing holds
+  are not reported as empty convergence. Only malformed journal errors are isolated;
+  database failures still fail status. This replaces the second global conflict reader,
+  not the journal or its validation. Public/DTO regressions remain unexecuted.

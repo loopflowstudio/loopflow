@@ -108,7 +108,7 @@ fn public_setup_recovers_user_identity_and_selects_without_publishing() {
         .unwrap();
     let held: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
-    assert!(held["conflicts"]
+    assert!(held["destinations"][0]["conflicts"]
         .as_array()
         .unwrap()
         .iter()
@@ -122,7 +122,10 @@ fn public_setup_recovers_user_identity_and_selects_without_publishing() {
     let status: Value =
         serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap();
     assert_eq!(status["destinations"][0]["selected_records"], 2);
-    assert!(status["conflicts"].as_array().unwrap().is_empty());
+    assert!(status["destinations"][0]["conflicts"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     assert!(status["destinations"][0]["imported_revision"].is_null());
     let refs = Command::new("git")
         .current_dir(repo.path())
@@ -169,4 +172,124 @@ fn public_shared_join_needs_no_user_key_and_does_not_enroll_existing_work() {
         .block_on(store.planning_user_key())
         .unwrap()
         .is_none());
+}
+
+#[test]
+fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journal() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let database = home.path().join("loopflow.db");
+    let store = runtime
+        .block_on(open_ephemeral_store(&StorageConfig::sqlite(
+            database.clone(),
+        )))
+        .unwrap();
+    let root = repo.path().canonicalize().unwrap();
+    let scope = root.to_str().unwrap();
+    let private = Wave::new(WaveId::new(), "private".into(), scope.into());
+    runtime.block_on(store.create_wave(&private)).unwrap();
+    let mut plans = Vec::new();
+    for name in ["damaged", "healthy"] {
+        let id = run(
+            repo.path(),
+            home.path(),
+            &["connect", "--remote", "origin", "--shared", name],
+        );
+        run(repo.path(), home.path(), &["use", &id]);
+        let wave = Wave::new(WaveId::new(), name.into(), scope.into());
+        runtime.block_on(store.create_wave(&wave)).unwrap();
+        plans.push((id, wave));
+    }
+    // A healthy destination's private-parent hold must still be shown.
+    runtime
+        .block_on(store.update_wave(&plans[1].1.clone().with_parent(private.id().clone())))
+        .unwrap();
+    let conn = rusqlite::Connection::open(database).unwrap();
+    conn.execute(
+        "INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active)
+        VALUES(?1,'wave',?2,'retained projection conflict',1)",
+        rusqlite::params![scope, plans[0].1.id()],
+    )
+    .unwrap();
+    conn.execute("UPDATE planning_destinations SET fetched_revision='fetched',publication_revision='attempted',
+        publication_state='unconfirmed',publication_error='reply lost' WHERE repo=?1 AND id=?2",
+        rusqlite::params![scope, plans[0].0]).unwrap();
+    conn.execute(
+        "INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,'imported')",
+        rusqlite::params![scope, plans[0].0],
+    )
+    .unwrap();
+    let heads: Vec<String> = conn
+        .prepare("SELECT id FROM planning_peer_heads WHERE object_id=?1")
+        .unwrap()
+        .query_map([plans[0].1.id()], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    conn.execute(
+        "DELETE FROM planning_peer_heads WHERE object_id=?1",
+        [plans[0].1.id()],
+    )
+    .unwrap();
+    let planning_revision = || -> i64 {
+        conn.query_row(
+            "SELECT revision FROM store_revisions WHERE domain='planning'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    let before = planning_revision();
+    let read = || -> Value {
+        serde_json::from_str(&run(repo.path(), home.path(), &["status", "--json"])).unwrap()
+    };
+    let status = read();
+    let destinations = status["destinations"].as_array().unwrap();
+    assert_eq!(destinations.len(), 2);
+    let damaged = destinations.iter().find(|d| d["id"] == plans[0].0).unwrap();
+    assert!(damaged["pending_local"].is_null());
+    assert!(damaged["local_error"].as_str().unwrap().contains("unknown"));
+    assert_eq!(damaged["publication_state"], "unconfirmed");
+    assert_eq!(damaged["publication_revision"], "attempted");
+    assert_eq!(damaged["publication_error"], "reply lost");
+    assert_eq!(damaged["fetched_revision"], "fetched");
+    assert_eq!(damaged["imported_revision"], "imported");
+    assert_eq!(
+        damaged["conflicts"][0]["reason"],
+        "retained projection conflict"
+    );
+    let healthy = destinations.iter().find(|d| d["id"] == plans[1].0).unwrap();
+    assert!(healthy["local_error"].is_null());
+    assert_eq!(healthy["pending_local"], false); // All its history is held, not lost.
+    assert_eq!(
+        healthy["conflicts"][0]["object"]["id"],
+        plans[1].1.id().as_str()
+    );
+    let text = run(repo.path(), home.path(), &["status"]);
+    assert!(text.contains("local changes unknown"));
+    assert!(text.contains("retained projection conflict"));
+    assert!(text.contains(&format!("Held wave {}", plans[1].1.id())));
+    assert_eq!(read(), status);
+    assert_eq!(planning_revision(), before);
+    // Status does not repair a damaged journal. Restoring this fixture's exact
+    // index makes its current local state readable without changing its receipts.
+    for id in heads {
+        conn.execute(
+            "INSERT INTO planning_peer_heads(id,kind,object_id,field)
+            SELECT id,kind,object_id,field FROM planning_peer_changes WHERE id=?1",
+            [&id],
+        )
+        .unwrap();
+    }
+    let recovered = read();
+    let recovered = recovered["destinations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == plans[0].0)
+        .unwrap();
+    assert_eq!(recovered["pending_local"], true);
+    assert!(recovered["local_error"].is_null());
+    assert_eq!(recovered["publication_state"], "unconfirmed");
 }

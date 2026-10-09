@@ -5,7 +5,7 @@ use crate::id::WaveId;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PeerProjectionConflict {
     pub object: PlanningObject,
     pub reason: String,
@@ -13,7 +13,7 @@ pub struct PeerProjectionConflict {
 
 /// Local routing and import evidence. Endpoints are deliberately not displayed:
 /// Git URLs can contain credentials. A checkpoint is not publication evidence.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PeerPlanningStatus {
     pub id: String,
     pub reference: String,
@@ -25,7 +25,10 @@ pub struct PeerPlanningStatus {
     pub publication_revision: Option<String>,
     pub publication_state: Option<String>,
     pub publication_error: Option<String>,
-    pub pending_local: bool,
+    /// None when the local journal cannot be read; never inferred from publication.
+    pub pending_local: Option<bool>,
+    pub local_error: Option<String>,
+    pub conflicts: Vec<PeerProjectionConflict>,
 }
 
 impl Store {
@@ -97,17 +100,6 @@ impl Store {
         let waves = waves.to_vec();
         run_sqlite(&self.sqlite, move |sqlite| {
             sqlite.select_peer_waves(&repo, &destination, &waves)
-        })
-        .await
-    }
-
-    pub async fn peer_projection_conflicts(
-        &self,
-        repo: &str,
-    ) -> StoreResult<Vec<PeerProjectionConflict>> {
-        let repo = repo.to_string();
-        run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_projection_conflicts(&repo)
         })
         .await
     }

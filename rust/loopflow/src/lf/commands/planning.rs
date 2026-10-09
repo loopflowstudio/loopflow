@@ -76,13 +76,11 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     let destinations = store.peer_planning_status(repo).await?;
-    let conflicts = store.peer_projection_conflicts(repo).await?;
     if json {
         println!(
             "{}",
             serde_json::to_string(&serde_json::json!({
                 "destinations": destinations,
-                "conflicts": conflicts,
             }))?
         );
         return Ok(());
@@ -120,26 +118,30 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 .publication_revision
                 .as_deref()
                 .unwrap_or("none"),
-            if destination.pending_local {
-                "; local changes pending"
-            } else {
-                ""
+            match destination.pending_local {
+                Some(true) => "; local changes pending",
+                Some(false) => "",
+                None => "; local changes unknown",
             }
         );
-        for error in [destination.acquisition_error, destination.publication_error]
-            .into_iter()
-            .flatten()
+        for error in [
+            destination.local_error,
+            destination.acquisition_error,
+            destination.publication_error,
+        ]
+        .into_iter()
+        .flatten()
         {
             println!("  {error}");
         }
-    }
-    for conflict in conflicts {
-        println!(
-            "Held {} {}: {}",
-            conflict.object.kind.as_str(),
-            conflict.object.id,
-            conflict.reason
-        );
+        for conflict in destination.conflicts {
+            println!(
+                "  Held {} {}: {}",
+                conflict.object.kind.as_str(),
+                conflict.object.id,
+                conflict.reason
+            );
+        }
     }
     println!("Import retention is not publication or convergence. Linear delivery is separate.");
     Ok(())

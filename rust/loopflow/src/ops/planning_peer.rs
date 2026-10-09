@@ -238,7 +238,13 @@ mod tests {
             [plans[0].1.id()],
         )
         .unwrap();
-        assert!(store.peer_planning_status(key).await.is_err());
+        let statuses = store.peer_planning_status(key).await.unwrap();
+        let damaged_status = statuses.iter().find(|s| s.id == plans[0].0.id()).unwrap();
+        assert_eq!(damaged_status.pending_local, None);
+        assert!(damaged_status.local_error.is_some());
+        let healthy_status = statuses.iter().find(|s| s.id == plans[1].0.id()).unwrap();
+        assert_eq!(healthy_status.pending_local, Some(true));
+        assert!(healthy_status.local_error.is_none());
 
         // Dispatch cannot require rendering every plan's status first.
         assert!(publish_repository(&store, key).await.is_err());
@@ -262,6 +268,13 @@ mod tests {
             )
             .unwrap();
         assert!(error.contains("local planning retained"));
+        let statuses = store.peer_planning_status(key).await.unwrap();
+        let healthy = statuses.iter().find(|s| s.id == plans[1].0.id()).unwrap();
+        assert_eq!(healthy.pending_local, Some(false));
+        assert_eq!(healthy.publication_state.as_deref(), Some("confirmed"));
+        let damaged = statuses.iter().find(|s| s.id == plans[0].0.id()).unwrap();
+        assert_eq!(damaged.pending_local, None);
+        assert_eq!(damaged.publication_error.as_deref(), Some(error.as_str()));
     }
 
     #[test]
@@ -297,7 +310,7 @@ mod tests {
         assert_eq!(git.fetch().unwrap().unwrap(), published);
         let status = store.peer_planning_status(key).unwrap().remove(0);
         assert_eq!(status.publication_state.as_deref(), Some("confirmed"));
-        assert!(!status.pending_local);
+        assert_eq!(status.pending_local, Some(false));
         let revisions = store.revisions().unwrap();
         publish_destination(&store, key, &id, &git).unwrap();
         assert_eq!(store.revisions().unwrap(), revisions);

@@ -243,7 +243,11 @@ Task resolution acquires before placement. No resident or turn retry runs.
 
 Status separates fetched revisions, retained imports, pending local edits and
 pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,
-not future edits or held records. Import retention is not convergence. Git exchange
+not future edits or held records. Each destination includes its sharing holds and
+retained projection conflicts. An invalid local journal reports unknown pending
+changes (`pending_local: null` in JSON), without hiding other destinations or
+changing sync receipts. Status does not repair the journal. Import retention is
+not convergence. Git exchange
 in Linear-connected repositories awaits complete provider acquisition and delivery
 receipt integration; it reports that limitation without changing local plans.
 

@@ -147,20 +147,45 @@ impl SqliteStore {
                         publication_revision: row.get(7)?,
                         publication_state: row.get(8)?,
                         publication_error: row.get(9)?,
-                        pending_local: false,
+                        pending_local: None,
+                        local_error: None,
+                        conflicts: Vec::new(),
                     },
                     row.get::<_, Option<String>>(10)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         drop(query);
+        let mut retained = BTreeMap::<String, Vec<PeerProjectionConflict>>::new();
+        for conflict in projection_conflicts_in(&tx, repo)? {
+            if let Some(destination) = member_destination(&tx, repo, &conflict.object)? {
+                retained.entry(destination).or_default().push(conflict);
+            }
+        }
         let mut statuses = Vec::new();
         for (mut status, digest) in rows {
-            let snapshot = export_selected(&tx, repo, &status.id)?;
-            status.pending_local = match digest {
-                Some(digest) => digest != planning_digest(&snapshot)?,
-                None => !snapshot.changes.is_empty(),
-            };
+            status.conflicts = retained.remove(&status.id).unwrap_or_default();
+            match export_selected(&tx, repo, &status.id) {
+                Ok((snapshot, held)) => {
+                    status.pending_local = Some(match digest {
+                        Some(digest) => digest != planning_digest(&snapshot)?,
+                        None => !snapshot.changes.is_empty(),
+                    });
+                    status.conflicts.extend(
+                        held.into_iter()
+                            .map(|(object, reason)| PeerProjectionConflict { object, reason }),
+                    );
+                }
+                // A damaged journal is destination-local evidence, not a reason
+                // to hide the other plans or claim no local changes. SQL failures
+                // still fail the read. Never display raw journal contents here.
+                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => {
+                    status.local_error = Some(
+                        "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.".into(),
+                    );
+                }
+                Err(error) => return Err(error),
+            }
             statuses.push(status);
         }
         tx.commit()?;
@@ -377,7 +402,7 @@ impl SqliteStore {
     ) -> StoreResult<PlanningSnapshot> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
-        let snapshot = export_selected(&tx, repo, destination)?;
+        let (snapshot, _) = export_selected(&tx, repo, destination)?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -497,23 +522,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn peer_projection_conflicts(
-        &self,
-        repo: &str,
-    ) -> StoreResult<Vec<PeerProjectionConflict>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.unchecked_transaction()?;
-        let mut conflicts = projection_conflicts_in(&tx, repo)?;
-        for destination in destination_ids(&tx, repo)? {
-            let snapshot = export_in(&tx, repo, &destination)?;
-            conflicts.extend(
-                selection_conflicts(&tx, repo, &destination, &snapshot)?
-                    .into_iter()
-                    .map(|(object, reason)| PeerProjectionConflict { object, reason }),
-            );
-        }
-        tx.commit()?;
-        Ok(conflicts)
+    #[cfg(test)]
+    fn peer_projection_conflicts(&self, repo: &str) -> StoreResult<Vec<PeerProjectionConflict>> {
+        Ok(self
+            .peer_planning_status(repo)?
+            .into_iter()
+            .flat_map(|status| status.conflicts)
+            .collect())
     }
 }
 
@@ -750,13 +765,13 @@ fn export_selected(
     conn: &Connection,
     repo: &str,
     destination: &str,
-) -> StoreResult<PlanningSnapshot> {
+) -> StoreResult<(PlanningSnapshot, BTreeMap<PlanningObject, String>)> {
     let mut snapshot = export_in(conn, repo, destination)?;
     let held = selection_conflicts(conn, repo, destination, &snapshot)?;
     snapshot
         .changes
         .retain(|_, change| !held.contains_key(&change.object));
-    Ok(snapshot)
+    Ok((snapshot, held))
 }
 
 fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
@@ -1542,6 +1557,22 @@ mod tests {
     }
 
     #[test]
+    fn peer_status_does_not_hide_database_failures_as_a_damaged_plan() {
+        let (_home, store) = store();
+        seed(&store);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute_batch("DROP TABLE planning_peer_heads")
+            .unwrap();
+        assert!(matches!(
+            store.peer_planning_status("/source"),
+            Err(crate::store::StoreError::Sqlite(_))
+        ));
+    }
+
+    #[test]
     fn peer_comments_preserve_lost_replies_and_adopt_provider_edits_without_echo() {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
@@ -1914,9 +1945,7 @@ mod tests {
             )
         );
         assert!(target.attempt_task_state(&delivery).unwrap());
-        target
-            .task_state_error(&delivery, "lost reply")
-            .unwrap();
+        target.task_state_error(&delivery, "lost reply").unwrap();
         let revision = target.revisions().unwrap();
         target
             .import_peer_planning("/target", &destination(), "completed", &completed)

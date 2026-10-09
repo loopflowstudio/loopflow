@@ -11,7 +11,7 @@ use crate::engine::planning_exchange::{
 use crate::store::{PeerPlanningRecord, PeerPlanningValue, StoreResult};
 
 use super::{
-    associated_local_id, belongs_elsewhere, invalid, member_destination, read_mutation, references,
+    belongs_elsewhere, invalid, member_destination, read_mutation, references, resolved_owners,
 };
 
 pub(super) fn records(
@@ -89,20 +89,7 @@ pub(super) fn records(
         }
     }
     snapshot.validate().map_err(invalid)?;
-    let owners = snapshot
-        .objects()
-        .into_iter()
-        .map(|object| {
-            Ok((
-                object.clone(),
-                PlanningObject {
-                    kind: object.kind,
-                    id: associated_local_id(conn, object.kind, &object.id, Some(repo))?
-                        .unwrap_or_else(|| object.id.clone()),
-                },
-            ))
-        })
-        .collect::<StoreResult<BTreeMap<_, _>>>()?;
+    let owners = resolved_owners(conn, repo, &snapshot)?;
     let candidates: BTreeSet<_> =
         winning_heads_by(snapshot.frontier_by(|object| &owners[object]), |change| {
             &owners[&change.object]

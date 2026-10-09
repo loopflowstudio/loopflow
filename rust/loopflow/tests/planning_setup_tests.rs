@@ -253,6 +253,8 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
     let damaged = destinations.iter().find(|d| d["id"] == plans[0].0).unwrap();
     assert!(damaged["pending_local"].is_null());
     assert!(damaged["local_error"].as_str().unwrap().contains("unknown"));
+    assert!(damaged["recovery_error"].is_string());
+    assert_eq!(damaged["records"], serde_json::json!([]));
     assert_eq!(damaged["publication_state"], "unconfirmed");
     assert_eq!(damaged["publication_revision"], "attempted");
     assert_eq!(damaged["publication_error"], "reply lost");
@@ -275,6 +277,34 @@ fn public_status_keeps_healthy_plans_and_receipts_visible_beside_a_damaged_journ
     assert!(text.contains(&format!("Held wave {}", plans[1].1.id())));
     assert_eq!(read(), status);
     assert_eq!(planning_revision(), before);
+    // Recovery follows private references that are absent from export. Damage
+    // there must not turn a readable export or its sharing hold into unknown.
+    conn.execute(
+        "UPDATE planning_peer_changes SET value='42' WHERE object_id=?1 AND field='name'",
+        [private.id()],
+    )
+    .unwrap();
+    let private_damage = read();
+    let healthy = private_damage["destinations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == plans[1].0)
+        .unwrap();
+    assert_eq!(healthy["pending_local"], false);
+    assert!(healthy["local_error"].is_null());
+    assert!(healthy["recovery_error"].is_string());
+    assert_eq!(healthy["records"], serde_json::json!([]));
+    assert_eq!(
+        healthy["conflicts"][0]["object"]["id"],
+        plans[1].1.id().as_str()
+    );
+    conn.execute(
+        "UPDATE planning_peer_changes SET value=?2 WHERE object_id=?1 AND field='name'",
+        rusqlite::params![private.id(), serde_json::to_string("private").unwrap()],
+    )
+    .unwrap();
+    assert_eq!(read(), status);
     // Status does not repair a damaged journal. Restoring this fixture's exact
     // index makes its current local state readable without changing its receipts.
     for id in heads {

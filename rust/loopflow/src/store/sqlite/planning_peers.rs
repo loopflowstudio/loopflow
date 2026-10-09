@@ -521,8 +521,19 @@ impl SqliteStore {
             let id: String = row.get(0)?;
             let digest: Option<String> = row.get(10)?;
             let mut conflicts = projection_conflicts_in(&tx, repo, &id)?;
-            let (pending_local, local_error) = match export_selected(&tx, repo, &id) {
-                Ok((snapshot, held)) => {
+            // Both views start at the same validated journal. Recovery may add
+            // private dependencies; only the selected copy can describe export.
+            let retained = match export_in(&tx, repo, &id) {
+                Ok(snapshot) => Some(snapshot),
+                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => None,
+                Err(error) => return Err(error),
+            };
+            let selected = retained
+                .as_ref()
+                .map(|snapshot| export_selected(&tx, repo, &id, snapshot.clone()))
+                .transpose();
+            let (pending_local, local_error) = match selected {
+                Ok(Some((snapshot, held))) => {
                     let pending = match digest {
                         Some(digest) => digest != planning_digest(&snapshot)?,
                         None => !snapshot.changes.is_empty(),
@@ -542,17 +553,18 @@ impl SqliteStore {
                 // A damaged journal is destination-local evidence, not a reason
                 // to hide the other plans or claim no local changes. SQL failures
                 // still fail the read. Never display raw journal contents here.
-                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
+                Ok(None) | Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
                     None,
                     Some("Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.".into()),
                 ),
                 Err(error) => return Err(error),
             };
-            let (records, recovery_error) = match export_in(&tx, repo, &id)
-                .and_then(|snapshot| recovery::records(&tx, repo, snapshot))
+            let (records, recovery_error) = match retained
+                .map(|snapshot| recovery::records(&tx, repo, snapshot))
+                .transpose()
             {
-                Ok(records) => (records, None),
-                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
+                Ok(Some(records)) => (records, None),
+                Ok(None) | Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
                     Vec::new(),
                     Some("Recovery values unavailable: retained planning is invalid; nothing changed.".into()),
                 ),
@@ -797,7 +809,8 @@ impl SqliteStore {
     ) -> StoreResult<PlanningSnapshot> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
-        let (snapshot, _) = export_selected(&tx, repo, destination)?;
+        let retained = export_in(&tx, repo, destination)?;
+        let (snapshot, _) = export_selected(&tx, repo, destination, retained)?;
         tx.commit()?;
         Ok(snapshot)
     }
@@ -819,20 +832,7 @@ impl SqliteStore {
         reserve_incoming(&tx, repo, destination, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
         retain_mutations(&tx, &saved, incoming)?;
-        let owners = merged
-            .objects()
-            .into_iter()
-            .map(|origin| {
-                Ok((
-                    origin.clone(),
-                    PlanningObject {
-                        kind: origin.kind,
-                        id: associated_local_id(&tx, origin.kind, &origin.id, Some(repo))?
-                            .unwrap_or_else(|| origin.id.clone()),
-                    },
-                ))
-            })
-            .collect::<StoreResult<BTreeMap<_, _>>>()?;
+        let owners = resolved_owners(&tx, repo, &merged)?;
         let mut objects = changes_by_object(&merged, &owners)?;
         let mut held = selection_conflicts(&tx, repo, destination, &merged, false)?;
         // One rejected or private origin holds the entire projection, not only
@@ -1035,6 +1035,26 @@ pub(super) fn associated_local_id(
         .query_row(params![kind.as_str(), origin, repo], |row| row.get(0))
         .optional()
         .map_err(StoreError::from)
+}
+
+// Import and recovery rank the same explicitly associated owners. This map
+// resolves projection identity only; it never changes an origin's membership.
+fn resolved_owners(
+    conn: &Connection,
+    repo: &str,
+    snapshot: &PlanningSnapshot,
+) -> StoreResult<BTreeMap<PlanningObject, PlanningObject>> {
+    snapshot
+        .objects()
+        .into_iter()
+        .map(|origin| {
+            let mut owner = origin.clone();
+            if let Some(id) = associated_local_id(conn, origin.kind, &origin.id, Some(repo))? {
+                owner.id = id;
+            }
+            Ok((origin.clone(), owner))
+        })
+        .collect()
 }
 
 fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
@@ -1258,7 +1278,7 @@ fn selection_conflicts(
             }
         }
         // Selected groups can project their scalar frontier now. Exchange and
-        // new effects remain held until relationship/receipt composition is complete.
+        // new effects remain held until public Git/Linear composition is proved.
         if hold_associations {
             let associated: bool = conn.query_row(
                 "SELECT EXISTS(SELECT 1 FROM planning_associations WHERE kind=?1 AND repo=?2
@@ -1342,8 +1362,8 @@ fn export_selected(
     conn: &Connection,
     repo: &str,
     destination: &str,
+    mut snapshot: PlanningSnapshot,
 ) -> StoreResult<(PlanningSnapshot, BTreeMap<PlanningObject, String>)> {
-    let mut snapshot = export_in(conn, repo, destination)?;
     let held = selection_conflicts(conn, repo, destination, &snapshot, true)?;
     snapshot
         .changes

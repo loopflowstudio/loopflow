@@ -128,8 +128,8 @@ associated origins share scalar winner selection on their local owner. Causal
 ancestry retires observed predecessors before concurrent-head ranking; retained
 per-origin heads alone cannot make that decision. Accepted source IDs commit on
 the local owner, including foreign peer-authored IDs, without an echo mutation.
-Association exchange/effect holds remain pending per-Work recovery presentation
-and public Git/Linear composition; storage receipt composition alone is insufficient.
+Association exchange/effect holds remain pending public Git/Linear composition;
+storage receipt composition and read-only recovery alone are insufficient.
 
 Peer imports can retain uncertain effects in their journal while rejecting the
 object's projection. Common field/deletion, creation/attachment, state and order
@@ -187,7 +187,7 @@ across origins are invalid. Order selection uses the original save's clock;
 projection, delivery and complete-list comparison resolve member references without
 rewriting captured lists or effect inputs. Associated receipt projection no longer
 requires a blanket refusal, but association exchange/effects remain held pending
-per-Work recovery presentation and public proof. Associated state/comment/Wave
+public proof. Associated state/comment/Wave
 imports retain uncertain attempts, authorship and losing values; association alone
 changes no Wave selection. State delivery readback enters common accepted-planning
 projection so the observation reaches peers, not only the local receipt.
@@ -249,8 +249,10 @@ all alternatives retain mutation IDs and lossless JSON. Comment authorship comes
 from its captured content; scalar authors remain unknown. This is a local read
 view, never a transport document. Recovery inspection changes no membership,
 observations, receipt, placement or publication state; ordinary edits own restores.
-Malformed recovery history reports a separate sanitized error without hiding
-healthy publication receipts. Exchange and effect holds remain independently owned.
+Export and recovery start from one validated journal; recovery alone expands private
+references. Malformed recovery history reports a separate sanitized error without
+hiding readable export status or publication receipts. Exchange and effect holds
+remain independently owned.
 
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing

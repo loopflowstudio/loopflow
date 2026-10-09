@@ -622,20 +622,22 @@ acceptance remain at
 Jack Heart selected review-only custom-ref sync; no landing/export.
 Joining publishes nothing; imports stay unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
-uncertainty and losers. Mappings/errors and creation never settle removal.
-Association/mixed exchange stays held pending public Git/HTTPS proof.
+uncertainty and losers. Mappings/errors/creation never settle removal.
+Association/mixed exchange awaits public Git/HTTPS proof.
 
 CLI/Desktop read per-origin selection, values, comment authors and private
 references without enrollment. Candidates prove no projection/delivery; unknown
-authors stay unknown. Ordinary edits own restores; status retains scoped last-good
-readings. Transport/installation remain unproved.
+authors stay unknown. Ordinary edits own restores. Recovery and export share a
+validated journal, not payloads; private recovery failure preserves readable
+export/receipts. Status retains scoped last-good readings. Transport/installation
+remain unproved.
 
-Causality precedes ranking. Correspondence reuses observations, not identity or
-authority; private references hold groups. Journal origins/aliases retain inputs
-and later-save baselines. Equal revisions can carry different ranks; retain bodies.
-`8a6f8f807`: state/comment/Wave readback must enter common projection to reach
-peers, not merely settle receipts. Storage proof retains authorship and execution.
-`6f1869e9b` retains earlier proofs. Plan: `scratch/work-on-another-machine-name.md`.
+Causality precedes ranking; correspondence grants no identity or authority.
+Private references hold groups. Origins retain inputs and later-save baselines;
+equal revisions can carry different ranks, so retain bodies. `8a6f8f807`: common
+state/comment/Wave readback reaches peers, preserving authorship/execution.
+Earlier proofs: `6f1869e9b`. Plan:
+`scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

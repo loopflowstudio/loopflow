@@ -140,15 +140,31 @@ association recovery remains unfinished. `planning associate` records exact loca
 correspondence and enables full-ID lookup without merging IDs or execution histories.
 The incoming scalar journal must retain one provider mapping matching the existing
 local Work. Names, titles and attempted creation inputs do not establish it.
-Physical rows remain their own owners; lookup rechecks mapping and repository.
+Physical rows remain their own owners; lookup rechecks the local mapping,
+repository and contradictory incoming scalar mappings.
 Association changes no sharing membership and leaves joint projection/effects held.
 Replacing a rejected mapping with null cannot hide its earlier claim against
 another local owner. Creation receipts also retain their original Work-derived
 provider UUID and captured model identity: a lookup alias cannot rekey them.
 Common `planning_creations` separates the original Work ID from its local
 Task/Project projection, retaining each origin's input and uncertain attempts.
-Receipt-origin storage does not implement cross-origin field projection. Exact readback never replaces an existing different provider mapping;
-those effects remain uncertain pending association recovery.
+After correspondence, ordinary import retains creation receipts on that local
+owner even while joint projection is held. It preserves captured inputs, merges
+attempts per origin and creates no new journal edits or sharing membership.
+Contradictory receipts stay held with their original journal values. Common
+acquisition can settle the exact origin without releasing new effects; it never
+replaces an existing different provider mapping. Cross-origin field projection
+and relationship recovery remain unfinished.
+Correspondence alone is not causal acknowledgement. Common scalar/content
+acquisition can link an exact Linear fact across associated origins in the existing
+journal. Validation requires the same kind, field, value and provider body, not
+merely equal text or a local alias. Later saves retain that observed predecessor;
+delivery baselines traverse it. Heads remain per-origin, so a foreign child cannot
+erase another origin's complete record. Export validates causal dependency closure
+but holds unselected origins and dependents without sharing their history.
+Joint winner projection must still account for those links; peer-authored winners,
+relationships and non-creation receipts remain unfinished. Retaining the journal
+does not release projection or effect holds.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

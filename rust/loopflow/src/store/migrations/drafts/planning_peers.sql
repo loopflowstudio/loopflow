@@ -54,10 +54,31 @@ CREATE TABLE planning_peer_heads (
 );
 CREATE INDEX planning_peer_heads_object ON planning_peer_heads(kind,object_id,field);
 CREATE TRIGGER planning_peer_advance AFTER INSERT ON planning_peer_changes BEGIN
-    DELETE FROM planning_peer_heads WHERE id IN (SELECT value FROM json_each(NEW.parents));
+    DELETE FROM planning_peer_heads WHERE kind=NEW.kind AND object_id=NEW.object_id
+        AND id IN (SELECT value FROM json_each(NEW.parents));
     INSERT INTO planning_peer_heads(id,kind,object_id,field)
         VALUES(NEW.id,NEW.kind,NEW.object_id,NEW.field);
 END;
+-- Common acquisition may observe the exact same provider fact under two IDs.
+-- Keep that cross-origin predecessor in the existing journal, not an alias payload.
+-- Only accepted fields get the link; retained or losing local intentions do not.
+CREATE VIEW planning_peer_capture_heads AS
+SELECT kind,object_id,field,id FROM planning_peer_heads
+UNION
+SELECT c.kind,COALESCE(a.task_id,a.project_id),c.field,c.id
+FROM planning_associations a
+JOIN planning_peer_heads h ON h.kind=a.kind AND h.object_id=a.origin_id
+JOIN planning_peer_changes c ON c.id=h.id
+JOIN planning_peer_context ctx ON ctx.singleton=1
+LEFT JOIN tasks t ON t.id=a.task_id
+LEFT JOIN projects p ON p.id=a.project_id
+WHERE COALESCE(t.external_issue_id,p.external_project_id)=a.provider_id
+    AND json_extract(ctx.observation,'$.body.id')=a.provider_id
+    AND json_extract(c.linear,'$.body')=json_extract(ctx.observation,'$.body')
+    AND c.field IN (SELECT key FROM json_each(ctx.fields))
+    AND c.value IS (SELECT CASE WHEN type IN ('object','array') THEN value ELSE json_quote(value) END
+        FROM json_each(ctx.fields) WHERE key=c.field);
+
 -- Selection is local routing, not a second planner or a replication payload.
 CREATE TABLE planning_user (
     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -188,7 +209,9 @@ BEGIN
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
+        (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+            WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key
+            AND (c.object_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j ;
 END;
 
@@ -201,14 +224,21 @@ BEGIN
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='project' AND object_id=NEW.id AND field=j.key)
+        (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+            WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key
+            AND (c.object_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('wave_id',NEW.wave_id,'external_project_id',NEW.external_project_id,'project_slug',NEW.project_slug,'project_name',NEW.project_name,'project_summary',NEW.project_summary,'status',NEW.status,'planning_rank',NEW.planning_rank,'planning_initiatives',NEW.planning_initiatives,'planning_teams',NEW.planning_teams)) j WHERE j.value IS NOT json_extract(json_object('wave_id',OLD.wave_id,'external_project_id',OLD.external_project_id,'project_slug',OLD.project_slug,'project_name',OLD.project_name,'project_summary',OLD.project_summary,'status',OLD.status,'planning_rank',OLD.planning_rank,'planning_initiatives',OLD.planning_initiatives,'planning_teams',OLD.planning_teams), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
-        AND NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
+        AND (NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
             WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key AND c.linear IS NOT NULL
             AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
-            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision')));
+            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision'))
+        OR EXISTS(SELECT 1 FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+                WHERE h.kind='project' AND h.object_id=NEW.id AND h.field=j.key AND c.object_id!=NEW.id
+                AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
+                    JOIN json_each(saved.parents) parent ON parent.value=h.id
+                    WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))));
 END;
 
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
@@ -225,7 +255,9 @@ BEGIN
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.id AND field=j.key)
+        (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+            WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
+            AND (c.object_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j ;
 END;
 
@@ -238,14 +270,21 @@ BEGIN
         max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE((SELECT max(clock)+1 FROM planning_peer_changes),0)),
         (SELECT CASE WHEN j.key IN (SELECT key FROM json_each(fields))
             AND j.value IS json_extract(fields, '$.' || j.key) THEN observation END FROM planning_peer_context),
-        (SELECT json_group_array(id) FROM planning_peer_heads WHERE kind='task' AND object_id=NEW.id AND field=j.key)
+        (SELECT json_group_array(h.id) FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+            WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
+            AND (c.object_id=NEW.id OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
     FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j WHERE j.value IS NOT json_extract(json_object('project_id',OLD.project_id,'external_issue_id',OLD.external_issue_id,'issue_identifier',OLD.issue_identifier,'issue_title',OLD.issue_title,'issue_description',OLD.issue_description,'planning_rank',OLD.planning_rank,'planning_assignee',OLD.planning_assignee,'disposition',json_object('planning_completed',OLD.planning_completed,'planning_completed_at',OLD.planning_completed_at,'planning_state',OLD.planning_state),'planning_deleted_at',OLD.planning_deleted_at,'planning_url',OLD.planning_url,'planning_branch_name',OLD.planning_branch_name,'planning_team_id',OLD.planning_team_id), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
-        AND NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
+        AND (NOT EXISTS(SELECT 1 FROM planning_peer_heads h JOIN planning_peer_changes c ON c.id=h.id
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key AND c.linear IS NOT NULL
             AND json_extract(c.linear,'$.body.id') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.id')
-            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision')));
+            AND json_extract(c.linear,'$.body.revision') IS json_extract((SELECT observation FROM planning_peer_context),'$.body.revision'))
+        OR EXISTS(SELECT 1 FROM planning_peer_capture_heads h JOIN planning_peer_changes c ON c.id=h.id
+                WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key AND c.object_id!=NEW.id
+                AND NOT EXISTS(SELECT 1 FROM planning_peer_heads own JOIN planning_peer_changes saved ON saved.id=own.id
+                    JOIN json_each(saved.parents) parent ON parent.value=h.id
+                    WHERE own.kind=h.kind AND own.object_id=h.object_id AND own.field=h.field))));
 END;
 
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)

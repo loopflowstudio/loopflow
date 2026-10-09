@@ -629,15 +629,15 @@ Ordering, causal freshness, private-history holds and unknown-journal proofs:
 scoped status. Mixed exchange stays disabled;
 sharing/recovery and public composition remain unfinished.
 
-Legacy association remains unfinished. `b414e8cce` resolves incoming full
-Task/Project IDs without changing execution or selection; `381c88fec` unifies
-skipped-projection receipts. Status explains holds, never grants authority.
-Lookup neither projects relationships nor settles origins. Capture/validation
-require same-ID parents; grouping winners cannot acknowledge a peer Linear
-head before a later local save. Planning references also need local projection
-without rewriting original IDs or captured inputs. Receipt-origin/refusal proofs:
-`bf4c39b2e`, this heading. The CLI fixture seeds import directly, proving
-no Git acquisition, joint winners or public origin settlement.
+`39dba32c1` retains creation origins through
+ordinary import; common acquisition owns exact-origin readback. `8f3472eda` adds
+portable exact-Linear-fact parents without exporting correspondence. Equal text
+grants no causality; heads remain per-origin and baselines traverse the links.
+Unselected origins stay held. Static checks prove neither fixture execution nor
+joint recovery. Deterministic joint winners,
+peer-authored causality, relationships and non-creation receipts remain unfinished.
+Preserve execution, inputs, private selection and losers.
+Earlier evidence: `f2a5c94e8`, this heading. Public Git/Linear acceptance remains.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

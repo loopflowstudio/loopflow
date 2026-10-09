@@ -184,6 +184,19 @@ pub struct PlanningSnapshot {
 }
 
 impl PlanningMutation {
+    /// Only an exact provider fact can bridge two retained Work identities.
+    /// Association is machine-local; equal values, clocks or names are no proof.
+    fn observes_same_fact(&self, previous: &Self) -> bool {
+        self.object.kind == previous.object.kind
+            && matches!(self.object.kind, PlanningKind::Task | PlanningKind::Project)
+            && self.value == previous.value
+            && self
+                .linear
+                .as_ref()
+                .zip(previous.linear.as_ref())
+                .is_some_and(|(next, prior)| next.body == prior.body)
+    }
+
     pub(crate) fn provider_evidence(&self) -> bool {
         matches!(
             (self.object.kind, self.field.as_str()),
@@ -245,7 +258,19 @@ impl PlanningSnapshot {
 
     /// Head mutations in change-ID order, borrowed from the retained journal.
     pub fn heads(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        let retired: BTreeSet<_> = self.changes.values().flat_map(|c| &c.parents).collect();
+        // Cross-origin observation links retain the other origin's own frontier.
+        // They carry causal evidence, not ownership of that origin's projection.
+        let retired: BTreeSet<_> = self
+            .changes
+            .values()
+            .flat_map(|change| {
+                change.parents.iter().filter(|id| {
+                    self.changes
+                        .get(*id)
+                        .is_some_and(|parent| parent.object == change.object)
+                })
+            })
+            .collect();
         self.changes
             .iter()
             .filter(move |(id, _)| !retired.contains(id))
@@ -329,7 +354,7 @@ impl PlanningSnapshot {
                     .ok_or(PlanningExchangeError::Invalid(
                         "missing planning predecessor",
                     ))?;
-                if previous.object != change.object
+                if (previous.object != change.object && !change.observes_same_fact(previous))
                     || previous.field != change.field
                     || previous.clock >= change.clock
                 {

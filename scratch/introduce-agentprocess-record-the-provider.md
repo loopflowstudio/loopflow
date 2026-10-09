@@ -291,3 +291,12 @@ reconnect fixture retains its original behavior and reports early launch errors.
 No installed store was opened and no configured orphan was signaled.
 
 Check: LF_*-cleared `cargo test -p loopflow --lib` with native-util, composed-connection and planning-reconnect filters passes after fixture repairs; `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; full Rust/Swift/DTO/materialized and Linux verification remains gate/CI-owned.
+
+**Sync with main `f4356029d` (#1517, 2026-10-09):** AgentSessionId now
+flows through native admission, invocation retry, connection inspection and
+correlated history. Attachment tokens, request-time attribution and the deleted
+engine-orphan path remain intact; no generation cut or installed-store migration
+is implied. Review retained the AgentProcess endpoint owner separately from the
+LfSession's selected AgentSession. Branch-only fixtures use the typed identity.
+
+Sync check: LF_*-cleared `cargo test -p loopflow --lib harness::codex_history::tests::delayed_start_keeps_request_capture_across_a_b_a_takeover -- --exact` passes (1 test), after repairing merged fixture type errors; broader verification remains gate/CI-owned.

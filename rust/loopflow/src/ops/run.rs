@@ -288,19 +288,6 @@ pub(crate) async fn select_execution_work(
     }
 }
 
-/// Resolve checkout attribution independently of Task or PR execution eligibility.
-pub async fn resolve_checkout_binding(
-    store: &SharedStore,
-    repo: &Path,
-) -> OpsResult<Option<WorkBinding>> {
-    let Some(selected) = select_work(store, repo, WorkSelection::default()).await? else {
-        return Ok(None);
-    };
-    let mut binding = bind_selected_work(store, repo, selected).await?;
-    binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    Ok(Some(binding))
-}
-
 async fn resolve_wave(store: &SharedStore, repo: &Path, value: &str) -> OpsResult<Wave> {
     let wave = if let Ok(id) = WaveId::parse(value) {
         store.get_wave(&id).await.map_err(run_error)?
@@ -539,7 +526,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(launch.cwd, *task.worktree.as_ref().unwrap());
-        assert!(super::resolve_checkout_binding(&store, other.path())
+        assert!(super::resolve_execution_binding(&store, other.path())
             .await
             .unwrap()
             .is_none());
@@ -554,7 +541,7 @@ mod tests {
             .status()
             .unwrap()
             .success());
-        let inferred_launch = super::resolve_checkout_binding(&store, repo.path())
+        let inferred_launch = super::resolve_execution_binding(&store, repo.path())
             .await
             .unwrap()
             .unwrap();
@@ -943,7 +930,7 @@ mod tests {
         // Context and attribution survive retirement and provider deletion.
         store.abandon(&work, "fixture retirement").await.unwrap();
         let task = store.get_task(&task.id).await.unwrap().unwrap();
-        assert!(super::resolve_checkout_binding(&store, repo.path())
+        assert!(super::resolve_execution_binding(&store, repo.path())
             .await
             .unwrap()
             .is_some());
@@ -1040,7 +1027,7 @@ mod tests {
                 }
             }
         }
-        assert!(super::resolve_checkout_binding(&store, repo.path())
+        assert!(super::resolve_execution_binding(&store, repo.path())
             .await
             .unwrap()
             .is_some());

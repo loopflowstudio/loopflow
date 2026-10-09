@@ -69,8 +69,8 @@ pub use release::{
 pub(crate) use run::render_task_context;
 #[doc(hidden)]
 pub use run::{
-    resolve_checkout_binding, resolve_execution_binding, resolve_work_binding,
-    resolve_work_selection, WorkBinding, WorkSelection,
+    resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
+    WorkSelection,
 };
 pub(crate) use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{

@@ -62,15 +62,14 @@ is broader; `--chrome` controls execution. Root `run`, `--max-turns` and
 `--no-loopflow` are removed; Task skill/Flow selection survives. History owns
 activity, Process pages, show/replay and usage. Desktop owns open/list; root
 `open` is ambiguous with PR opening; Sessions use `connect`. Composed opening and
-Wave planning remain. Local skill/inline previews and
-Work explanation now bypass admission; remote/Flow-wide input and full action
+Wave planning remain. Local previews and launches share Work assembly; explanation bypasses admission. Remote/Flow-wide input and full action
 explanation remain. Discord is unchanged; `--steers-after` filters nodes, not restarts.
 Lookup uses Machine-local `repo_root` (default `~/src`) or explicit paths,
 expanded on the selected Machine, never portable identity. Remembered names are
 open. Scoped Task IDs survive dispatch, without reparsing
 raw argv. Preview/routing use read-only SQLite; unreadable is not absent. Prompt
-assembly returns excerpt sources; only launch persists them. Fake-provider input
-parity supplies no remote or native acceptance.
+assembly returns excerpt sources; only launch persists them. Fake-provider parity
+proves no remote/native acceptance.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

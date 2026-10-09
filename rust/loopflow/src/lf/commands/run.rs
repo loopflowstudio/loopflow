@@ -26,12 +26,7 @@ use tracing::{debug, info, instrument, trace};
 #[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &Cli) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        let mut bound = cli.process_options();
-        bound.wave = Some(binding.wave_name.clone());
-        if bound.agent.is_none() {
-            bound.agent = binding.agent.clone();
-        }
-        return run_bound_prompt(skill, message, &bound, &binding).map(|_| ());
+        return run_bound_prompt(skill, message, cli, &binding).map(|_| ());
     }
     let mut built = build_prompt(repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -58,7 +53,7 @@ pub fn preview(
     cli: &Cli,
 ) -> Result<PromptPreview> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let binding = runtime.block_on(async {
+    let mut binding = runtime.block_on(async {
         let Some(store) = crate::store::read_existing_registry()? else {
             anyhow::ensure!(
                 cli.task.is_none() && cli.wave.is_none(),
@@ -82,7 +77,7 @@ pub fn preview(
         } else {
             crate::ops::resolve_execution_binding(&store, repo).await?
         };
-        if let Some(wave) = cli.wave.as_deref() {
+        if let Some(wave) = cli.wave.as_deref().filter(|_| cli.task.is_none()) {
             let selected = crate::ops::resolve_work_selection(
                 &store,
                 repo,
@@ -116,29 +111,20 @@ pub fn preview(
     })?;
     let mut launch = cli.process_options();
     launch.context = true;
-    let mut cwd = repo.to_path_buf();
-    let mut context_message = message.map(str::to_string);
-    if let Some(binding) = &binding {
-        cwd = binding.cwd.clone();
-        launch.wave = Some(binding.wave_name.clone());
-        if launch.agent.is_none() {
-            launch.agent = binding.agent.clone();
-        }
-        if let crate::durable::WorkRef::Task(id) = &binding.work {
-            launch.task = Some(id.to_string());
-        } else {
-            context_message = Some(bound_message(binding, message));
-        }
+    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.bound_cwd) {
+        binding.cwd = cwd.clone();
     }
+    let cwd = binding
+        .as_ref()
+        .map(|binding| binding.cwd.as_path())
+        .or(cli.bound_cwd.as_deref())
+        .unwrap_or(repo);
     anyhow::ensure!(
         !matches!(skill, Some("repo/operate" | "wave/operate"))
             || cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some()
-            || crate::repository::CanonicalRepo::discover(&cwd)?.as_path() != cwd.canonicalize()?,
+            || crate::repository::CanonicalRepo::discover(cwd)?.as_path() != cwd.canonicalize()?,
         "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
     );
-    if let Some(path) = &cli.bound_cwd {
-        cwd = path.clone();
-    }
     if let Some(name) = skill {
         let invocation = if let Some(path) = &cli.skill_input {
             let invocation = crate::engine::skill_invocation::SkillInvocation::read(path)?;
@@ -149,7 +135,7 @@ pub fn preview(
             invocation
         } else {
             let crate::engine::target::Target::Skill(skill) =
-                crate::engine::target::resolve_definition(&cwd, name, kind)?
+                crate::engine::target::resolve_definition(cwd, name, kind)?
             else {
                 anyhow::bail!("Flow context preview is not defined; preview an individual skill instead (no steps ran)");
             };
@@ -160,19 +146,17 @@ pub fn preview(
         };
         launch.resolved_invocation = Some(invocation);
     }
-    let built = build_prompt_at(
-        skill,
-        context_message.as_deref(),
-        message.unwrap_or_default(),
-        &launch,
-        cwd,
-        binding.as_ref().map(|_| {
-            (
-                crate::trace::ContextAssetKind::Goal,
-                crate::trace::ContextScope::Task,
-            )
-        }),
-    )?;
+    let built = match &binding {
+        Some(binding) => build_bound_prompt(skill, message, &launch, binding)?,
+        None => build_prompt_at(
+            skill,
+            message,
+            message.unwrap_or_default(),
+            &launch,
+            cwd.to_path_buf(),
+            None,
+        )?,
+    };
     Ok(PromptPreview {
         checkout: built.repo_root,
         system_prompt: crate::engine::agent::system_prompt_with_structured_replies(
@@ -291,11 +275,24 @@ fn run_bound_prompt(
     } else {
         binding
     };
+    let built = build_bound_prompt(skill, message, cli, binding)?;
+    print_context_header(&built, cli);
+    run_prompt(&built, cli)
+}
+
+/// Preview and launch enrich the same selected Work; only launch prepares a checkout.
+fn build_bound_prompt(
+    skill: Option<&str>,
+    message: Option<&str>,
+    cli: &Cli,
+    binding: &crate::ops::WorkBinding,
+) -> Result<PromptBuild> {
     let mut launch = cli.process_options();
+    launch.wave = Some(binding.wave_name.clone());
+    launch.agent = binding.agent.clone().or(launch.agent);
     let arguments = message.unwrap_or_default();
     let message = if let crate::durable::WorkRef::Task(id) = &binding.work {
         launch.task = Some(id.to_string());
-        launch.agent = binding.agent.clone().or(launch.agent);
         message.unwrap_or_default().to_owned()
     } else {
         bound_message(binding, message)
@@ -317,8 +314,7 @@ fn run_bound_prompt(
         source: binding.source,
     });
 
-    print_context_header(&built, cli);
-    run_prompt(&built, cli)
+    Ok(built)
 }
 
 /// An `lf` launch inside a registered Task's checkout binds to that Task unless
@@ -684,17 +680,12 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
     }
     let colors = Colors::new();
     let header = format_context_header(&built.context, &built.components);
-    let cli_agent = if cli.agent.is_some() {
-        built.agent_config.agent.as_deref()
-    } else {
-        None
-    };
     let command = format_reproducible_command(
         built.skill_name.as_deref(),
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
-        cli_agent,
+        built.agent_config.agent.as_deref(),
     );
     eprintln!(
         "{dim}{header}\n\n  {command}{reset}",
@@ -1241,9 +1232,9 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_capture, build_bound_prompt_at, build_prompt_at,
-        is_interactive_run, is_interactive_run_with_tty, run_headless_prompt, run_prompt,
-        PromptBuild,
+        attributed_context, begin_capture, build_bound_prompt, build_bound_prompt_at,
+        build_prompt_at, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
+        run_prompt, PromptBuild,
     };
 
     use crate::engine::agent::{run_agent, AgentCapabilities, AgentConfig, ProcessConfig};
@@ -1835,54 +1826,78 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
     }
 
     #[test]
-    fn interactive_bound_skill_keeps_the_assembled_scratch_snapshot() {
+    fn bound_prompt_preserves_work_and_the_assembled_snapshot_in_preview_and_launch() {
+        let machine = crate::journal::TestLedgerGuard::new();
         let repo = loopflow_test_support::TestRepo::new();
         repo.create_file(".lf/skills/proof.md", "inspect the complete basis");
-        repo.create_file("scratch/research-runtime.md", "runtime evidence bytes");
-        repo.stage_all();
-        repo.commit("bound basis");
-        let cli = Cli {
-            interactive: true,
-            ..Cli::default()
-        };
-
-        let built = build_bound_prompt_at(
-            Some("proof"),
-            "<lf:work kind=\"task\" id=\"task_test\">Task seed</lf:work>",
-            "",
-            &cli,
-            repo.path(),
-        )
-        .unwrap();
         repo.create_file(
-            "scratch/research-runtime.md",
-            "evidence published after launch",
+            ".lf/config.yaml",
+            "diff: false\ndiff_files: false\npaste: false\n",
         );
-
-        assert!(built
-            .agent_config
-            .system_prompt
-            .contains("runtime evidence bytes"));
-        assert!(!built
-            .agent_config
-            .system_prompt
-            .contains("evidence published after launch"));
-        assert!(built
-            .agent_config
-            .system_prompt
-            .contains("inspect the complete basis"));
-        assert!(built.agent_config.system_prompt.contains("Task seed"));
-        assert!(built
-            .context
-            .system
-            .as_ref()
+        repo.create_file("wave/fixture/GOAL.md", "Preserve this Wave goal.");
+        let wave_id = crate::store::sqlite::SqliteStore::new(&machine.home().join("loopflow.db"))
             .unwrap()
-            .assets
-            .iter()
-            .any(|asset| {
-                asset.kind == ContextAssetKind::Scratch
-                    && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
-            }));
+            .ensure_wave(
+                repo.path().canonicalize().unwrap().to_str().unwrap(),
+                "fixture",
+            )
+            .unwrap();
+        let binding = crate::ops::WorkBinding {
+            source: crate::session::WorkSource::Declared,
+            work: crate::durable::WorkRef::Wave(wave_id.clone()),
+            wave_id: wave_id.clone(),
+            wave_name: "fixture".into(),
+            subjects: vec!["wave:fixture".into()],
+            cwd: repo.path().into(),
+            context: "Selected Work direction".into(),
+            agent: None,
+        };
+        for context in [true, false] {
+            repo.create_file("scratch/research-runtime.md", "runtime evidence bytes");
+            let cli = Cli {
+                interactive: true,
+                context,
+                agent: Some("claude".into()),
+                ..Cli::default()
+            };
+            let built =
+                build_bound_prompt(Some("proof"), Some("inspect now"), &cli, &binding).unwrap();
+            repo.create_file(
+                "scratch/research-runtime.md",
+                "evidence published after launch",
+            );
+            let system = &built.agent_config.system_prompt;
+            for expected in [
+                "runtime evidence bytes",
+                "inspect the complete basis",
+                "Selected Work direction",
+                "Preserve this Wave goal.",
+                "inspect now",
+            ] {
+                assert!(system.contains(expected), "missing {expected}");
+            }
+            assert!(!system.contains("evidence published after launch"));
+            assert_eq!(
+                built.agent_config.env[crate::work::wave::context::WAVE_ID_ENV],
+                wave_id.to_string()
+            );
+            assert_eq!(built.subjects, binding.subjects);
+            assert_eq!(
+                built.work.as_ref().unwrap().wave_id.as_ref(),
+                Some(&wave_id)
+            );
+            assert!(built
+                .context
+                .system
+                .as_ref()
+                .unwrap()
+                .assets
+                .iter()
+                .any(|asset| {
+                    asset.kind == ContextAssetKind::Scratch
+                        && asset.source_path.as_deref() == Some("scratch/research-runtime.md")
+                }));
+        }
     }
 
     #[test]

@@ -42,8 +42,10 @@ signed in", yet a bare `codex` ran as `loopflow-eng@loopflow.studio`.
 
 ## Open
 
-- `use` restarts the daemon even with a turn running through it. Holding off
-  and printing the command instead is the alternative; Jack has not chosen.
+- Jack chose a bounded wait: `use` installs the login first, releases the
+  login lock, then gives turns running through the daemon up to five minutes
+  before restarting it. Busy detection is unit-tested; the wait itself has not
+  run live, because the only running turn available was Jack's own session.
 - Automatic switches during an lf launch (`SwitchCause::Exhaustion`) leave the
   daemon alone, so a bare `codex` can lag after one.
 - Unverified: whether a stale daemon writes its old tokens back to

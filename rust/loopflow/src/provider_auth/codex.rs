@@ -147,18 +147,8 @@ impl Connection {
 /// one is running. A bare `codex` attaches to it instead of reading
 /// `auth.json`, and it reads that file only as it starts.
 pub(crate) async fn daemon_login(home: &Path) -> Option<String> {
-    let endpoint = home
-        .join("app-server-control")
-        .join("app-server-control.sock");
     tokio::time::timeout(DAEMON_TIMEOUT, async {
-        let stream = UnixStream::connect(endpoint).await.ok()?;
-        let (mut socket, _) = client_async("ws://localhost", stream).await.ok()?;
-        let client = json!({"clientInfo": {
-            "name": "loopflow", "title": "loopflow", "version": env!("CARGO_PKG_VERSION")
-        }});
-        daemon_request(&mut socket, 1, "initialize", client).await?;
-        let initialized = json!({"method": "initialized"}).to_string();
-        socket.send(Message::Text(initialized.into())).await.ok()?;
+        let mut socket = connect_daemon(home).await?;
         // Never refresh here: that would rotate the token of a login being replaced.
         let account = daemon_request(
             &mut socket,
@@ -172,6 +162,42 @@ pub(crate) async fn daemon_login(home: &Path) -> Option<String> {
     .await
     .ok()
     .flatten()
+}
+
+/// Whether a turn is running through `home`'s background app-server, which a
+/// restart would cut. An unreachable daemon has none.
+pub(crate) async fn daemon_has_running_turn(home: &Path) -> bool {
+    tokio::time::timeout(DAEMON_TIMEOUT, async {
+        let mut socket = connect_daemon(home).await?;
+        let loaded = daemon_request(&mut socket, 2, "thread/loaded/list", json!({})).await?;
+        for (offset, thread) in loaded["data"].as_array()?.iter().enumerate() {
+            let params = json!({"threadId": thread, "includeTurns": false});
+            let read = daemon_request(&mut socket, 3 + offset as i64, "thread/read", params).await;
+            if read.is_some_and(|read| read["thread"]["status"]["type"] == "active") {
+                return Some(true);
+            }
+        }
+        Some(false)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
+
+async fn connect_daemon(home: &Path) -> Option<WebSocketStream<UnixStream>> {
+    let endpoint = home
+        .join("app-server-control")
+        .join("app-server-control.sock");
+    let stream = UnixStream::connect(endpoint).await.ok()?;
+    let (mut socket, _) = client_async("ws://localhost", stream).await.ok()?;
+    let client = json!({"clientInfo": {
+        "name": "loopflow", "title": "loopflow", "version": env!("CARGO_PKG_VERSION")
+    }});
+    daemon_request(&mut socket, 1, "initialize", client).await?;
+    let initialized = json!({"method": "initialized"}).to_string();
+    socket.send(Message::Text(initialized.into())).await.ok()?;
+    Some(socket)
 }
 
 async fn daemon_request(
@@ -194,7 +220,7 @@ async fn daemon_request(
 }
 
 /// Restart `home`'s background app-server so it reads the installed login.
-/// Work running through it is interrupted and resumes from its saved thread.
+/// A turn running through it is cut; its thread reloads from disk.
 pub(crate) async fn restart_daemon(home: &Path) -> Result<(), AuthError> {
     let status = Command::new("codex")
         .args(["app-server", "daemon", "restart"])
@@ -385,27 +411,33 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
     }
 
     #[tokio::test]
-    async fn daemon_login_reports_the_login_a_running_daemon_holds() {
+    async fn daemon_reports_its_login_and_whether_a_turn_is_running() {
         // Unix socket paths are short; the default temp directory is not.
         let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
         assert_eq!(super::daemon_login(home.path()).await, None);
+        assert!(!super::daemon_has_running_turn(home.path()).await);
 
         let control = home.path().join("app-server-control");
         fs::create_dir(&control).unwrap();
         let listener =
             tokio::net::UnixListener::bind(control.join("app-server-control.sock")).unwrap();
+        // The second connection sees the first thread's turn still running.
         tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
-            while let Some(Ok(Message::Text(text))) = socket.next().await {
-                let request: Value = serde_json::from_str(&text).unwrap();
-                let result = match request["method"].as_str() {
-                    Some("initialize") => json!({}),
-                    Some("account/read") => json!({"account": {"email": "old@example.com"}}),
-                    _ => continue,
-                };
-                let reply = json!({"id": request["id"], "result": result}).to_string();
-                socket.send(Message::Text(reply.into())).await.unwrap();
+            for status in ["idle", "active", "idle"] {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                    let request: Value = serde_json::from_str(&text).unwrap();
+                    let result = match request["method"].as_str() {
+                        Some("initialize") => json!({}),
+                        Some("account/read") => json!({"account": {"email": "old@example.com"}}),
+                        Some("thread/loaded/list") => json!({"data": ["thread-1"]}),
+                        Some("thread/read") => json!({"thread": {"status": {"type": status}}}),
+                        _ => continue,
+                    };
+                    let reply = json!({"id": request["id"], "result": result}).to_string();
+                    socket.send(Message::Text(reply.into())).await.unwrap();
+                }
             }
         });
 
@@ -413,5 +445,7 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
             super::daemon_login(home.path()).await.as_deref(),
             Some("old@example.com")
         );
+        assert!(super::daemon_has_running_turn(home.path()).await);
+        assert!(!super::daemon_has_running_turn(home.path()).await);
     }
 }

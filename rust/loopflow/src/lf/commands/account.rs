@@ -28,7 +28,7 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, remove_account_home,
     AccountMatch,
 };
-use crate::provider_auth::codex::{daemon_login, restart_daemon};
+use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart_daemon};
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
@@ -45,6 +45,7 @@ const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 // Authorization-code flows wait on the browser login to finish; give
 // them the ~10 minutes the OAuth authorization itself stays valid.
 const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
+const CODEX_DAEMON_TURN_WAIT: Duration = Duration::from_secs(5 * 60);
 #[cfg(test)]
 static TEST_OPENED_CHROME_PROFILES: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
@@ -197,7 +198,7 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     )
     .await?;
     let login = crate::provider_account::account_login(&account);
-    match switched {
+    match &switched {
         Some(_) => println!(
             "{} is now signed in as {login} in {}",
             provider.display_name(),
@@ -208,6 +209,8 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
             provider.display_name()
         ),
     }
+    // The login is installed; launches must not wait on the daemon's turns.
+    drop(switched);
     if provider == Provider::Codex {
         restart_stale_codex_daemon(&native, login).await?;
     }
@@ -215,13 +218,24 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
 }
 
 /// A bare `codex` attaches to the home's background app-server, which keeps
-/// the login it started with whatever `auth.json` now holds.
+/// the login it started with whatever `auth.json` now holds. Restarting it
+/// cuts a turn running through it, so running turns get a few minutes to finish.
 async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
     let Some(held) = daemon_login(native).await else {
         return Ok(());
     };
     if held.eq_ignore_ascii_case(login) {
         return Ok(());
+    }
+    if daemon_has_running_turn(native).await {
+        println!(
+            "Codex's background app-server is still signed in as {held}; waiting up to {} minutes for its running turns before restarting it",
+            CODEX_DAEMON_TURN_WAIT.as_secs() / 60
+        );
+        let deadline = tokio::time::Instant::now() + CODEX_DAEMON_TURN_WAIT;
+        while tokio::time::Instant::now() < deadline && daemon_has_running_turn(native).await {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
     }
     restart_daemon(native).await?;
     match daemon_login(native).await {

@@ -1,0 +1,196 @@
+--- a/include/ghostty.h
++++ b/include/ghostty.h
+@@ -1273,6 +1273,12 @@
+ GHOSTTY_API bool ghostty_surface_read_text(ghostty_surface_t,
+                                               ghostty_selection_s,
+                                               ghostty_text_s*);
++// Writes a UTF-8 prefix into caller-owned bytes, without a full text allocation.
++// NULL selection reads the user selection; no selection succeeds with length 0.
++// The output is not NUL-terminated. Truncation does not split a UTF-8 scalar.
++GHOSTTY_API bool ghostty_surface_read_text_bounded(ghostty_surface_t,
++                                                 const ghostty_selection_s*,
++                                                 char*, size_t, size_t*, bool*);
+ GHOSTTY_API void ghostty_surface_free_text(ghostty_surface_t, ghostty_text_s*);
+ 
+ #ifdef __APPLE__
+--- a/src/apprt/embedded.zig
++++ b/src/apprt/embedded.zig
+@@ -2014,6 +2014,35 @@
+         return readTextLocked(surface, core_sel, result);
+     }
+ 
++    /// NULL selection means the current user selection (empty is successful).
++    /// Caller owns the bounded destination; this path never allocates text.
++    export fn ghostty_surface_read_text_bounded(
++        surface: *Surface,
++        sel: ?*const Selection,
++        destination: [*]u8,
++        capacity: usize,
++        written: *usize,
++        truncated: *bool,
++    ) bool {
++        written.* = 0;
++        truncated.* = false;
++        const core_surface = &surface.core_surface;
++        core_surface.renderer_state.mutex.lockUncancelable(global.io());
++        defer core_surface.renderer_state.mutex.unlock(global.io());
++        const screen = core_surface.renderer_state.terminal.screens.active;
++        const core_sel = if (sel) |value|
++            value.core(screen) orelse return false
++        else
++            screen.selection orelse if (screen.selectedCommandBlock()) |block| block.text else return true;
++        const result = screen.selectionStringBounded(.{
++            .sel = core_sel,
++            .trim = false,
++        }, destination[0..capacity]);
++        written.* = result.len;
++        truncated.* = result.truncated;
++        return true;
++    }
++
+     fn readTextLocked(
+         surface: *Surface,
+         core_sel: terminal.Selection,
+--- a/src/terminal/Screen.zig
++++ b/src/terminal/Screen.zig
+@@ -64,8 +64,8 @@
+ /// The selected command block (if any), as a tracked pin on its prompt row.
+ /// A screen has a text selection or a selected command block, never both:
+ /// `select` clears this and `selectCommandBlock` clears `selection`. Read it
+-/// through `selectedCommandBlock`, which drops a pin that no longer names a
+-/// completed block.
++/// through `selectedCommandBlock`, which ignores a pin that no longer names a
++/// completed block. Selection changes, reset and deinit release the pin.
+ selected_command: ?*Pin = null,
+ 
+ /// The charset state
+@@ -3045,6 +3045,28 @@
+     return try aw.toOwnedSliceSentinel(0);
+ }
+ 
++/// Format directly into caller-owned storage. No allocation, pin map, or full
++/// intermediate string; a full destination stops the existing formatter.
++pub fn selectionStringBounded(
++    self: *const Screen,
++    opts: SelectionString,
++    destination: []u8,
++) struct { len: usize, truncated: bool } {
++    var writer: std.Io.Writer = .fixed(destination);
++    var formatter: ScreenFormatter = .init(self, .{
++        .emit = .plain,
++        .unwrap = true,
++        .trim = opts.trim,
++    });
++    formatter.content = .{ .selection = opts.sel };
++    const truncated = if (formatter.format(&writer)) |_| false else |_| true;
++    // A byte-limited destination can end in the middle of a UTF-8 scalar.
++    // Keep only complete scalars, without allocating a repaired copy.
++    var len = writer.end;
++    while (len > 0 and !std.unicode.utf8ValidateSlice(destination[0..len])) : (len -= 1) {}
++    return .{ .len = len, .truncated = truncated };
++}
++
+ pub const SelectLine = struct {
+     /// The pin of some part of the line to select.
+     pin: Pin,
+@@ -3544,9 +3566,9 @@
+     self.selected_command = null;
+ }
+ 
+-/// The selected command block. The selection ends itself when its prompt row
+-/// was evicted, erased, or no longer starts a completed command.
+-pub fn selectedCommandBlock(self: *Screen) ?CommandBlock {
++/// Read the selected command block without releasing tracked state. An evicted
++/// or erased prompt is no longer selected; its pin stays with the selection owner.
++pub fn selectedCommandBlock(self: *const Screen) ?CommandBlock {
+     const tracked = self.selected_command orelse return null;
+     if (!tracked.garbage) {
+         if (self.commandBlock(tracked.*)) |block| {
+@@ -3554,7 +3576,6 @@
+                 block.prompt.y == tracked.y) return block;
+         }
+     }
+-    self.clearCommandBlockSelection();
+     return null;
+ }
+ 
+@@ -12963,3 +12984,79 @@
+         try testing.expectEqualStrings("world", contents);
+     }
+ }
++
++test "Screen: bounded text preserves UTF-8 and reports truncation" {
++    const testing = std.testing;
++    var s = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 5 });
++    defer s.deinit();
++    try s.testWriteString("aé界z");
++    const sel: Selection = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false);
++    var full: [512]u8 = undefined;
++    const complete = s.selectionStringBounded(.{ .sel = sel, .trim = false }, &full);
++    try testing.expect(!complete.truncated);
++    try testing.expectEqualStrings("aé界z", full[0..complete.len]);
++    var buffer: [16]u8 = @splat(0xaa);
++    for (0..complete.len + 1) |capacity| {
++        const result = s.selectionStringBounded(.{ .sel = sel, .trim = false }, buffer[0..capacity]);
++        try testing.expect(result.len <= capacity);
++        try testing.expect(std.unicode.utf8ValidateSlice(buffer[0..result.len]));
++        try testing.expectEqualStrings(full[0..result.len], buffer[0..result.len]);
++        try testing.expectEqual(capacity < complete.len, result.truncated);
++        try testing.expectEqual(@as(u8, 0xaa), buffer[capacity]);
++        @memset(&buffer, 0xaa);
++    }
++}
++
++test "Screen: bounded text limits scrollback without allocation or selection changes" {
++    const testing = std.testing;
++    var allocator: testing.FailingAllocator = .init(testing.allocator, .{});
++    var s = try init(testing.io, allocator.allocator(), .{ .cols = 80, .rows = 5 });
++    defer s.deinit();
++    for (0..1000) |_| try s.testWriteString("retained output\n");
++    const sel: Selection = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false);
++    try s.select(sel);
++    allocator.fail_index = allocator.alloc_index;
++    allocator.resize_fail_index = allocator.resize_index;
++    const allocated = allocator.allocated_bytes;
++    const freed = allocator.freed_bytes;
++    var buffer: [32]u8 = undefined;
++    const result = s.selectionStringBounded(.{ .sel = sel, .trim = false }, &buffer);
++    try testing.expect(result.truncated);
++    try testing.expectEqual(buffer.len, result.len);
++    try testing.expect(std.mem.startsWith(u8, &buffer, "retained output"));
++    try testing.expect(s.selection.?.eql(sel));
++    try testing.expect(!allocator.has_induced_failure);
++    try testing.expectEqual(allocated, allocator.allocated_bytes);
++    try testing.expectEqual(freed, allocator.freed_bytes);
++}
++
++test "Screen: bounded text empty succeeds" {
++    const testing = std.testing;
++    var s = try init(testing.io, testing.allocator, .{ .cols = 80, .rows = 5 });
++    defer s.deinit();
++    const sel: Selection = .init(s.pages.getTopLeft(.screen), s.pages.getBottomRight(.screen).?, false);
++    var buffer: [0]u8 = .{};
++    const result = s.selectionStringBounded(.{ .sel = sel, .trim = false }, &buffer);
++    try testing.expectEqual(@as(usize, 0), result.len);
++    try testing.expect(!result.truncated);
++}
++
++test "Screen: bounded text reads selected blocks without cleanup" {
++    const testing = std.testing;
++    var s = try init(testing.io, testing.allocator, .{ .cols = 20, .rows = 10 });
++    defer s.deinit();
++    try testWriteCommand(&s, "echo hi", "hi\n");
++    s.cursorSetSemanticContent(.{ .prompt = .initial });
++    try s.testWriteString("$ ");
++    try testing.expect(try s.selectCommandBlock(s.pages.getTopLeft(.active)));
++    const pin = s.selected_command.?;
++    var buffer: [64]u8 = undefined;
++    const result = s.selectionStringBounded(.{ .sel = s.selectedCommandBlock().?.text, .trim = false }, &buffer);
++    try testing.expectEqualStrings("echo hi\nhi", buffer[0..result.len]);
++    try testing.expect(!result.truncated);
++    try testing.expect(s.selected_command.? == pin);
++    // Invalidate the prompt without asking the reader to release its pin.
++    pin.garbage = true;
++    try testing.expect(s.selectedCommandBlock() == null);
++    try testing.expect(s.selected_command.? == pin);
++}

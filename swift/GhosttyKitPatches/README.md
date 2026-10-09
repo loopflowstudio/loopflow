@@ -33,6 +33,32 @@ credentials from Doppler. Download it back and compare its checksum with the
 build's, then update the URL and checksum in `Package.swift`.
 Use a new artifact version whenever the patch changes.
 
+## Bounded text
+
+```sh
+# In the patched Ghostty source; terminal-only proof, including on Linux.
+zig build test-lib-vt -Demit-lib-vt=true -Dtest-filter='bounded text'
+```
+
+`0004-bounded-text.patch` adds `ghostty_surface_read_text_bounded`. Supply a
+selection for viewport or scrollback, or NULL for the current text/command-block
+selection. Supply the destination buffer and its byte capacity. The result gives
+bytes written and whether content was truncated; it is not NUL-terminated.
+An empty terminal/selection succeeds with zero bytes, while an invalid explicit
+selection fails. The prefix always ends at a complete UTF-8 scalar.
+
+The existing `ScreenFormatter` writes directly to fixed caller storage and stops
+when it fills. Neither the reader nor its formatter allocates a full string or
+pin map. The renderer lock covers selection resolution and extraction. Reading
+an invalidated command-block selection no longer releases its tracked pin:
+selection changes, reset and teardown keep that ownership. Clipboard/Quick Look
+retain their existing unbounded API and viewport metadata.
+
+The next artifact is `GhosttyKit-a60e9e2-lf3.xcframework.zip`; it has not been
+built or published. `Package.swift` deliberately remains on published lf2 until
+the relevant checks and upload/download checksum verification succeed. Desktop
+must not import the new symbol before that artifact is available.
+
 ## Program Status
 
 `0003-program-status.patch` forwards validated OSC 7501 reports from Ghostty's

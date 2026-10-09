@@ -1102,6 +1102,58 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
 }
 
 #[test]
+fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_completion() {
+    let task = WorkflowTask::new();
+    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    task.publish(false);
+    assert!(!task
+        .run(&["task", "move", "INF-123", "end"])
+        .status
+        .success());
+    assert!(!task.status()["completion_pending"].is_null());
+    let workflow = task.workflow();
+    let flows = support::recorded_flows(task.home.path());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let pr = runtime
+        .block_on(
+            task.registered
+                .store
+                .active_task_pr(&task.registered.task.id),
+        )
+        .unwrap();
+    task.ok(&[
+        "task",
+        "reopen",
+        "INF-123",
+        "--reason",
+        "Continue accepted work",
+    ]);
+    assert!(task.status()["completion_pending"].is_null());
+    assert_eq!(task.workflow(), workflow);
+    assert_eq!(support::recorded_flows(task.home.path()), flows);
+    assert_eq!(
+        runtime
+            .block_on(
+                task.registered
+                    .store
+                    .active_task_pr(&task.registered.task.id)
+            )
+            .unwrap(),
+        pr
+    );
+    task.ok(&["task", "move", "INF-123", "end"]);
+    assert!(task.status()["completion_pending"].is_null());
+    task.complete_in_linear();
+    assert_eq!(task.state(), "done");
+    task.ok(&["task", "reopen", "INF-123"]);
+    assert_eq!(task.state(), "active");
+    assert_eq!(task.workflow(), workflow);
+    task.ok(&["task", "reopen", "INF-123"]);
+    assert_eq!(task.workflow(), workflow);
+    assert!(task.repo.path().exists());
+}
+
+#[test]
 fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "gated"]);
@@ -1323,15 +1375,27 @@ fn failed_completion_in_finishing_flow_is_retryable_without_replaying_it() {
 #[test]
 fn provider_completion_preserves_a_live_edge_and_the_driver_records_its_real_arrival() {
     let task = WorkflowTask::new();
-    task.repo.create_file(
-        ".lf/workflows/live.yaml",
+    let worktree = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(task.registered.store.get_task(&task.registered.task.id))
+        .unwrap()
+        .unwrap()
+        .worktree
+        .unwrap();
+    let write = |path: &str, content: &str| {
+        let path = worktree.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, content).unwrap();
+    };
+    write(
+        ".lf/workflows/live-workflow.yaml",
         "edges:\n  - {from: start, to: end, flow: live}\n",
     );
-    task.repo.create_file(
+    write(
         ".lf/flows/live.yaml",
         "- cmd: __telemetry-scorecard\n- cmd: task complete INF-123\n",
     );
-    task.repo.create_file(
+    write(
         "scripts/lifecycle_scorecard.py",
         r#"
 import json
@@ -1345,13 +1409,25 @@ while not (home / 'release').exists():
 print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
 "#,
     );
+    task.ok(&[
+        "project",
+        "workflow",
+        "set",
+        task.registered.task.project_id.as_str(),
+        "live-workflow",
+        "--file",
+        worktree
+            .join(".lf/workflows/live-workflow.yaml")
+            .to_str()
+            .unwrap(),
+    ]);
     let log_path = task.home.path().join("live.log");
     let log = fs::File::create(&log_path).unwrap();
     let mut held = HeldFlow {
         child: command(
             task.repo.path(),
             task.home.path(),
-            &["-b", "task", "run", "INF-123", "live"],
+            &["-b", "task", "run", "INF-123", "live-workflow"],
         )
         .stdout(log.try_clone().unwrap())
         .stderr(log)
@@ -1373,6 +1449,9 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
     assert_eq!(before["position"]["running"], true);
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
+    assert_eq!(task.workflow(), before);
+    task.ok(&["task", "reopen", "INF-123"]);
+    assert_eq!(task.state(), "active");
     assert_eq!(task.workflow(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());

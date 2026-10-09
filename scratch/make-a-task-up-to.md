@@ -1,14 +1,16 @@
 # One Task, up to one PR
 
-LOO-418 · composed lifecycle proved headlessly; shared planning integration remains · reconciled 2026-10-08
+LOO-418 · integrated local planning at `314095b00` · reconciled 2026-10-08
 
-The composed fixture requested by the preceding review is committed at
-`432f37065`; its projection/timeout simplifications are checkpointed at
-`99a133733`. Existing Rust and Swift results cover that population. The remaining
-implementation boundary is LOO-406's common local writer and the local-only
-lifecycle, preserving independent completion and durable end requests. Provider
-concurrency, full affected gate, stacked/due-return demonstration and Jack's
-complete demo review remain; the composed fixture does not satisfy those checks.
+Jack Heart authorized stacking on LOO-406 and continuing. The merge is recorded
+at `9f54c5b43`, with repairs at `07eeef61d` and focused Docker proof.
+Common local creation and state delivery replace the separate provider-first
+filing/completion writers; `1fe22f565` adds relation export and `314095b00`
+simplifies completion and shared reads.
+Task completion remains independent of Workflow position and Process liveness.
+The earlier evidence below describes pre-integration populations; it does not
+verify the combined branch. Full gate, stacked/due-return proof and Jack's demo
+remain. Landing and Task completion are unauthorized.
 
 ## Decision and intended experience
 
@@ -36,60 +38,61 @@ that belongs to another Task. Research reaches `end` without a phantom PR slot.
 
 ## Alignment with local planning (2026-10-08)
 
-Jack Heart requested avoiding duplicate data types and making repair explicit in
-`--wait-and-fix`. The landing flag replaces `--wait`; ship and all callers use
-that spelling. Bare landing still returns after requesting merge.
+Jack Heart requested one Task model and explicit `--wait-and-fix` naming. Bare
+land still returns after requesting merge. The committed parent `558a39232`
+supersedes earlier observations of an unavailable common writer at `de000c24f`.
+The parent checkout was not changed.
 
-LOO-406's earlier published local lifecycle is superseded by its ongoing
-common-ownership revision. Its October 8
-brief and checkout use the existing Task, TaskPlan and TaskSnapshot, with optional
-Linear mapping and checkout. TaskSnapshot is the assembled read, not another
-stored Task or planning authority. Preserve one model and one read path when the
-branches integrate: local identity and optional placement from LOO-406, one
-optional PR and follow-through from LOO-418. Do not introduce local/Linear or
-delivery-specific Task copies. Shared fields should come from their owning record;
-computed status, work and actions belong in the read projection.
+The merge keeps Task, TaskPlan and the assembled TaskSnapshot, optional Linear
+mapping and checkout, and one optional PR. Placement saves without a placeholder
+PR; status exposes absent branch/base until checkout. Completion writes local
+planning state and its optional delivery receipt in one transaction, retaining
+LOO-418's separate durable end request. Workflow movement does not reopen or
+complete planning by alias. Provider observations preserve Workflow and Processes
+and supersede old completion requests. No provider-first completion writer remains.
 
-Integration remains: reconcile overlapping Task/TaskSnapshot and Rust/Swift wire
-changes, make branch/base placement absent until checkout, and route follow-up
-creation, links and completion through LOO-406's shared local planning APIs.
-The current follow-through and completion implementations still call Linear
-directly; merging DTOs alone will not make either path work without Linear. Verify unplaced,
-PR-less and merged-with-follow-up Tasks through both CLI and Desktop, including
-local filing/completion without provider calls. No second filing or completion
-implementation should survive. LOO-406 was rechecked read-only on October 8 at
-`de000c24f`, with staged source changes and an unresolved merge in its design.
-Its source and questions still report an incomplete common-writer boundary;
-that checkout supplies evidence, not an integration commit. No live Task/PR
-state was refreshed.
-Saved Tasks now share offline checkout preparation. Completion and reopening save
-locally before provider I/O, while the coherent common-writer cut remains
-unavailable. It deletes `complete_planning_task`,
-`task_pm::complete_task`, `reconcile_pm_writeback`, the completion arm of
-`PmTaskUpdate`, and direct writeback updates. These are integration deletion
-targets here; do not ship the current provider-first completion path beside them.
-No changes were made in that checkout. The ongoing plan is evidence of unfinished
-work, not a stable integration commit or new authorization.
+Follow-through now reserves a local Task identity, then uses the common NewTask
+writer. Its receipt retains the original Project, description and due date; normal filing
+and local links need no provider. Reservation and common local creation now commit together; old reservations
+recover in their pinned Project even after selection changes. Normal planning export owns eventual Linear creation.
+Historical provider receipts can acquire an already-created issue without issuing
+a duplicate creation. The local disposition and optional Linear relation are
+separate effects. Foreground planning export now delivers eligible relations once
+both endpoints are mapped, including after source completion. Confirmation is an
+idempotent Task event; lost replies retry the original relation UUID. Filing no
+longer calls a separate relation sender. Reads resolve links against current
+saved Task names, URLs and dates, without changing immutable filing input.
 
-Two integration conflicts are now explicit. LOO-406's `ops/task.rs::reach_end`
-still couples completion to Workflow movement, including the old planning-conflict
-and dirty-checkout refusals. Integration must retain LOO-418's independent status,
-durable end request and retained-artifact behavior while adopting the local save
-and optional delivery receipt. Replacing this branch's operation wholesale would
-restore the behavior Jack superseded.
+Integration update (2026-10-08):
 
-LOO-406 records an enabled failing regression,
-`task_completion_preserves_linear_reopening_during_delivery`: a provider reopening
-between ownership read and completion mutation is overwritten, and matching
-readback falsely settles the receipt. Its test and unconditional writer were
-inspected; the recorded failure was not rerun here. This branch also checks its
-request before an unconditional provider update, so its passing observation tests
-do not prove preservation of a reopening during that write interval. Carry the
-regression into composed acceptance. Extra reads and matching readback do not
-establish a conditional-write guarantee. Provider-guarantee investigation remains
-with LOO-406; neither automatic propagation nor concurrent-change preservation
-has been relaxed. If no sufficient guarantee exists, that exact product tradeoff
-remains unresolved. Common local ownership can progress independently.
+- Reservation and child creation share the common transactional writer. A failed
+  reservation leaves neither child nor receipt. Existing reservations recover the
+  original child, payload and Project after rotation; unrelated old-Project
+  creation still refuses. The separate post-reservation creator is deleted.
+- Historical provider intents convert into the common local creation/export
+  receipt, retaining the UUID, Project, Team, state, description and due date.
+  Saved filing input remains immutable. Common receipt aliases resolve local
+  navigation before mapping; exact provider readback adopts the same child.
+  **Remaining uncertainty:** the predecessor saved no network-attempt boundary.
+  Conversion conservatively retains an attempted/unknown export. If the issue is
+  absent remotely, it stays pending rather than issuing a potentially repeated
+  create. Local filing can finish; automatically delivering an uncreated historical
+  issue still needs evidence or a reviewed retry rule. No second creator is added.
+- `lf task reopen ISSUE [--reason TEXT]` uses common planning state delivery,
+  clears superseded completion intent, and retains PR, Workflow, checkout and
+  Processes. It starts nothing and does not restart the Workflow. The spelling is
+  an implementation choice, not a new decision attributed to Jack.
+- Combined CLI/Desktop lifecycle, populated released-data upgrade, stacking and
+  due-return acceptance remain with gate; Jack's complete demo remains separate.
+
+LOO-406's design records Jack Heart's Linear-wins policy for observed conflicts.
+Its enabled `task_completion_preserves_linear_reopening_during_delivery` regression
+retains the unseen-write race: an edit between read and unconditional mutation can
+be overwritten, and matching readback cannot prove preservation. Conditional-write
+research does not block source integration. Neither the merge nor local acceptance
+claims that race is fixed. The known failure remains in acceptance, not an
+ignored test. Linear-wins precedence supplies no atomic-write guarantee; any
+relaxation of concurrent-edit preservation still requires an explicit decision.
 
 ## Demo
 
@@ -110,66 +113,22 @@ Finally run a research Task to accepted findings and `end`: no PR is created or
 shown. Throughout, launching from a sibling checkout shows the actual Flow under
 the target Task, without the Started warning.
 
-The four lifecycle slices, landing corrections and independent completion trigger
-are implemented locally. The shared local planning integration is not built. A Task/Flow/waited-land fixture now repairs CI and reaches follow-through;
-repeated landing preserves finishing notes for pending and completed Tasks.
-Shared local planning integration, complete lifecycle proof and Jack's demo review remain.
-
 ## Inventory and findings
 
-Initial inventory: `626789dcd0382c6754ba3b7c61ea2448b57658ce`. Reconciled
-October 7 after integrating `35e759aaf`: #1492 supplies the FlowProcess API and
-`flow list --processes`; #1495 simplifies completion readiness and keeps
-terminal Task actions inert. The implementation preserves those changes. This inventory records the
-pre-change mechanisms; ship now runs `gate → land --wait-and-fix → follow-through`.
+The original symbol-by-symbol inventory, including LOO-385 overlap and retired
+serial-PR/completion paths, is retained at
+`07eeef61d:scratch/make-a-task-up-to.md`, “Inventory and findings.” The surviving
+ownership and deletion cut are below. The inventory predates common local planning
+and supplies neither combined acceptance nor authority to close LOO-385.
 
-| Existing mechanism | Finding and treatment |
-| --- | --- |
-| `ops/task.rs`: `prepare_new_task`, `create_prepared_task`, `restore_task_checkout`; `work/task/mod.rs`: `TaskPr` | Every checkout gets a working PR record. That record owns branch/base and is required even to restore a research checkout. Move placement onto Task before making its PR optional. Hiding a slot only in Swift cannot fix this. |
-| `ops/task.rs`: `pr_next`, `rotate_task_pr`, `next_pr_slug`, `deterministic_next_branch`, `roll_back_failed_rotation` | Serial rotation waits for the current merge, carries commits and dirty edits, then changes the same Task's branch. Delete rotation, preserving protection of unpublished files and historical receipts. |
-| `AfterMerge::{ContinueTask,CompleteTask}`, `MergeRequest`, `PrLanding`, `land/arm/submit` flags | Current source already defaults bare landing to completion; `-c` is redundant. `--next` preserves the alternate chain. Supplied older operating text describes a different default. Remove both flags and the disposition enum, not a second compatibility mode. |
-| `cead4c952` / #1488, LOO-408 | Merged delivery now completes by default without stale Process/Session gates. `TaskFollowUp { outcome, evidence, check_at }` and `task follow-up --clear` deliberately keep the original Task open. Replace this current writer and projection; preserve its existing unresolved obligations during conversion. Do not restore execution-completion gates. |
-| `ops/task.rs`: `reach_end`, `task_completion_gate`; `store/sqlite/children.rs`: `complete_task` | Workflow owns done. A no-Flow edge may retain dirty files, but an unpublished PR with commits still blocks completion; a placeholder only disappears if its branch is empty. Optional PR requires removing that dependency, not another exception. |
-| LOO-385, read with `lf task status LOO-385 --json` | Planning read reports unstarted/no local execution, observed_at 1791421119. It asks for Workflow-derived state and no PR slot. Much state derivation exists; the slot/placement coupling remains. This design incorporates that behavior. No issue closure or reassignment was performed; reconcile overlap before parallel implementation. |
-| `feature.yaml`, `code.yaml`, `research.yaml`, `ship.yaml` | Feature already stops for design and demo; research has an empty edge to end. Ship is `gate → cmd: pr land -c`. Land returns after requesting merge, so successful command exit cannot mean the Task reached end. |
-| `task_stack`, `record_stack_sync`, `ops/sync.rs` | Existing stack code records parent PR/fork, integrates a live parent, and handles squash landing. `sync_tests` contains child-edit, scratch, squash and conflict cases. Preserve this mechanism. Parent merge does not require replacement child identity. |
-| `finish_task_checkout` | The child's first commit deletes inherited scratch; subsequent sync preserves the child's scratch. This is intentional isolation, and explains the manual design copying in LOO-394. Add explicit design handoff; do not restore wholesale inherited scratch. |
-| `pm_create_task_idempotent` | Existing filing stores a content marker and reconciles uncertain creation, but searches the currently selected Project. A retry after rotation can miss the original issue. Follow-through needs a persisted destination and issue identity before external mutation. |
-| `task_operate.md`, `wave_operate.md`, `ops/cron.rs` | Operators leave unstarted backlog alone. The minute reconcile command observes delivery and does not launch Flows. A due date is not an installed timer or permission to start work. |
-| #1439 / `9c7b6828a`, current CLI command tree | Flow resume and Session ready/complete are removed. A stopped Flow remains history; no replacement resume/acknowledgement controller is required here. |
-| `task_session.md` with included `task_operate.md`; installed `task/session` | No explicit completion call; guidance stops when the Task lands. Update it to finish follow-through and verify completion. The restored Task command does not restore Session completion controls. |
+### Launch and provider findings
 
-### The launch defect has a shared cause
-
-The base admitted the Process before `--task` placement and launched the Flow
-child from the caller's cwd. Started and Flow membership use that recorded
-location. The milestone now resolves existing `--task`/`--wt` placement before
-admission, observes resolution failures, and gives Task Flow children their
-checkout explicitly. Physical cwd resolves lexical aliases. Flow inventory
-uses the shared checkout/Session membership predicates; Flow registration and
-Started commit together before any step launches. Historical Process rows are
-unchanged.
-
-A disposable SQLite probe executed the actual released Started trigger with one
-Task and one recorded Flow. Caller cwd reproduced “Started requires recorded Task
-work”; changing only that row's cwd to the Task checkout allowed Started. This
-proves the predicate failure and, with the dispatch ordering, a concrete defective
-path. Public CLI coverage now exercises sibling, direct `--task`, plain checkout,
-symlink and `--wt` launches. Neither fixture replays every October 7 launch.
-
-### Provider support
-
-Linear's official generated SDK defines `IssueCreateInput.id` (UUID v4),
-`dueDate` (`TimelessDate`) and `IssueRelationCreateInput`, including related issues.
-The existing Linear client now creates issues with persisted UUID v4 identities,
-dates and related-issue links; PM projects dates and follow-up sources. Simulated
-provider tests cover lost responses, issue edits/moves and chapter rotation.
-Live provider writes remain unproven. Confirmation takes the observed due date,
-including removal, while the retry intent keeps its original payload.
-
-Sources inspected October 7: [Linear SDK schema](https://github.com/linear/linear/blob/master/packages/sdk/src/_generated_documents.ts),
-[issue relations](https://linear.app/docs/issue-relations),
-[due dates](https://linear.app/docs/due-dates).
+The shared launch defect was admission at the caller's cwd before Task placement.
+The implemented cut resolves performed location first and atomically records Flow
+and Started. The original SQLite probe, CLI population and Linear schema sources
+are retained at `07eeef61d:scratch/make-a-task-up-to.md`, “The launch defect has a
+shared cause” and “Provider support.” Live provider writes remain unproven;
+observed due dates and immutable retry input remain separate.
 
 ## Accepted decisions and implemented mechanisms
 
@@ -278,12 +237,12 @@ evidence for completion, not another Task state machine. Serialize intent creati
 under the existing Task control boundary; each intended child gets a stable
 request key, persisted UUID v4, Project ID and exact payload before sending.
 On uncertainty, query that UUID and pinned destination; do not recalculate the
-Project or use a changed title as a new request. Freshly confirm issue and link
-before recording filed. Repeated calls reuse receipts, including after a crash
+Project or use a changed title as a new request. Confirm the saved Task and local
+link before recording filed; optional provider export proceeds independently. Repeated calls reuse receipts, including after a crash
 between provider success and local writeback. A second deliberate obligation
 gets a different request key. Never hold a local lock across an agent turn.
 
-Linear owns the follow-up's authored plan and date. A native `related` relation
+Local planning owns the follow-up's authored plan and date; observed conflicts adopt Linear. A native `related` relation
 gives navigation without making the child block its completed parent. The child
 brief says “Follow-up to …”; the parent's disposition records the direction and
 exact issue IDs. Desktop shows those links from the shared projection, rather
@@ -384,7 +343,8 @@ PR delivery still creates neither a Task nor follow-through obligations.
 
 ### 4. The owning Wave returns to a dated follow-up
 
-Use Linear's due date for the day a check is wanted. Exact release prerequisites,
+Use the saved planning due date, exported to Linear when connected, for the day
+a check is wanted. Exact release prerequisites,
 timezone and any time-of-day requirement stay in the brief; a date is not an
 exact-time alarm. Extend the existing PM read/DTO to carry the optional date and
 follow-up references. The owning Wave's next `wave/operate` pass lists due
@@ -458,12 +418,30 @@ commands must use the new command contract.
 
 ### Delete — do not maintain
 
-Remaining integration cut: replace `ops/pm.rs::complete_planning_task`,
-`task_pm::complete_task`, `ops/task.rs::reconcile_pm_writeback`, the completion
-arm of `PmTaskUpdate`, and direct completion writeback updates with LOO-406's
-common local planning writer. Route follow-up filing through that same planning
-owner. Do not refactor or extend these predecessor paths while that boundary is
-unfinished; no parallel local/Linear completion or filing owner may survive.
+Integration removed `complete_planning_task`, `task_pm::complete_task`,
+`reconcile_pm_writeback`, the completion arm of `PmTaskUpdate`, and direct
+completion writeback updates. Common local planning owns creation and status;
+follow-through owns its linked disposition. No parallel provider-first writer remains.
+The inline relation sender in `confirm_intent` is deleted; foreground planning
+export owns that optional effect. The obsolete `with_pr` fixture switch is removed:
+placement alone creates no Working PR, and tests must publish explicitly.
+
+Compression removes the unreachable provider-error fallback and absent-execution
+mapping in `task_status`, and the impossible absent result of `task_complete`.
+Completion reads Task state once inside its immediate transaction; the request,
+merge and disposition checks still happen there. `FollowThrough::links_confirmed`
+owns the shared filing test. Filing reuses its open store, and `follow_up_sources`
+joins target aliases in its single inventory read instead of querying per link.
+Historical missing targets and repeated link presentations retain their source.
+The skill and delivery guide no longer require provider relation confirmation
+before local disposition. Historical conversion now uses the common receipt;
+unknown remote creation stays pending. No separate creator is restored and the
+provider race remains unresolved.
+Planning-lookup fixtures exposed two reads outside their scoped store: Wave discovery
+and saved Wave configuration. Discovery now uses the existing PM selector, and
+the test-only configuration path reads that fixture’s saved documents, not the
+default Home. The first two runs failed 16/17 and 13/17 cases respectively; the
+corrected population passes without changing production Wave ownership.
 
 Implemented cuts: serial PR rotation and its CLI flags, placeholder PR creation,
 PR-owned placement, keep-open follow-up writers, ordinal PR projections,
@@ -486,43 +464,24 @@ controller, Session approval API, duplicate Task status store, or source Task
 
 ## Alternatives and review findings
 
-- **File before merge:** easier with current async land, but violates Jack's
-  chosen post-land step and can create follow-through for code never shipped.
-  Preserve suggestions in PR copy first; commit filings after verified merge.
-- **Have reconcile launch an agent:** makes completion look automatic but turns
-  read/recovery into an unrequested execution service. Keep autonomous work in
-  authored Flows and existing operators.
-- **Keep land async and add a mandatory review node:** exposes the gap but asks
-  Jack to click through routine filing. Prefer the existing ship edge waiting
-  for merge and finishing its work. Unknown scope still reaches the conversation.
-- **Leave the old Task open with a deadline:** already implemented by #1488 and
-  directly superseded by Jack's decision. Transfer the obligation, not its wait.
-- **Copy all parent scratch:** creates conflicting current-slice markers and
-  restores the failure from LOO-394. Explicit child-specific handoff preserves
-  accepted context without inheriting another Task's working notes.
-
-Simulated design review changed the proposal in three places: checkout placement
-must survive without a PR; filing retries must retain their original Project
-across chapter rotation; and a merged PR must stay visible as pending until its
-filing receipt is confirmed. These are failure boundaries, not extra approval
-steps. Success means finishing becomes boring and later evidence has an owner.
-Failure would be a new queue nobody visits, duplicate follow-ups after outages,
-or hidden multi-PR state behind a simpler label; the acceptance scenarios below
-exercise those exact cases.
+`07eeef61d:scratch/make-a-task-up-to.md`, “Alternatives and review findings,”
+retains rejected pre-merge filing, reconcile-launched agents, mandatory finishing
+reviews, keeping the source open, and wholesale parent-scratch copying. Keep
+Task-owned placement, pinned retry destinations and visible pending follow-through;
+simulated design review established those failure boundaries, not Jack's approval.
 
 ## Internal slices and acceptance
 
 One coherent lifecycle landing for LOO-418; internal slices do not authorize a
 serial PR chain. If independent work is split later, each additional PR needs
 its own Task and child-specific design. The original four slices and the independent completion trigger are implemented locally.
-Shared planning integration, local-only lifecycle proof and complete demo remain; these are
-internal slices of the same delivery boundary.
+The common planning integration and crash/local-reopening repairs exist;
+historical remote-creation uncertainty, combined acceptance and the complete
+demo remain within that same boundary.
 
-**Remaining work:** integrate LOO-406's common local planning writer once its
-coherent boundary is ready, then finish the unified lifecycle acceptance population
-below and Jack's complete demo. The current completion writer still contacts
-Linear before settling local status; this must be replaced by the common local-save
-and optional-sync owner before delivery, never retained as a second implementation. The affected
+**Remaining work:** resolve the historical remote-creation uncertainty above,
+run the unified lifecycle acceptance population below and Jack's complete demo. Completion and filing now
+use local planning; the earlier evidence does not verify the combined source. The affected
 gate ran against the earlier model; its failures have passing focused repairs.
 Those results do not verify the newly accepted completion contract.
 No-PR research now retains dirty files and committed findings; merged Tasks need
@@ -547,7 +506,7 @@ passed; configured/native acceptance is absent and landing is unauthorized.
 3. **Linked follow-through.** Durable filing/retry, dates, waited landing,
    finishing Flows and pending/done projections replace keep-open obligations.
    The skill and operators must use the independent completion operation. The composed provider fixture now covers filing, independent completion and actual
-   arrival through CLI/monitor and Rust/Swift projections; local-only integration remains.
+   arrival through CLI/monitor; combined Swift proof remains.
 4. **Selected design handoff.** Checkout transfers an explicit child design;
    retries preserve edited/deleted child notes and conflicts retain both inputs.
    `task_handoff_tests` covers those boundaries; existing `sync_tests` covers
@@ -558,7 +517,8 @@ passed; configured/native acceptance is absent and landing is unauthorized.
    arrival; failed completion retains both. Fresh provider completion/reopening
    preserves execution and supersedes old requests. CLI, shared projections,
    Desktop, instructions and the one migration draft use the new contract.
-   Integration must move settlement onto LOO-406's common local writer.
+   Settlement now queues local state and optional provider delivery in the same
+   transaction; combined acceptance remains.
 
 Gate runs the changed-aware headless plan once:
 
@@ -596,52 +556,21 @@ crash or access loss; this design claims neither. No new performance metric is
 needed for these bounded reads and existing UI surfaces. Gate should verify
 that ordinary Task reads add no per-follow-up subprocess or network call.
 
-## Implementation evidence (reconciled 2026-10-08)
+## Earlier implementation evidence
 
-The committed implementation includes Task-owned checkout placement,
-optional current PR with immutable historical rows, post-merge disposition and
-UUID-pinned Linear filing, waited land/finishing Flows, shared due/link projections,
-and explicit design handoff. Focused implementation checks pass. The earlier
-inventory records the starting point; the affected gate ran with focused repairs.
-The local-only integrated lifecycle and Jack's complete demo remain.
-
-Review removed serial store settlement and PR-based placement writers as well as
-CLI rotation. Task placement writes update the validated PR copy in one direction.
-Publishing now separates reserved intent from confirmed reviewer copy, preserving
-the prior copy when draft promotion fails. Historical continuation followed by an
-unpublished placeholder requires explicit scope conversion. No-PR completion keeps
-its artifacts, and merged completion checks the disposition inside its transaction.
-Legacy scope notes retain the original outcome, evidence condition, date and reason
-in CLI/Swift projections; a conversion flag alone did not give the finisher enough
-context. Reconcile observes a merge successfully while follow-through is pending.
-
-The public waited-landing test found competing Ctrl-C handlers. The existing
-process handler owns interruption (130, stopped without retry); timeout is held
-(3). Its lifecycle proof retains the same PR/request and checkout across interruption,
-retry, authoritative merge and later reconcile. Detached repair fixtures clear
-inherited `LF_BIN`: otherwise their children silently use the installed binary.
-
-Filing uses `--key` (default `follow-up`) for stable obligation identity; a second
-obligation needs a distinct key. Retries retain the original UUID, relation UUID,
-Project, Team, initial state and exact content. This is an implementation choice,
-not a new decision attributed to Jack. The operation-level fixture loses both
-mutation responses and readbacks, rotates the chapter and edits/moves the issue,
-then confirms the original receipt and exactly one provider issue/relation.
-The CLI proves no-PR retained research and post-merge completion within a Flow;
-Swift fixtures prove pending/done links and legacy scope text. These separate
-proofs do not establish a single configured provider-to-monitor-to-native run.
-The composed simulated-provider population below closes that headless gap; local-only integration remains unproven. The real wait loop now has
-paused-clock timeout proof, and the disposable Docker installation checks passed.
-The initial Docker pass silently selected zero Flow-history tests: removing its
-incorrect `--ignored` selection exposed and passed the actual test.
+`07eeef61d:scratch/make-a-task-up-to.md`, “Implementation evidence,” preserves
+pre-integration checks, failures and repairs. They cover publication copy,
+retained artifacts, interruption ownership, filing identities and the corrected
+zero-test Docker filter, not the combined model. Current integration evidence is
+below; configured provider/native acceptance remains unproven.
 
 ## Implementation defaults and delivery boundary
 
 Jack's zero-or-one PR and normal post-merge follow-through contract remain
 accepted. October 8 supersedes the alias: end triggers independent completion,
 and Linear completion preserves Workflow and Process state. The current code
-separates completion and position, but still needs the shared local planning
-writer and local-only lifecycle proof before the complete demo on the existing PR.
+separates completion and position through the shared local planning writer.
+Combined acceptance and the historical export decision precede the complete demo.
 
 The implementation uses the proposed polling limits and filing interface,
 removes `-c` and `--next`, and provides explicit `--design` handoff. Dated follow-ups return on the owning Wave's next operation; filing
@@ -671,7 +600,9 @@ follow-through; it now retains that obligation, and history filtering keeps
 unresolved delivery visible even with no live Process. A running Flow keeps its edge
 after accepted provider completion and records its real arrival. Newer reopening
 clears superseded intent; PM delivery checks the request after fresh acquisition.
-Migration seeds historical completion and retains pending provider writebacks.
+Migration seeds historical completion and retains pending provider writebacks;
+the inherited local-planning draft and this Task's optional-PR draft remain
+separate Task-owned drafts, not two revisions of this Task's schema.
 No new Task type, watcher or worker was introduced.
 
 The historical `scratch/pr-review.html` retains revision-pinned excerpts from the
@@ -679,46 +610,49 @@ superseded alias model. Its notice now distinguishes the implemented trigger fro
 remaining integration; it is not a walkthrough of the current contract. A current
 walkthrough remains part of the complete demo preparation.
 
-## Composed headless lifecycle (2026-10-08)
+## Composed headless lifecycle
 
-`ops::task::follow_through::tests::lifecycle` builds the branch CLI and holds a
-real Task Flow in a disposable Git repository/Home. Simulated GitHub merge
-observation precedes linked filing through the existing operations against a
-stateful Linear server. Completion records one event while the Flow remains on
-its edge; releasing the step lets the actual driver arrive at end, with one
-successful Flow and the child still unstarted. No predecessor completion writer
-was extended. The fixture shares setup and provider simulation with the existing
-lost-response/chapter-rotation regression, which remains enabled.
+The pre-integration population and failed fixture attempts are retained at
+`07eeef61d:scratch/make-a-task-up-to.md`, “Composed headless lifecycle.” It held a
+real Flow across simulated merge, in-process filing, independent completion and
+actual driver arrival. One Home supplied CLI, roadmap and monitor JSON, captured
+in `tests/fixtures/dto/task_lifecycle.json` for Rust/Swift decoding. This remains
+simulated-provider proof, not autonomous filing judgment or native acceptance.
+Its subsequent compression kept settlement's transactional recheck. Integrated
+checks below do not erase the earlier failures or prove the concurrent-write guarantee.
 
-The same Home supplies public `task status`, `roadmap` and monitor planning/Task
-frames at merged, completed-running and arrived phases. Its generated
-`tests/fixtures/dto/task_lifecycle.json` feeds Rust DTO and Swift decoder/view
-assertions, including the exact follow-up link, due date and pending/done labels.
-Live reruns compare behavioral fields with that capture, excluding volatile IDs,
-paths and clock readings. `TESTING.md` documents regeneration.
+Implementation review (2026-10-08): foreground export now delivers related-issue
+links from retained filing intents after either endpoint gains its mapping. A
+confirmation event prevents continuous remote rereads. Source completion is
+independent; reads resolve displayed names/URLs/dates from saved Task values.
+The inline filing sender is deleted. The simulated provider test loses creation
+and relation responses/readbacks, removes the child's date, and recovers one
+issue/relation without reopening the source or completing the child.
 
-Fixture construction first failed on a noncanonical seeded macOS checkout path,
-a mock `gh` lacking version discovery, and missing cached planning; those fixture
-errors are repaired. Swift initially ran before capture generation and failed on
-the missing file; the generated population now passes. Review added release-on-drop
-so an assertion failure cannot strand the held fixture step.
+All-target compilation exposed integration fixtures still assuming mandatory
+placement and a Working PR. They now unwrap explicitly placed fixtures, establish
+an actual published parent, and assert an unplaced Task rather than no Task row.
+The first new test also assumed a Task-owned Wave column and omitted its isolated
+Home; both fixture/query errors were repaired. An overly broad test-name filter
+selected two Git cherry-pick tests that failed on the Docker image's older Git
+option set; they remain with capable gate/CI, not silently counted as passes.
 
-This proves the composed simulated-provider contract, not an autonomous agent's
-filing judgment or a live provider/native Desktop run. The provider operations run
-in-process against the test server while the real Flow is held; the CLI performs
-reads, idempotent completion and actual arrival. Local-only planning composition,
-LOO-406's common writer and concurrent-reopening guarantee, full affected gate,
-stacked/due-return demo and Jack's review remain. The reopening regression was not
-rerun or resolved here. Landing remains unauthorized.
+Check (2026-10-08, disposable Docker): focused follow-up export/lost-response test, research checkout, due-follow-up projection and four handoff tests pass; prior two unchanged local/composed lifecycle tests pass; `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `git diff --check` pass. The integrated unseen-write reopening regression remains failing as recorded at `07eeef61d`; full gate, Swift and populated installation checks remain with gate.
 
-Compression review (2026-10-08): Task status derives follow-through and its latest
-event from one history read. Status and Wave projections evaluate completion
-eligibility from their already loaded PR and follow-through; the shared pure
-calculation replaces redundant reads without adding stored state. Settlement
-keeps its fresh read and transactional validation. Waited landing has one timeout
-around observation and polling, with storage failures still distinct from held
-expiry. The composed fixture reuses the existing environment guard; the README
-now describes independent completion. No predecessor completion writer changed.
-LOO-406 integration, its reopening regression and provider guarantee remain open.
+Check (2026-10-08, compression): disposable Docker `cargo test -p loopflow --test task_follow_through_tests` (3), `--lib ops::task::follow_through::tests` (3), `--lib end_request_is_atomic_and_survives_reopening_the_store` (1), and `--lib ops::pm::planning_lookup_tests` (17) pass; `cargo clippy --all-targets -- -D warnings`, native `cargo fmt --check` and `git diff --check` pass. Native compilation stalled in the build-script loader and was stopped; Docker supplies the build proof. Full gate/Swift/installation and Jack’s demo remain with their existing owners.
 
-Check (2026-10-08): reused compression results for unchanged code: `cargo test -p loopflow --lib ops::task::follow_through::tests` — 2 passed; `cargo test -p loopflow --lib landing_wait` — 4 passed; `cargo test -p loopflow --test dto_fixtures composed_lifecycle` — 1 passed; `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Swift decoder/view evidence: `432f37065:scratch/make-a-task-up-to.md`. Realign: `git diff --check` and `lf context --skill realign` passed; full gate/demo deferred.
+Implementation review (2026-10-08): old filing events cannot distinguish a
+never-sent request from a lost creation reply. Conversion therefore preserves
+uncertainty in the common export receipt instead of treating absence as permission
+to send. Atomic local filing initially failed three existing tests because the
+selected Project projection can use its provider ID; admission now resolves that
+alias to the stable local Project before checking selection, and new receipts pin
+the local identity. The first reopening test exposed that common state delivery
+supports unstarted, not started: reopening now returns planning to unstarted while
+preserving Started and execution. No schema extension is needed. The enabled
+unseen-write reopening regression remains unresolved and unchanged. The held-Flow
+fixture also exposed its predecessor assumption that adding a Workflow file after
+Wave import changes the catalog. Renaming it and changing its checkout did not
+fix that; the fixture now stores the definition through `project workflow set`.
+
+Check (2026-10-08, integration recovery): Docker `cargo test -p loopflow --lib ops::task::follow_through::tests` (5), `--test task_follow_through_tests` (3), `--test task_flow_launch_tests` filtered to local reopening and live-edge preservation (1 each), `--lib end_request_is_atomic_and_survives_reopening_the_store` (1), `--lib engine::flow_graph::tests` (10), and `cargo clippy --all-targets -- -D warnings` pass; native `cargo fmt --check` and `git diff --check` pass. Combined gate/Swift/installation and Jack's demo remain; the enabled concurrent-reopening regression is unchanged. `lf commit` returned exit 1 without a diagnostic; prior scratch edits were preserved before editing.

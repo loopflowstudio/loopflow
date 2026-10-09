@@ -1018,6 +1018,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             );
             Ok(())
         }
+        TaskCommand::Reopen { issue, reason } => {
+            loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
+            println!("{issue}: reopened; Workflow unchanged");
+            Ok(())
+        }
         TaskCommand::Complete { issue, reason } => {
             loopflow::ops::task::task_complete(repo, issue, reason.as_deref())?;
             println!("{issue}: completed");

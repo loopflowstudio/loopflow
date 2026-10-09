@@ -46,6 +46,68 @@ fn task_creation_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<NewT
     .map_err(StoreError::from)
 }
 
+// Shared creation writer. Callers either admit a new selected-Project request or
+// recover a durable filing reservation in its original Project.
+pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<Task> {
+    if let Some(intent) = task_creation_in(conn, &input.id)? {
+        if intent != *input {
+            return Err(StoreError::InvalidData(
+                "creation identity already belongs to a different request".into(),
+            ));
+        }
+        return task_on(conn, &input.id)?.ok_or(StoreError::NotFound);
+    }
+    if input.title.trim().is_empty() {
+        return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+    }
+    let wave_id: WaveId = conn.query_row(
+        "SELECT wave_id FROM projects WHERE id=?1",
+        [input.project_id.as_str()],
+        |row| row.get(0),
+    )?;
+
+    let now = OffsetDateTime::now_utc();
+    let task = Task {
+        id: input.id.clone(),
+        plan: TaskPlan {
+            revision: 0,
+            linear_id: None,
+            identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
+            title: input.title.clone(),
+            description: input.description.clone(),
+            pm_snapshot_synced_at: None,
+        },
+        pm_writeback: PmWritebackState::Current,
+        wave_id,
+        project_id: input.project_id.clone(),
+        worktree: None,
+        workspace_slug: String::new(),
+        branch: String::new(),
+        base_commit: String::new(),
+        parent_pr_id: None,
+        agent: None,
+        abandon_intent: None,
+        created_at: now,
+        updated_at: now,
+        observation: crate::work::task::Observation::NotRequired,
+    };
+    validate_task(&task)?;
+    insert_task_row(conn, &task)?;
+    conn.execute("UPDATE tasks SET planning_due_date=?3,planning_state='unstarted',planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1",params![task.id.as_str(),task.project_id.as_str(),input.due_date])?;
+    conn.execute(
+        "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
+         VALUES(?1, ?2, ?3, ?4, ?5)",
+        params![
+            input.id.as_str(),
+            input.project_id.as_str(),
+            input.title,
+            input.description,
+            input.due_date
+        ],
+    )?;
+    task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
+}
+
 impl SqliteStore {
     pub(crate) fn task_deleted(&self, task: &Task) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -110,64 +172,10 @@ impl SqliteStore {
     pub fn create_task(&self, input: &NewTask) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(intent) = task_creation_in(&tx, &input.id)? {
-            if intent != *input {
-                return Err(StoreError::InvalidData(
-                    "creation identity already belongs to a different request".into(),
-                ));
-            }
-            return task_on(&tx, &input.id)?.ok_or(StoreError::NotFound);
+        if task_creation_in(&tx, &input.id)?.is_none() {
+            super::durable::require_selected_project(&tx, &input.project_id)?;
         }
-        if input.title.trim().is_empty() {
-            return Err(StoreError::InvalidData("Task title cannot be empty".into()));
-        }
-        let wave_id: WaveId = tx.query_row(
-            "SELECT wave_id FROM projects WHERE id=?1",
-            [input.project_id.as_str()],
-            |row| row.get(0),
-        )?;
-
-        super::durable::require_selected_project(&tx, &input.project_id)?;
-        let now = OffsetDateTime::now_utc();
-        let task = Task {
-            id: input.id.clone(),
-            plan: TaskPlan {
-                revision: 0,
-                linear_id: None,
-                identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
-                title: input.title.clone(),
-                description: input.description.clone(),
-                pm_snapshot_synced_at: None,
-            },
-            pm_writeback: PmWritebackState::Current,
-            wave_id,
-            project_id: input.project_id.clone(),
-            worktree: None,
-            workspace_slug: String::new(),
-            branch: String::new(),
-            base_commit: String::new(),
-            parent_pr_id: None,
-            agent: None,
-            abandon_intent: None,
-            created_at: now,
-            updated_at: now,
-            observation: crate::work::task::Observation::NotRequired,
-        };
-        validate_task(&task)?;
-        insert_task_row(&tx, &task)?;
-        tx.execute("UPDATE tasks SET planning_due_date=?3,planning_state='unstarted',planning_rank=COALESCE((SELECT max(planning_rank)+1 FROM tasks WHERE project_id=?2 AND id!=?1),0) WHERE id=?1",params![task.id.as_str(),task.project_id.as_str(),input.due_date])?;
-        tx.execute(
-            "INSERT INTO task_creation_intents(task_id, project_id, title, description, due_date)
-             VALUES(?1, ?2, ?3, ?4, ?5)",
-            params![
-                input.id.as_str(),
-                input.project_id.as_str(),
-                input.title,
-                input.description,
-                input.due_date
-            ],
-        )?;
-        let task = task_on(&tx, &input.id)?.ok_or(StoreError::NotFound)?;
+        let task = create_task_in(&tx, input)?;
         tx.commit()?;
         Ok(task)
     }
@@ -299,6 +307,44 @@ impl SqliteStore {
         Ok(true)
     }
 
+    /// Reopen planning without touching Workflow, placement, PR or Process history.
+    pub(crate) fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        require_task_not_deleted(&tx, &task)?;
+        if super::durable::task_state_in(&tx, id)? == TaskState::Abandoned {
+            return Err(StoreError::InvalidAuthority(
+                "An abandoned Task cannot be reopened".into(),
+            ));
+        }
+        let (completed, pending): (bool, bool) = tx.query_row(
+            "SELECT planning_completed,completion_request IS NOT NULL FROM tasks WHERE id=?1",
+            [id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if completed || pending {
+            tx.execute(
+                "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
+                [id.as_str()],
+            )?;
+            super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            insert_task_event_in(
+                &tx,
+                id,
+                &TaskEventKind::Progress {
+                    summary: note.map_or_else(
+                        || "Task reopened; Workflow unchanged".into(),
+                        |note| format!("Task reopened; Workflow unchanged: {note}"),
+                    ),
+                },
+            )?;
+        }
+        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        tx.commit()?;
+        Ok(task)
+    }
+
     pub fn task(&self, task_id: &TaskId) -> StoreResult<Option<Task>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         task_on(&conn, task_id)
@@ -329,6 +375,7 @@ impl SqliteStore {
             "SELECT t.id, t.issue_title FROM tasks t
              LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
              WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
+                OR t.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)
                 OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
              ORDER BY t.id",
         )?;

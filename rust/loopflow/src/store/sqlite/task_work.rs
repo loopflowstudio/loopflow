@@ -753,6 +753,15 @@ mod tests {
         );
         let completed: i64 = conn.query_row("SELECT count(*) FROM task_events WHERE task_id=?1 AND json_extract(kind_json,'$.kind')='completed'",[task.as_str()],|row| row.get(0)).unwrap();
         assert_eq!(completed, 1);
+        drop(conn);
+        store.reopen_task(&task, Some("Continue findings")).unwrap();
+        assert!(!store.complete_task(&retained, request).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_none());
+        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        assert_ne!(
+            store.task_state(&task).unwrap(),
+            crate::durable::TaskState::Done
+        );
     }
 
     #[test]

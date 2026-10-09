@@ -40,7 +40,11 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
         if let Some(reason) = options.none.as_ref().or(options.finish.as_ref()) {
             if options.finish.is_some() {
                 for intent in &prior.intents {
-                    let link = confirm_intent(&store, repo, intent).await?;
+                    let intent = store
+                        .sqlite
+                        .reserve_follow_through(&task.id, intent)
+                        .map_err(task_error)?;
+                    let link = confirm_intent(&store, repo, &intent).await?;
                     store
                         .sqlite
                         .link_follow_through(&task.id, &link)
@@ -71,7 +75,12 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .await
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("destination Wave is not initialized"))?;
-            let project = crate::ops::project::current_project(&store, &wave)?;
+            let selected = crate::ops::project::current_project(&store, &wave)?;
+            let project = store
+                .get_project_by_project(&selected.id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
                 let saved = match store
                     .get_task_by_issue(selector)
@@ -135,11 +144,11 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                     .as_deref()
                     .unwrap_or("Linked accepted follow-through")
             );
-            let candidate = FollowThroughIntent {
+            FollowThroughIntent {
                 key: key.into(),
                 issue_id,
                 relation_id: uuid::Uuid::new_v4().to_string(),
-                project_id: project.id,
+                project_id: project.id.to_string(),
                 team_id: String::new(),
                 state_id: None,
                 wave: wave_name.into(),
@@ -147,12 +156,12 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 notes,
                 due: options.due.clone(),
                 existing,
-            };
-            store
-                .sqlite
-                .reserve_follow_through(&task.id, &candidate)
-                .map_err(task_error)?
+            }
         };
+        let intent = store
+            .sqlite
+            .reserve_follow_through(&task.id, &intent)
+            .map_err(task_error)?;
         let link = confirm_intent(&store, repo, &intent).await?;
         store
             .sqlite
@@ -173,33 +182,9 @@ async fn confirm_intent(
         .map_err(task_error)?
     {
         saved
-    } else if intent.issue_id.starts_with("task_") && !intent.existing {
-        let project = store
-            .get_project_by_project(&intent.project_id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
-        let wave = store
-            .get_wave(&project.wave_id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("follow-up destination Wave is unavailable"))?;
-        store
-            .create_task(
-                &crate::planning::NewTask {
-                    id: crate::durable::TaskId::parse(&intent.issue_id).map_err(task_error)?,
-                    project_id: project.id,
-                    title: intent.title.clone(),
-                    description: intent.notes.clone(),
-                    due_date: intent.due.clone(),
-                },
-                crate::ops::pm::lock_wave_planning(&wave).await?,
-            )
-            .await
-            .map_err(task_error)?
     } else {
-        // Historical provider receipts retain their UUID and payload. Acquire an
-        // already-created issue through the common owner; never issue another create.
+        // An explicitly linked existing issue may not have been acquired yet.
+        // New and historical filings already have a local creation receipt.
         let acquired = crate::ops::task_pm::resolve_task_async(
             repo,
             &intent.issue_id,

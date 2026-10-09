@@ -6,7 +6,7 @@ demo on October 7. The launch/alias-only milestone was the agent's scope reducti
 Jack Heart revised completion on October 8: end triggers `task complete`; it does
 not define Task status. Linear completion changes status without moving Workflow
 or stopping Processes. This supersedes the earlier alias. Local implementation preserves durable failed-trigger retries, newer reopen
-decisions, and unresolved delivery facts. Shared local planning integration remains. The prior gate verifies the earlier model, not this revision.
+decisions, and unresolved delivery facts. Shared local planning is integrated; acceptance remains. The prior gate verifies the earlier model, not this revision.
 
 Implemented defaults below remain unreviewed by Jack:
 
@@ -24,29 +24,20 @@ Implemented defaults below remain unreviewed by Jack:
 The original four slices, landing corrections and independent completion trigger
 are present. Earlier checks cover the predecessor; current focused evidence is
 in the design. The composed simulated-provider lifecycle now has CLI/monitor and Rust/Swift
-proof. Local-only lifecycle proof, LOO-406 integration and the complete demo remain. No landing or installed-Home
+proof. The local filing/completion and held-Flow composition now pass in Docker.
+Historical remote-export uncertainty, combined acceptance and the complete demo remain. No landing or installed-Home
 migration is authorized.
 
-Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. The receipt pins the initial Team/state as well as Project and content.
+Implementation choice: `task follow-up --key` identifies an obligation across retries; the default is `follow-up`, and additional obligations use distinct keys. New local receipts pin child ID, Project, content and date; provider Team/state
+are resolved by common export, not pinned at filing. Historical receipts retain
+their original provider payload; conversion now preserves its unknown network outcome in the common export receipt.
 
 Wait interruption uses the existing global exit 130 handler (a stopped Flow, without retry); timeout remains held exit 3. The public CLI test exposed a conflict with a second Tokio Ctrl-C handler, so that duplicate handler was removed.
 
-Review corrections (2026-10-08, findings from `cdde9f6a2`):
-
-- Jack Heart asked how automatic CI repair interacts with waited landing, then
-  confirmed it should repair its own PR with Desktop closed.
-  The initial wait disabled repairs and the existing guard rejected the live
-  ship driver. Waited landing now shares repair admission, exempting only its
-  recorded waiting Flow/Task controllers while retaining other-work exclusions.
-  A watcher reports busy work without marking delivery failed. The combined
-  headless Task/Flow/wait/repair/merge/follow-through fixture passes.
-- Jack asked whether already-merged `land` should succeed with a clear message.
-  Previously only the waited path checked before preparation. Jack approved the
-  correction: bare land shares that success path, confirms
-  the same PR, preserves pending follow-through, and performs no publication,
-  sync, scratch cleanup or new merge request. Keep failed/unknown observation
-  distinct from verified merge. Pending/completed Tasks, retained scratch and
-  explicit checkout selection have passing public CLI coverage.
+October 8 waited-land repair and already-merged success decisions, with their
+failed first attempts, are retained in the design and at
+`07eeef61d:scratch/questions.md`, “Review corrections.” Those decisions remain;
+new relation-delivery checks do not replace their acceptance evidence.
 
 Jack requested retry from the failed Flow step; filed Infrastructure LOO-435 on
 October 8, linked to LOO-418/PR #1499. This branch only corrects propagation of
@@ -56,17 +47,36 @@ was for continuation after caller exit (#1382), then watcher-owned repair
 (#1384); the inspected record does not establish a particular crash as the cause.
 
 Jack Heart (October 8) requested no duplicate Task data types and explicit
-`--wait-and-fix` naming. The design records the LOO-406 integration gap: shared
+`--wait-and-fix` naming. The design records the LOO-406 integration boundary: shared
 optional placement/identity and local follow-up filing/completion, not DTO merging
 alone. Existing LOO-406 types are reused; its active checkout is unchanged.
 
-October 8 source recheck: LOO-406 at `de000c24f`, with staged source changes and
-an unresolved design merge, still lacks the coherent common writer. Its
-local-save path retains the old end/completion coupling; integration
-must preserve LOO-418's independent trigger. Its recorded failing concurrent
-reopening regression exposes an outbound read/write race, not covered by this
-branch's passing observation tests. The design records the precise integration
-cut and evidence limits. Provider-guarantee research remains with LOO-406; neither
-automatic propagation nor preservation of concurrent edits may be silently
-relaxed. If both cannot be guaranteed, that product choice remains unresolved.
-The checkout was read only; no live Task/PR status or test result was refreshed.
+October 8 integration: Jack Heart authorized stacking on committed LOO-406
+`558a39232`. Merge `9f54c5b43` and its repairs adopt local creation/status while
+retaining independent completion and durable end requests. The source integration
+does not accept the unseen-write race. Linear wins observed conflicts; the enabled
+concurrent-reopening regression remains. Foreground export now owns provider relation delivery. Atomic filing/recovery and independent local reopening are implemented. Historical
+remote-creation uncertainty and combined acceptance remain explicit in the design. Neither permits restoring Workflow/status coupling or a parallel provider writer. No landing is authorized.
+
+October 8 implementation review: a locally filed child could export without its
+relation, and displayed links kept their old local name/date. Foreground export
+now settles relations from retained intents, independently of source completion;
+shared reads use the child's current saved values. Fixture-only provider outages
+and lost replies cover this path, not live Linear acceptance.
+
+Implementation choice (2026-10-08): `task reopen` changes planning only, through
+its common state-delivery owner, returning planning to unstarted while retaining
+Started and live execution. Repeated calls do not add a PR or move Workflow.
+Historical filing receipts lack a send/attempt boundary: conversion preserves
+unknown export state; a missing provider issue does not authorize another create.
+The child exists locally in its pinned Project. Automatically exporting a truly
+uncreated historical issue remains unresolved, rather than guessing it was unsent.
+
+Context limit (2026-10-08): the complete supplied launch source at
+`.lf/tmp/context/c9f039f03d3bfbe5f04fb1f0a074d7df9019efd9cf9147592dedb7b72b16a766.md`
+was inspected; its omitted section is generated changed-path metadata. The live
+query initially reported 16,306/16,000 goal tokens, while authored scratch and
+Product memory fit. A post-edit query reported 16,308/16,000 goal tokens (308 over),
+10,353/12,000 scratch tokens, and 15,995/16,000 memory tokens. This generated
+inventory cannot be shortened by curating accepted scope; no limit or Task
+directive was changed.

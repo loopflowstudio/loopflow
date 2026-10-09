@@ -33,7 +33,8 @@ fn retry_retains_original_issue_payload_and_destination() {
         &repo.head_sha(),
     );
     let sqlite = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    let original = intent("installed");
+    let mut original = intent("installed");
+    original.project_id = fixture.task.project_id.to_string();
     let saved = sqlite
         .reserve_follow_through(&fixture.task.id, &original)
         .unwrap();

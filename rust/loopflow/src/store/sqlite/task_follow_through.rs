@@ -32,6 +32,7 @@ impl SqliteStore {
              JOIN projects p ON p.id=source.project_id JOIN waves w ON w.id=p.wave_id
              JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')
+                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
              WHERE w.repo=?1 AND json_extract(e.kind_json, '$.kind')='follow_through_intent'
                 AND source.external_issue_id IS NOT NULL AND target.external_issue_id IS NOT NULL
                 AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL
@@ -99,12 +100,26 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = FollowThrough::from_events(&task_events_after_in(&tx, task, 0)?);
         if let Some(existing) = current.intents.iter().find(|prior| prior.key == intent.key) {
-            return Ok(existing.clone());
+            let existing = existing.clone();
+            create_reserved_task_in(&tx, &existing)?;
+            tx.commit()?;
+            return Ok(existing);
         }
         if super::durable::task_state_in(&tx, task)?.is_terminal() || current.resolved() {
             return Err(StoreError::InvalidAuthority(
                 "Follow-through is already resolved; file new scope as a separate Task".into(),
             ));
+        }
+        if intent.issue_id.starts_with("task_") && !intent.existing {
+            super::durable::require_selected_project(
+                &tx,
+                &crate::durable::ProjectId::from_raw(tx.query_row(
+                    "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+                    [&intent.project_id],
+                    |row| row.get::<_, String>(0),
+                )?),
+            )?;
+            create_reserved_task_in(&tx, intent)?;
         }
         insert_task_event_in(
             &tx,
@@ -189,6 +204,7 @@ impl SqliteStore {
              FROM task_events e JOIN tasks t ON t.id = e.task_id
              LEFT JOIN tasks target ON target.id=json_extract(e.kind_json, '$.link.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.link.issue_id')
+                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.link.issue_id'))
              WHERE json_extract(e.kind_json, '$.kind') = 'follow_through_linked'
              ORDER BY e.id",
         )?;
@@ -227,7 +243,7 @@ impl SqliteStore {
 fn follow_through_in(conn: &Connection, events: &[TaskEvent]) -> StoreResult<FollowThrough> {
     let mut follow_through = FollowThrough::from_events(events);
     let mut query = conn.prepare(
-        "SELECT issue_identifier,planning_url,planning_due_date FROM tasks WHERE id=?1 OR external_issue_id=?1",
+        "SELECT issue_identifier,planning_url,planning_due_date FROM tasks WHERE id=?1 OR external_issue_id=?1 OR id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)",
     )?;
     for link in &mut follow_through.links {
         if let Some((identifier, url, due)) = query
@@ -242,4 +258,50 @@ fn follow_through_in(conn: &Connection, events: &[TaskEvent]) -> StoreResult<Fol
         }
     }
     Ok(follow_through)
+}
+
+// A saved reservation, unlike an arbitrary old backlog request, has already
+// selected its destination. Recover it without admitting new work there.
+fn create_reserved_task_in(conn: &Connection, intent: &FollowThroughIntent) -> StoreResult<()> {
+    if intent.existing {
+        return Ok(());
+    }
+    let local = intent.issue_id.starts_with("task_");
+    if !local {
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE external_issue_id=?1)",
+            [&intent.issue_id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            return Ok(());
+        }
+    }
+    let id = if local {
+        TaskId::parse(&intent.issue_id)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?
+    } else {
+        let uuid = uuid::Uuid::parse_str(&intent.issue_id)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        TaskId::from_raw(format!("task_{}", uuid.simple()))
+    };
+    let project_id = conn.query_row(
+        "SELECT id FROM projects WHERE id=?1 OR external_project_id=?1",
+        [&intent.project_id],
+        |row| row.get::<_, String>(0),
+    )?;
+    let task = super::children::create_task_in(
+        conn,
+        &crate::planning::NewTask {
+            id,
+            project_id: crate::durable::ProjectId::from_raw(project_id),
+            title: intent.title.clone(),
+            description: intent.notes.clone(),
+            due_date: intent.due.clone(),
+        },
+    )?;
+    if !local {
+        super::planning_export::retain_follow_through_export_in(conn, &task.id, intent)?;
+    }
+    Ok(())
 }

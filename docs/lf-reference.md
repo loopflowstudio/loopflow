@@ -1622,6 +1622,16 @@ Complete a Task without moving its Workflow
 | `--reason` | Why, kept in the Task's completion request |
 | `--help / -h` | Print help |
 
+## lf task reopen
+
+Reopen local planning without moving Workflow or replacing the PR
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
+| `--reason` | reason |
+| `--help / -h` | Print help |
+
 ## lf task move
 
 Move Workflow position without running anything; `end` requests completion

@@ -927,6 +927,12 @@ pub enum TaskCommand {
         #[arg(long)]
         reason: Option<String>,
     },
+    /// Reopen local planning without moving Workflow or replacing the PR
+    Reopen {
+        issue: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
     /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
@@ -1095,6 +1101,7 @@ impl TaskCommand {
             | Self::Run { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
+            | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }

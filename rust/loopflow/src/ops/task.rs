@@ -773,7 +773,7 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
         match task_work_status(&store, &task).await? {
             WorkStatus::Done => {
                 return Err(task_error(format!(
-                    "Task {} is done; reopen its planning status before starting new work on {}",
+                    "Task {} is done; use `lf task reopen {}` before starting new work",
                     task.plan.identifier, task.plan.identifier
                 )))
             }
@@ -2973,6 +2973,18 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
             reconcile_task_completion(&store, &mut task).await?;
         }
         Ok(task)
+    })
+}
+
+pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
+    block_on_task(async {
+        let store = task_store().await?;
+        let task = store
+            .get_task_by_issue(issue)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        store.sqlite.reopen_task(&task.id, note).map_err(task_error)
     })
 }
 

@@ -553,3 +553,250 @@ fn fixture(
     });
     (directory, store, repo, task, wave)
 }
+
+#[test]
+fn filing_is_atomic_and_reserved_recovery_keeps_the_original_chapter() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let (directory, store, _repo, task, wave) = fixture(&runtime);
+    let intent = crate::work::task::follow_through::FollowThroughIntent {
+        key: "installed".into(),
+        issue_id: TaskId::new().to_string(),
+        relation_id: uuid::Uuid::new_v4().to_string(),
+        project_id: task.project_id.to_string(),
+        team_id: String::new(),
+        state_id: None,
+        wave: "product".into(),
+        title: "Verify installed release".into(),
+        notes: "Retain the command result".into(),
+        due: Some("2026-10-09".into()),
+        existing: false,
+    };
+    let conn = rusqlite::Connection::open(directory.path().join("loopflow.db")).unwrap();
+    conn.execute_batch("CREATE TRIGGER refuse_filing BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='follow_through_intent' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
+    assert!(store
+        .sqlite
+        .reserve_follow_through(&task.id, &intent)
+        .is_err());
+    assert!(runtime
+        .block_on(store.get_task_by_issue(&intent.issue_id))
+        .unwrap()
+        .is_none());
+    assert!(store
+        .sqlite
+        .task_follow_through(&task.id)
+        .unwrap()
+        .intents
+        .is_empty());
+    conn.execute_batch("DROP TRIGGER refuse_filing").unwrap();
+    // Simulate the previous version's crash after reservation, before creation.
+    runtime
+        .block_on(store.append_task_event(
+            &task.id,
+            &crate::work::task::TaskEventKind::FollowThroughIntent {
+                intent: intent.clone(),
+            },
+        ))
+        .unwrap();
+    let mut next = runtime
+        .block_on(store.get_project(&task.project_id))
+        .unwrap()
+        .unwrap();
+    next.id = ProjectId::new();
+    next.plan.linear_id = None;
+    next.plan.slug = "next".into();
+    runtime.block_on(store.create_project(&next)).unwrap();
+    crate::store::sqlite::project_selection::write_project_binding(
+        &store.sqlite,
+        wave.id(),
+        Some("project-1"),
+        next.id.as_str(),
+        &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+    )
+    .unwrap();
+    let mut retry = intent.clone();
+    retry.project_id = next.id.to_string();
+    retry.issue_id = TaskId::new().to_string();
+    retry.title = "Changed retry".into();
+    for _ in 0..2 {
+        assert_eq!(
+            store
+                .sqlite
+                .reserve_follow_through(&task.id, &retry)
+                .unwrap(),
+            intent
+        );
+    }
+    let child = runtime
+        .block_on(store.get_task_by_issue(&intent.issue_id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(child.project_id, task.project_id);
+    assert_eq!(child.plan.title, intent.title);
+    assert_eq!(child.plan.description, intent.notes);
+    assert_eq!(
+        super::super::task_planning_item(&store, &child)
+            .unwrap()
+            .due_date,
+        intent.due
+    );
+    assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 2);
+    let mut unrelated = intent.clone();
+    unrelated.key = "another".into();
+    unrelated.issue_id = TaskId::new().to_string();
+    assert!(store
+        .sqlite
+        .reserve_follow_through(&task.id, &unrelated)
+        .is_err());
+    assert!(store
+        .sqlite
+        .create_task(&crate::planning::NewTask {
+            id: TaskId::new(),
+            project_id: task.project_id,
+            title: "Old backlog".into(),
+            description: String::new(),
+            due_date: None,
+        })
+        .is_err());
+}
+
+#[test]
+fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertainty() {
+    let _lock = crate::journal::test_env_lock();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    for created_remotely in [false, true] {
+        let (directory, store, repo, task, wave) = fixture(&runtime);
+        let _environment = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_DATABASE"]);
+        std::env::set_var("LF_HOME", directory.path());
+        let intent = crate::work::task::follow_through::FollowThroughIntent {
+            key: "installed".into(),
+            issue_id: uuid::Uuid::new_v4().to_string(),
+            relation_id: uuid::Uuid::new_v4().to_string(),
+            project_id: "project-1".into(),
+            team_id: "original-team".into(),
+            state_id: Some("original-state".into()),
+            wave: "product".into(),
+            title: "Original title".into(),
+            notes: "Original evidence condition".into(),
+            due: Some("2026-10-09".into()),
+            existing: false,
+        };
+        runtime
+            .block_on(store.append_task_event(
+                &task.id,
+                &crate::work::task::TaskEventKind::FollowThroughIntent {
+                    intent: intent.clone(),
+                },
+            ))
+            .unwrap();
+        let mut next = runtime
+            .block_on(store.get_project(&task.project_id))
+            .unwrap()
+            .unwrap();
+        next.id = ProjectId::new();
+        next.plan.linear_id = None;
+        next.plan.slug = "next".into();
+        runtime.block_on(store.create_project(&next)).unwrap();
+        crate::store::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            Some("project-1"),
+            next.id.as_str(),
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        let linear = Arc::new(Mutex::new(Linear::default()));
+        if created_remotely {
+            linear.lock().unwrap().issues.insert(
+                intent.issue_id.clone(),
+                json!({"id":intent.issue_id,
+                "title":intent.title,"description":intent.notes,"dueDate":intent.due,
+                "teamId":"team-1","projectId":"project-1"}),
+            );
+        }
+        let (url, server) = runtime.block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            let app = axum::Router::new()
+                .route("/", axum::routing::post(respond))
+                .with_state(linear.clone());
+            (
+                url,
+                tokio::spawn(async move { axum::serve(listener, app).await.unwrap() }),
+            )
+        });
+        PM_TEST_CONTEXT.sync_scope(
+            PmTestContext {
+                path: directory.path().join("loopflow.db"),
+                store: store.clone(),
+                graphql_url: url,
+            },
+            || {
+                for _ in 0..2 {
+                    store
+                        .sqlite
+                        .reserve_follow_through(&task.id, &intent)
+                        .unwrap();
+                }
+                let child = runtime
+                    .block_on(store.get_task_by_issue(&intent.issue_id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(child.project_id, task.project_id);
+                let link = runtime
+                    .block_on(super::confirm_intent(&store, repo.path(), &intent))
+                    .unwrap();
+                store.sqlite.link_follow_through(&task.id, &link).unwrap();
+                assert!(store
+                    .sqlite
+                    .follow_up_sources()
+                    .unwrap()
+                    .contains_key(child.id.as_str()));
+                let export = store
+                    .sqlite
+                    .prepare_planning_export(
+                        crate::store::sqlite::planning_changes::PlanningChanges::Task(&child.id),
+                        "changed-team",
+                        "initiative-1",
+                    )
+                    .unwrap();
+                assert_eq!(export.id, intent.issue_id);
+                assert_eq!(export.input["teamId"], "original-team");
+                assert_eq!(export.input["stateId"], "original-state");
+                assert_eq!(export.input["dueDate"], "2026-10-09");
+                assert_eq!(export.input["description"], intent.notes);
+                let result = runtime.block_on(crate::ops::planning_export::sync_export(
+                    &store,
+                    repo.path(),
+                    &crate::durable::WorkRef::Task(child.id.clone()),
+                ));
+                if created_remotely {
+                    result.unwrap();
+                } else {
+                    assert!(result.unwrap_err().to_string().contains("uncertain"));
+                }
+                let retained = runtime
+                    .block_on(store.get_task_by_issue(&intent.issue_id))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(retained.id, child.id);
+                assert_eq!(retained.plan.linear_id.is_some(), created_remotely);
+                assert_eq!(
+                    linear.lock().unwrap().issues.len(),
+                    usize::from(created_remotely)
+                );
+                assert_eq!(runtime.block_on(store.list_tasks(None)).unwrap().len(), 2);
+                assert_eq!(
+                    store
+                        .sqlite
+                        .task_follow_through(&task.id)
+                        .unwrap()
+                        .intents
+                        .as_slice(),
+                    std::slice::from_ref(&intent)
+                );
+            },
+        );
+        server.abort();
+    }
+}

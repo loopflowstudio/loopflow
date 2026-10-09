@@ -372,7 +372,10 @@ request shows **Completion pending**; retry `lf task complete EXP-12`, without
 replaying the Flow. Completion requires merge and a durable none/filed
 disposition when the Task has a PR. Linear completion and reopening change
 status without moving the Workflow or stopping Processes; reopening supersedes
-an older completion request. A PR-less
+an older completion request. `lf task reopen EXP-12` does the same locally,
+including offline: it returns planning to unstarted and keeps the PR, checkout,
+Started evidence and Workflow position. Restart the
+Workflow separately when needed; reopening does not start work. A PR-less
 Task can finish with research files or commits; they do not create a PR
 requirement. Old Session turns and unknown process exits cannot veto completion.
 Live controls and execution history remain intact; unsafe or occupied checkouts

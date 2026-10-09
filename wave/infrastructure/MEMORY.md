@@ -625,28 +625,27 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear. Plan ownership above governs sharing and execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Causal ordering retains losers. Scalar receipts lack provider frontiers;
-older/equal-value reads remain unsafe, distinct from the parent's unseen-write race.
-Grouped receipts and legacy association remain.
+Causal ordering retains losers. The origin-only boolean is replaced in source by
+provider identity/revision/body and acquisition age. Capture and validation share
+one field map; pending local values never acquire Linear priority. Equal-value
+acquisitions retain frontiers. Peer projection reuses common provider acquisition;
+scalar receipt baselines retain provider revision. Task/Project stale/equal-read,
+uncertain-receipt and no-echo regressions are authored, not executed. Grouped
+receipts, other provider paths and legacy association remain. This does not solve
+LOO-406's unseen-write race or order Project relationships by entity revision.
 
-Joining publishes nothing. `6c0f2256f` connects dispatch/cold acquisition;
-`e62431d0d` adds taskless/reconnect lifetimes and standalone post-save exchange.
-`4e3cb2160` isolates destinations. Target-only dispatch needs no source repository.
-Linear exchange reports its provenance gap without activation, not a product limit.
-
+Joining publishes nothing. Taskless/reconnect and post-save exchange are authored;
+Mixed Linear exchange remains disabled pending composition, not a product limit.
 Fetch/import/publication stay separate; readback settles only the attempted save.
-Workers retain effect locks through cancellation; acquisition/saves stay independent.
-`59830f149` shares winners/export filtering. Damaged journals break status, not exchange.
-CLI shows conflicts; Desktop remains. Two-store/taskless fixtures are authored;
-Rust times out before tests. Forced `-i`/null stdin proves no native PTY/reconnect.
-SQL proves no Rust behavior. Release's public-entry lesson applies; native and
-installed acceptance remain unproved.
+Effect locks survive cancellation without blocking acquisition/saves. Damaged
+journals break status, not exchange. CLI holds exist; Desktop remains.
+Rust execution, native reconnect and installed acceptance remain unproved.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`.
-Holds exclude moves/private history/dependents, including retained Git documents,
-until explicit selection. Independent exchange proceeds; omission is not convergence.
-Recovery UX needs review.
-Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
+Holds omit private history/dependents, including retained Git documents, until
+explicit selection. Independent exchange proceeds; omission is not convergence.
+Recovery UX needs review. Design: `scratch/work-on-another-machine-name.md`;
+prior details: `4aca376dd:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

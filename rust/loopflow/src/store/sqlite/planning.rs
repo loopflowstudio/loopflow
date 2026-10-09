@@ -512,10 +512,6 @@ fn project_accepted_planning(
     items: &[PmItem],
     confirmed_wave: Option<(&WaveId, &str)>,
 ) -> StoreResult<()> {
-    tx.execute(
-        "UPDATE planning_peer_context SET linear=(?1='linear')",
-        [provider],
-    )?;
     let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
     let project_ids = serde_json::to_string(&projects.iter().map(|p| &p.id).collect::<Vec<_>>())?;
     let item_ids = serde_json::to_string(&items.iter().map(|i| &i.id).collect::<Vec<_>>())?;
@@ -563,6 +559,7 @@ fn project_accepted_planning(
             }?,
             None => ProjectId::new(),
         };
+        super::planning_peers::observe_project(tx, provider, &project, observed_at)?;
         let project =
             super::planning_changes::PlanningChanges::Project(&id).reconcile(tx, &project)?;
         tx.execute(
@@ -583,6 +580,7 @@ fn project_accepted_planning(
                 WHERE wave_id=?2 AND project_id=?3),planning_rank) WHERE id=?1",
             params![id.as_str(), wave_id, project.id],
         )?;
+        super::planning_peers::clear_observation(tx)?;
         super::durable::inherit_project_placement(tx, &id)?;
     }
     for item in items {
@@ -628,6 +626,7 @@ fn project_accepted_planning(
     for (id, body, observed_at, project) in updates {
         let item: PmItem = serde_json::from_str(&body)?;
         let task_id = crate::durable::TaskId::from_raw(&id);
+        super::planning_peers::observe_task(tx, provider, &item, &project, observed_at)?;
         super::task_state_delivery::reconcile_in(tx, &task_id, &item)?;
         let item = super::planning_changes::PlanningChanges::Task(&task_id).reconcile(tx, &item)?;
         let project: String = match item.project_id.as_deref() {
@@ -654,6 +653,7 @@ fn project_accepted_planning(
             params![id,item.identifier,item.name,item.description,item.state,item.completed,item.completed_at,
                 item.revision,item.url,item.branch_name,item.team_id,item.assignee,observed_at,project],
         )?;
+        super::planning_peers::clear_observation(tx)?;
     }
     let mut query = tx.prepare(&format!(
         "WITH accepted AS ({ACCEPTED_WAVE_PROJECTS})
@@ -687,6 +687,7 @@ fn project_accepted_planning(
     drop(query);
     for (body, observed_at, project) in imported {
         let item: PmItem = serde_json::from_str(&body)?;
+        super::planning_peers::observe_task(tx, provider, &item, &project, observed_at)?;
         tx.execute(
             "INSERT INTO tasks(id,project_id,external_issue_id,issue_identifier,issue_title,
              issue_description,pm_snapshot_synced_at,created_at,updated_at,planning_rank,workspace_slug,planning_state,planning_completed,
@@ -696,7 +697,7 @@ fn project_accepted_planning(
                 item.name,item.description,observed_at,super::super::rows::now_unix(),item.rank,item.state,item.completed,item.completed_at,item.revision,item.url,item.branch_name,item.team_id,item.assignee],
         )?;
     }
-    tx.execute("UPDATE planning_peer_context SET linear=0", [])?;
+    super::planning_peers::clear_observation(tx)?;
     Ok(())
 }
 
@@ -751,7 +752,7 @@ fn require_accepted_initiative(
     Ok(accepted)
 }
 
-fn validate_project_membership(
+pub(super) fn validate_project_membership(
     conn: &Connection,
     repo: &str,
     provider: &str,
@@ -789,7 +790,7 @@ fn validate_project_membership(
     Ok(())
 }
 
-fn put_project(
+pub(super) fn put_project(
     conn: &Connection,
     repo: &str,
     provider: &str,

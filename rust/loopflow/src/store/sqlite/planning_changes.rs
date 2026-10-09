@@ -297,11 +297,11 @@ impl<'a> PlanningChanges<'a> {
     ) -> StoreResult<()> {
         let value = self.normalize(conn, field, value)?;
         let (owner, id) = self.owner();
-        // A peer's observed predecessor is stronger than this machine's older
-        // cache. The peer protocol carries values, not a provider revision.
+        // Preserve the causal predecessor's provider revision, not this
+        // machine's potentially newer observation of a different value.
         let base = match baseline {
-            Some(value) => Some(serde_json::json!({
-                "revision": null, "value": self.normalize(conn, field, value)?
+            Some(base) => Some(serde_json::json!({
+                "revision": base["revision"], "value": self.normalize(conn, field, base["value"].clone())?
             })),
             None => self
                 .observation(conn)?
@@ -335,6 +335,7 @@ impl<'a> PlanningChanges<'a> {
         field: &str,
         mutation: &str,
         value: Value,
+        revision: Option<&str>,
     ) -> StoreResult<()> {
         let value = self.normalize(conn, field, value)?;
         let (owner, id) = self.owner();
@@ -346,7 +347,8 @@ impl<'a> PlanningChanges<'a> {
             params![
                 id,
                 field,
-                serde_json::json!({"value":value,"peer_change":mutation}).to_string()
+                serde_json::json!({"value":value,"peer_change":mutation,"revision":revision})
+                    .to_string()
             ],
         )?;
         Ok(())

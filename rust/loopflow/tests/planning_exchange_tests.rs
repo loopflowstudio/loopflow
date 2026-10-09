@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use loopflow::engine::planning_exchange::{
-    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
+    LinearObservation, PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
 use serde_json::json;
 
@@ -32,7 +32,23 @@ fn write(
                 json!(value)
             },
             clock,
-            linear,
+            linear: linear.then(|| {
+                let mut item: loopflow::pm::PmItem = serde_json::from_value(
+                    serde_json::from_str::<serde_json::Value>(include_str!(
+                        "../../../tests/fixtures/dto/task_history_planning.json"
+                    ))
+                    .unwrap()["items"][0]
+                        .clone(),
+                )
+                .unwrap();
+                item.name = value.into();
+                item.state = Some(value.into());
+                item.revision = Some("2026-10-08T10:00:00Z".into());
+                LinearObservation {
+                    body: serde_json::to_value(item).unwrap(),
+                    observed_at: 1,
+                }
+            }),
             parents,
         },
     );
@@ -118,7 +134,7 @@ fn observed_reopening_beats_delayed_completion_and_linear_beats_concurrent_peer(
     assert_eq!(value(&merged, "disposition"), "Linear open");
     let (id, winner) = merged.winners().next().unwrap();
     assert_eq!(id, "linear-reopen");
-    assert!(winner.linear);
+    assert!(winner.linear.is_some());
     assert_eq!(winner, &merged.changes[id]);
     assert_eq!(
         merged.changes["later"].value["planning_state"],
@@ -168,4 +184,65 @@ fn conflicting_identity_missing_ancestors_and_execution_fields_are_rejected() {
         changes: BTreeMap::new(),
     };
     assert_eq!(saved.merge(&empty).unwrap(), saved);
+}
+
+#[test]
+fn concurrent_linear_facts_follow_provider_revision_not_the_receivers_clock() {
+    let mut newer = PlanningSnapshot::default();
+    write(&mut newer, "newer", "issue_title", "Newer", 2, true);
+    newer
+        .changes
+        .get_mut("newer")
+        .unwrap()
+        .linear
+        .as_mut()
+        .unwrap()
+        .body["revision"] = json!("2026-10-08T12:00:00Z");
+    let mut delayed = PlanningSnapshot::default();
+    write(&mut delayed, "delayed", "issue_title", "Older", 100, true);
+    let merged = newer.merge(&delayed).unwrap();
+    assert_eq!(value(&merged, "issue_title"), "Newer");
+    assert_eq!(merged.changes["delayed"].value, "Older");
+}
+
+#[test]
+fn provider_observations_cannot_smuggle_execution_or_invalid_revisions() {
+    let mut snapshot = PlanningSnapshot::default();
+    write(
+        &mut snapshot,
+        "observed",
+        "issue_title",
+        "Observed",
+        1,
+        true,
+    );
+    snapshot
+        .changes
+        .get_mut("observed")
+        .unwrap()
+        .linear
+        .as_mut()
+        .unwrap()
+        .body["worktree"] = json!("/private/path");
+    assert!(snapshot.to_bytes().is_err());
+    snapshot
+        .changes
+        .get_mut("observed")
+        .unwrap()
+        .linear
+        .as_mut()
+        .unwrap()
+        .body
+        .as_object_mut()
+        .unwrap()
+        .remove("worktree");
+    snapshot
+        .changes
+        .get_mut("observed")
+        .unwrap()
+        .linear
+        .as_mut()
+        .unwrap()
+        .body["revision"] = json!("not-a-revision");
+    assert!(snapshot.to_bytes().is_err());
 }

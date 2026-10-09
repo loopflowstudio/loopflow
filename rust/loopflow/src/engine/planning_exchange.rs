@@ -70,6 +70,109 @@ pub struct PlanningObject {
     pub id: String,
 }
 
+/// The provider fact that justified a mutation, including its original acquisition
+/// time. Peer receipt time and Git ancestry cannot establish provider freshness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinearObservation {
+    pub body: Value,
+    pub observed_at: i64,
+}
+
+impl LinearObservation {
+    pub fn revision(&self) -> Option<&str> {
+        self.body["revision"].as_str()
+    }
+
+    pub(crate) fn revision_time(&self) -> Option<i128> {
+        self.revision().and_then(|revision| {
+            time::OffsetDateTime::parse(revision, &time::format_description::well_known::Rfc3339)
+                .ok()
+                .map(|time| time.unix_timestamp_nanos())
+        })
+    }
+
+    /// Fields with entity-revision ordering. Membership's local IDs are resolved
+    /// by the Store; Project relationships and list rank have separate frontiers.
+    pub(crate) fn fields(&self, kind: PlanningKind) -> Result<Value, serde_json::Error> {
+        Ok(match kind {
+            PlanningKind::Task => {
+                let item: crate::pm::PmItem = serde_json::from_value(self.body.clone())?;
+                serde_json::json!({
+                    "external_issue_id":item.id,"issue_identifier":item.identifier,
+                    "issue_title":item.name,"issue_description":item.description,
+                    "planning_assignee":item.assignee,
+                    "disposition":{"planning_state":item.state,"planning_completed":i32::from(item.completed),"planning_completed_at":item.completed_at},
+                    "planning_url":item.url,"planning_branch_name":item.branch_name,"planning_team_id":item.team_id,
+                })
+            }
+            PlanningKind::Project => {
+                let project: crate::pm::PmProject = serde_json::from_value(self.body.clone())?;
+                serde_json::json!({
+                    "external_project_id":project.id,"project_slug":project.slug,"project_name":project.name,
+                    "project_summary":project.summary,"workflow":project.workflow,"status":project.status.as_str(),
+                    "project_prompt_context":crate::pm::render_project_content(&crate::pm::ProjectContent {
+                        workflow:project.workflow.clone(), krs:project.krs.clone(), metric_targets:project.metric_targets.clone(),
+                    }),
+                })
+            }
+            PlanningKind::Comment => serde_json::json!({"content":{
+                "body":self.body["body"],"author":self.body["author"],"created_at":self.body["created_at"],
+            }}),
+            PlanningKind::Wave => serde_json::json!({}),
+        })
+    }
+
+    fn validate(&self, kind: PlanningKind) -> Result<(), PlanningExchangeError> {
+        if self.observed_at < 0
+            || self.body["id"].as_str().is_none_or(str::is_empty)
+            || self
+                .body
+                .get("revision")
+                .is_none_or(|value| !value.is_null() && !value.is_string())
+            || (self.revision().is_some() && self.revision_time().is_none())
+        {
+            return Err(PlanningExchangeError::Invalid("invalid Linear observation"));
+        }
+        // Round trips reject extra payload, including local execution or paths.
+        let body = match kind {
+            PlanningKind::Task => serde_json::to_value(
+                serde_json::from_value::<crate::pm::PmItem>(self.body.clone())?,
+            )?,
+            PlanningKind::Project => serde_json::to_value(serde_json::from_value::<
+                crate::pm::PmProject,
+            >(self.body.clone())?)?,
+            PlanningKind::Comment => {
+                let valid = self.body.as_object().is_some_and(|body| {
+                    body.len() == 5
+                        && ["id", "revision", "body", "author", "created_at"]
+                            .iter()
+                            .all(|key| body.contains_key(*key))
+                }) && self.body["body"].is_string()
+                    && self.body["author"]
+                        .as_str()
+                        .is_some_and(|author| serde_json::from_str::<Value>(author).is_ok())
+                    && (self.body["created_at"].is_null() || self.body["created_at"].is_string());
+                if !valid {
+                    return Err(PlanningExchangeError::Invalid("invalid Linear comment"));
+                }
+                self.body.clone()
+            }
+            PlanningKind::Wave => {
+                return Err(PlanningExchangeError::Invalid(
+                    "Wave has no Linear observation",
+                ))
+            }
+        };
+        if body != self.body {
+            return Err(PlanningExchangeError::Invalid(
+                "unexpected Linear observation fields",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningMutation {
@@ -78,7 +181,7 @@ pub struct PlanningMutation {
     pub value: Value,
     /// Hybrid logical milliseconds, advanced beyond every observed mutation.
     pub clock: i64,
-    pub linear: bool,
+    pub linear: Option<LinearObservation>,
     /// Observed heads of this field, not a global revision or Git ancestry.
     pub parents: BTreeSet<String>,
 }
@@ -150,7 +253,17 @@ impl PlanningSnapshot {
                         .expect("a head belongs to the snapshot");
                     (id.as_str(), change)
                 })
-                .max_by_key(|(id, change)| (change.linear, change.clock, *id))
+                .max_by_key(|(id, change)| {
+                    (
+                        change.linear.is_some(),
+                        change
+                            .linear
+                            .as_ref()
+                            .and_then(LinearObservation::revision_time),
+                        change.clock,
+                        *id,
+                    )
+                })
                 .expect("a field has at least one head")
         })
     }
@@ -165,6 +278,24 @@ impl PlanningSnapshot {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
             validate_value(change)?;
+            if let Some(observation) = &change.linear {
+                observation.validate(change.object.kind)?;
+                let fields = observation.fields(change.object.kind)?;
+                if let Some(value) = fields.get(&change.field) {
+                    if value != &change.value {
+                        return Err(PlanningExchangeError::Invalid(
+                            "mutation disagrees with its Linear observation",
+                        ));
+                    }
+                } else if !matches!(
+                    (change.object.kind, change.field.as_str()),
+                    (PlanningKind::Task, "project_id") | (PlanningKind::Comment, "task_id")
+                ) {
+                    return Err(PlanningExchangeError::Invalid(
+                        "field has no Linear entity frontier",
+                    ));
+                }
+            }
             for parent in &change.parents {
                 let previous = self
                     .changes

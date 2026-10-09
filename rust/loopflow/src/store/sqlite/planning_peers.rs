@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
-    PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
+    LinearObservation, PlanningKind, PlanningMutation, PlanningObject, PlanningSnapshot,
 };
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
@@ -20,6 +20,65 @@ use super::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
+}
+
+/// Mark only fields equal to the accepted provider fact. Reconciliation may
+/// preserve a pending local value; that value must not acquire Linear priority.
+pub(super) fn observe_task(
+    conn: &Connection,
+    provider: &str,
+    item: &crate::pm::PmItem,
+    project: &str,
+    observed_at: i64,
+) -> StoreResult<()> {
+    let observation = LinearObservation {
+        body: serde_json::to_value(item)?,
+        observed_at,
+    };
+    let mut fields = observation.fields(PlanningKind::Task)?;
+    fields["project_id"] = Value::String(project.into());
+    observe_in(conn, provider, &observation, &fields)
+}
+
+pub(super) fn observe_project(
+    conn: &Connection,
+    provider: &str,
+    project: &crate::pm::PmProject,
+    observed_at: i64,
+) -> StoreResult<()> {
+    let observation = LinearObservation {
+        body: serde_json::to_value(project)?,
+        observed_at,
+    };
+    let fields = observation.fields(PlanningKind::Project)?;
+    observe_in(conn, provider, &observation, &fields)
+}
+
+fn observe_in(
+    conn: &Connection,
+    provider: &str,
+    observation: &LinearObservation,
+    fields: &Value,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE planning_peer_context SET observation=?1,fields=?2",
+        params![
+            (provider == "linear")
+                .then_some(observation)
+                .map(serde_json::to_string)
+                .transpose()?,
+            fields.to_string(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn clear_observation(conn: &Connection) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE planning_peer_context SET observation=NULL,fields=NULL",
+        [],
+    )?;
+    Ok(())
 }
 
 impl SqliteStore {
@@ -656,7 +715,11 @@ fn retain_mutations(
                 change.field,
                 change.value.to_string(),
                 change.clock,
-                change.linear,
+                change
+                    .linear
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
                 serde_json::to_string(&change.parents)?
             ],
         )?;
@@ -716,7 +779,10 @@ fn read_mutation(row: &rusqlite::Row<'_>) -> StoreResult<PlanningMutation> {
         field: row.get(2)?,
         value: serde_json::from_str(&row.get::<_, String>(3)?)?,
         clock: row.get(4)?,
-        linear: row.get(5)?,
+        linear: row
+            .get::<_, Option<String>>(5)?
+            .map(|body| serde_json::from_str(&body))
+            .transpose()?,
         parents: serde_json::from_str(&row.get::<_, String>(6)?)?,
     })
 }
@@ -835,8 +901,88 @@ fn insert_and_project(
             })
             .map(|(&field, &value)| (field, value)),
     )?;
+    acquire_linear_frontier(conn, object, fields, repo, snapshot)?;
     project_delivery_fields(conn, object, winners, snapshot, &previous)?;
     require_repository(conn, object, repo)
+}
+
+/// Reuse provider acquisition's revision and equal-revision checks, rather than
+/// treating peer receipt time as a fresh read. This is inside the object's
+/// projection savepoint: rejected ownership never advances its provider cache.
+fn acquire_linear_frontier(
+    conn: &Connection,
+    object: &PlanningObject,
+    fields: &BTreeMap<&str, &Value>,
+    repo: &str,
+    snapshot: &PlanningSnapshot,
+) -> StoreResult<()> {
+    let (provider_table, mapping) = match object.kind {
+        PlanningKind::Task => ("pm_items", "external_issue_id"),
+        PlanningKind::Project => ("pm_projects", "external_project_id"),
+        _ => return Ok(()),
+    };
+    let Some(provider_id) = fields[mapping].as_str() else {
+        return Ok(());
+    };
+    let mut observations = snapshot
+        .changes
+        .values()
+        .filter(|change| change.object == *object)
+        .filter_map(|change| change.linear.as_ref())
+        .filter(|observation| observation.body["id"].as_str() == Some(provider_id))
+        .map(|observation| {
+            Ok((
+                super::planning::revision_nanos(observation.revision())?,
+                observation,
+            ))
+        })
+        .collect::<StoreResult<Vec<_>>>()?;
+    observations.sort_by_key(|(revision, observation)| (*revision, observation.observed_at));
+    observations.dedup_by(|a, b| a.1 == b.1);
+    for (_, observation) in observations {
+        let retained: Option<(String, i64)> = conn.query_row(
+            &format!("SELECT body,observed_at FROM {provider_table} WHERE repo=?1 AND provider='linear' AND id=?2"),
+            params![repo, provider_id], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        if let Some((body, acquired)) = retained {
+            let body: Value = serde_json::from_str(&body)?;
+            if body == observation.body && acquired >= observation.observed_at {
+                continue;
+            }
+        }
+        match object.kind {
+            PlanningKind::Task => {
+                let item = serde_json::from_value(observation.body.clone())?;
+                if super::planning::put_item(conn, repo, "linear", observation.observed_at, &item)?
+                {
+                    conn.execute("UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider='linear' AND id=?2 AND needs_refresh!=0", params![repo, provider_id])?;
+                }
+            }
+            PlanningKind::Project => {
+                let project = serde_json::from_value(observation.body.clone())?;
+                super::planning::validate_project_membership(conn, repo, "linear", &project)?;
+                super::planning::put_project(
+                    conn,
+                    repo,
+                    "linear",
+                    observation.observed_at,
+                    &project,
+                )?;
+            }
+            _ => unreachable!("only Tasks and Projects have entity frontiers"),
+        }
+    }
+    conn.execute(
+        &format!(
+            "UPDATE {} SET planning_provider_revision=(SELECT json_extract(body,'$.revision')
+        FROM {provider_table} WHERE repo=?2 AND provider='linear' AND id=?3)
+        WHERE id=?1 AND planning_provider_revision IS NOT (SELECT json_extract(body,'$.revision')
+        FROM {provider_table} WHERE repo=?2 AND provider='linear' AND id=?3)",
+            table(object.kind)
+        ),
+        params![object.id, repo, provider_id],
+    )?;
+    Ok(())
 }
 
 // These are the scalar fields delivered by the common field writer. State,
@@ -901,8 +1047,14 @@ fn project_delivery_fields(
         let Some(field) = delivery_field(object.kind, &change.field) else {
             continue;
         };
-        if change.linear {
-            owner.adopt_peer_linear(conn, field, id, change.value.clone())?;
+        if let Some(observation) = &change.linear {
+            owner.adopt_peer_linear(
+                conn,
+                field,
+                id,
+                change.value.clone(),
+                observation.revision(),
+            )?;
         } else if previous.get(&change.field) != Some(&change.value) {
             owner.record_value(
                 conn,
@@ -925,12 +1077,18 @@ fn linear_predecessor(snapshot: &PlanningSnapshot, change: &PlanningMutation) ->
             continue;
         }
         let prior = &snapshot.changes[id];
-        if prior.linear && latest.is_none_or(|(clock, key)| (prior.clock, id) > (clock, key)) {
-            latest = Some((prior.clock, id));
+        if let Some(observation) = &prior.linear {
+            let candidate = (observation.revision_time(), prior.clock, id);
+            if latest.is_none_or(|previous| candidate > previous) {
+                latest = Some(candidate);
+            }
         }
         pending.extend(prior.parents.iter().map(String::as_str));
     }
-    latest.map(|(_, id)| snapshot.changes[id].value.clone())
+    latest.map(|(_, _, id)| {
+        let prior = &snapshot.changes[id];
+        serde_json::json!({"value":prior.value,"revision":prior.linear.as_ref().and_then(LinearObservation::revision)})
+    })
 }
 
 fn projection_conflict(error: &StoreError) -> bool {
@@ -1328,6 +1486,230 @@ mod tests {
             .import_peer_planning("/target", &destination(), "linear", &incoming)
             .unwrap();
         assert_eq!(target.revisions().unwrap(), revision);
+    }
+
+    #[test]
+    fn peer_linear_frontier_survives_older_and_equal_value_acquisition_without_echo() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        target
+            .import_peer_planning(
+                "/target",
+                &destination(),
+                "base",
+                &source
+                    .export_peer_planning("/source", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        // Execution remains a local fact throughout provider/peer reconciliation.
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/retained/work',started_at=7 WHERE id=?1",
+                [&task],
+            )
+            .unwrap();
+        target.conn.lock().unwrap().execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+             VALUES('retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task,wave],
+        ).unwrap();
+        edit_title(&target, &task, "Uncertain local title");
+        let receipt = target
+            .pending_task_changes(&task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "name")
+            .unwrap();
+        target
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE task_changes SET attempted=1,error='lost response' WHERE id=?1",
+                [&receipt.id],
+            )
+            .unwrap();
+        let mut record = crate::store::PmTaskRecord {
+            item: row.snapshot.items[0].clone(),
+            project: Some(row.snapshot.projects[0].clone()),
+            observed_at: 43,
+        };
+        record.item.name = "Linear winner".into();
+        record.item.revision = Some("2026-10-08T11:00:00Z".into());
+        source
+            .put_pm_task("/source", "linear", &record, Some((&wave, "initiative")))
+            .unwrap();
+        // No planning value changes in this second observation. Its frontier must
+        // nevertheless cross the peer boundary and fence a later older response.
+        record.item.revision = Some("2026-10-08T12:00:00Z".into());
+        record.observed_at = 44;
+        source
+            .put_pm_task("/source", "linear", &record, Some((&wave, "initiative")))
+            .unwrap();
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let execution_before = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "newer", &incoming)
+            .unwrap();
+        let before_reads = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        let retained = target.task(&task).unwrap().unwrap();
+        assert_eq!(retained.plan.title, "Linear winner");
+        assert_eq!(
+            retained.worktree.as_deref(),
+            Some(std::path::Path::new("/retained/work"))
+        );
+        let execution_after = target.revisions().unwrap();
+        assert_eq!(execution_before.sessions, execution_after.sessions);
+        assert_eq!(execution_before.processes, execution_after.processes);
+        assert_eq!(execution_before.flows, execution_after.flows);
+        for (revision, title) in [
+            ("2026-10-08T10:00:00Z", row.snapshot.items[0].name.as_str()),
+            ("2026-10-08T11:00:00Z", "Linear winner"),
+            ("2026-10-08T12:00:00Z", "Linear winner"),
+        ] {
+            let mut delayed = record.clone();
+            delayed.item.revision = Some(revision.into());
+            delayed.item.name = title.into();
+            delayed.observed_at = 100; // receipt age cannot order provider facts
+            target
+                .put_pm_task("/target", "linear", &delayed, Some((&wave, "initiative")))
+                .unwrap();
+            assert_eq!(
+                target.task(&task).unwrap().unwrap().plan.title,
+                "Linear winner"
+            );
+            let conn = target.conn.lock().unwrap();
+            let frontier: String = conn.query_row(
+                "SELECT json_extract(body,'$.revision') FROM pm_items WHERE repo='/target' AND id=?1",
+                [&record.item.id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(frontier, "2026-10-08T12:00:00Z");
+            let saved: (bool, bool, String, String) = conn
+                .query_row(
+                    "SELECT attempted,acknowledged,error,value_json FROM task_changes WHERE id=?1",
+                    [&receipt.id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .unwrap();
+            assert_eq!(
+                saved,
+                (
+                    true,
+                    false,
+                    "lost response".into(),
+                    json!("Uncertain local title").to_string()
+                )
+            );
+        }
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            before_reads
+        );
+        assert!(target.pending_task_changes(&task).unwrap().is_empty());
+        // A same-revision contradiction rejects atomically, retaining frontier,
+        // receipt history and the existing imported journal.
+        record.item.name = "Conflicting same revision".into();
+        assert!(target
+            .put_pm_task("/target", "linear", &record, Some((&wave, "initiative")))
+            .is_err());
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            before_reads
+        );
+    }
+
+    #[test]
+    fn equal_value_provider_revision_does_not_relabel_a_pending_local_value() {
+        let (_home, source) = store();
+        let (wave, row, task) = linear_seed(&source);
+        edit_title(&source, &task, "Saved locally");
+        let receipt = source.pending_task_changes(&task).unwrap();
+        let mut item = row.snapshot.items[0].clone();
+        item.revision = Some("2026-10-08T12:00:00Z".into());
+        source
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item,
+                    project: Some(row.snapshot.projects[0].clone()),
+                    observed_at: 45,
+                },
+                Some((&wave, "initiative")),
+            )
+            .unwrap();
+        assert_eq!(
+            source.task(&task).unwrap().unwrap().plan.title,
+            "Saved locally"
+        );
+        assert_eq!(source.pending_task_changes(&task).unwrap(), receipt);
+        let snapshot = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let (_, title) = snapshot
+            .winners()
+            .find(|(_, change)| change.object.id == task.as_str() && change.field == "issue_title")
+            .unwrap();
+        assert!(title.linear.is_none());
+        assert!(snapshot.changes.values().any(|change| {
+            change.object.id == task.as_str()
+                && change.linear.as_ref().is_some_and(|observation| {
+                    observation.revision() == Some("2026-10-08T12:00:00Z")
+                })
+        }));
+    }
+
+    #[test]
+    fn peer_project_frontier_keeps_equal_value_revision_and_rejects_old_detail() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, _) = linear_seed(&source);
+        let mut project = row.snapshot.projects[0].clone();
+        project.name = "Current Project".into();
+        for revision in ["2026-10-08T11:00:00Z", "2026-10-08T12:00:00Z"] {
+            project.revision = Some(revision.into());
+            source
+                .put_pm_project(&wave, "linear", "initiative", &project, 45)
+                .unwrap();
+        }
+        target
+            .import_peer_planning(
+                "/target",
+                &destination(),
+                "project",
+                &source
+                    .export_peer_planning("/source", &destination())
+                    .unwrap(),
+            )
+            .unwrap();
+        let before = target
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        project.name = "Delayed Project".into();
+        project.revision = Some("2026-10-08T11:30:00Z".into());
+        let accepted = target
+            .put_pm_project(&wave, "linear", "initiative", &project, 100)
+            .unwrap();
+        assert_eq!(accepted.name, "Current Project");
+        assert_eq!(accepted.revision.as_deref(), Some("2026-10-08T12:00:00Z"));
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            before
+        );
     }
 
     #[test]
@@ -1824,7 +2206,7 @@ mod tests {
             .unwrap(),
             task.id.as_str()
         );
-        assert!(conn.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE kind='task' AND object_id=?1 AND field='project_id' AND linear=1 AND json_extract(value,'$')=?2)", params![task.id,private_id], |r| r.get::<_,bool>(0)).unwrap());
+        assert!(conn.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE kind='task' AND object_id=?1 AND field='project_id' AND linear IS NOT NULL AND json_extract(value,'$')=?2)", params![task.id,private_id], |r| r.get::<_,bool>(0)).unwrap());
     }
 
     #[test]

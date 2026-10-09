@@ -50,19 +50,17 @@ ages and causal invalidation findings remain at
 scalar/list replay cannot clear freshness. Earlier 63 peer-storage passes and four
 focused invalidation checks are bounded evidence, not combined acceptance.
 
-New source cuts: `60d113a70` makes Wave Machine placement nullable in Rust/Swift
-and displays imported Waves without allocating placement. `c20e4ad13` adds Git
-destination receipts/holds to the repository Work stream and Desktop, independent
-of roadmap availability. Scope/Machine fencing and last-good readings preserve
-unavailable state; there is no second poller or setup action. The dependency records
-focused headless proof, not per-Work sharing/recovery UX or native acceptance.
+`60d113a70`/`c20e4ad13` supply unplaced Waves and repository-scoped Git
+receipts/holds through the existing Work stream. Scoped last-good readings survive
+unavailability; no second poller. Earlier detail: `a73198197:scratch/findings.md`,
+this heading. Per-Work sharing/recovery and native acceptance remain unproved.
 
 `7260e4602` moves provider-mapping validation ahead of both scalar projection and
 independent evidence. A new fixture retains mapping, uncertain effects and execution
 when peers remove/replace a mapping, while independent objects import. The earlier
 raw-SQL unmapping recovery was removed: it could turn legacy Work into a duplicate
-provider-creation candidate without reconciling issue lookup or effects. Explicit
-legacy association remains unfinished. This newest fixture was inspected, not run.
+provider-creation candidate without reconciling issue lookup or effects. Divergent Task/Project provider association remains unfinished; repository-root
+binding below is a different operation. This fixture was inspected, not run.
 
 `ops/planning_peer.rs` still refuses connected Linear exchange. Partial-list/public
 composition, foreground provider lifetime/native reconnect and peer-exclusive start
@@ -70,12 +68,6 @@ remain unproved. Imported unrun records and populated storage fixtures cannot pr
 live control preservation. Dependency plan/memory: `7260e4602`, **Remaining integration**
 and **Tasks across machines**; no mixed-provider activation follows from these reads.
 
-October 9: filesystem inspection found no Product child directories/memories.
-Infrastructure planning/Machine/Task-decision sections, LOO-412's committed plan and
-peer memory, and Intelligence context/check-ownership sections were read; unrelated
-sibling history was not re-audited. Main `3e1e6245c` (#1512) is already integrated.
-Its dead-driver resume uses a fresh engine on native history; live connect still
-hands off. Neither mechanism gives planning imports process-control authority.
 
 ## Arrangement evidence — October 8
 
@@ -154,44 +146,51 @@ foreground lifetime and Desktop Work stream are reused. Merge review found
 started-Machine retention and effect-free previews. They are excluded rather than
 silently changing those contracts. Copied child placement remains deleted.
 
-`repo identity --bind` exposes explicit existing-store association without a new
-registry or publication. It intentionally preserves/refuses an existing different
-repository identity; this slice does not solve divergent-root association. The
-independent-Task fixture exchanges real common-writer journals, not matched Task
-IDs. Its first run exposed an invalid retained-checkout fixture (empty workspace
-slug); the fixture now records a valid slug, Machine and distinct checkout paths. Populated legacy local
-execution is retained separately from first-start authority. Review also found import could expose local-default allocation without peer
-admission. The shared admission owner now refuses first start for shared Tasks
-without retained checkouts; it leaves saves and acquisition alone. Mixed Linear/Git,
-delegation exchange, exclusive admission and remote/native composition remain.
+`d4fbca0ae` replaces the earlier different-ID refusal and pre-bound fixture.
+Both roots now own Work and distinct repository IDs before explicit association.
+Prior IDs remain local locators; journals, selections, provider lookup, uncertain
+effects and local execution survive. The provider fixture initially omitted the
+expected revision and correctly failed attempt admission; it now uses the retained
+observation. Earlier empty-workspace-slug and pre-binding evidence remains at
+`d4fbca0ae:scratch/findings.md`, this heading. No mixed-provider activation follows.
 
-Compression review keeps object preparation immutable and scalar selection on the
-portable schema. Per-field savepoint handling stays inline: extracting it under the
-outer conflict handler could soften a commit/release failure into a projection hold.
-Retained mutation identity checks precede completeness validation. Creation readback
-still reconciles both pre-existing and newly projected delivery receipts; neither
-call is redundant. Focused checks do not authorize mixed-provider activation.
+Compression review found routing still resolved Task prefixes globally before
+checking repository paths, unlike entry dispatch's scoped lookup. A shared scoped
+resolver removes that second policy: historical locators select the path before
+Task lookup. The fixture distinguishes two same-prefix Tasks, retains the selected
+plan after association, rejects another repository's Work and leaves unknown
+Tasks for acquisition. Missing-locator guidance now names explicit binding rather
+than suggesting planning sync supplies identity. These are local resolver proofs,
+not configured SSH or exclusive admission.
 
-Source review at `97bf9dbcb` distinguishes independent Task creation from root
-association: `independent_peer_tasks_converge_without_transferring_execution`
-binds the repository ID before creating either Task. `PlanningKind::fields()`
-exports neither repository identity nor delegation; first Wave import allocates
-local identity via `ensure_repository_in`. The admission guard checks membership
-in any destination, not only shared-named refs. The plan now names those remaining
-mechanisms rather than counting refusal or pre-binding as distributed routing.
-Product still has no child directories/memories. Relevant Infrastructure planning,
-peer/recovery and Intelligence check/context sections were read; unrelated sibling
-history was not re-audited. Local main remains `3e1e6245c`; no remote fetch was made.
+Import preparation remains immutable; scalar projection uses the portable schema.
+Per-field savepoints remain inline: the outer conflict handler must not soften a
+commit/release failure into a projection hold. Mutation identity precedes complete-
+record validation, and creation readback reconciles old and new delivery receipts.
 
-October 9 association replaces pre-binding in the independent-root fixture: both
-roots own Work and different repository IDs before explicit selection. Retained
-IDs use the same table; no journal or provider field changes. Separate Linear
-storage evidence retains provider lookup and attempted effects without relaxing
-mixed-provider refusal. Review found raw-ID routing would reject historical IDs;
-routing now compares their resolved repository paths. Same-Machine locator
-collisions remain explicit errors, preserving both selections. Desktop windows
-already open under the former identity still need reconciliation.
+October 9 realignment distinguished repository-root association from divergent
+Task/Project provider correspondence; the latter remains unresolved. Its window
+counterexample is now repaired on opening/restoration through common locator
+readings and existing scene/router owners. Identity changes renew targeting tokens,
+not receiver or delivery lifetimes. Headless fixtures retain document selection,
+pane state and native view ownership, not mounted surfaces. A test initially waited
+forever on the worktree URL after canonical-root rewriting; sampling exposed the
+fixture error. Corrected expected URLs pass. Initial Swift/Rust compilation failures
+were stale constructor/scalar assumptions and were repaired.
 
-The first association fixture passed no expected provider revision to the attempt
-owner and correctly returned false. It now supplies the retained observation's
-revision rather than bypassing receipt admission; production behavior is unchanged.
+New committed dependency evidence: `63d292896`/`19dab80dd` retain cross-ID provider
+claims for both projection and effect eligibility. `19e31f64d` moves creation receipts
+to the common origin-keyed owner, distinct from local projection foreign keys.
+LOO-427 still contains `7260e4602`'s same-Work-ID effect-conflict check. The newer
+cuts are not ancestors of this checkout; their source/fixtures were inspected, not
+executed. Origin preservation is not legacy association: the dependency still lacks
+correspondence, lookup and deterministic projection. Compose the common owners,
+not a second repair; preserve mixed-provider refusal and excluded TaskSource transfer.
+
+Filesystem inspection again found no Product child directories/memories. Relevant
+Infrastructure peer/recovery/planning and Intelligence check/context/memory sections
+were read, plus LOO-412's committed plan and peer memory at `19e31f64d`; unrelated
+sibling history was not re-audited. Local main remains `3e1e6245c`; no fetch was made.
+Delegation exchange, exclusive first-start admission and remote/native composition
+remain. Jack Heart's inheritance choice is unresolved; cursor insertion is settled.
+Pre-edit uncommitted evidence is preserved at `/tmp/loo427-realign-YhViGf/`.

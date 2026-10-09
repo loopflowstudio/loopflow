@@ -18,7 +18,7 @@ struct DesktopPaneControlTests {
         throw RegistryQueryError("Pane controls must not launch Work")
     })) {
         router.register(window, repository: repository, focus: {},
-            inspect: { incarnation in
+            inspect: { repository, incarnation in
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     selectionKind: nil, selectionId: nil, reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, supportedOperations: ["list", "hide", "restore", "focus", "split", "move", "resize", "zoom"],

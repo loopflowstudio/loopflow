@@ -1713,7 +1713,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         fs::create_dir_all(home.join(".lf")).unwrap();
         SqliteStore::new(&home.join(".lf/loopflow.db")).unwrap();
     }
-    let id: String = serde_json::from_str(&success(
+    let identity: loopflow::durable::RepositoryIdentity = serde_json::from_str(&success(
         command(
             source_home.path(),
             source.path(),
@@ -1723,7 +1723,9 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap(),
     ))
     .unwrap();
-    let bound: String = serde_json::from_str(&success(
+    let id = identity.id.to_string();
+    assert_eq!(identity.locators, vec![identity.id.clone()]);
+    let bound: loopflow::durable::RepositoryIdentity = serde_json::from_str(&success(
         command(
             target_home.path(),
             target.path(),
@@ -1733,7 +1735,8 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap(),
     ))
     .unwrap();
-    assert_eq!(bound, id);
+    assert_eq!(bound.id, identity.id);
+    assert_eq!(bound.locators, vec![identity.id]);
     let store = SqliteStore::new(&target_home.path().join(".lf/loopflow.db")).unwrap();
     let repo = target
         .path()
@@ -1771,7 +1774,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     assert_eq!(store.repository_id(&repo).unwrap(), Some(other));
     let prior = loopflow::durable::RepositoryId::parse(&id).unwrap();
     assert_eq!(store.repository_path(&prior).unwrap(), Some(repo.clone()));
-    let through_prior: String = serde_json::from_str(&success(
+    let through_prior: loopflow::durable::RepositoryIdentity = serde_json::from_str(&success(
         command(
             target_home.path(),
             target.path(),
@@ -1782,9 +1785,12 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     ))
     .unwrap();
     assert_eq!(
-        through_prior,
+        through_prior.id.as_str(),
         store.repository_id(&repo).unwrap().unwrap().as_str()
     );
+    assert!(through_prior.locators.contains(&prior));
+    assert!(through_prior.locators.contains(&through_prior.id));
+    assert_eq!(through_prior.locators.len(), 2);
     let explained = success(
         command(
             target_home.path(),
@@ -1803,6 +1809,6 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap(),
     );
     assert!(explained.contains(task["id"].as_str().unwrap()));
-    assert!(explained.contains(&through_prior));
+    assert!(explained.contains(through_prior.id.as_str()));
     assert!(store.peer_planning_status(&repo).unwrap().is_empty());
 }

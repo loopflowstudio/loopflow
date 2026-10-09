@@ -936,3 +936,19 @@ fn unplaced_wave_preserves_nullable_machine() {
     assert_eq!(wave.active_tasks, 1);
     assert_eq!(serde_json::to_value(wave).unwrap(), fixture);
 }
+
+#[test]
+fn repository_identity_preserves_explicit_local_locators() {
+    use loopflow::durable::RepositoryIdentity;
+    let json = include_str!("../../../tests/fixtures/dto/repository_identity.json");
+    let identity: RepositoryIdentity = serde_json::from_str(json).unwrap();
+    assert_eq!(identity.locators.len(), 2);
+    assert_eq!(identity.id, identity.locators[1]);
+    assert_eq!(
+        serde_json::to_value(&identity).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing = serde_json::to_value(&identity).unwrap();
+    missing.as_object_mut().unwrap().remove("locators");
+    assert!(serde_json::from_value::<RepositoryIdentity>(missing).is_err());
+}

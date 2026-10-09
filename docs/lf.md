@@ -834,7 +834,7 @@ Names and quoted `~/` paths resolve on the selected Machine, using its own
 to the remote login directory. `--forward-agent` requires `--machine`.
 
 `lf repo identity` establishes or prints the selected repository plan's opaque ID
-(`--json` returns the ID as a JSON string). It also works before creating any Waves
+(`--json` returns `id` and `locators`, the retained Machine-local IDs). It also works before creating any Waves
 or Tasks. `--repository ID` selects that registered plan's local path, including on
 an explicitly selected Machine. Neither operation joins plans by code remote or
 changes a Machine's saved repository.

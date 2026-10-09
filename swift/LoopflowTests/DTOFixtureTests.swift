@@ -7,6 +7,19 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func repositoryIdentityPreservesExplicitLocalLocators() throws {
+        let data = try loadFixtureData("repository_identity.json")
+        let identity = try JSONDecoder().decode(RepositoryIdentity.self, from: data)
+        #expect(identity.locators.count == 2)
+        #expect(identity.id == identity.locators[1])
+        #expect(try JSONDecoder().decode(RepositoryIdentity.self, from: JSONEncoder().encode(identity)) == identity)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        wire.removeValue(forKey: "locators")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(RepositoryIdentity.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func sessionConnectExplanationsPreserveIntentAndUnavailableEvidence() throws {
         let data = try loadFixtureData("session_connect_explanations.json")
         let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)

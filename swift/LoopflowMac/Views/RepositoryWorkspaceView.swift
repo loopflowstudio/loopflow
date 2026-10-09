@@ -3,12 +3,13 @@ import Loopflow
 import SwiftUI
 
 extension RepositoryWorkspace {
-    static func resolve(path: String, query: RegistryQuery) async throws -> Self {
+    static func resolve(path: String, query: RegistryQuery) async throws -> (workspace: Self, identity: RepositoryIdentity) {
         let localPath = await Task.detached {
             RepoScanner().mainRepository(URL(fileURLWithPath: path))?.normalizedFilePath
         }.value
         guard let localPath else { throw RegistryQueryError("\(path) is not an available local Git repository.") }
-        return try await Self(id: query.repositoryIdentity(cwd: localPath), path: localPath)
+        let identity = try await query.repositoryIdentity(cwd: localPath)
+        return (Self(id: identity.id, path: localPath), identity)
     }
 }
 
@@ -54,6 +55,7 @@ struct RepositoryWorkspaceView: View {
     let query: RegistryQuery
     let router: WorkLinkRouter
     let openRepository: (String, URL?) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var reading: WorkReading<RepositoryWorkspace> = .loading
     @State private var openingRequests: Set<UUID> = []
 
@@ -91,6 +93,13 @@ struct RepositoryWorkspaceView: View {
         do {
             let current = try await router.resolveWorkspace(workspace, query: query)
             guard !Task.isCancelled else { return }
+            guard current.id == workspace.id else {
+                // This restored shell has not mounted any panes. Its retained
+                // locator belongs to the scene already reserved by the router.
+                openRepository(current.path, nil)
+                dismiss()
+                return
+            }
             openingRequests = requests
             reading = .available(current)
         } catch {

@@ -71,7 +71,7 @@ struct RepoView: View {
         .accessibilityIdentifier("loopflow")
         .background {
             if let taskLinks, let repository {
-                WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { incarnation in
+                WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
                 }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
                    readText: { try sessionWorkspaces.readText($0) }) { url in

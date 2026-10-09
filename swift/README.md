@@ -564,7 +564,11 @@ content incarnation; inspection never creates a surface or cleans up an exited
 child. Neither token authorizes terminal input.
 
 `desktop open` delivers the resolved Task/Session link to this same repository
-window. `--diff` reveals the existing Changes browser beside the conversation,
+window. After explicit `repo identity --bind`, the next open reuses the existing
+scene, including one still registering. Retained local IDs come from `lf`, not
+path matching. Drafts, native views and pending links stay in place; old pane
+targets become stale, so inspect again before control. Restoration accepts a
+retained ID but refuses a location that no longer owns it. `--diff` reveals the existing Changes browser beside the conversation,
 retaining file selection and drafts. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
 `usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading

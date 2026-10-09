@@ -96,8 +96,9 @@ freshness or unseen notices. Prior evidence: `7d12ab10a`, this heading.
 October 9: `d4fbca0ae` associates established roots; `a73198197` scopes Task
 lookup through retained repository locators. Work, mappings, effects and execution
 survive. Both fixture roots own Work before binding. Binding publishes nothing. Journals exclude RepositoryId/delegation.
-Imports allocate identity. Live windows capture the old ID: aliases alone cannot
-converge windows or preserve drafts across reassociation.
+Imports allocate identity. October 9 opening/restoration now consumes atomic local
+locator readings, retaining scene/queue/native owners while renewing input targets.
+Headless tests retain drafts and view ownership, not mounted/native usability.
 
 Repository association does not associate divergent Task/Project provider IDs.
 **Unmapping is not association.** LOO-412's newer provider claims cross IDs;
@@ -888,8 +889,7 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
 - **Backlogs are allowed.** Linear Tasks may exist without a Run; open Runs are
   not the Wave's roadmap.
 
-July–August incidents: `b908182f5:wave/product/MEMORY.md`. October 4 retired
-automatic recovery; durable Steers survive exits, with provider-dependent delivery.
+July–August incidents: `b908182f5:wave/product/MEMORY.md`; Steer delivery remains provider-dependent.
 
 ## Model (design invariants)
 

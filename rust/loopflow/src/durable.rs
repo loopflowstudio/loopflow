@@ -60,6 +60,14 @@ pub enum DurableDataError {
 
 // Identity of one selected repository plan, never derived from a code remote.
 durable_id!(RepositoryId, "repo_");
+
+/// One selected plan and its retained Machine-local locators, read together.
+/// Locators prove explicit association, not portable Work or execution authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryIdentity {
+    pub id: RepositoryId,
+    pub locators: Vec<RepositoryId>,
+}
 durable_id!(ProjectId, "proj_");
 durable_id!(TaskId, "task_");
 // Opaque IDs retain their released spelling, including references in scheduled jobs.

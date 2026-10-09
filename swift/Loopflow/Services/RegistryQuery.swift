@@ -68,8 +68,8 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
-    public func repositoryIdentity(cwd: String) async throws -> String {
-        try Self.decode(String.self, from: await run(["repo", "identity", "--json"], cwd))
+    public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
+        try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
     }
 
     /// Current Waves across the machine. The shared

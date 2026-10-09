@@ -824,7 +824,7 @@ struct WorkDestinationTests {
 
     @Test func plainRepositoryWaitsForRegistrationAndReusesTheWindow() async throws {
         let router = WorkLinkRouter()
-        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
         let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil, query: query) { _ in }
         #expect(router.inspect().windows.isEmpty)
         #expect(router.inspect().openings.first?.status == .opening)
@@ -847,12 +847,12 @@ struct WorkDestinationTests {
             try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
                 await barrier.wait("lookup")
                 if outcome == "failure" { throw RegistryQueryError("Old lookup failure") }
-                return "\"old-plan\""
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
             }) { _ in Issue.record("An obsolete lookup must not open its window") }
         }
         while !(await barrier.contains("lookup")) { await Task.yield() }
         if outcome == "cancellation" { old.cancel() }
-        let current = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in "\"plan\"" }) { _ in }
+        let current = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }) { _ in }
         await barrier.release("lookup")
         switch await old.result {
         case .success: Issue.record("Obsolete lookup unexpectedly succeeded")
@@ -871,14 +871,14 @@ struct WorkDestinationTests {
     func obsoleteSceneValidationCannotSettleNewRepositoryRequest(outcome: String) async throws {
         let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
         let path = repositoryFixturePath()
-        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
         let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
         let oldRequests = router.workspaceRequests(workspace.id)
         let validation = Task {
             try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in
                 await barrier.wait("validate")
                 if outcome == "failure" { throw RegistryQueryError("Old validation failure") }
-                return "\"plan\""
+                return #"{"id":"plan","locators":["plan"]}"#
             })
         }
         while !(await barrier.contains("validate")) { await Task.yield() }
@@ -905,7 +905,7 @@ struct WorkDestinationTests {
     @Test func requestArrivingBetweenValidationAndRegistrationUsesTheRetainedShell() async throws {
         let router = WorkLinkRouter()
         let path = repositoryFixturePath()
-        let query = RegistryQuery { _, _ in "\"plan\"" }
+        let query = RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }
         let workspace = try await router.openRepository(path: path, link: nil, query: query) { _ in }
         let validated = router.workspaceRequests(workspace.id)
         _ = try await router.resolveWorkspace(workspace, query: query)
@@ -925,9 +925,9 @@ struct WorkDestinationTests {
     @Test func sceneValidationFailureRemainsFailedAfterDelayedRegistration() async throws {
         let router = WorkLinkRouter()
         let workspace = try await router.openRepository(path: repositoryFixturePath(), link: nil,
-            query: RegistryQuery { _, _ in "\"plan\"" }) { _ in }
+            query: RegistryQuery { _, _ in #"{"id":"plan","locators":["plan"]}"# }) { _ in }
         do {
-            _ = try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in "\"different-plan\"" })
+            _ = try await router.resolveWorkspace(workspace, query: RegistryQuery { _, _ in #"{"id":"different-plan","locators":["different-plan"]}"# })
             Issue.record("A changed plan must not restore this workspace")
         } catch {}
         #expect(router.inspect().windows.isEmpty)
@@ -938,12 +938,140 @@ struct WorkDestinationTests {
         #expect(router.inspect().openings == receipt)
     }
 
+    @Test func repositoryAssociationRetainsDraftsPanesAndInFlightDelivery() async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        let before = RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        let first = try #require(TaskLink(issue: "FIRST", repo: path).url)
+        let second = try #require(TaskLink(issue: "SECOND", repo: path).url)
+        let scene = try await router.openRepository(path: path, link: first, query: before) { _ in }
+        let deliveredFirst = try #require(TaskLink(issue: "FIRST", repo: scene.path).url)
+        let deliveredSecond = try #require(TaskLink(issue: "SECOND", repo: scene.path).url)
+        let registry = SessionsWorkspaceRegistry(localMachineId: "fixture-machine")
+        let identity = WorkspaceIdentity(machineId: "fixture-machine", worktree: path)
+        let retained = registry.workspace(for: identity), store = retained.multiplexer
+        store.newShell(command: ["retained-command"])
+        let pane = store.focusedPane
+        let document = retained.files(taskId: "task", issue: "TASK", cwd: path).document("note.txt")
+        document.editor.string = "unfinished draft"
+        document.editor.setSelectedRange(NSRange(location: 2, length: 4))
+        let layout = store.layout, focus = store.focusedPaneId
+        #if canImport(GhosttyKit)
+        let terminal = TerminalIdentity.shell(pane.id, machineId: identity.machineId)
+        let view = registry.surfaces.view(for: terminal)
+        defer { registry.surfaces.release(terminal) }
+        #endif
+        let window = UUID()
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No Work reads") })
+        var received: [URL] = []
+        router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
+            inspect: { repository, incarnation in
+                DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: path,
+                    selectionKind: nil, selectionId: nil, reading: "current", reason: nil,
+                    task: nil, session: nil, supportedOperations: ["hide", "restore"],
+                    workspaces: registry.inspect(), layouts: registry.inspectLayouts(), opening: nil)
+            }, controlPane: { try registry.controlPane($0, model: model) },
+            readText: { try registry.readText($0) }) { url in
+                received.append(url)
+                if url == deliveredFirst { await barrier.wait("delivery") }
+            }
+        while !(await barrier.contains("delivery")) { await Task.yield() }
+        let rebound = try await router.openRepository(path: path, link: second, query: after) { _ in
+            Issue.record("Association must reuse the retained window")
+        }
+        #expect(rebound == scene)
+        for _ in 0..<2 {
+            _ = try await router.openRepository(path: path, link: nil, query: after) { _ in
+                Issue.record("Repeated opens must reuse the retained window")
+            }
+        }
+        let report = router.inspect()
+        #expect(report.windows.count == 1)
+        #expect(report.windows[0].repository == "plan")
+        #expect(report.windows[0].window != window.uuidString)
+        #expect(received == [deliveredFirst])
+        #expect(registry.workspace(for: identity) === retained)
+        #if canImport(GhosttyKit)
+        #expect(registry.surfaces.view(for: terminal) === view)
+        #expect(registry.surfaces.programStatus(for: terminal) === view.programStatus)
+        #endif
+        #expect(store.layout == layout)
+        #expect(store.focusedPaneId == focus)
+        #expect(document.editor.string == "unfinished draft")
+        #expect(document.editor.selectedRange() == NSRange(location: 2, length: 4))
+        let stale = DesktopPaneTarget(repository: "old-plan", window: window.uuidString,
+            machineId: identity.machineId, worktree: path, pane: pane.id, incarnation: pane.incarnation)
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        let current = DesktopPaneTarget(repository: "plan", window: report.windows[0].window,
+            machineId: identity.machineId, worktree: path, pane: pane.id, incarnation: pane.incarnation)
+        _ = try router.controlPane(.init(target: current, action: .hide))
+        _ = try router.controlPane(.init(target: current, action: .restore))
+        #expect(store.layout == layout)
+        await barrier.release("delivery")
+        while received.count < 2 { await Task.yield() }
+        #expect(received == [deliveredFirst, deliveredSecond])
+        #expect(document.editor.string == "unfinished draft")
+        _ = try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+            #"{"id":"old-plan","locators":["old-plan","plan"]}"#
+        }) { _ in Issue.record("Binding back must also reuse the window") }
+        #expect(router.inspect().windows.first?.repository == "old-plan")
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: stale, action: .hide))
+        }
+        #expect(throws: RegistryQueryError.self) {
+            try router.controlPane(.init(target: current, action: .hide))
+        }
+        router.remove(window, repository: scene.id)
+        #expect(router.inspect().windows.isEmpty)
+    }
+
+    @Test func associationBeforeRegistrationKeepsOneSceneAndRejectsLateLookup() async throws {
+        let router = WorkLinkRouter(), barrier = LinkedDestinationBarrier()
+        let path = repositoryFixturePath()
+        var opened: [RepositoryWorkspace] = []
+        let scene = try await router.openRepository(path: path, link: nil,
+            query: RegistryQuery { _, _ in #"{"id":"old-plan","locators":["old-plan"]}"# }) { opened.append($0) }
+        let stale = Task {
+            try await router.openRepository(path: path, link: nil, query: RegistryQuery { _, _ in
+                await barrier.wait("lookup")
+                return #"{"id":"old-plan","locators":["old-plan"]}"#
+            }) { opened.append($0) }
+        }
+        while !(await barrier.contains("lookup")) { await Task.yield() }
+        let after = RegistryQuery { _, _ in #"{"id":"plan","locators":["old-plan","plan"]}"# }
+        _ = try await router.openRepository(path: path, link: nil, query: after) { opened.append($0) }
+        await barrier.release("lookup")
+        switch await stale.result {
+        case .success: Issue.record("A stale lookup cannot change repository association")
+        case .failure(let error): #expect(error is CancellationError)
+        }
+        #expect(Set(opened).count == 1)
+        #expect(opened.first == scene)
+        // Scene restoration accepts retained identity without unmounting/rekeying it.
+        #expect(try await router.resolveWorkspace(scene, query: after) == scene)
+        let restoredAlias = RepositoryWorkspace(id: "plan", path: path)
+        #expect(try await router.resolveWorkspace(restoredAlias, query: after) == scene)
+        let window = UUID()
+        router.register(window, repository: scene.id, openingRequests: router.workspaceRequests(scene.id), focus: {},
+            inspect: windowInspection, controlPane: { _ in },
+            readText: { _ in throw RegistryQueryError("No terminal") }) { _ in }
+        #expect(router.inspect().windows.map(\.repository) == ["plan"])
+        #expect(router.inspect().openings.first?.status == .usable)
+        _ = try await router.openRepository(path: path, link: nil, query: after) { _ in
+            Issue.record("Concurrent opens must converge before and after registration")
+        }
+        #expect(router.inspect().windows.map(\.window) == [window.uuidString])
+    }
+
     private func repositoryFixturePath() -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
     }
 
-    private func windowInspection(_ id: UUID) -> DesktopWindowInspection {
-        DesktopWindowInspection(repository: "fixture", window: id.uuidString, path: nil,
+    private func windowInspection(_ repository: String, _ id: UUID) -> DesktopWindowInspection {
+        DesktopWindowInspection(repository: repository, window: id.uuidString, path: nil,
             selectionKind: nil, selectionId: nil, reading: "loading", reason: nil,
             task: nil, session: nil, supportedOperations: ["list"], workspaces: [], layouts: [], opening: nil)
     }

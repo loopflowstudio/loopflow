@@ -107,10 +107,11 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 context query: generated goal remains about 31,400 tokens against 16,000
-(about 15,400 over); the supplied launch source was read completely, including its file
-inventory. This generated payload cannot be reduced by authored-note curation;
-the context-producer gap remains. No limit was raised.
+October 9 context query: the generated Work seed is 31,646 tokens against 16,000
+(15,646 over), including the Task-workspace file inventory. Authored-note curation
+cannot shrink this separate source. The complete launch excerpt source, including
+its omitted inventory, was inspected; the context-producer gap remains. No limit
+was raised.
 
 ## Explicit repository association — October 9
 
@@ -120,17 +121,24 @@ locators in the same `repository_plans` table; Work, provider mappings, uncertai
 effects, journals and execution stay unchanged. It selects/publishes no destination.
 An ID already locating another local checkout is not reassigned. This associates
 two Machines' established roots, not two same-Machine stores or duplicate Work.
-Live Desktop reassociation, delegation exchange and peer first-start admission
-remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
+Divergent Task/Project IDs for one provider object remain LOO-412's separate
+association problem; repository binding grants no correspondence or effect rekeying.
+Desktop reassociation on open/restore is local; delegation exchange and peer
+first-start admission remain. Neither binding nor a retained alias authorizes start; Git-selected Tasks
 without retained checkouts still refuse. Inheritance remains unresolved.
 LOO-412's started-Task source-transfer path conflicts with Jack Heart's retained-
 Machine decision and is excluded; dependent remote launch work stays unfinished.
+
+Scene retention choice (October 9): a validated local locator keeps its SwiftUI
+scene key across binding. The current plan and input token change without replacing
+its native owner. An unopened restored alias redirects before mounting any panes.
+Identity is refreshed on opening/restoration, not by a new timer.
 
 ## Reversible preview limits — October 9
 
 Skill/inline context uses stored planning; launch may refresh Task comments.
 Flow context uses the fresh-start snapshot choice below. Bare-agent/new operator-checkout previews
-cannot prepare future checkouts. Remote previews are scoped to the selected Machine;
+cannot prepare future checkouts. Remote previews are scoped to the addressed Machine;
 identity failure precedes assembly. Authentication is outside preparation; local
 absence grants no first-start admission.
 

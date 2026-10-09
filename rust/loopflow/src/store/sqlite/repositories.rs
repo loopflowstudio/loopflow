@@ -2,7 +2,8 @@
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
-    MachineId, RepositoryId, TaskExecutionRoute, TaskExecutionSource, TaskId, WorkRef,
+    MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskExecutionSource, TaskId,
+    WorkRef,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -85,6 +86,36 @@ impl SqliteStore {
     pub fn repository_id(&self, repo: &str) -> StoreResult<Option<RepositoryId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         repository_id_in(&conn, repo)
+    }
+
+    pub fn repository_identity(&self, repo: &str) -> StoreResult<Option<RepositoryIdentity>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // A single statement prevents a concurrent bind from mixing generations.
+        let mut statement = conn.prepare(
+            "SELECT selected.id, locator.id FROM repository_plans selected
+             JOIN repository_plans locator ON locator.repo=selected.repo
+             WHERE selected.repo=?1 AND selected.selected=1 ORDER BY locator.id",
+        )?;
+        let rows = statement.query_map([repo], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut identity: Option<RepositoryIdentity> = None;
+        for row in rows {
+            let (id, locator) = row?;
+            let parse = |value: &str| {
+                RepositoryId::parse(value)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))
+            };
+            let selected = parse(&id)?;
+            identity
+                .get_or_insert_with(|| RepositoryIdentity {
+                    id: selected,
+                    locators: Vec::new(),
+                })
+                .locators
+                .push(parse(&locator)?);
+        }
+        Ok(identity)
     }
 
     pub fn repository_path(&self, id: &RepositoryId) -> StoreResult<Option<String>> {

@@ -9,7 +9,7 @@ nothing to do with this repository or Loopflow.
 
 Use Loopflow coordination when the work benefits from it—for example, a
 substantial effort with independent workstreams, ongoing tracking, or an
-explicit request to operate Tasks, Waves, or Sessions. Load the `repo/operate`
+explicit request to operate Tasks, Waves, or Sessions. Load the `repo-operate`
 skill when that operational guidance is needed.
 
 Let the conversation set the agenda. Do not begin with a Session inventory,

@@ -4,10 +4,12 @@ pub mod clipboard;
 pub mod command;
 pub mod config;
 pub mod context_budget;
+pub mod definition_name;
 pub mod error;
 pub mod execution;
 pub mod flow;
 pub mod flow_graph;
+pub mod flow_instructions;
 pub mod flow_output;
 #[cfg(target_os = "macos")]
 pub(crate) mod fs_events;

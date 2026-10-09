@@ -497,7 +497,7 @@ fn definition_help(
                 flow.name.as_str(),
                 DefinitionKind::Flow,
                 description,
-                crate::engine::flow::find_flow_source_path(&flow.name, repo),
+                crate::engine::flow::find_flow_source_path(&flow.name, repo)?,
             )
         }
     };
@@ -520,13 +520,17 @@ fn definition_help(
             }
         }
     }
-    if kind == DefinitionKind::Flow
-        && resolve_definition(repo, name, Some(DefinitionKind::Skill)).is_ok()
-    {
-        output.push_str(&format!(
-            "\nAlso available: skill (flow wins untyped lookup)\n  {} [message]\n",
-            definition_invocation(tree, name, DefinitionKind::Skill)
-        ));
+    if kind == DefinitionKind::Flow {
+        match resolve_definition(repo, name, Some(DefinitionKind::Skill)) {
+            Ok(Target::Skill(skill)) => output.push_str(&format!(
+                "\nAlso available: skill {} (flow wins untyped lookup for {name})\n  {} [message]\n",
+                skill.name,
+                definition_invocation(tree, &skill.name, DefinitionKind::Skill)
+            )),
+            Ok(_) => unreachable!("typed skill lookup returns a skill"),
+            Err(crate::engine::LoadError::SkillNotFound(_)) => {}
+            Err(error) => output.push_str(&format!("\nSame-named skill unavailable: {error}\n")),
+        }
     }
     Ok(output)
 }

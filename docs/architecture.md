@@ -293,9 +293,9 @@ Task Flow, piecemeal helper AgentSessions, or another system.
 ### Task Flows
 
 ```bash
-lf --wave product wave/operate        # one finite planning pass
+lf --wave product wave-operate        # one finite planning pass
 lf task run INF-123
-lf --wave <wave> wave/operate "ship invoices first"
+lf --wave <wave> wave-operate "ship invoices first"
 lf wave status product
 ```
 
@@ -311,7 +311,7 @@ conversation.
 
 ```bash
 lf --machine build-home session list --json
-lf --machine build-home --wave product wave/operate
+lf --machine build-home --wave product wave-operate
 ```
 
 The origin transports one command. The target resolves its own Machine state and

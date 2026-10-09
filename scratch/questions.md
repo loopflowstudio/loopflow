@@ -178,8 +178,9 @@ remain separate. No new product decision is selected.
   remaining public invalidation verification and presentation work;
   mixed-provider exchange remains disabled.
 
-- Ordering choices and counterexamples live in the design's **Remaining integration**,
-  item 2; detailed rationale stays at `fcd64901f:scratch/questions.md`.
+- Ordering choices and counterexamples live in the design's
+  **Implemented boundaries, not remaining implementation**, Ordering; detailed
+  rationale stays at `fcd64901f:scratch/questions.md`.
 
 - October 9 alternate-acquisition choice: common removal/archive evidence commits
   before scalar projection, so rejecting a stale body cannot erase the negative
@@ -214,12 +215,16 @@ remain separate. No new product decision is selected.
   replies. No status cache, sync worker, setup action or mixed activation is added.
   Per-Work selection and losing-edit recovery remain unfinished.
 
-- October 9 association finding: the earlier duplicate-mapping fixture cleared
-  `external_issue_id` directly. The common export view makes that legacy Task a
-  creation candidate while retaining its old issue selector and effect receipts.
-  This is not safe association. Preserve the existing mapping against ordinary
-  peer replacement/removal, and retain the rejected journal. An explicit
-  planning-only correspondence must resolve local lookup and effect ownership
-  without renumbering either Work, exporting private history or merging execution.
-  Representation remains unfinished; no product decision or transfer approval is
-  attributed to Jack Heart. The design's item 3 replaces the raw-SQL recovery path.
+- October 9 association finding: clearing mappings is unsafe and dispatch's
+  issue-name fallback persists no correspondence. Cross-ID effect deferral now
+  considers retained provider mappings/creation inputs, including losing mappings;
+  private selection and common acquisition remain independent. This is a safety
+  repair, not association. Re-keying incoming A's projection to local B contradicts
+  creation validation: its provider UUID and captured model still belong to A.
+  The common one-receipt-per-Work layout also cannot combine two original attempts.
+  Dependent alias/projection work stops at that representation boundary. Item 3
+  of the design now requires preserving receipt origin separately from local
+  projection ownership, then composing lookup, deterministic projection and
+  effect settlement without a second queue or execution rewrite. The storage
+  shape remains an implementation decision; no new policy or approval is
+  attributed to Jack Heart. Mixed-provider exchange stays disabled.

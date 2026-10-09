@@ -633,13 +633,14 @@ scoped status. Mixed exchange stays disabled; sharing/recovery and public
 composition remain unfinished.
 
 Legacy association remains unfinished. Clearing mappings creates new provider-creation
-candidates while retaining old selectors/effects. Dispatch's issue-name fallback
-persists no association. One mapping check protects scalar and independent evidence;
-`require_projected_effects` checks the attempted Work ID: a conflict on A does not
-itself defer mapped B. Association must compose lookup, projection and both IDs'
-uncertain effects without renumbering Work, merging execution or enrolling private
-history. Source-only finding at `9dfb95451`, not a duplicate-write observation or recovery
-proof. Plan: `scratch/work-on-another-machine-name.md`.
+candidates; issue-name fallback persists no association. Cross-ID deferral now
+consults retained mappings/creation inputs, including losing claims, before effects;
+nulling a rejected mapping cannot hide that ownership. This grants no association.
+Creation receipts bind provider UUID and captured model to their original Work ID;
+redirecting A onto B cannot rewrite that attempted input. The common single-receipt
+layout needs revision before composing correspondence, lookup and projection.
+Preserve both origins, execution and private selection. Recovery unproved.
+Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

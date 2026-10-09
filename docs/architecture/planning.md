@@ -126,6 +126,9 @@ as conflicts too; selecting their history permits exchange, not new effects. Loc
 authorize another write. Pending reads, local saves and provider acquisition remain
 independent; successful peer projection incorporates retained receipts before
 releasing the conflict. Local sharing selection alone never acquires an effect.
+Deferral also covers a different local ID mapped to the same provider object.
+Retained mappings and creation inputs identify that object, including losing
+mappings; issue names and titles do not. The diagnostic names the rejected ID.
 
 The same provider-mapping check precedes peer scalar projection and independent
 provider evidence. Initial attachment is allowed; ordinary peer edits cannot
@@ -134,6 +137,9 @@ journal and isolate that object while independent plans advance. Clearing a lega
 mapping is not identity association: it makes the retained Work a provider-creation
 candidate and leaves its old selectors and effect receipts behind. Explicit legacy
 association remains unfinished; neither IDs nor execution histories are merged.
+Replacing a rejected mapping with null cannot hide its earlier claim against
+another local owner. Creation receipts also retain their original Work-derived
+provider UUID and captured model identity: a lookup alias cannot rekey them.
 
 `ops/planning_delivery.rs` consumes mapped Task titles, descriptions, nullable
 assignees and membership, and Project names, summaries, statuses and structured

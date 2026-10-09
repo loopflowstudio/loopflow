@@ -153,9 +153,10 @@ this heading. Keep these replacements deleted:
 - Transition/intent-only export discovery, mapping-only completion shortcuts and
   duplicate status eligibility filters. One `planning_exports` view reads common
   receipt acknowledgement; preparation alone creates missing Task receipts.
-- Local-receipt-only attempt eligibility after rejected peer projection. The
-  common attempts consult retained projection conflicts, including skipped holds,
-  in their write transaction; pending/readback and saves remain independent.
+- Local-receipt/Work-ID-only attempt eligibility after rejected peer projection.
+  Common attempts consult retained conflicts, including skipped holds and another
+  ID claiming the same provider object, in their write transaction. Losing mappings
+  and creation inputs survive; pending/readback and saves remain independent.
 - Sequence-selected Project order intentions and delivery of settled, superseded
   partial moves. Shared views select the original save, while uncertain losing
   effects still hold delivery. Import projects the chosen list after Task rows;
@@ -208,18 +209,20 @@ for review**. These reductions add neither a planner nor execution authority.
 
 Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
 assertions or failure-path checks. No predecessor path or second planner is added.
-Remaining grouped owners, legacy association and acceptance are below; omission
-and retained conflicts are not convergence.
+Legacy association and acceptance remain below; omission and retained conflicts
+are not convergence. Provider cache/mapping selection now has one definition,
+and one ownership query rejects both replacement/removal and duplicate mappings.
+Independent evidence retains its separate savepoints and identity validation.
 
 ## Remaining integration — October 9
 
-Current boundary at `ce1750393`: destination-level Desktop status is implemented
+Current boundary after the cross-ID effect cut: destination-level Desktop status is implemented
 and has focused headless proof; per-Work membership, authorship/assignees and
 losing-edit recovery do not. Legacy identity association and composed public
 Git/Linear acquisition remain implementation/acceptance work. The temporary
 mixed-provider refusal in `ops/planning_peer.rs` stays enabled; retained storage
 receipts are not an end-to-end result. Jack Heart's direction remains; legacy
-association needs the preservation revision recorded in item 3 below.
+association needs the common receipt-identity revision recorded in item 3 below.
 
 Deletion composition and its counterexamples remain at
 `506efbbfe:scratch/work-on-another-machine-name.md`, **Remaining integration**.
@@ -274,109 +277,53 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Remaining composition, reconciled October 9 against `ce1750393`:
+### Implemented boundaries, not remaining implementation
 
-`358f7fa08` implements alternate removal/archive/Team acquisition;
-`25cbc0a09` prepares typed histories before projection retries. `4acd37ec8` adds
-causal invalidation; `6ccbbabe3` simplifies replay while retaining revision floors.
-These supersede the earlier instructions to implement items 3 and 4, not their
-public acceptance. Legacy association and richer Desktop sharing/recovery presentation remain
-implementation cuts; another invalidation implementation is unnecessary.
-Ordering (`fcd64901f`, `357090d4b`) and retained-effect eligibility (`08a285872`)
-remain integrated. The 63 peer-storage passes at `25cbc0a09` predate invalidation;
-the current cut has four focused passes, not a rerun of that full suite. The public
-reader change at `30b476328` still awaits gate.
-`5bed3a211` integrates main `3a0aa5ca4` (#1510), after common writer `d20c56daf`.
-Main adds chat Flow recipes and hierarchical names, not provider frontier transport;
-combined launch/Flow verification remains with gate.
+The detailed ordering, alternate-acquisition and invalidation proofs remain at
+`c6874c01b:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+Keep their counterexamples and acceptance limits; no second implementation is needed:
 
-1. **Retained-effect eligibility is implemented, with bounded proof.**
-   Common field/deletion, creation/link, state and ordering attempt transactions
-   consult active projection conflicts. Saves, pending reads and acquisition do
-   not. Skipped sharing-held projections retain conflicts even after selection;
-   only successful import releases them after incorporating the retained receipts.
-   `08a285872` records passing storage and public retained-effect regressions:
-   a stale frontier carrying an uncertain deletion prevents another delivery,
-   while independent title/comment acquisition and populated execution survive.
-   The public fixture imports directly before connecting its synthetic provider;
-   it proves neither mixed-provider Git transport nor running-control preservation.
-   `30b476328` changed its shared snapshot reader without rerunning that Linux
-   public case; the combined gate must cover it. Exact earlier proof and rationale:
-   `08a285872:scratch/work-on-another-machine-name.md`, **Remaining integration**
-   and **Acceptance for review**.
-2. **Ordering receipt transport is implemented with focused proof.**
-   `planning_order.rs` imports each captured move's baseline, desired list,
-   exact effects, acknowledgement and conflicts through the existing journal.
-   The first mutation's logical clock plus receipt ID selects the saved intention;
-   attempt/readback clocks and receiving-machine sequence never select it.
-   Common views drive pending, delivery and status. Any unresolved losing effect
-   still prevents another write; settled partial progress cannot revive a losing
-   desired order. Only complete-list acquisition recognizes progress and rebases
-   unattempted saves. Scalar ranks, detail reads and import checkpoints settle nothing.
-   Lists include private-history references in the existing sharing holds.
-   Divergent effect chains or unordered baseline heads isolate projection.
-   The two-store common-delivery fixture covers lost replies, cold empty-list
-   rejection, reopening and a later save. Compression exposed rejection of valid
-   primary-key-only moves: the common writer omits `sortOrder` when moving between
-   priority groups. Transport now retains that exact input. A regression failed
-   on export before repair and exercises peer readback without another write.
-   Migration, selection and competing-effect proofs remain distinct from public
-   mixed-provider acceptance.
-3. **Alternate removal/archive/Team acquisition is implemented.**
-   Optional provider-evidence fields use the existing peer journal, separate from
-   entity provenance and saved delivery receipts. Removal/archive evidence commits
-   independently of rejected stale scalar projection; confirmed Teams retain their
-   baseline and original acquisition age, without ordering Initiatives or complete
-   lists. Concurrent contradictory Team confirmations isolate the object. Retained
-   membership uncertainty still needs a fresh common confirmation, not an old
-   imported receipt. Migration seeds retained negative evidence with unknown age;
-   it does not invent historical Team confirmations. Non-removal notifications
-   use the causal invalidation cut in item 4, not durable removal evidence.
-   Each fact has its own savepoint:
-   conflicting Teams cannot roll back an independently confirmed archive.
-   Review/tests repaired unchanged removal writes and reteam's stale unversioned
-   entity conflict; newer entity values and their age survive confirmed Teams.
-   Repeat-import checks use the same Git revision: changing the import checkpoint
-   legitimately notifies planning readers and is not projection churn.
-   Focused fixtures cover source-only removal against stale detail, archive without
-   a delete receipt, reteam beside newer entity facts, conflicting confirmations,
-   malformed evidence, migration and populated execution. The Team fixture retains
-   an uncertain order without acquiring a list; the earlier order fixture separately
-   rejects a cold empty list. Neither proves partial-list acquisition composed with
-   alternate provider evidence. That case and public acquisition remain gate coverage,
-   not reasons to weaken acceptance or claim mixed-provider lifetime behavior.
-4. **Replay-safe invalidation is implemented with focused proof.**
-   `provider_invalidation` shares the existing journal's causal heads between
-   notifications and successful detail acknowledgements. Detail retires only the
-   notices it observed; unseen concurrent notices remain outstanding. Known revision
-   floors survive acknowledgement. Neither arrival time nor the receipt's clock
-   becomes a provider revision. Import clears freshness only after accepting the
-   corresponding entity frontier; scalar/list replay no longer clears it alone.
-   The acknowledgement carries identity, revision and original age, not another
-   entity body or parent mapping. A cache-only detail without transported scalar
-   facts cannot refresh another machine's older body; the fixture distinguishes
-   that from acquisition with confirmed Wave ownership. Null-detail invalidation
-   uses the same capture path; migration retains unknown ages and known floors.
-   Cold import reapplies outstanding notices after creating the cache. Each fact's
-   existing savepoint and private-selection holds remain. Tests cover delayed replay,
-   genuinely new and concurrent notifications, equal-body detail, null-detail
-   invalidation, populated execution, migration and private-history withholding.
-   Review removed unconditional scalar freshness clearing and an unnecessary second
-   detail body/reader. A marker-only import also exposed a fresh but older cache;
-   the detail's actual revision now fences it through common invalidation, without
-   fabricating a revision or accepting a stale local read. Repeated unchanged detail
-   does not mint another acknowledgement. Public composition remains gate work,
-   not mixed activation.
-5. **Unplaced-Wave presentation is implemented at `60d113a70`; broader presentation remains.**
-   `WaveSnapshot.machine` is nullable in Rust/Swift, with shared placed/unplaced
-   fixtures and absence-aware text/roadmap consumers. The Store exposes its existing
-   optional placement reader; required execution placement still rejects absence.
-   Public list/status/roadmap coverage imports synthetic planning and compares
-   retained Sessions, Process, Workflow and all placements across repeated reads.
-   No live control, SSH or installed acceptance follows. Divergent legacy IDs still
-   need association without renumbering or merging execution histories. Desktop
-   per-Work selection, authorship/assignee and losing-edit/recovery presentation
-   remain; destination routing, pending/unknown state and holds now stream to Desktop; mixed-provider activation still requires composed acceptance.
+- **Effect eligibility (`08a285872`).** Common field/deletion, creation/link,
+  state and order attempts consult retained projection conflicts in the attempt
+  transaction. Saves and acquisition remain independent. Selection releases no
+  effect: successful import must incorporate retained receipts first. The public
+  synthetic-provider case preserves populated execution, but imports directly;
+  it proves neither mixed Git transport nor running controls. Its shared reader
+  changed at `30b476328` without rerunning that Linux case.
+- **Ordering (`fcd64901f`, `357090d4b`).** Common receipt identities retain exact
+  input, uncertain losing effects and causal baseline heads. The first mutation's
+  clock selects the intention, never an attempt/readback or arrival sequence.
+  Only complete-list acquisition settles progress and rebases unattempted saves;
+  detail reads and scalar ranks do not. Cold empty/partial lists cannot discard
+  captured members. Primary-key-only moves omit `sortOrder` and remain valid.
+  Import projects pending lists after Task rows; repeat import does not churn rank.
+- **Removal/archive/Teams (`358f7fa08`, `25cbc0a09`).** Independent savepoints
+  commit negative facts before scalar projection; conflicting Teams cannot roll
+  back an archive. Causal heads retain Team/Initiative baselines and original ages;
+  newer entity facts survive reteam. Migration retains unknown negative ages and
+  invents no historical confirmation. Unknown age never rewrites removal time.
+  The 63 storage passes at `25cbc0a09` predate invalidation. Partial-list ordering
+  composed with alternate evidence and public acquisition remain gate coverage.
+- **Invalidation (`4acd37ec8`, `6ccbbabe3`).** Notification/detail heads retain
+  causal acknowledgement and revision floors. Only observed notices retire;
+  unseen concurrent notices remain invalid. Scalar/list replay cannot restore
+  freshness. Detail carries identity/revision/age, not a second body or mapping,
+  and refreshes only an accepted matching-or-newer frontier. Cold import reapplies
+  notices; null detail and unknown-age migration use the same capture path.
+  Marker-only import exposed an older cache: common invalidation now fences it
+  with the real detail revision. Four focused passes cover this cut, not a full
+  storage rerun or public mixed-provider acceptance.
+- **Unplaced Wave/status (`60d113a70`, `c20e4ad13`).** Nullable placement and
+  destination-level Desktop status have focused headless proof. Public reads
+  preserve retained Sessions, Processes, Workflow and placements; no live control,
+  SSH or installed acceptance follows. Per-Work selection, authorship/assignees
+  and losing-edit recovery remain implementation work.
+
+`5bed3a211` integrated main `3a0aa5ca4` (#1510), after common writer `d20c56daf`;
+`ce1750393` integrated #1512. These add chat recipes/hierarchical names and driver
+recovery, not provider-frontier acceptance. Combined launch/Flow verification
+remains with gate. The single remaining-work list below owns association,
+presentation and public composition; retained conflicts are not convergence.
 
 Mixed-provider exchange remains disabled until composition is complete. Local-only
 exchange and private-selection holds remain intact. Combined verification belongs
@@ -475,9 +422,59 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    provider evidence. That check now precedes either acquisition or projection,
    retaining contradictory mutations and independent progress. This is a
    preservation repair, not association implementation.
-   Conflict isolation is implemented with regressions
-   for duplicate mappings, dependent comments, retained Sessions, selection and
-   idempotent retry; the focused storage suite passes. CLI `planning status`
+   October 9's cross-ID deferral cut repairs one of those boundaries:
+   common field/deletion, creation/link, state and ordering attempts consult active
+   conflicts against the same exact provider object, even when the rejected ID is
+   not the local mapped ID. Retained mapping history and creation inputs supply the
+   provider identity; a later null/replacement cannot mask its earlier claim.
+   Mapping validation uses the retained claims too, preventing a rejected incoming
+   ID from becoming a new creation candidate by clearing its winning mapping.
+   No new association, selection, lookup or execution authority is introduced.
+   Diagnostics name the rejected Work ID. Acquisition and saves remain independent.
+
+   **Representation revision — October 9, not a new product decision.**
+   An alias that projects incoming A onto local B is insufficient. Creation
+   validation derives the provider UUID from the mutation's original Work ID and
+   requires the captured model's ID to match. Task creation has one receipt per
+   Task; Project creation/link receipt columns live on the Project row.
+   Re-keying A's projection to B rejects A's unchanged receipt; rewriting the
+   captured model/input changes the attempted operation. Combining A and B's
+   distinct creation/link attempts in that single slot can also discard uncertainty.
+   This concrete common-writer constraint stops dependent alias/projection work.
+   Regressions cover re-keyed Task/Project creation refusal and cross-ID deferral
+   from an unmapped lost-response receipt, preserving inputs and attempts.
+   These are not association recovery proofs.
+
+   The revised implementation unit must preserve origin identity separately from
+   local projection ownership in the **common receipt owner**, then compose:
+   - A local, explicit correspondence between exact provider identity and both
+     Work IDs, without changing IDs or execution foreign keys. Names/titles are
+     not identity. Machine dispatch's issue-name fallback stores no correspondence.
+   - Common lookup and planning projection using that correspondence, with field
+     winner selection across retained origins rather than whichever ID projects last.
+     Preserve origin mutation IDs, causal heads, baselines and losing values.
+   - Every original creation/link attempt and readback under its captured identity.
+     The one-receipt-per-Work layout cannot represent two origins by overwriting
+     either slot. Change that owner as part of the same cut; do not restore
+     transition-owned effects, copy receipts into a parallel peer queue or rewrite
+     captured provider inputs. The exact storage shape remains design work.
+   - Selection independent of correspondence. Associating private B with selected
+     A cannot enroll B, its comments, losing edits or private parent references.
+     Public recovery must explain any resulting sharing hold.
+
+   The new two-store preservation fixture has distinct local Task/Project IDs,
+   a private legacy Wave, populated Session/Process/Workflow/PR history, uncertain
+   peer deletion and local scalar effects, later saves, repeated import, common
+   acquisition and issue/full-local-ID lookup. It checks that nulling the incoming
+   mappings cannot release deferral, private history stays out of export and an
+   unrelated provider object's effect still proceeds. It proves refusal, not
+   successful association, incoming-full-ID lookup or running-control continuity.
+   Successful association and repeat projection with uncertain effects under both
+   IDs remain required before mixed-provider activation. No merge of Work,
+   execution transfer or real-plan publication is inferred.
+
+   Earlier focused storage results cover preservation only; association recovery
+   remains unimplemented. CLI `planning status`
    and Desktop now read projection conflicts through the same status reader.
    A durable import checkpoint is not completed projection.
    Dispatch and status isolate malformed journals: `pending_local: null` plus a
@@ -500,8 +497,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    `5624151a3:scratch/work-on-another-machine-name.md`, this item. The earlier
    checks are storage evidence, not connected Git/Linear lifetime acceptance.
 
-   Removal/archive/reteam now use common acquisition with the focused storage
-   proof in Remaining integration item 3. Gate still owns public alternate
+   Removal/archive/reteam use common acquisition with the focused storage
+   proof under **Implemented boundaries, not remaining implementation**. Gate still owns public alternate
    acquisition, complete-list ordering and comment composition, not only detail
    reads. Legacy association, richer Desktop sharing/recovery UI and public invalidation verification remain
    before mixed-provider exchange and removal of its temporary diagnostic. This
@@ -571,7 +568,7 @@ and disposable remotes. Installed-release behavior remains separate. Release's c
 records a recovery path missed by lower-level fixtures and a successful failure
 report mistaken for operation success. The same lessons require public command
 coverage here, and status that distinguishes retained conflicts from convergence.
-October 9 reconciliation at `ce1750393` reread Release's GOAL.md and full MEMORY.md;
+October 9 reconciliation at `9dfb95451` reread Release's GOAL.md and full MEMORY.md;
 filesystem inspection found no other immediate child memory. Its operation-entry and
 result-accounting lessons remain in parent memory: storage readback cannot prove
 foreground acquisition, and a successful report cannot replace operation success.
@@ -621,7 +618,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass; network-isolated binary passes 3 mapping/creation regressions (replacement failed before repair). Gate owns combined foreground/native-resume, partial-list and Git/Linear acceptance; association recovery is still unimplemented.
+Check: lib build, network-isolated lib filters `duplicate_provider_`, `peer_creation_identity_`, `peer_mapping_replacement_` (four regressions), `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass after repairing a fixture's missing description. Gate owns combined foreground/native-resume, partial-list and Git/Linear acceptance; association remains unimplemented.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

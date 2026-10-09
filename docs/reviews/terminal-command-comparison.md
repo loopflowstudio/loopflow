@@ -47,6 +47,16 @@ installed help or reviewed Desktop code, not proof that no external tool exists.
   one saved repository; it does not establish cross-machine correspondence or
   route arbitrary repository locations. Earlier installed spellings below remain
   baseline evidence.
+- **October 8 source delta (`b64924447`):** `lf context --explain` now shares
+  recorded-checkout resolution with launch/status/PR reads; `lf desktop inspect`
+  projects registered plan-keyed windows and retained layouts without focus or
+  client acquisition. Cancellation-safe per-plan queues replace the single link.
+  Headless router smoke and Ghostty-disabled typechecking are recorded, not native
+  convergence or usable Session/diff proof. Rust/configured SwiftPM remain
+  unverified. The command tables preserve October 7's baseline and judgments;
+  these two read surfaces are now partial implementations of their **want** rows.
+  Complete legal actions/freshness, composed opening, pane control and terminal
+  I/O remain unfinished. No cmux/herdr behavior was re-exercised for this delta.
 - Public [cmux API](https://cmux.com/docs/api) and
   [concepts](https://cmux.com/docs/concepts) provide context, but the tables below
   use the installed command discovery and our local observations. The public API

@@ -61,28 +61,27 @@ One store's SQLite transaction cannot provide that guarantee; never synchronize
 runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
 control and composed proof remain.
 
-LOO-427 keys windows/queues by plan; canceled reads cannot clear replacement
-deliveries. Router smoke and Ghostty-disabled typecheck pass, not composed/native
-readiness. Context, launch, status and PR checkout inference now share recorded
-Machine/path identity, not branch names. Rust, configured SwiftPM and remote proof
-remain unverified.
+LOO-427 keys windows/queues by plan; delivery tokens fence canceled completions.
+Context/launch/status/PR reads share recorded Machine/path, not branch names.
+Passive inspection projects retained layouts, only a Task recommendation and UI
+read time—not complete actions, source freshness or usable-content proof. Router
+smoke/stub typecheck pass; Rust, configured SwiftPM and native/remote proof remain.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control
 stay local; imported completion cannot move or clean them. Preserve pending edits,
-semi-live comments/completion, causal reopening and stable mutation IDs. No real
-plan publication is authorized.
-412's `7af31f09f` adds peer import/export and conflict retention, not integrated here.
-Its checkpoint can retain unprojected conflicts; it does not prove convergence.
+semi-live comments/completion, causal reopening and stable mutation IDs.
+412's unintegrated `7395cf3bb` pins destinations, starts joins empty and explicitly
+selects records; descendants inherit selection. Checkpoints can retain conflicts.
 
 Jack selected user-keyed Git plans by default, explicit shared opt-in through the
 same APIs, Linear conflict wins; otherwise host preference then last-write-wins
 with recoverable edits (`f027890ab:wave/infrastructure/MEMORY.md`). A code remote
 grants neither shared identity nor publication permission.
-412 has causal ordering/ref isolation, not selected-record binding or foreground
-exchange. Ref separation alone cannot prevent exporting unrelated local plans.
-Plan ID/delegation exchange is absent; local Desktop work stays independent.
-Precedence fixes neither Linear's read/write race nor execution authority.
+Private-ancestry moves hold journals/dependents, including losing references,
+without undoing local moves. Peers retain old values: holds are not convergence.
+Public setup/exchange, 427 plan-ID/delegation integration and Rust proof remain.
+Precedence fixes neither Linear's race nor start admission.
 
 ## Terminal-host adoption (2026-10-07)
 

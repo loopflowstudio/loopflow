@@ -983,3 +983,45 @@ fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
         .remove("force");
     assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
 }
+
+#[test]
+fn task_planning_explanations_preserve_intent_and_effects() {
+    use loopflow::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
+    let json = include_str!("../../../tests/fixtures/dto/task_planning_explanations.json");
+    let reports: Vec<TaskPlanningExplanation> = serde_json::from_str(json).unwrap();
+    assert!(matches!(
+        &reports[0].action,
+        Some(TaskPlanningAction::Create {
+            project: Some(_),
+            ..
+        })
+    ));
+    assert!(
+        matches!(&reports[1].action, Some(TaskPlanningAction::Edit { revision: 3, fields }) if fields == &["title", "assignee"])
+    );
+    assert!(matches!(
+        &reports[2].action,
+        Some(TaskPlanningAction::Comment {
+            message: Some(_),
+            steer: true,
+            refresh: false
+        })
+    ));
+    assert!(matches!(
+        &reports[3].action,
+        Some(TaskPlanningAction::Comment {
+            message: None,
+            refresh: true,
+            ..
+        })
+    ));
+    assert!(reports[4].action.is_none());
+    assert!(!reports[4].impediments.is_empty());
+    assert_eq!(
+        serde_json::to_value(reports).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
+    missing[0].as_object_mut().unwrap().remove("effects");
+    assert!(serde_json::from_value::<Vec<TaskPlanningExplanation>>(missing).is_err());
+}

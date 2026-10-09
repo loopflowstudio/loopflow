@@ -163,6 +163,7 @@ lf history             # durable work, delivery and steering history
 lf session list --json # conversations on this Machine
 lf context             # context budgets, configuration sources and current usage
 lf task run LOO-427 --explain --json # intended action and impediments; no launch
+lf task edit LOO-427 --title "Retain drafts" --explain # validate without saving
 lf --machine mini --repo project debug --context # read remote input without launching
 lf flow pursue --context # graph and initial input; future inputs stay unavailable
 lf usage --days 30      # recorded provider usage

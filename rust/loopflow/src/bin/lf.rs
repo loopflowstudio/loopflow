@@ -1320,16 +1320,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 repo,
                 issue,
                 wave.as_deref(),
-                loopflow::pm::PmItemUpdate {
-                    name: title.clone(),
-                    description: notes.clone(),
-                    rank: *rank,
-                    assignee: if *unassign {
-                        Some(None)
-                    } else {
-                        assignee.clone().map(Some)
-                    },
-                },
+                task_edit_update(title, notes, *rank, assignee, *unassign),
             )?;
             println!("{}: updated task {}", result.wave, result.id);
             print_planning_sync(&result.sync);
@@ -1404,6 +1395,25 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             let task = loopflow::ops::task::task_wait(issue, until, timeout)?;
             print_task(&task, *json)
         }
+    }
+}
+
+fn task_edit_update(
+    title: &Option<String>,
+    notes: &Option<String>,
+    rank: Option<u32>,
+    assignee: &Option<String>,
+    unassign: bool,
+) -> loopflow::pm::PmItemUpdate {
+    loopflow::pm::PmItemUpdate {
+        name: title.clone(),
+        description: notes.clone(),
+        rank,
+        assignee: if unassign {
+            Some(None)
+        } else {
+            assignee.clone().map(Some)
+        },
     }
 }
 
@@ -1780,6 +1790,77 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 end: loopflow::ops::task::EndOptions { force: *force },
             },
         )?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            println!("{}", report.render());
+        }
+        return Ok(());
+    }
+    let piped_notes;
+    let planning = match &cli.command {
+        Some(Commands::Task {
+            cmd: TaskCommand::Create {
+                title, notes, wave, ..
+            },
+        }) => {
+            anyhow::ensure!(
+                !cli.context,
+                "--context requires an agent invocation; nothing was executed"
+            );
+            piped_notes = if notes.is_none() {
+                piped_task_report()?
+            } else {
+                None
+            };
+            Some((
+                wave.as_deref().or(cli.wave.as_deref()),
+                loopflow::ops::task::TaskPlanningRequest::Create {
+                    title: title.as_deref(),
+                    notes: notes.as_deref().or(piped_notes.as_deref()),
+                },
+            ))
+        }
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Edit {
+                    title,
+                    notes,
+                    rank,
+                    assignee,
+                    unassign,
+                    wave,
+                    ..
+                },
+        }) => Some((
+            wave.as_deref().or(cli.wave.as_deref()),
+            loopflow::ops::task::TaskPlanningRequest::Edit(task_edit_update(
+                title, notes, *rank, assignee, *unassign,
+            )),
+        )),
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Comment {
+                    message,
+                    steer,
+                    wave,
+                    ..
+                },
+        }) => Some((
+            wave.as_deref().or(cli.wave.as_deref()),
+            loopflow::ops::task::TaskPlanningRequest::Comment {
+                message: message.as_deref(),
+                steer: *steer,
+            },
+        )),
+        _ => None,
+    };
+    if let Some((wave, request)) = planning {
+        anyhow::ensure!(
+            !cli.context,
+            "--context requires an agent invocation; nothing was executed"
+        );
+        let report = loopflow::lf::commands::context::explain_task_planning(task, wave, &request)?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {

@@ -48,7 +48,10 @@ The later `4688a4d85`/`e3d5d46df` cut explains Task movement/restart through
 captured Workflow validation, sharing Task selection/location with run explanation.
 Session connect and interactive message-less resume have operation-specific
 explanation without endpoint probes. End intent does not perform completion reconciliation or cleanup; JSON
-preparation grants no takeover. Other Task commands, `history show` and skill/Flow/inline
+preparation grants no takeover. Planning create/edit/comment now share input,
+current-Project, scope and saved-record validation, reporting intended effects
+without acquisition or delivery. Unknown initialization/provenance stays unavailable.
+Other Task commands, `history show` and skill/Flow/inline
 invocations still have identity-only `--explain`, not mutation validation or a
 complete action plan. Agent `--context` is a separate input preview. These source
 boundaries do not add native, configured-peer or installed acceptance.

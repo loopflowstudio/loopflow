@@ -1,3 +1,7 @@
+mod planning_explain;
+pub use planning_explain::{
+    explain_task_planning, TaskPlanningAction, TaskPlanningExplanation, TaskPlanningRequest,
+};
 mod explain;
 pub use explain::{
     explain_task_move, explain_task_run, TaskMoveAction, TaskMoveExplanation, TaskRunAction,
@@ -1278,6 +1282,26 @@ async fn place_prepared_task(
     Ok(task)
 }
 
+pub(crate) async fn select_task_creation_wave(
+    store: &Store,
+    repo: &Path,
+    wave: Option<&str>,
+) -> OpsResult<Option<Wave>> {
+    let selected = match crate::work::wave::context::resolve_managed_wave(
+        Some(store),
+        Some(repo),
+        wave,
+        std::env::var("LF_WAVE_ID").ok().as_deref(),
+    )
+    .await
+    {
+        Ok(wave) => Some(wave),
+        Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => None,
+        Err(error) => return Err(task_error(error)),
+    };
+    Ok(selected)
+}
+
 pub fn task_create(
     repo: &Path,
     wave: Option<&str>,
@@ -1300,18 +1324,7 @@ pub fn task_create(
                 super::project::ensure(&main, name).await?;
             }
         }
-        let selected = match crate::work::wave::context::resolve_managed_wave(
-            Some(&store),
-            Some(&main),
-            wave,
-            std::env::var("LF_WAVE_ID").ok().as_deref(),
-        )
-        .await
-        {
-            Ok(wave) => Some(wave),
-            Err(crate::work::wave::context::WaveResolveError::NoContext) if wave.is_none() => None,
-            Err(error) => return Err(task_error(error)),
-        };
+        let selected = select_task_creation_wave(&store, &main, wave).await?;
         let wave = match selected {
             Some(wave) => wave,
             None => {
@@ -4822,13 +4835,8 @@ pub struct TaskEdit {
     pub sync: crate::planning::PlanningSyncStatus,
 }
 
-pub fn task_edit(
-    repo: &Path,
-    issue: &str,
-    wave: Option<&str>,
-    update: crate::pm::PmItemUpdate,
-) -> OpsResult<TaskEdit> {
-    if update == crate::pm::PmItemUpdate::default() {
+pub(crate) fn validate_task_edit_input(update: &crate::pm::PmItemUpdate) -> OpsResult<()> {
+    if *update == crate::pm::PmItemUpdate::default() {
         return Err(task_error(
             "task edit requires --title, --notes, --rank, --assignee or --unassign",
         ));
@@ -4840,6 +4848,16 @@ pub fn task_edit(
     {
         return Err(task_error("Task title cannot be empty"));
     }
+    Ok(())
+}
+
+pub fn task_edit(
+    repo: &Path,
+    issue: &str,
+    wave: Option<&str>,
+    update: crate::pm::PmItemUpdate,
+) -> OpsResult<TaskEdit> {
+    validate_task_edit_input(&update)?;
     block_on_task(async {
         let (store, task) = super::pm::resolve_saved_task(repo, wave, issue).await?;
         let edited = store
@@ -4925,12 +4943,20 @@ pub fn task_comment(
     ))
 }
 
+pub(crate) fn validate_task_comment_input(message: &str) -> OpsResult<()> {
+    if message.trim().is_empty() {
+        return Err(task_error("Task comment cannot be empty"));
+    }
+    Ok(())
+}
+
 pub(crate) fn append_task_comment(
     store: &Store,
     task: &Task,
     message: &str,
     steer: bool,
 ) -> OpsResult<String> {
+    validate_task_comment_input(message)?;
     let id = uuid::Uuid::new_v4().to_string();
     let capture = crate::session_record::inherited_capture_key().map_err(task_error)?;
     let provenance =
@@ -4965,9 +4991,6 @@ pub(crate) fn append_task_comment(
             super::pm::TaskCommentAuthor::Person { name },
         )
     };
-    if message.trim().is_empty() {
-        return Err(task_error("Task comment cannot be empty"));
-    }
     store
         .sqlite
         .append_task_comment(

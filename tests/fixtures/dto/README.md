@@ -89,3 +89,6 @@ takeover, shared legal actions and unavailable evidence without client acquisiti
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
 
 `task_move_explanations.json` preserves exact prior Workflow positions, move/restart intent and unperformed completion checks.
+
+`task_planning_explanations.json` preserves creation, edit revision/fields, comment
+append versus provider refresh, effects and explicit refused input.

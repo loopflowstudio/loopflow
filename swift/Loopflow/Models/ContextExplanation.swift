@@ -151,3 +151,59 @@ public struct TaskMoveExplanation: Codable, Equatable, Sendable {
     public let impediments: [String]
     public let unavailable: [String]
 }
+
+public enum TaskPlanningAction: Codable, Equatable, Sendable {
+    case create(title: String, description: String, project: String?)
+    case edit(revision: UInt64, fields: [String])
+    case comment(message: String?, steer: Bool, refresh: Bool)
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, title, description, project, revision, fields, message, steer, refresh
+    }
+    private enum Kind: String, Codable { case create, edit, comment }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(Kind.self, forKey: .kind) {
+        case .create:
+            self = .create(title: try values.decode(String.self, forKey: .title),
+                           description: try values.decode(String.self, forKey: .description),
+                           project: try values.decodeIfPresent(String.self, forKey: .project))
+        case .edit:
+            self = .edit(revision: try values.decode(UInt64.self, forKey: .revision),
+                         fields: try values.decode([String].self, forKey: .fields))
+        case .comment:
+            self = .comment(message: try values.decodeIfPresent(String.self, forKey: .message),
+                            steer: try values.decode(Bool.self, forKey: .steer),
+                            refresh: try values.decode(Bool.self, forKey: .refresh))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .create(let title, let description, let project):
+            try values.encode(Kind.create, forKey: .kind)
+            try values.encode(title, forKey: .title)
+            try values.encode(description, forKey: .description)
+            try values.encode(project, forKey: .project)
+        case .edit(let revision, let fields):
+            try values.encode(Kind.edit, forKey: .kind)
+            try values.encode(revision, forKey: .revision)
+            try values.encode(fields, forKey: .fields)
+        case .comment(let message, let steer, let refresh):
+            try values.encode(Kind.comment, forKey: .kind)
+            try values.encode(message, forKey: .message)
+            try values.encode(steer, forKey: .steer)
+            try values.encode(refresh, forKey: .refresh)
+        }
+    }
+}
+
+public struct TaskPlanningExplanation: Codable, Equatable, Sendable {
+    public let resolution: ContextExplanation
+    public let action: TaskPlanningAction?
+    public let effects: [String]
+    public let impediments: [String]
+    public let unavailable: [String]
+}

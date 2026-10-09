@@ -1220,6 +1220,8 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         "--json",
     ]);
     assert!(invalid["action"].is_null());
+    assert_eq!(invalid["resolution"]["wave"]["state"], "unavailable");
+    assert_eq!(invalid["resolution"]["task"]["state"], "unbound");
     assert!(invalid["impediments"][0]
         .as_str()
         .unwrap()
@@ -2070,4 +2072,362 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
     assert!(!end["unavailable"].as_array().unwrap().is_empty());
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(fs::read(&path).unwrap() == before);
+}
+
+#[test]
+fn task_planning_explain_validates_mutations_without_changing_checkpointed_storage() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("planning-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "planning-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let edit = read(&[
+        "task",
+        "edit",
+        "INF-123",
+        "--title",
+        "New title",
+        "--unassign",
+        "--rank",
+        "2",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(
+        edit["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
+    assert_eq!(edit["action"]["kind"], "edit");
+    assert_eq!(
+        edit["action"]["fields"],
+        serde_json::json!(["title", "rank", "assignee"])
+    );
+    assert_eq!(edit["impediments"], serde_json::json!([]));
+    let text = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "edit", "INF-123", "--notes", "", "--explain"],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert!(text.contains("Intended action: edit description"));
+    assert!(text.contains("Effect: Save changed fields"));
+    for (args, expected) in [
+        (
+            vec!["task", "edit", "INF-123", "--explain", "--json"],
+            "requires --title",
+        ),
+        (
+            vec![
+                "task",
+                "edit",
+                "INF-123",
+                "--title",
+                "  ",
+                "--explain",
+                "--json",
+            ],
+            "title cannot be empty",
+        ),
+        (
+            vec!["task", "comment", "INF-123", "  ", "--explain", "--json"],
+            "comment cannot be empty",
+        ),
+    ] {
+        let refused = read(&args);
+        assert!(refused["action"].is_null());
+        assert!(
+            refused["impediments"][0]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{refused}"
+        );
+    }
+    let comment = read(&[
+        "task",
+        "comment",
+        "INF-123",
+        "  Keep the draft  ",
+        "--steer",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(
+        comment["action"],
+        serde_json::json!({"kind":"comment", "message":"Keep the draft", "steer":true, "refresh":false})
+    );
+    let thread = read(&["task", "comment", "INF-123", "--explain", "--json"]);
+    assert!(thread["action"]["message"].is_null());
+    assert_eq!(thread["action"]["refresh"], true);
+    assert!(thread["effects"][0]
+        .as_str()
+        .unwrap()
+        .contains("Refresh Linear"));
+    let created = read(&[
+        "task",
+        "create",
+        "--wave",
+        "task-pr-tests",
+        "--title",
+        "  A new Task  ",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(created["action"]["kind"], "create", "{created}");
+    assert_eq!(created["action"]["title"], "A new Task");
+    assert_eq!(created["action"]["description"], "A new Task");
+    assert_eq!(
+        created["action"]["project"],
+        registered.task.project_id.as_str()
+    );
+    assert_eq!(created["resolution"]["task"]["state"], "unbound");
+    assert_eq!(created["impediments"], serde_json::json!([]));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(
+        fs::read(&path).unwrap() == before,
+        "preview changed checkpointed storage"
+    );
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn task_planning_explain_retains_deletion_and_missing_evidence() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let read = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&success(
+            command(home.path(), repo.path(), args).output().unwrap(),
+        ))
+        .unwrap()
+    };
+    let absent = read(&["task", "create", "--title", "New", "--explain", "--json"]);
+    assert!(absent["action"].is_null());
+    assert!(absent["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("absent"));
+    assert!(!home.path().join(".lf/loopflow.db").exists());
+    support::bind_task_planning(&repo);
+    repo.create_branch("planning-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "planning-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+        [registered.task.id.as_str()],
+    )
+    .unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    for args in [
+        vec![
+            "task",
+            "edit",
+            "INF-123",
+            "--title",
+            "Changed",
+            "--explain",
+            "--json",
+        ],
+        vec!["task", "comment", "INF-123", "Hello", "--explain", "--json"],
+    ] {
+        let refused = read(&args);
+        assert!(refused["action"].is_null());
+        assert!(
+            refused["impediments"][0]
+                .as_str()
+                .unwrap()
+                .contains("was deleted"),
+            "{refused}"
+        );
+    }
+    let missing = read(&[
+        "task",
+        "edit",
+        "INF-999",
+        "--title",
+        "Changed",
+        "--explain",
+        "--json",
+    ]);
+    assert!(missing["action"].is_null());
+    assert!(missing["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("no planning acquisition"));
+    let unregistered = read(&[
+        "task",
+        "create",
+        "--wave",
+        "not-registered",
+        "--title",
+        "New",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(unregistered["resolution"]["wave"]["state"], "unavailable");
+    assert!(unregistered["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("registration/acquisition was not performed"));
+    let inbox = read(&[
+        "task",
+        "create",
+        "--title",
+        "Inbox Task",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(inbox["action"]["kind"], "create");
+    assert!(inbox["action"]["project"].is_null());
+    assert_eq!(inbox["resolution"]["wave"]["state"], "unbound");
+    assert!(inbox["unavailable"][0]
+        .as_str()
+        .unwrap()
+        .contains("initialization"));
+    let invalid = read(&[
+        "task",
+        "create",
+        "--wave",
+        "task-pr-tests",
+        "--explain",
+        "--json",
+    ]);
+    assert!(invalid["action"].is_null());
+    assert_eq!(invalid["resolution"]["wave"]["state"], "unavailable");
+    assert_eq!(invalid["resolution"]["task"]["state"], "unbound");
+    assert!(invalid["impediments"][0]
+        .as_str()
+        .unwrap()
+        .contains("title or piped report"));
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+}
+
+#[test]
+fn task_planning_explain_create_uses_piped_input_and_current_project_validation() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    support::bind_task_planning(&repo);
+    repo.create_branch("creation-proof");
+    let registered = support::register_task(
+        &home.path().join(".lf"),
+        &repo.path().canonicalize().unwrap(),
+        "creation-proof",
+        &repo.head_sha(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let notes = tempfile::NamedTempFile::new().unwrap();
+    fs::write(notes.path(), "  First line\n\nA useful description.\n").unwrap();
+    let mut invocation = command(
+        home.path(),
+        repo.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "task-pr-tests",
+            "--explain",
+            "--json",
+        ],
+    );
+    invocation.stdin(fs::File::open(notes.path()).unwrap());
+    let preview: serde_json::Value =
+        serde_json::from_str(&success(invocation.output().unwrap())).unwrap();
+    assert_eq!(preview["action"]["title"], "First line");
+    assert_eq!(
+        preview["action"]["description"],
+        "First line\n\nA useful description."
+    );
+    assert_eq!(preview["resolution"]["checkout"]["state"], "unbound");
+    assert_eq!(
+        preview["resolution"]["execution_machine"]["state"],
+        "unbound"
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+
+    db.execute(
+        "UPDATE projects SET status='completed' WHERE id=?1",
+        [registered.task.project_id.as_str()],
+    )
+    .unwrap();
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    let before = fs::read(&path).unwrap();
+    let preview: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "create",
+                "--wave",
+                "task-pr-tests",
+                "--title",
+                "Not admitted",
+                "--explain",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    assert!(
+        preview["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("terminal"),
+        "{preview}"
+    );
+    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
+    assert!(fs::read(&path).unwrap() == before);
+    // Execution uses the same current-Project refusal, rather than creating in history.
+    let refused = command(
+        home.path(),
+        repo.path(),
+        &[
+            "task",
+            "create",
+            "--wave",
+            "task-pr-tests",
+            "--title",
+            "Not admitted",
+        ],
+    )
+    .output()
+    .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("terminal"));
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
 }

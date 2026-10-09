@@ -1113,6 +1113,18 @@ pub(crate) async fn resolve_saved_task(
                 .ok_or_else(|| OpsError::Message(format!("Task {issue} is not stored")))?
         }
     };
+    validate_saved_task_scope(&store, repo, wave, &task).await?;
+    Ok((store, task))
+}
+
+pub(crate) async fn validate_saved_task_scope(
+    store: &Store,
+    repo: &Path,
+    wave: Option<&str>,
+    task: &crate::work::task::Task,
+) -> OpsResult<()> {
+    let canonical = crate::repository::CanonicalRepo::discover(repo)
+        .map_err(|error| OpsError::Message(error.to_string()))?;
     let owner = store
         .get_wave(&task.wave_id)
         .await
@@ -1121,7 +1133,7 @@ pub(crate) async fn resolve_saved_task(
     let expected_wave = match wave {
         Some(selector) => Some(
             crate::work::wave::context::resolve_managed_wave(
-                Some(&store),
+                Some(store),
                 Some(repo),
                 Some(selector),
                 None,
@@ -1137,12 +1149,13 @@ pub(crate) async fn resolve_saved_task(
             .is_some_and(|expected| expected.id() != owner.id())
     {
         return Err(OpsError::Message(format!(
-            "Task {issue} belongs to {} in {}",
+            "Task {} belongs to {} in {}",
+            task.plan.identifier,
             owner.slug(),
             owner.repo()
         )));
     }
-    Ok((store, task))
+    Ok(())
 }
 
 /// The Linear linkage a published PR carries on its owning issue: a first-class

@@ -1,0 +1,281 @@
+[
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unbound"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "unbound"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "kind": "create",
+      "title": "Keep drafts",
+      "description": "Retain input",
+      "project": "project-fixture"
+    },
+    "effects": [
+      "Save locally; attempt configured synchronization"
+    ],
+    "impediments": [],
+    "unavailable": [
+      "Delivery has not been observed"
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "kind": "edit",
+      "revision": 3,
+      "fields": [
+        "title",
+        "assignee"
+      ]
+    },
+    "effects": [
+      "Save locally; attempt configured synchronization"
+    ],
+    "impediments": [],
+    "unavailable": [
+      "Delivery has not been observed"
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "kind": "comment",
+      "message": "Keep the draft",
+      "steer": true,
+      "refresh": false
+    },
+    "effects": [
+      "Save locally; attempt configured synchronization"
+    ],
+    "impediments": [],
+    "unavailable": [
+      "Delivery has not been observed"
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "kind": "comment",
+      "message": null,
+      "steer": false,
+      "refresh": true
+    },
+    "effects": [
+      "Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails"
+    ],
+    "impediments": [],
+    "unavailable": [
+      "Delivery has not been observed"
+    ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "unbound"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": null,
+    "effects": [],
+    "impediments": [
+      "Task title cannot be empty"
+    ],
+    "unavailable": [
+      "Delivery has not been observed"
+    ]
+  }
+]

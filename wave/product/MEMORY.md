@@ -132,11 +132,13 @@ readers and suppresses fallback Process writes. Parsed transport retains scoped 
 Checkpoint both stores: an effect-free receiver cannot undo a sender's write.
 Two-CLI fixtures cover routing/Flow previews, not configured SSH or exclusive start.
 
-Identity is not action validation. Task previews share selection/location;
-run/move/restart reuse owners; other Task explanations remain identity-only
-(`e3d5d46df`). Session explanation uses opening without endpoint probes;
-opening re-resolves. JSON grants no takeover; end intent grants no completion or
-cleanup. Native proof remains.
+Identity is not action validation. Run/move/restart and create/edit/comment
+previews reuse operation owners. Planning edits need no execution checkout;
+new Tasks have no execution location. Comment reads may refresh Linear during
+execution, never preview. Initialization/provenance remain unavailable.
+Session explanation never probes endpoints; execution re-resolves. JSON grants
+no takeover, end intent no completion/cleanup. Other Task explanations remain
+identity-only. Native proof remains.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -408,12 +410,10 @@ not establish status in cmux or herdr.
 
 ## Current Tasks and completion history (2026-10-02)
 
-LOO-371's October 5 snapshot measured warm 152 ms/reopen 38 ms, cold 8.4 s;
-no Task-link sheet. OCR split an ID and falsely failed a sweep: verify the observer.
-Own benchmark process groups; overlapping runs prove nothing. Full population,
-failed attempts and limits: `96a42755e:wave/product/MEMORY.md`, this heading, and
-[the evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
-October 7 retired performance acceptance; LOO-408 owns installed settlement.
+LOO-371 measurements, failed attempts and limits: `5044add03:wave/product/MEMORY.md`,
+this heading, and [evidence](../../scripts/benchmarks/desktop-performance/20261005-task-open/README.md).
+OCR split an ID: verify the observer. Own benchmark process groups; overlaps prove
+nothing. October 7 retired performance acceptance; LOO-408 owns installed settlement.
 
 Jack Heart requested current work without obsolete duplicates, completed Tasks
 hidden initially, and Show completed with 7 days, positive N days and All time

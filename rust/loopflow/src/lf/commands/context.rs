@@ -249,3 +249,27 @@ pub fn explain_task_move(
         }
     }))
 }
+
+/// Read planning intent without importing, saving, or synchronizing a record.
+pub fn explain_task_planning(
+    task: Option<&str>,
+    wave: Option<&str>,
+    request: &crate::ops::task::TaskPlanningRequest<'_>,
+) -> Result<crate::ops::task::TaskPlanningExplanation> {
+    let cwd = std::env::current_dir()?;
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(async {
+        match read_registry() {
+            Ok(store) => {
+                crate::ops::task::explain_task_planning(
+                    &store,
+                    &cwd,
+                    crate::ops::WorkSelection { task, wave },
+                    request,
+                )
+                .await
+            }
+            Err(error) => crate::ops::task::TaskPlanningExplanation::unavailable(error),
+        }
+    }))
+}

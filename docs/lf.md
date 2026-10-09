@@ -581,6 +581,18 @@ Moving to `end` describes completion and possible checkout cleanup but leaves PR
 reconciliation and completion gates explicitly unperformed; it grants no permission.
 Missing or remote execution evidence stays unavailable.
 
+`task create/edit/comment --explain` validates planning input through the same
+owners as saving. JSON separates `resolution`, intended `action`, `effects`,
+`impediments` and `unavailable`. Creation reads the current Project and derives a
+title from piped notes normally; new Task identity and execution stay unallocated.
+Editing reports fields and the observed revision, preserving empty descriptions
+and explicit unassignment. Comment explanation distinguishes appending from reading:
+a connected thread read would refresh Linear, but preview never does.
+Missing registry, cold acquisition, Wave/Project initialization, comment provenance
+and synchronization delivery remain explicit uncertainties. No preview saves,
+imports, registers, refreshes or synchronizes anything; execution validates again.
+Other Task commands still explain identity only, not their mutation arguments.
+
 `desktop open --explain` reports `resolution`, the proposed `url`, `impediments`
 and `unavailable` evidence using the same Work and opening checks as launch.
 It includes `--session` and `--diff`, and reports unsupported platforms without

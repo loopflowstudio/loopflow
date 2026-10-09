@@ -248,6 +248,10 @@ Task lookup plus `read_local_execution` wrapper for run/move explanations. It
 retains unavailable location and remote refusals before reading Workflow intent;
 no preparation or admission is added.
 
+Create/edit/comment no longer fall through to identity-only explanation. Shared
+input/scope/store validators replace inline save-only validation; transaction-time
+checks survive. Creation uses the same Wave/Project owners without initialization.
+
 Input reuses `insertTerminalText` and the pane event. Registry, multiplexer and
 surface owners remain authoritative: Close/Undo renews content tokens; filtered
 absence never releases a surface; passive reads allocate/clean up nothing and
@@ -396,13 +400,14 @@ completions. Utility windows and retained surfaces keep their own lifetimes.
 Inspection forwards Task and Session actions independently, retaining Task dates;
 Session observation time stays unavailable. Saved/failed readings grant no actions.
 Shared peer identity, remote observations/opening and configured proof remain.
-**Explanation coverage (`e3d5d46df`):** Task run/move/Workflow restart, Desktop open,
-Session connect and interactive message-less resume have operation-specific readings.
-Other Task commands, `history show` and skill/Flow/inline invocations read identity only;
-`--context` separately previews input. Other shapes refuse. Resolving
-`task edit/create/comment` does not validate its mutation. Remaining explanations
-must reuse operation validation and expose effects/impediments in text and JSON,
-with valid/refused cases; identity-only success is not completion.
+**Explanation coverage:** run/move/Workflow restart, create/edit/comment, Desktop
+open, Session connect and interactive message-less resume have operation-specific
+readings. Planning previews share input/scope/current-Project and saved-record
+validation; report effects without acquisition, registration, saves or delivery.
+New Task identity/location, missing initialization and comment provenance stay
+unallocated/unavailable. Other Task commands, `history show` and agent invocations
+still explain identity only; `--context` separately previews input. Remaining
+explanations must reuse their operation owners, not equate identity with permission.
 
 `task move` and Workflow restart now share captured-node validation with execution.
 Preview retains the exact prior node/edge, reason and force choice; restart intends
@@ -526,4 +531,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` PASS (prose-only reconciliation); prior network-isolated `global_commands task_` 8 PASS/build/fmt/Clippy retained at `e3d5d46df`; full suites/installation: gate/CI, native: demo.
+Check: network-isolated `global_commands task_planning_explain` (3), `dto_fixtures task_planning_explanations` (1), headless Swift DTO build/test (1), build/fmt/Clippy PASS; full suites/installation: gate/CI, native: demo.

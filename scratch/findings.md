@@ -182,29 +182,14 @@ Joint-projection setup failures and the foreign-bridge regression remain at
 accepted-only save parents and private holds. Prior Git proof called transport/Store
 directly, bypassing foreground exchange; it did not lift the mixed-provider refusal.
 
-**Foreground composition, October 9.** The transport-only association fixture is
-replaced in `planning_foreground_tests`: two isolated Homes, file-only Git, public
-association/Task edits/comments and repository `monitor work --watch`. Connected
-Linear stays off. Seeded provider observations establish distinct local Task/Project
-IDs; association enables projection only after import. Offline saves remain pending
-with last-good stream receipts; reconnect converges title/description/comment changes.
-Local → foreign → local title ancestry survives, completion then observed reopening
-converges, and a fresh connection repairs an unconfirmed publication without another
-mutation or commit. Captured Workflow/Session/Process rows remain unchanged; the PR
-and placement tables remain empty. No executing provider, checkout cleanup, real
-Linear acquisition or mounted Desktop acceptance is established.
-
-Review replaced a weak repeat-exchange assertion (saved status could satisfy it
-before exchange) with a lost-publication-receipt fixture requiring fresh confirmation.
-Git confirmation preserves the pending provider comment's original input and local
-lost-reply error. An initial assertion wrongly expected that diagnostic on the peer:
-comment error text is local, while stable comment identity/input is portable. No
-protocol expansion followed. A private-API compile failure led to SQL seeding of the lost receipt.
-Clippy caught a forward scan for the last frame; the reader scans backward.
-Logs: `/tmp/loo427-foreground-{build,test,clippy}.log`, failed receipt assertion:
-`/tmp/loo427-foreground-receipt-failure.log`. Pre-edit scratch/diff:
-`/tmp/loo427-foreground-before-AgmlKJ/`. Mixed exchange, exclusive admission,
-delegation and remote/native proof remain; neither refusal was lifted.
+**Foreground composition, October 9.** `5044add03:scratch/findings.md`, this
+heading, retains the public association/offline/reconnect/causal-reopening and
+lost-publication-receipt fixture, failed assertions and logs. It uses two isolated
+Homes and file-only Git; seeded execution stays unchanged. Fresh stream confirmation
+is required: cached success cannot prove repeat exchange. Git confirmation never
+acknowledges provider delivery, and comment diagnostics remain local. Mixed-provider
+exchange, exclusive admission, delegation and remote/native proof remain; neither
+refusal was lifted.
 
 ## Workflow movement explanation — October 9
 
@@ -212,3 +197,15 @@ Run/move readers share Task selection/location; movement/restart retain captured
 graph validation and exact prior edges. End intent does not reconcile or clean up.
 The ID-versus-alias failure and recovery remain at `4688a4d85`, this heading
 (`/tmp/loo427-move-first-failure.log`, `/tmp/loo427-implement-9Chixx/`).
+
+## Planning invocation explanation — October 9
+
+Create/edit/comment replace identity-only preview with shared input, scope,
+current-Project and store validation. Reads use the read-only registry, with no
+planning acquisition, initialization, author capture, Process logging or delivery.
+Review caught creation retaining the caller Task's recorded location: a new Task's
+checkout/execution are now unbound. Comment reads can refresh Linear during actual
+execution; preview exposes that effect without refreshing. This does not establish
+provider delivery or remote execution. CLI fixtures compare checkpointed stores,
+include refused/deleted/missing records and piped creation input, and compare the
+terminal-Project refusal with execution. Rust/Swift fixtures preserve the new wire.

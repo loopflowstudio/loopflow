@@ -50,6 +50,23 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode([DesktopOpenExplanation].self, from: JSONEncoder().encode(reports)) == reports)
     }
 
+    @Test func taskPlanningExplanationsPreserveIntentAndEffects() throws {
+        let data = try loadFixtureData("task_planning_explanations.json")
+        let reports = try JSONDecoder().decode([TaskPlanningExplanation].self, from: data)
+        #expect(reports[0].action == .create(title: "Keep drafts", description: "Retain input", project: "project-fixture"))
+        #expect(reports[1].action == .edit(revision: 3, fields: ["title", "assignee"]))
+        #expect(reports[2].action == .comment(message: "Keep the draft", steer: true, refresh: false))
+        #expect(reports[3].action == .comment(message: nil, steer: false, refresh: true))
+        #expect(reports[4].action == nil)
+        #expect(!reports[4].impediments.isEmpty)
+        #expect(try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        wire[0].removeValue(forKey: "effects")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskPlanningExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
+    }
+
     @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
         let data = try loadFixtureData("task_move_explanations.json")
         let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)

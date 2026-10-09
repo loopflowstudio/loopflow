@@ -82,6 +82,22 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub(crate) fn validate_task_edit(
+        &self,
+        id: &TaskId,
+        expected_revision: u64,
+        patch: &PmItemUpdate,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        validate_edit(&conn, id, expected_revision, patch).map(|_| ())
+    }
+
+    pub(crate) fn require_task_not_deleted(&self, id: &TaskId) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let task = super::children::task_on(&conn, id)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&conn, &task)
+    }
+
     pub fn edit_task(
         &self,
         id: &TaskId,
@@ -90,20 +106,7 @@ impl SqliteStore {
     ) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        super::children::require_task_not_deleted(&tx, &task)?;
-        if task.plan.revision != expected_revision {
-            return Err(StoreError::InvalidAuthority(
-                "Task changed; read its current revision before editing".into(),
-            ));
-        }
-        if patch
-            .name
-            .as_ref()
-            .is_some_and(|title| title.trim().is_empty())
-        {
-            return Err(StoreError::InvalidData("Task title cannot be empty".into()));
-        }
+        let task = validate_edit(&tx, id, expected_revision, patch)?;
         let current = super::plan_read::task_in(&tx, id)?
             .record
             .ok_or(StoreError::NotFound)?
@@ -149,4 +152,27 @@ impl SqliteStore {
         tx.commit()?;
         Ok(task)
     }
+}
+
+fn validate_edit(
+    conn: &rusqlite::Connection,
+    id: &TaskId,
+    expected_revision: u64,
+    patch: &PmItemUpdate,
+) -> StoreResult<Task> {
+    let task = super::children::task_on(conn, id)?.ok_or(StoreError::NotFound)?;
+    super::children::require_task_not_deleted(conn, &task)?;
+    if task.plan.revision != expected_revision {
+        return Err(StoreError::InvalidAuthority(
+            "Task changed; read its current revision before editing".into(),
+        ));
+    }
+    if patch
+        .name
+        .as_ref()
+        .is_some_and(|title| title.trim().is_empty())
+    {
+        return Err(StoreError::InvalidData("Task title cannot be empty".into()));
+    }
+    Ok(task)
 }

@@ -783,7 +783,7 @@ const ACCEPTED_WAVE_PROJECTS: &str = "
         CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
 
 /// Inputs select IDs only; project their accepted rows inside the ingestion transaction.
-fn project_accepted_planning(
+pub(super) fn project_accepted_planning(
     tx: &Transaction<'_>,
     repo: &str,
     provider: &str,

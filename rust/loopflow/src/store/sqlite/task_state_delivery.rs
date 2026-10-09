@@ -219,6 +219,17 @@ impl SqliteStore {
         )? {
             return Ok(false);
         }
+        // Delivery readback is acquisition too. Use the common projection to
+        // retain its provider provenance before settling the receipt; otherwise
+        // a peer sees only the old intention and cannot observe this readback.
+        super::planning::project_accepted_planning(
+            &tx,
+            &repo,
+            "linear",
+            &[],
+            std::slice::from_ref(observed),
+            None,
+        )?;
         let pending = reconcile_in(&tx, &delivery.task_id, observed)?;
         tx.commit()?;
         Ok(pending)

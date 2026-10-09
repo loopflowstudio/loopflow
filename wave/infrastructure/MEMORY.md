@@ -625,17 +625,18 @@ acceptance remain at
 Jack Heart selected review-only custom-ref sync, not landing/real export.
 Joining publishes nothing; imports remain unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, baselines,
-uncertainty and losers. Readback cannot settle mappings/errors or removal via creation.
-Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchange
-stays disabled. Earlier proofs: `9dfb95451`, this heading.
+uncertainty and losers. Mappings/errors and creation never settle removal.
+Desktop retains scoped last-good status; per-Work recovery remains unfinished.
+Association/mixed exchange stays held; storage proves no public/installed acceptance.
 
-Creation origins retain exact readback; joint winners reuse accepted observations
-on explicit correspondence. Causality precedes ranking; portable parents prove observation, not identity or
-authority. Private references hold groups. Membership aliases preserve inputs; readback rebases later saves
-(`79e478550`/`521c7040f`). Journal origins survive capture/ranking. Equal revisions can carry different list
-ranks; capture bodies. Association/mixed exchange stays held. Storage proves
-no public/installed acceptance.
-Origin/readback proofs: `e422eca8b`/`19ed9a5a1`; earlier: `163362aad`, this heading.
+Causality precedes ranking. Correspondence reuses accepted observations, never
+identity or authority; private references hold groups. Journal origins and alias
+comparisons preserve inputs and rebase later saves. Equal revisions can carry
+different ranks; retain bodies. Earlier proofs: `6f1869e9b`, this heading.
+State readback must enter common planning projection: cache/receipt settlement alone
+omits the observation from peer history. Association fixtures cover state, comment
+authorship, Wave selection and private uncertainty without changing execution;
+association alone selects nothing. Public Git/HTTPS proof remains.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

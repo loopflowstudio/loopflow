@@ -164,6 +164,9 @@ this heading. Keep these replacements deleted:
   Store error, not diagnostic-string matching; malformed input still aborts import.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
+- State delivery's cache-only readback, which settled its local receipt without
+  publishing the observation into the peer journal. Reuse common accepted-planning
+  projection in the same transaction; retain the exact-current-receipt fence.
 - Physical-only membership delivery lookup and raw-ID readback/baseline comparisons.
   Reuse explicit correspondence at delivery/comparison; keep captured IDs unchanged.
 - Repeated baseline normalization and decoding entire later receipts just to rebase
@@ -228,8 +231,8 @@ Receipt origins and full-ID correspondence exist. Ordinary import now projects
 associated creation receipts onto their local owner without releasing holds
 (`39dba32c1`).
 **Joint scalar projection now exists; complete association recovery remains
-unfinished.** Item 3 owns relationship and receipt composition before releasing
-exchange/effect holds. Private or failed groups never advance observations.
+unfinished.** Item 3 owns private-group presentation and public composition before
+releasing exchange/effect holds. Private or failed groups never advance observations.
 
 Destination-level Desktop status has focused headless proof; per-Work membership,
 authorship/assignees and losing-edit recovery remain unfinished. Public Git/Linear
@@ -263,21 +266,13 @@ Creation/link discovery and receipts share `planning_export.rs` and
 Exact capture/readback proof: `95e81c688:scratch/work-on-another-machine-name.md`,
 **Remaining integration**.
 
-At `a002e4060`, the isolated Linux connected-provider fixture passed after importing
-unprepared plans before connecting Linear. It exercises public work-watch, Task
-edits/status and Project edits/workflow readback against synthetic HTTPS. Lost
-creation/link responses, mapping-only evidence and later saves require readback
-without repeated writes. `098de8033` then corrected status assertions to read
-`sync.changes` directly; execution of that revised Linux fixture remains with gate.
-Neither result enables mixed-provider Git exchange or establishes simultaneous
-cross-machine creation authority.
-
-The fixture compares complete rows in six tables: Sessions, Workflows, Workflow
-moves, Task PRs, placements and Project transitions. Its peer-born records are
-unrun. The shared reader now also queries Processes, but this creation case
-passes an empty retained-ID list. This proves no fabricated placement or
-transition, not populated execution/control preservation. That separate acceptance
-remains with the two-store foreground fixture and combined gate.
+Connected-provider fixture history: `6f1869e9b:scratch/work-on-another-machine-name.md`,
+**Remaining integration**. `a002e4060` passed public work-watch/edit/readback
+against synthetic HTTPS; `098de8033`'s corrected `sync.changes` assertions await
+gate. Its six-table comparison uses unrun peer-born records: no fabricated
+placement/transition, not populated execution or running-control preservation.
+Lost creation/link responses still require exact readback, not repeated effects;
+this supplies neither mixed-provider exchange nor simultaneous creation authority.
 
 Executable feedback exposed two distinct presentation/execution boundaries:
 - Wave list/status/roadmap now expose nullable `WaveSnapshot.machine` in Rust
@@ -430,8 +425,8 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    local execution lookup, common effect ownership, uncertain receipts and private
    selection. Neither transferring a mapping nor merging execution is an accepted
    implementation. The common receipt-origin cut below resolves storage multiplicity.
-   Explicit correspondence/lookup and joint scalar projection now exist;
-   complete receipt/relationship recovery does not.
+   Correspondence, joint projection and receipt composition have focused storage
+   proof; public recovery remains unfinished.
    Mapping validation precedes scalar and independent-evidence acquisition.
    Common effect attempts consult cross-ID conflicts against retained provider
    claims, including losing mappings and creation inputs; nulling a mapping
@@ -513,42 +508,45 @@ invalidation) remain. The diagnostic is temporary, not product policy.
    It serializes retained history because public association exchange
    remains held. It is not public Git/HTTPS acceptance.
 
-   Remaining association implementation order (reconciled October 9 at `521c7040f`):
-   - Finish planning-reference composition. Scalar Task membership, comment
-     ownership and Wave selection now resolve associated IDs at projection;
-     order members resolve for projection/delivery/comparison without changing
-     captured IDs. Membership has ordinary-import and absent-parent readback proof; comment ownership and Wave selection still
-     need focused composition proof. Preserve journal values, captured inputs and
-     execution foreign keys. Association alone changes no Wave selection.
-   - Compose non-creation receipts against the resolved local owner.
-     Grouped scalar delivery and order/deletion receipts use the resolved local
-     owner. Membership resolves explicit Project correspondence in
-     delivery and common readback comparisons, retaining captured values/baselines.
-     Exact readback rebases later saves by resolved baseline identity, not raw ID;
-     equal projected membership creates no redundant receipt. The focused fixture
-     uses ordinary association/import in both orders, an earlier uncertain local
-     move, a later peer move and populated execution during readback. Public
-     Git/HTTPS delivery remains gate-owned; state still needs composed verification.
-     October 9 receipt-origin composition uses the journal's immutable origin
-     for capture and order ranking, without a second origin store. Cross-origin
-     receipt-ID reuse aborts import. Common delivery and complete-list comparisons
-     resolve Task aliases, preserving captured lists, baselines and effect inputs.
-     The ordinary-import regression passes reversed/repeated imports, partial
-     readback, later-save rebasing, return import and execution preservation.
-     Detail/list reads with one revision but different rank exposed a missing
-     capture: compare complete provider bodies, not revision alone. Exact trash
-     acknowledgement returns on the original deletion history. The private-origin
-     fixture preserves execution and uncertain removal through explicit selection,
-     reimport and readback. Missing Task correspondence must remain an unresolved
-     member, never become an empty desired list or acknowledge an uncertain move.
-     State/comment/Wave composition and public Git/HTTPS proof remain;
-     association/mixed exchange and effects stay held.
-     Preserve field/state mutation identities, deletion/order receipt IDs,
-     original inputs, baselines and uncertain losing attempts; relationship
-     resolution changes the local projection, not captured delivery inputs.
-   - Independent private selection: associating private B with selected A cannot
-     enroll B, its comments, losing edits or private parent references. Public
-     recovery must explain the resulting hold.
+   **Implemented association boundaries — reconciled October 9.**
+   `79e478550`/`521c7040f` supply membership composition.
+   `e422eca8b`/`19ed9a5a1` supply receipt-origin/order-member composition:
+   journal-owned capture/ranking, cross-origin receipt-reuse rejection (including
+   snapshot union), and alias-aware delivery/readback. Captured inputs survive;
+   unknown correspondence defers readback rather than discarding a member.
+
+   Ordinary-import fixtures cover reversed/repeated association and import,
+   partial-progress readback, later-save rebasing, return import and populated
+   execution. Detail acquisition alone cannot settle order. Equal issue revisions
+   with different list ranks require retaining the complete provider body.
+   Deletion readback retains origins and private uncertainty. Return imports use
+   retained journals, not public exchange; Git/HTTPS acceptance remains unproved.
+
+   **October 9 state/comment/Wave composition.**
+   State/comment/Wave composition now has ordinary association/import fixtures,
+   reversing/repeating snapshots and returning local saves after accepted peer
+   observations. They preserve mutation IDs, authored losers, uncertain local
+   attempts and populated execution. Association alone changes no Wave selection;
+   later import resolves the selected Project through correspondence. Private
+   comments, decisions and parent references remain held even after another
+   destination is selected.
+
+   The fixture exposed cache-only state readback: its receipt settled locally,
+   but the peer remained pending because the journal lacked the observation.
+   `observe_task_state` now enters common accepted-planning projection in that
+   transaction, retaining its exact-current-receipt fence. No second writer or
+   migration is added. Return readback settles the peer without replaying a turn.
+   These are storage proofs, not public Git/HTTPS or running-control acceptance.
+
+   **Remaining association work, in order:**
+   - Complete public recovery presentation for private groups. Associating private
+     B with selected A cannot enroll B, its comments, losing edits or private parent
+     references. The storage hold exists; per-Work selection and losing-edit
+     recovery remain implementation work, not only gate coverage.
+   - Complete public Git/HTTPS composition and exact-origin readback before
+     releasing association exchange/effect holds or the mixed-provider refusal.
+     Storage readback is not foreground acceptance. Gate owns the combined
+     command/lifetime checks; Jack Heart's review-only boundary is unchanged.
 
    Acceptance must enter through that correspondence operation and ordinary peer
    import/lookup, not substitute helper calls for association. For both Tasks and
@@ -637,6 +635,11 @@ planning exchange during a live connection and explicit native resume, with no
 extra provider launch caused by exchange; legitimate local resume is not an
 imported execution mutation. No engine-lifecycle code is added to LOO-412.
 
+`2df907de7` integrates main `461577746` (#1516): Rust/Swift now name the
+Loopflow-owned records LfSession/LfProcess. Wire/storage bytes, ProcessLfid and
+product Session/Process remain unchanged. Recorded checks precede this merge;
+the combined candidate remains gate-owned.
+
 Readback of historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still leaves
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without completion or exit evidence.
 The new local recovery implementation does not settle that history.
@@ -705,7 +708,7 @@ Earlier checks and limits: `9b59e9b71` and `b5b491099`, this file's
 **Acceptance for review**. They do not prove this ordering cut, combined public
 behavior or Desktop acceptance.
 
-Check: `cargo test -p loopflow --lib --no-run`; `scripts/test_network.py` lib filters `associated_`, `planning_order_`, `peer_ordering_` (21 passes); `cargo fmt --all --check`; `cargo clippy --all-targets -- -D warnings` pass. Gate owns released-frontier, Git/HTTPS and Desktop acceptance.
+Check: `cargo test -p loopflow --lib --no-run`, `cargo fmt --all --check` and `cargo clippy --all-targets -- -D warnings` pass; network-isolated lib filters `associated_`, `task_completion_lost_reply_adopts_linear_reopening`, `task_completion_late_acknowledgement_preserves_explicit_reopening`, `task_completion_preserves_linear_reopening_during_delivery`: 11 passes. Gate owns released-frontier, public Git/HTTPS and Desktop acceptance.
 
 SQL/macOS and unresolved Flow-exit evidence: `eeb98aa89`, this file's
 **Acceptance for review**. No provider death, replacement authority or installed

@@ -8331,6 +8331,290 @@ mod tests {
     }
 
     #[test]
+    fn associated_state_comments_and_wave_selection_preserve_local_ownership() {
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        for reverse in [false, true] {
+            let (_source_home, source) = store();
+            let (wave, mut row, source_task) = linear_seed(&source);
+            let source_project = source.task(&source_task).unwrap().unwrap().project_id;
+            let before = export(&source, "/source");
+            let (_target_home, target) = store();
+            target
+                .create_wave(&Wave::new(
+                    wave.clone(),
+                    "planning".into(),
+                    "/target".into(),
+                ))
+                .unwrap();
+            target.put_pm_snapshot(&row).unwrap();
+            let local = target
+                .task_by_issue(&row.snapshot.items[0].id)
+                .unwrap()
+                .unwrap();
+            target
+                .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+                .unwrap();
+            let selection = |store: &SqliteStore| -> Option<String> {
+                store
+                    .conn
+                    .lock()
+                    .unwrap()
+                    .query_row(
+                        "SELECT current_project_id FROM waves WHERE id=?1",
+                        [&wave],
+                        |r| r.get(0),
+                    )
+                    .unwrap()
+            };
+            assert_eq!(selection(&target), None);
+            // An uncertain local completion must survive association and lose only
+            // to the later observed reopening, without moving its local Workflow.
+            complete(&target, &local.id);
+            let uncertain = target.pending_task_state(&local.id).unwrap().unwrap();
+            assert!(target.attempt_task_state(&uncertain).unwrap());
+            target
+                .task_state_error(&uncertain, "lost completion response")
+                .unwrap();
+            preserve_execution(&target, &wave, &local.id);
+            preserve_execution(&source, &wave, &source_task);
+            let source_execution = execution_rows(&source);
+            let target_execution = execution_rows(&target);
+            let authored = TaskComment {
+                id: "associated-comment".into(),
+                body: "Keep this direction".into(),
+                author: TaskCommentAuthor::Person {
+                    name: Some("Maya".into()),
+                },
+                created_at: Some("2026-10-09T10:00:00Z".into()),
+            };
+            source.append_task_comment(&source_task, &authored).unwrap();
+            // Same provider ID, different saved Task IDs, and an uncertain local
+            // comment delivery. Provider correction must retain the authored loser.
+            target.append_task_comment(&local.id, &authored).unwrap();
+            target
+                .record_comment_delivery(&authored.id, Some("lost comment response"))
+                .unwrap();
+            let comment_before = comment_receipt(&target, &authored.id);
+            let source_steers = source.task_steers(&source_task).unwrap();
+            let target_steers = target.task_steers(&local.id).unwrap();
+            let corrected = crate::pm::IssueComment {
+                id: authored.id.clone(),
+                body: "Provider correction".into(),
+                author_id: Some("quinn".into()),
+                author_name: Some("Quinn".into()),
+                created_at: authored.created_at.clone(),
+                revision: Some("2026-10-09T11:00:00Z".into()),
+            };
+            acquire_comment(&source, &source_task, &corrected);
+            row.snapshot.items[0].state = Some("unstarted".into());
+            row.snapshot.items[0].completed = false;
+            row.snapshot.items[0].revision = Some("2026-10-09T11:00:00Z".into());
+            row.synced_at += 1;
+            source.put_pm_snapshot(&row).unwrap();
+            source.bind_project(&wave, "current").unwrap();
+            let after = export(&source, "/source");
+            let snapshots = if reverse {
+                [&after, &before]
+            } else {
+                [&before, &after]
+            };
+            import(&target, "/target", "unassociated", snapshots[0]);
+            let selected = selection(&target);
+            let associations = [
+                (
+                    PlanningKind::Task,
+                    source_task.as_str(),
+                    local.id.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                ),
+                (
+                    PlanningKind::Project,
+                    source_project.as_str(),
+                    local.project_id.as_str(),
+                    "current",
+                ),
+            ];
+            for (kind, origin, owner, provider) in associations {
+                for _ in 0..2 {
+                    target
+                        .associate_peer_planning(
+                            "/target",
+                            &PlanningObject {
+                                kind,
+                                id: origin.into(),
+                            },
+                            owner,
+                            provider,
+                        )
+                        .unwrap();
+                    assert_eq!(
+                        selection(&target),
+                        selected,
+                        "association must not select a Project"
+                    );
+                    assert_eq!(execution_rows(&target), target_execution);
+                    assert_eq!(comment_receipt(&target, &authored.id), comment_before);
+                    let retained = target.pending_task_state(&local.id).unwrap().unwrap();
+                    assert_eq!(retained.id, uncertain.id);
+                    assert!(retained.attempted);
+                }
+            }
+            for incoming in [snapshots[1], &after, &before, &after] {
+                import(&target, "/target", "associated", incoming);
+                assert_eq!(
+                    selection(&target).as_deref(),
+                    Some(local.project_id.as_str())
+                );
+                assert_eq!(
+                    target
+                        .planning_task(&local.id)
+                        .unwrap()
+                        .record
+                        .unwrap()
+                        .item
+                        .state
+                        .as_deref(),
+                    Some("unstarted")
+                );
+                assert!(target.pending_task_state(&local.id).unwrap().is_none());
+                assert_eq!(
+                    target.task_comments(&local.id).unwrap().comments,
+                    vec![TaskComment::from(&corrected)]
+                );
+                assert_eq!(
+                    target.task_comments(&local.id).unwrap().conflicts[&authored.id],
+                    authored.body
+                );
+                assert!(target.pending_task_comments(&local.id).unwrap().is_empty());
+                assert_eq!(execution_rows(&target), target_execution);
+            }
+            let losing: (String, bool, bool, String) = target.conn.lock().unwrap().query_row(
+                "SELECT target,attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1", [&uncertain.id],
+                |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))
+            ).unwrap();
+            assert_eq!((&*losing.0, losing.1, losing.2), ("completed", true, true));
+            assert_eq!(
+                serde_json::from_str::<crate::pm::PmItem>(&losing.3).unwrap(),
+                row.snapshot.items[0]
+            );
+            assert_eq!(comment_receipt(&target, &authored.id).0, comment_before.0);
+            assert_eq!(target.task_steers(&local.id).unwrap(), target_steers);
+            let revisions = target.revisions().unwrap();
+            import(&target, "/target", "associated", &after);
+            assert_eq!(target.revisions().unwrap(), revisions);
+            assert_eq!(target.task_steers(&local.id).unwrap(), target_steers);
+
+            // A local decision after observing the associated peer follows its
+            // actual mutation, rather than becoming a concurrent intention.
+            super::super::task_state_delivery::queue_in(
+                &target.conn.lock().unwrap(),
+                &local.id,
+                "canceled",
+            )
+            .unwrap();
+            let reply = TaskComment {
+                id: "associated-reply".into(),
+                body: "Keep the implementation".into(),
+                author: TaskCommentAuthor::Person {
+                    name: Some("Ravi".into()),
+                },
+                created_at: Some("2026-10-09T12:00:00Z".into()),
+            };
+            target.append_task_comment(&local.id, &reply).unwrap();
+            // Serialize the retained journal only; public association exchange
+            // remains held until the complete Git/HTTPS path is proved.
+            let returned =
+                super::export_in(&target.conn.lock().unwrap(), "/target", &destination()).unwrap();
+            let returned = PlanningSnapshot::from_bytes(&returned.to_bytes().unwrap()).unwrap();
+            let (mutation, saved) = returned
+                .winners()
+                .find(|(_, c)| c.object.id == local.id.as_str() && c.field == "disposition")
+                .unwrap();
+            assert!(saved
+                .parents
+                .iter()
+                .any(|id| returned.changes[id].object.id == source_task.as_str()));
+            assert_eq!(
+                super::linear_predecessor(&returned, saved).unwrap()["revision"],
+                "2026-10-09T11:00:00Z"
+            );
+            import(&source, "/source", "return-unassociated", &returned);
+            for (kind, owner, origin, provider) in associations {
+                source
+                    .associate_peer_planning(
+                        "/source",
+                        &PlanningObject {
+                            kind,
+                            id: origin.into(),
+                        },
+                        owner,
+                        provider,
+                    )
+                    .unwrap();
+            }
+            for incoming in [&returned, &before, &returned] {
+                import(&source, "/source", "return", incoming);
+                let delivery = source.pending_task_state(&source_task).unwrap().unwrap();
+                assert_eq!(delivery.id, format!("peer:{mutation}:disposition"));
+                assert_eq!(delivery.target, "canceled");
+                assert_eq!(
+                    source.task_comments(&source_task).unwrap().comments,
+                    vec![TaskComment::from(&corrected), reply.clone()]
+                );
+                assert_eq!(execution_rows(&source), source_execution);
+            }
+            let delivery = source.pending_task_state(&source_task).unwrap().unwrap();
+            assert!(
+                source.attempt_task_state(&delivery).is_err(),
+                "association effects remain held"
+            );
+            let mut observed = row.snapshot.items[0].clone();
+            observed.state = Some("canceled".into());
+            observed.revision = Some("2026-10-09T13:00:00Z".into());
+            assert!(!source.observe_task_state(&delivery, &observed).unwrap());
+            assert!(source.pending_task_state(&source_task).unwrap().is_none());
+            let observed_reply = crate::pm::IssueComment {
+                id: reply.id.clone(),
+                body: reply.body.clone(),
+                author_id: Some("ravi".into()),
+                author_name: Some("Ravi".into()),
+                created_at: reply.created_at.clone(),
+                revision: Some("2026-10-09T13:00:00Z".into()),
+            };
+            acquire_comment(&source, &source_task, &observed_reply);
+            assert!(source
+                .pending_task_comments(&source_task)
+                .unwrap()
+                .is_empty());
+            let readback =
+                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            for incoming in [&readback, &returned, &readback] {
+                import(&target, "/target", "readback", incoming);
+                assert!(target.pending_task_state(&local.id).unwrap().is_none());
+                assert!(target.pending_task_comments(&local.id).unwrap().is_empty());
+                assert_eq!(
+                    selection(&target).as_deref(),
+                    Some(local.project_id.as_str())
+                );
+                assert_eq!(execution_rows(&target), target_execution);
+            }
+            assert_eq!(execution_rows(&source), source_execution);
+            assert_eq!(source.task_steers(&source_task).unwrap(), source_steers);
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().worktree.as_deref(),
+                Some(std::path::Path::new("/retained/work"))
+            );
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o.id == local.id.as_str()
+                    || o.id == source_task.as_str()
+                    || o.id == reply.id));
+        }
+    }
+
+    #[test]
     fn associated_import_observes_joint_frontier_before_local_save_and_return_import() {
         use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
 
@@ -8622,6 +8906,26 @@ mod tests {
             .task_by_issue(&row.snapshot.items[0].id)
             .unwrap()
             .unwrap();
+        target.bind_project(private.id(), "current").unwrap();
+        complete(&target, &local.id);
+        let uncertain = target.pending_task_state(&local.id).unwrap().unwrap();
+        assert!(target.attempt_task_state(&uncertain).unwrap());
+        target
+            .task_state_error(&uncertain, "private lost reply")
+            .unwrap();
+        let comment = TaskComment {
+            id: "private-associated-comment".into(),
+            body: "Private direction".into(),
+            author: TaskCommentAuthor::Person {
+                name: Some("Maya".into()),
+            },
+            created_at: Some("2026-10-09T10:00:00Z".into()),
+        };
+        target.append_task_comment(&local.id, &comment).unwrap();
+        target
+            .record_comment_delivery(&comment.id, Some("private lost comment reply"))
+            .unwrap();
+        let comment_before = comment_receipt(&target, &comment.id);
         preserve_execution(&target, private.id(), &local.id);
         let execution = execution_rows(&target);
         import(&target, "/target", "incoming", &incoming);
@@ -8651,6 +8955,17 @@ mod tests {
                 )
                 .unwrap();
         }
+        assert_eq!(
+            super::super::project_selection::read_project_binding(&target, private.id())
+                .unwrap()
+                .as_deref(),
+            Some("current")
+        );
+        assert_eq!(
+            target.pending_task_state(&local.id).unwrap().unwrap().id,
+            uncertain.id
+        );
+        assert_eq!(comment_receipt(&target, &comment.id), comment_before);
         // Retention alone is not observation. The common acquisition writer now
         // reads the same fact, even though its value/revision was already local.
         target.put_pm_snapshot(&local_row).unwrap();
@@ -8674,7 +8989,8 @@ mod tests {
             .iter()
             .any(|o| o.id == local.id.as_str()
                 || o.id == local.project_id.as_str()
-                || o.id == private.id().as_str()));
+                || o.id == private.id().as_str()
+                || o.id == comment.id));
 
         // Selecting the local plan elsewhere must not pull the observed origin's
         // history into that destination. Validation can read it; export cannot.
@@ -8701,7 +9017,8 @@ mod tests {
         assert!(!public.objects().iter().any(|o| o.id == local.id.as_str()
             || o.id == incoming_task.as_str()
             || o.id == local.project_id.as_str()
-            || o.id == incoming_project.as_str()));
+            || o.id == incoming_project.as_str()
+            || o.id == comment.id));
         // An unchanged readback must preserve the subsequent local intention,
         // without relabeling it as Linear or repeatedly capturing the bridge.
         target.put_pm_snapshot(&local_row).unwrap();
@@ -8754,6 +9071,21 @@ mod tests {
         }
         import(&target, "/target", "repeat", &incoming);
         assert_eq!(execution_rows(&target), execution);
+        assert_eq!(
+            super::super::project_selection::read_project_binding(&target, private.id())
+                .unwrap()
+                .as_deref(),
+            Some("current")
+        );
+        let pending = target.pending_task_state(&local.id).unwrap().unwrap();
+        assert_eq!(pending.id, uncertain.id);
+        assert!(pending.attempted);
+        assert!(target.attempt_task_state(&pending).is_err());
+        assert_eq!(comment_receipt(&target, &comment.id), comment_before);
+        assert_eq!(
+            target.task_comments(&local.id).unwrap().comments,
+            vec![comment]
+        );
         assert_eq!(
             super::export_in(&target.conn.lock().unwrap(), "/target", &separate.id()).unwrap(),
             retained

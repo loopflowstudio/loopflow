@@ -49,14 +49,11 @@ earlier adoption and pre-cut storage evidence, with their limitations, remain at
   or Jack Heart's approval of a new UX. CLI holds are displayed; recovery/losing-edit
   UX still needs review. Repository-scoped membership also prevents a shared endpoint
   from transferring another repository's identities.
-- October 8 setup choice: `planning key --new` explicitly creates one stable user
-  key; repeated calls retain it, and `--recover` refuses to replace a different key.
-  `connect` binds an empty destination without activating it. `use` routes future
-  root Waves only (including newly ingested definitions); `use local` does not
-  withdraw existing membership. Children follow their parent's saved selection.
-  This keeps joining separate from publication consent. All setup is local;
-  grouped Linear receipts now exist; legacy association and mixed-provider
-  activation remain unfinished. Local-only exchange uses the foreground lifetime.
+- Setup choices remain in the design and at
+  `6f1869e9b:scratch/questions.md`, October 8 setup choice. A stable user key,
+  empty local connection and future-root routing keep joining separate from
+  publication. `use local` never withdraws existing membership; descendants
+  inherit their parent's saved selection. Mixed-provider activation remains held.
 
 - Provider-frontier representation and acquisition-before-projection rationale:
   `b4a91632e:scratch/questions.md`, October 8 provenance. The existing journal

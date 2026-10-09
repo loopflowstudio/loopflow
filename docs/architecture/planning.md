@@ -546,7 +546,10 @@ attempt evidence and conflicting value. The latest receipt determines the displa
 writeback state; Tasks store no separate copy. A response records only its captured
 effect, so it cannot settle a newer decision. State acquisition and delivery share
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
-the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
+the losing receipt without changing the Workflow. State-delivery readback also
+runs the common accepted-planning projection, retaining the provider observation
+in the peer journal; settling a local receipt alone cannot inform another machine.
+No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
 concurrent Linear edit between them. Matching readback settles the observed target;
 it does not prove that no intermediate edit was overwritten. An unseen complete/reopen

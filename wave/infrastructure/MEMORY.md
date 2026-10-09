@@ -625,18 +625,16 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-`e608b0d2d` retains provider identity/body/revision/age, replacing origin flags.
-Pending local values gain no Linear priority. Equal-value facts retain frontiers;
-scalar receipts retain revisions and losers. Task/Project regressions are unexecuted;
-the design distinguishes coverage. Head views borrow journal mutations; scoped
-savepoints retain rollback ownership.
-
-`c6f55719d` fences projection with removal/archive evidence and retains typed
-membership disputes outside savepoints. Identical bodies cannot bypass rejection;
-entity revisions cannot order relationships. Regressions preserve journals,
-independent imports and execution; SQL passes, Rust is unexecuted. Grouped receipts,
-alternate paths, legacy association and Desktop remain.
-Design: `scratch/work-on-another-machine-name.md`.
+`e608b0d2d` retains provider bodies/revisions/ages without relabeling local
+intentions. `c6f55719d` fences projection with removal/archive evidence and
+retains typed membership disputes after object rollback. Entity revisions cannot
+order relationships. `9355170fd` keeps scoped savepoints and borrowed heads.
+SQL passes; Rust/CLI/Desktop/installed acceptance is unproved.
+Same-revision entity contradictions still escape object isolation as `InvalidData`;
+source inspection finds whole-import rollback, not an executed reproduction.
+Grouped receipts, alternate acquisition paths, legacy association and Desktop
+remain. Integrated parent `b6f34a6f8` supplies ordering, common status and repository
+sync; reuse those owners. Design: `scratch/work-on-another-machine-name.md`.
 
 Joining publishes nothing. Mixed Linear exchange stays disabled pending composition,
 not by product policy. Fetch/import/publication stay separate; readback settles

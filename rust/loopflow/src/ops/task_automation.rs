@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::durable::WorkStatus;
 use crate::journal::{process_evidence, ProcessIdentityEvidence};
-use crate::process::Process;
+use crate::process::LfProcess;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::work::task::Task;
@@ -49,7 +49,7 @@ pub fn select(issue: &str, enabled: bool) -> OpsResult<()> {
 /// so it never does; that exempts waiting and grants no authority.
 pub(crate) fn execution_blockers(
     store: &SqliteStore,
-    processes: &[Process],
+    processes: &[LfProcess],
 ) -> OpsResult<Vec<String>> {
     let mut lineage = HashSet::new();
     let mut next = crate::journal::current_process_lfid();

@@ -57,7 +57,7 @@ pub(crate) async fn task_execution_and_flow(
         ));
     };
     let entry = store.sqlite.flow_entry(&flow)?;
-    let evidence = |process: &crate::process::Process| match process.completed_at {
+    let evidence = |process: &crate::process::LfProcess| match process.completed_at {
         Some(_) => ProcessIdentityEvidence::Dead,
         None => crate::journal::process_evidence(&store.sqlite, &process.lfid),
     };

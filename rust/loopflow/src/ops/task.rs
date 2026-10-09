@@ -4269,7 +4269,7 @@ mod tests {
                 [fixture.task.id.as_str()],
             )
             .unwrap();
-        let process = crate::process::Process {
+        let process = crate::process::LfProcess {
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),
@@ -4639,7 +4639,7 @@ mod tests {
 
         // A reboot proves stale execution exited without settling the Flow.
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let process = crate::process::Process {
+        let process = crate::process::LfProcess {
             lfid: crate::id::ProcessLfid::new(),
             pid: None,
             trace_id: crate::id::TraceId::new(),

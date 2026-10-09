@@ -59,7 +59,7 @@ impl SessionEventKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AgentSession {
+pub struct LfSession {
     pub captured: Option<i64>,
     pub id: String,
     /// Immutable captured input, not a resumable execution identity.

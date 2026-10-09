@@ -113,7 +113,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
 
 6. **Report the outcome or blocker.** For completed work, state the
    observed outcome. For blocked work, name what prevents progress and the exact
-   decision or action needed. Identify the blocking AgentSession from fresh Task
+   decision or action needed. Identify the blocking Session from fresh Task
    and Flow records, including the pending review when that is the blocker, and
    supply a copyable command to open it in Loopflow Desktop:
 

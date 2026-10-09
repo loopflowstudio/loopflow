@@ -147,7 +147,7 @@ demo notes are at `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
   ordinary `lf -b`. More conversations may be opened deliberately. Substantial
   implementation inside the conversation is discouraged.
 - Product says Session for interactive and Run for headless; both keep
-  AgentSession identity and history through mode changes.
+  LfSession identity and history through mode changes.
 - Waiting is the one attention state; `--waiting` replaces `--needs-me`;
   `--interactive` stays a mode filter. False positives are acceptable. Claude
   uses only binary stream-json, never SDK, hooks or permission hosts.
@@ -922,7 +922,7 @@ lfd and resident-cron contracts remain in
 
 Wave → Task is public planning; Chapter/Project identity stays internal and
 historical. Shared status, roadmap, cached plan and Rust/Swift fixtures change
-together. AgentSession owns interactive Session/headless Run continuity and
+together. LfSession owns interactive Session/headless Run continuity and
 history; Process owns an lf invocation; FlowProcess records one Flow driver's graph
 and steps. A Task run may start several Flow processes. No separate Run owner is
 restored because identifiers happen to coincide.

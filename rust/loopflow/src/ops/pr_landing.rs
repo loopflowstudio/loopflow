@@ -317,7 +317,7 @@ fn admit_ci_fix(
                 .ok_or_else(|| repair_error("reserved repair Session disappeared"))?
         } else {
             let (provider, model) = crate::engine::parse_agent(config.agent());
-            crate::session::AgentSession {
+            crate::session::LfSession {
                 id: format!("session_{}", uuid::Uuid::new_v4().simple()),
                 captured: None,
                 artifact_key: crate::session_record::new_artifact_key(),

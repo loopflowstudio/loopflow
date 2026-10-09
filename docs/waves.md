@@ -417,7 +417,7 @@ can publish before it merges. `lf sync` preserves child code and design through
 parent updates and squash merge. Use `lf checkout CHILD --stack-on PARENT
 --design PATH` to transfer a child-specific design before launch.
 
-AgentSessions and Processes own typed nullable Task/Wave ancestry.
+LfSessions and Processes own typed nullable Task/Wave ancestry.
 Historical work events retain their original attribution. Launching `lf` in a registered Task checkout binds automatically unless
 an explicit selector overrides it. A later bind can attach a conversation to
 a done or landed Task without reopening Work. Assignment is permanent and

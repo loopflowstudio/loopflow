@@ -589,7 +589,7 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     for index in 0..113 {
         let id = format!("inventory-{index:03}");
         let foreign_row = index < 110;
-        let session = loopflow::session::AgentSession {
+        let session = loopflow::session::LfSession {
             captured: None,
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),

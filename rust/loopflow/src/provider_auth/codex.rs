@@ -1,16 +1,21 @@
 //! Codex owns OAuth and persistence; Loopflow owns opening the returned URL.
 
+use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio_tungstenite::{client_async, tungstenite::Message, WebSocketStream};
 
 use super::{AuthCompletion, AuthError, AuthFlowHandle, AuthFlowResponse, Provider};
 use crate::engine::process::ProcessGroupGuard;
 
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const DAEMON_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub(crate) struct Connection {
@@ -138,6 +143,75 @@ impl Connection {
     }
 }
 
+/// The login held by the background app-server Codex manages for `home`, when
+/// one is running. A bare `codex` attaches to it instead of reading
+/// `auth.json`, and it reads that file only as it starts.
+pub(crate) async fn daemon_login(home: &Path) -> Option<String> {
+    let endpoint = home
+        .join("app-server-control")
+        .join("app-server-control.sock");
+    tokio::time::timeout(DAEMON_TIMEOUT, async {
+        let stream = UnixStream::connect(endpoint).await.ok()?;
+        let (mut socket, _) = client_async("ws://localhost", stream).await.ok()?;
+        let client = json!({"clientInfo": {
+            "name": "loopflow", "title": "loopflow", "version": env!("CARGO_PKG_VERSION")
+        }});
+        daemon_request(&mut socket, 1, "initialize", client).await?;
+        let initialized = json!({"method": "initialized"}).to_string();
+        socket.send(Message::Text(initialized.into())).await.ok()?;
+        // Never refresh here: that would rotate the token of a login being replaced.
+        let account = daemon_request(
+            &mut socket,
+            2,
+            "account/read",
+            json!({"refreshToken": false}),
+        )
+        .await?;
+        Some(account.pointer("/account/email")?.as_str()?.to_string())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+async fn daemon_request(
+    socket: &mut WebSocketStream<UnixStream>,
+    id: i64,
+    method: &str,
+    params: Value,
+) -> Option<Value> {
+    let request = json!({"id": id, "method": method, "params": params}).to_string();
+    socket.send(Message::Text(request.into())).await.ok()?;
+    loop {
+        let Message::Text(text) = socket.next().await?.ok()? else {
+            continue;
+        };
+        let mut message: Value = serde_json::from_str(&text).ok()?;
+        if message["id"].as_i64() == Some(id) {
+            return Some(message["result"].take()).filter(Value::is_object);
+        }
+    }
+}
+
+/// Restart `home`'s background app-server so it reads the installed login.
+/// Work running through it is interrupted and resumes from its saved thread.
+pub(crate) async fn restart_daemon(home: &Path) -> Result<(), AuthError> {
+    let status = Command::new("codex")
+        .args(["app-server", "daemon", "restart"])
+        .env("CODEX_HOME", home)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .await
+        .map_err(io_error)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(failed("codex app-server daemon restart failed"))
+    }
+}
+
 pub(super) async fn refresh(command: &mut Command) -> Result<Value, AuthError> {
     Connection::start(command)
         .await?
@@ -197,10 +271,13 @@ fn io_error(source: std::io::Error) -> AuthError {
 #[cfg(all(test, unix))]
 mod tests {
     use super::{start_login, AuthCompletion, LOGIN_TIMEOUT};
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::{json, Value};
     use std::fs;
     use std::path::Path;
     use std::time::Duration;
     use tokio::process::Command;
+    use tokio_tungstenite::tungstenite::Message;
 
     fn server(root: &Path, after_start: &str) -> Command {
         let script = root.join("server.sh");
@@ -305,5 +382,36 @@ echo '{"method":"account/login/completed","params":{"loginId":"this-login","succ
         tokio::time::resume();
         assert!(error.contains("timed out"), "{error}");
         wait_for_exit(root.path()).await;
+    }
+
+    #[tokio::test]
+    async fn daemon_login_reports_the_login_a_running_daemon_holds() {
+        // Unix socket paths are short; the default temp directory is not.
+        let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+        assert_eq!(super::daemon_login(home.path()).await, None);
+
+        let control = home.path().join("app-server-control");
+        fs::create_dir(&control).unwrap();
+        let listener =
+            tokio::net::UnixListener::bind(control.join("app-server-control.sock")).unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let request: Value = serde_json::from_str(&text).unwrap();
+                let result = match request["method"].as_str() {
+                    Some("initialize") => json!({}),
+                    Some("account/read") => json!({"account": {"email": "old@example.com"}}),
+                    _ => continue,
+                };
+                let reply = json!({"id": request["id"], "result": result}).to_string();
+                socket.send(Message::Text(reply.into())).await.unwrap();
+            }
+        });
+
+        assert_eq!(
+            super::daemon_login(home.path()).await.as_deref(),
+            Some("old@example.com")
+        );
     }
 }

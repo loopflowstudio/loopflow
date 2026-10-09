@@ -28,6 +28,7 @@ use crate::provider_account::{
     ensure_account_home, match_account, new_account, open_account_store, remove_account_home,
     AccountMatch,
 };
+use crate::provider_auth::codex::{daemon_login, restart_daemon};
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
@@ -180,7 +181,8 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
 }
 
 /// The only command that changes which account a provider's shared home is
-/// signed in as. Running Codex agents keep their login until they restart.
+/// signed in as. Codex agents Loopflow launched keep their login until they
+/// restart; Codex's own background app-server is restarted to adopt it.
 async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
     let provider = parse_managed_provider(raw_provider)?;
     let store = open_account_store().await?;
@@ -204,6 +206,31 @@ async fn use_account(raw_provider: &str, raw_email: &str) -> Result<()> {
         None => println!(
             "{} is already signed in as {login}",
             provider.display_name()
+        ),
+    }
+    if provider == Provider::Codex {
+        restart_stale_codex_daemon(&native, login).await?;
+    }
+    Ok(())
+}
+
+/// A bare `codex` attaches to the home's background app-server, which keeps
+/// the login it started with whatever `auth.json` now holds.
+async fn restart_stale_codex_daemon(native: &Path, login: &str) -> Result<()> {
+    let Some(held) = daemon_login(native).await else {
+        return Ok(());
+    };
+    if held.eq_ignore_ascii_case(login) {
+        return Ok(());
+    }
+    restart_daemon(native).await?;
+    match daemon_login(native).await {
+        Some(now) if now.eq_ignore_ascii_case(login) => println!(
+            "Restarted Codex's background app-server, which was still signed in as {held}"
+        ),
+        now => bail!(
+            "Codex's background app-server still reports {} after a restart; run `codex app-server daemon restart`",
+            now.as_deref().unwrap_or("no login")
         ),
     }
     Ok(())

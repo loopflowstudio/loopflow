@@ -680,6 +680,10 @@ fn session_command_status_with_env(
     if let Some(route) = &account_route {
         process.args(route.provider_args());
     }
+    if command.program == "codex" {
+        // Codex's shared background server keeps the login it started with.
+        process.arg("--no-daemon");
+    }
     let observed_capture = capture_dir
         .clone()
         .filter(|_| command.program == "opencode" && provider_session_id.is_none());

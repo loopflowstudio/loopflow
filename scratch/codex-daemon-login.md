@@ -26,6 +26,14 @@ signed in", yet a bare `codex` ran as `loopflow-eng@loopflow.studio`.
   `daemon_login` / `restart_daemon` in `provider_auth/codex.rs`, called from
   `use_account`.
 
+- Code: lf's Codex terminal launches pass `--no-daemon`. They already stayed
+  off the daemon, apparently because Codex embeds its server when given
+  configuration overrides (inferred from the binary's "remove configuration
+  overrides or use --remote" message, not traced in Codex source). The flag
+  states it. Checked against codex-cli 0.161.0, which accepts it ahead of
+  `resume`, `fork` and `exec`; an older Codex without the flag would reject
+  the launch.
+
 ## Verification (2026-10-09)
 
 - `cargo test -p loopflow --lib provider_auth::codex`: 4 passed.

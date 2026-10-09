@@ -222,18 +222,13 @@ impl PlanningSnapshot {
         Ok(merged)
     }
 
-    pub fn heads(&self) -> BTreeMap<(PlanningObject, String), BTreeSet<String>> {
+    /// Head mutations in change-ID order, borrowed from the retained journal.
+    pub fn heads(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
         let retired: BTreeSet<_> = self.changes.values().flat_map(|c| &c.parents).collect();
-        let mut heads: BTreeMap<_, BTreeSet<_>> = BTreeMap::new();
-        for (id, change) in &self.changes {
-            if !retired.contains(id) {
-                heads
-                    .entry((change.object.clone(), change.field.clone()))
-                    .or_default()
-                    .insert(id.clone());
-            }
-        }
-        heads
+        self.changes
+            .iter()
+            .filter(move |(id, _)| !retired.contains(id))
+            .map(|(id, change)| (id.as_str(), change))
     }
 
     pub(crate) fn objects(&self) -> BTreeSet<&PlanningObject> {
@@ -243,16 +238,16 @@ impl PlanningSnapshot {
     /// Keep winner identity and origin available to delivery projection. Values
     /// alone cannot distinguish a local intention from an observed Linear fact.
     pub fn winners(&self) -> impl Iterator<Item = (&str, &PlanningMutation)> {
-        self.heads().into_values().map(move |heads| {
+        let mut fields: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for (id, change) in self.heads() {
+            fields
+                .entry((&change.object, change.field.as_str()))
+                .or_default()
+                .push((id, change));
+        }
+        fields.into_values().map(|heads| {
             heads
                 .into_iter()
-                .map(|id| {
-                    let (id, change) = self
-                        .changes
-                        .get_key_value(&id)
-                        .expect("a head belongs to the snapshot");
-                    (id.as_str(), change)
-                })
                 .max_by_key(|(id, change)| {
                     (
                         change.linear.is_some(),

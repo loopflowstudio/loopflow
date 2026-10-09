@@ -628,8 +628,8 @@ Review-only publication; no landing or public-remote planning export.
 `e608b0d2d` retains provider identity/body/revision/age, replacing origin flags.
 Pending local values gain no Linear priority. Equal-value facts retain frontiers;
 scalar receipts retain revisions and losers. Task/Project regressions are unexecuted;
-the design distinguishes coverage. Grouped receipts, alternate acquisition, legacy
-association and Desktop remain.
+the design distinguishes coverage. Head views borrow journal mutations; scoped
+savepoints retain rollback ownership.
 
 `c6f55719d` fences projection with removal/archive evidence and retains typed
 membership disputes outside savepoints. Identical bodies cannot bypass rejection;

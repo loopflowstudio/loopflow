@@ -19,8 +19,9 @@ fn write(
     };
     let parents = snapshot
         .heads()
-        .remove(&(object.clone(), field.into()))
-        .unwrap_or_default();
+        .filter(|(_, change)| change.object == object && change.field == field)
+        .map(|(id, _)| id.to_owned())
+        .collect();
     snapshot.changes.insert(
         id.into(),
         PlanningMutation {

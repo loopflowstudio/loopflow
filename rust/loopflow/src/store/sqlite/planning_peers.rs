@@ -374,7 +374,7 @@ impl SqliteStore {
         incoming: &PlanningSnapshot,
     ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let saved = export_in(&tx, repo, destination)?;
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
@@ -417,13 +417,14 @@ impl SqliteStore {
             // projected in this pass may replace an earlier missing-parent error.
             let mut conflicts = BTreeSet::new();
             for (object, winners) in pending {
-                tx.execute_batch("SAVEPOINT peer_projection")?;
-                match insert_and_project(&tx, object, repo, winners, &merged) {
+                let savepoint = tx.savepoint()?;
+                match insert_and_project(&savepoint, object, repo, winners, &merged) {
                     Ok(()) => {
-                        tx.execute_batch("RELEASE peer_projection")?;
+                        savepoint.commit()?;
                     }
                     Err(error) if projection_conflict(&error) => {
-                        tx.execute_batch("ROLLBACK TO peer_projection; RELEASE peer_projection")?;
+                        // Roll back and release before retaining contrary evidence.
+                        savepoint.finish()?;
                         if let StoreError::ProjectMembershipConflict { project_id } = &error {
                             // The rejected projection rolls back, not the contrary
                             // relationship evidence. Independent objects still commit.
@@ -757,7 +758,6 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
         snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
     }
     snapshot.validate().map_err(invalid)?;
-    let expected: BTreeSet<_> = snapshot.heads().into_values().flatten().collect();
     let mut query = conn.prepare(
         "SELECT h.id FROM planning_peer_heads h
          JOIN planning_peer_changes c ON c.id=h.id
@@ -767,7 +767,11 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
     let actual = query
         .query_map(params![repo, destination], |row| row.get::<_, String>(0))?
         .collect::<Result<BTreeSet<_>, _>>()?;
-    if expected != actual {
+    if !snapshot
+        .heads()
+        .map(|(id, _)| id)
+        .eq(actual.iter().map(String::as_str))
+    {
         return Err(invalid(
             "planning causal heads disagree with retained mutations",
         ));

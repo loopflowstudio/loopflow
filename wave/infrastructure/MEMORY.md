@@ -1004,11 +1004,10 @@ tuning policy; the synthetic harness remains unbuilt. Jack Heart's July 6
 
 ## Direct invocation and large inputs (curated 2026-10-09)
 
-Jack Heart's LOO-444 supersedes 429's all-system transport: native prompts/guides,
-skill/request first, whole-file start/compact context. Option B
-fixes additions per surface/reply/participant profile.
-Production authorized, unchanged; native-guide wording proposed. Wave/ancestor
-bytes remain SQLite-owned.
+Jack Heart's LOO-444: native prompts/guides, skill/request first, whole-file
+start/compact context. Option B fixes additions per surface/reply/participant.
+Production authorized, unchanged; native-guide wording proposed. Wave bytes stay
+SQLite-owned. Preserve request attribution, custom titles and native/lf naming.
 
 Fake APIs: Claude 2.1.295/Codex 0.161.0 refresh 10,000-byte ASCII blocks;
 both truncate 10,000-scalar emoji blocks. Codex keeps markers around missing

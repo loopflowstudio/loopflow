@@ -628,15 +628,15 @@ uncertainty and losers. Readback cannot settle mappings/errors or removal via cr
 Desktop retains last-good scoped status; per-Work recovery remains. Mixed exchange
 stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this heading.
 
-`39dba32c1` retains creation origins; common acquisition owns exact readback.
-`1cbbba625`/`01769ea0d` reuse accepted observations for joint scalar winners on
-explicit correspondence. Causality precedes ranking; foreign ancestry never
-associates owners. Portable peer parents prove
-observation, not identity or authority. Private references hold groups.
-Membership delivery/readback resolve aliases without rewriting inputs; exact
-readback rebases later saves. Order/deletion capture still needs original owners,
-not projected IDs. Association/mixed exchange stays disabled. Focused proofs are
-not public/installed acceptance. Earlier proofs: `163362aad`, this heading.
+Creation origins (`39dba32c1`) retain exact readback; joint scalar winners
+(`1cbbba625`/`01769ea0d`) reuse accepted observations on explicit correspondence.
+Causality precedes ranking; portable parents prove observation, not identity or
+authority. Private references hold groups. Membership delivery/readback resolves
+aliases without rewriting inputs (`79e478550`/`521c7040f`); exact readback rebases
+later saves. Receipt origin and local projection must remain distinct through
+capture, order selection and list comparison—not only import. Order/deletion
+composition and association/mixed exchange remain held. Focused proofs establish
+no public/installed acceptance. Earlier proofs: `163362aad`, this heading.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

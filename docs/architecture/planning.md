@@ -529,8 +529,13 @@ arriving at end atomically records the move and a completion request, then
 attempts settlement. Failed settlement retains end and its reason; retry only
 `task complete`, never the successful edge. PR delivery requires verified merge
 and confirmed follow-through; PR-less completion retains useful artifacts.
-Accepted Linear completion or reopening updates status without moving Workflow
-or terminating Processes. Reopening supersedes old requests. Ordinary reads do
+Accepted Linear or Git completion/reopening updates status without moving Workflow,
+terminating Processes or cleaning checkouts. Reopening supersedes old requests.
+Git uses the accepted winning mutation, including offline complete/reopen returning
+to the same status; replay cannot cancel a newer request. Linear uses actual status
+changes, not unrelated entity revisions. Requests themselves never synchronize.
+Retrying retained end cannot revive superseded intent; explicit `task complete`
+authors a new request after reopening. Ordinary reads do
 not execute completion. Unfinished readiness remains not ready with no Workflow,
 ready at start, and active otherwise; abandonment is its own mark.
 

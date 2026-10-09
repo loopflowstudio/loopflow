@@ -456,6 +456,187 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
 }
 
 #[test]
+#[cfg(unix)]
+fn public_completion_exchange_supersedes_only_old_completion_requests() {
+    let repo = TestRepo::new();
+    let other = TestRepo::new();
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    let source = repo.path().canonicalize().unwrap();
+    let target = other.path().canonicalize().unwrap();
+    let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
+    let task = &fixture.task.id;
+    let source_store = SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
+    let worker = open_store(right.path());
+    let conn = Connection::open(left.path().join("loopflow.db")).unwrap();
+    conn.busy_timeout(Duration::from_secs(5)).unwrap();
+    seed_execution(&conn, &fixture.task, &source, "review");
+    let mut agent = Agent::start(&source, left.path(), false);
+    let marker = source.join("retained-draft.txt");
+    fs::write(&marker, "unfinished draft\n").unwrap();
+    let binding = PlanningDestination::resolve(
+        &source,
+        "origin",
+        "refs/loopflow/planning/shared/completion-fixture",
+    )
+    .unwrap();
+    source_store
+        .bind_peer_planning(source.to_str().unwrap(), &binding)
+        .unwrap();
+    source_store
+        .select_peer_waves(
+            source.to_str().unwrap(),
+            &binding.id(),
+            std::slice::from_ref(&fixture.task.wave_id),
+        )
+        .unwrap();
+    worker
+        .bind_peer_planning(target.to_str().unwrap(), &binding)
+        .unwrap();
+    let source_watch = Watch::start(&source, left.path());
+    let worker_watch = Watch::start(&target, right.path());
+    let settled = || {
+        [&source_store, &worker]
+            .into_iter()
+            .zip([&source, &target])
+            .all(|(store, repo)| {
+                let status = status(store, repo.to_str().unwrap());
+                status.pending_local == Some(false)
+                    && status.publication_state.as_deref() == Some("confirmed")
+                    && status.conflicts.is_empty()
+                    && status.acquisition_error.is_none()
+            })
+    };
+    wait_for(|| worker.task(task).unwrap().is_some() && settled());
+    let request = || {
+        conn.query_row(
+            "SELECT completion_request,completion_error FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .unwrap()
+    };
+    let completed = |store: &SqliteStore| {
+        store
+            .planning_task(task)
+            .unwrap()
+            .record
+            .unwrap()
+            .item
+            .completed
+    };
+    let fail = |args: &[&str]| {
+        let output = command(&source, left.path()).args(args).output().unwrap();
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?} unexpectedly succeeded");
+        assert!(error.to_lowercase().contains("pull request"), "{error}");
+        let (id, error) = request();
+        assert!(error.is_some());
+        id.unwrap()
+    };
+    let old = fail(&["task", "move", task.as_str(), "end"]);
+    let before = execution(&conn, task.as_str());
+
+    // The other Machine has planning, not this checkout or its unsettled PR.
+    // Public completion imports no request and cannot settle local execution.
+    run(&target, right.path(), &["task", "complete", task.as_str()]);
+    wait_for(|| completed(&source_store) && settled());
+    assert_eq!(request(), (None, None));
+    assert_eq!(execution(&conn, task.as_str()), before);
+    assert!(agent.child.try_wait().unwrap().is_none());
+    assert_eq!(fs::read_to_string(&marker).unwrap(), "unfinished draft\n");
+
+    // Reopen locally while the remote still contains completion, then retain a
+    // newer failed intention. Acquiring that stale remote must not clear it.
+    let remote = Path::new(binding.endpoint());
+    let disconnected = remote.with_extension("disconnected");
+    fs::rename(remote, &disconnected).unwrap();
+    run(&source, left.path(), &["task", "reopen", task.as_str()]);
+    let newer = fail(&["task", "complete", task.as_str()]);
+    assert_ne!(old, newer);
+    let pending = request();
+    fs::rename(&disconnected, remote).unwrap();
+    wait_for(|| !completed(&worker) && settled());
+    assert_eq!(
+        request(),
+        pending,
+        "stale completion cannot supersede a newer request"
+    );
+
+    // Repeated acquisition includes the accepted reopening. Change another
+    // field to prove a fresh exchange, rather than accepting cached status.
+    run(
+        &target,
+        right.path(),
+        &["task", "edit", task.as_str(), "--title", "After reopening"],
+    );
+    wait_for(|| {
+        source_store.task(task).unwrap().unwrap().plan.title == "After reopening" && settled()
+    });
+    assert_eq!(
+        request(),
+        pending,
+        "replayed reopening cannot clear newer intent"
+    );
+
+    // Both commands happen offline: the receiver sees open -> open, but the
+    // accepted causal reopening is new and must supersede the retained request.
+    fs::rename(remote, &disconnected).unwrap();
+    run(&target, right.path(), &["task", "complete", task.as_str()]);
+    run(&target, right.path(), &["task", "reopen", task.as_str()]);
+    run(
+        &target,
+        right.path(),
+        &[
+            "task",
+            "edit",
+            task.as_str(),
+            "--title",
+            "Continue after retry",
+        ],
+    );
+    fs::rename(&disconnected, remote).unwrap();
+    wait_for(|| {
+        source_store.task(task).unwrap().unwrap().plan.title == "Continue after retry" && settled()
+    });
+    assert!(!completed(&source_store));
+    assert_eq!(
+        request(),
+        (None, None),
+        "new reopening supersedes failed end intent even when the value is unchanged"
+    );
+
+    // Ordinary retry at the retained end cannot resurrect the superseded
+    // request. Explicit `task complete` would instead author a new intention.
+    run(
+        &source,
+        left.path(),
+        &["task", "move", task.as_str(), "end"],
+    );
+    assert!(!completed(&source_store));
+    assert_eq!(request(), (None, None));
+    assert_eq!(execution(&conn, task.as_str()), before);
+    assert!(agent.child.try_wait().unwrap().is_none());
+    assert_eq!(fs::read_to_string(&marker).unwrap(), "unfinished draft\n");
+    assert!(worker.task(task).unwrap().unwrap().worktree.is_none());
+    let remote_conn = Connection::open(right.path().join("loopflow.db")).unwrap();
+    assert!(rows(
+        &remote_conn,
+        "SELECT completion_request FROM tasks WHERE id=?1 AND completion_request IS NOT NULL",
+        [task.as_str()]
+    )
+    .is_empty());
+    drop(source_watch);
+    drop(worker_watch);
+    agent.finish();
+}
+
+#[test]
 fn fetched_invalid_document_does_not_claim_import_or_publication() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

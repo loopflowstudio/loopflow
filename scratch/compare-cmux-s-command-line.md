@@ -10,8 +10,9 @@ Focused local Rust and model evidence establish neither native acceptance nor de
 LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
-Remaining: mixed-path completion/reopening composition, delegation exchange,
-first-start admission, remote opening and broader explanation. Mixed Linear/Git
+Public completion/reopening exchange now supersedes old intent. Mixed-provider
+composition, delegation exchange, first-start admission, remote opening and broader
+explanation remain. Mixed Linear/Git
 stays disabled; native proof remains, including request-scoped Task/Session-plus-Changes opening.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
@@ -233,6 +234,8 @@ not depend on globally unique aliases. Unknown Tasks retain ordinary acquisition
 
 Receipt import/lookup, accepted-frontier and per-origin deletion details:
 `a44ddcb5f`, this section. Import creates no local requests or execution authority.
+Git disposition projection no longer leaves old completion intent untouched;
+accepted winners supersede it without replacing the common intent owner.
 
 Preview dispatch shares Task/location resolution, agent-input classification and
 writer validation without preparation, locks or recovery. Compression details and
@@ -354,17 +357,21 @@ Remaining: foreground Git/Linear/Desktop composition, delegation exchange,
 exclusive admission, remote opening and broader explanation. Mixed-provider and
 shared first-start refusals remain.
 
-**Post-LOO-418 completion boundary (October 9 source review):** existing foreground
-fixtures inject provider snapshots and compare seeded execution tables; they do not
-exercise public `task complete/reopen` against a retained failed completion request.
-The common local/Linear paths clear superseded requests, while Git scalar projection
-writes disposition separately. End-to-end behavior here remains unproved, not a
-passing consequence of unchanged Workflow rows. Extend the existing foreground
-fixture with public completion/reopening, pending-request supersession and a later
-ordinary completion retry. Accepted reopening must survive that retry; stale/replayed
-facts must not clear a newer request. Incoming completion must still cause no
-Workflow movement, process signal or checkout cleanup. Any repair belongs in the
-common planning/intent owners, without exporting requests or restoring TaskSource.
+**Post-LOO-418 completion boundary (October 9):** the public two-Home fixture
+reproduced retained failed end intent after imported completion. Accepted Git
+disposition now clears old requests in the projection transaction, using the winning
+mutation and existing accepted frontier. Value comparison alone misses offline
+complete/reopen returning to the same open value; replay must preserve a newer
+request. Linear's existing status-change owner stays authoritative: review reproduced
+a title-only provider refresh wrongly clearing intent in the first repair.
+
+The fixture covers public complete/reopen, offline recovery, stale completion,
+replayed reopening, same-value causal reopening and ordinary retry at retained end.
+It retains Workflow/PR/placement, draft bytes and an owned fake provider through
+exchange. Explicit `task complete` authors a new intention after reopening; an
+end retry does not. Receipt failure rollback and provider-refresh/status cases have
+focused store coverage. Mixed Linear/Git remains disabled; native and configured
+provider proof remain. Failed attempts: [findings](findings.md#task-completion-integration--october-9).
 
 **Required mixed-operation proofs:** local `task run` writes its own Workflow and
 runs locally while Task comments/follow-ups/completion synchronize to a second
@@ -521,4 +528,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `git diff --check` PASS; prose-only reconciliation, prior focused results retained at `a44ddcb5f`; completion/exchange coverage remains implementation work, broader suites/migrations gate/CI, native demo.
+Check: `cargo test --no-run` build + `scripts/test_network.py` focused completion/exchange, provider-status and rollback tests PASS (3); `cargo fmt`, Clippy all-targets and diff PASS; broader suites/migrations gate/CI, native demo.

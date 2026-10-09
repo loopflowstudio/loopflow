@@ -204,11 +204,19 @@ delivery. Failure logs: `/tmp/loo427-integrated-*.log`.
 lookup, admission and the later historical-branch repository check. Its focused
 13-test pass and stale missing-PR/retired-run assertion failures remain there.
 
-Post-integration source review: `planning_foreground_tests.rs::execution` compares
-Sessions, Processes, Workflows/moves, PRs and placement, not completion requests.
-Its associated-origin reopening case injects `put_pm_snapshot`; public local
-complete/reopen and a retained failed end request are not exercised together.
-`children::reopen_task` and `planning::put_item` clear superseded requests;
-`planning_peers::project_fields` projects portable disposition separately.
-This identifies missing composition proof, not a reproduced failure. The plan
-retains the required stale/replayed-versus-newer-intent cases; no refusal is lifted.
+`37cd026a7` identified missing request coverage. The public foreground fixture
+reproduced retained failed end intent after imported completion
+(`/tmp/loo427-completion-counterexample.log`). Projection now supersedes requests
+using newly accepted local-authored disposition winners in its existing transaction.
+Requests stay local; execution remains untouched.
+
+Review reproduced a title-only Linear revision wrongly clearing intent in the first
+repair (`/tmp/loo427-completion-refresh.log`); Linear now retains `put_item`'s
+status-change rule. The first fixture compile failed on an untyped empty vector;
+it now asserts emptiness (`/tmp/loo427-completion-first.log`).
+
+Public commands, file-only Git, two isolated Homes, work-watch and an owned fake
+provider exercise offline same-value reopening, stale/replayed facts, newer failed
+requests and ordinary end retry. Workflow/PR/placement and draft bytes survive.
+Store cases cover receipt rollback and provider refresh versus status changes.
+The plan retains mixed-provider, delegation, admission, remote and native limits.

@@ -95,11 +95,11 @@ Primary and stack-parent Task selectors now carry repository-scoped full IDs thr
 dispatch; an unscoped ambiguous prefix still fails.
 
 October 9 context: complete launch source
-`.lf/tmp/context/b8142a92bc370e76baf301deecc2885b9de30f0cd58d1d1b057370d8a3d9501a.md`
-was inspected, including its manifest. The initial `lf context --skill realign`
-reported 32,668 Work-seed tokens (16,668 over); the generated manifest changes
-with each edit. Authored notes fit. Scratch/memory curation cannot fix this producer
-gap; historical inputs and budget limits remain unchanged.
+`.lf/tmp/context/fe859f5700adfc6678decd4f413807a6bc43019000c8bd633e9530b1f6625d13.md`
+was inspected, including its manifest and repeated historical Task bodies/steers.
+`lf context --skill implement` reports 32,671 Work-seed tokens (16,671 over).
+Authored notes fit; curation cannot fix this generated-input producer gap.
+Historical inputs and budget limits remain unchanged.
 
 ## Explicit repository association — October 9
 

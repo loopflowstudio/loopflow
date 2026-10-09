@@ -1592,6 +1592,20 @@ fn insert_and_project(
         }
     }
     require_repository(conn, object, repo)?;
+    if object.kind == PlanningKind::Task && winners["disposition"].1.linear.is_none() {
+        // An accepted authored status supersedes earlier completion intent even
+        // when completion and reopening arrived together (open -> open). Use
+        // the winning mutation, not value changes or retained losing history.
+        // Local saves are already observed; replay cannot cancel a newer request.
+        // Linear status changes use put_item above: a new entity revision alone
+        // (for example, a title edit) must not supersede completion intent.
+        conn.execute(
+            "UPDATE tasks SET completion_request=NULL,completion_error=NULL
+             WHERE id=?1 AND completion_request IS NOT NULL AND NOT EXISTS (
+                 SELECT 1 FROM planning_peer_observed WHERE object_id=?1 AND id=?2)",
+            params![object.id, winners["disposition"].0],
+        )?;
+    }
     let mut observed = projected;
     observed.extend(
         changes
@@ -4531,12 +4545,52 @@ mod tests {
     }
 
     #[test]
+    fn peer_provider_status_not_entity_refresh_supersedes_completion_request() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (_, mut row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        let request = target
+            .request_task_completion(&task, None)
+            .unwrap()
+            .unwrap();
+        target
+            .fail_task_completion(&task, request, "retained failure")
+            .unwrap();
+        let pending = target.task_completion_pending(&task).unwrap();
+        row.snapshot.items[0].name = "Only the title changed".into();
+        row.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
+        row.synced_at += 1;
+        source.put_pm_snapshot(&row).unwrap();
+        import(&target, "/target", "refresh", &export(&source, "/source"));
+        assert_eq!(
+            target.task(&task).unwrap().unwrap().plan.title,
+            "Only the title changed"
+        );
+        assert_eq!(target.task_completion_pending(&task).unwrap(), pending);
+        row.snapshot.items[0].state = Some("unstarted".into());
+        row.snapshot.items[0].revision = Some("2026-10-08T12:00:00Z".into());
+        row.synced_at += 1;
+        source.put_pm_snapshot(&row).unwrap();
+        import(&target, "/target", "status", &export(&source, "/source"));
+        assert!(target.task_completion_pending(&task).unwrap().is_none());
+    }
+
+    #[test]
     fn peer_disposition_receipt_failure_rolls_back_planning_and_checkpoint() {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let (_, _, task) = linear_seed(&source);
         let base = export(&source, "/source");
         import(&target, "/target", "base", &base);
+        let request = target
+            .request_task_completion(&task, None)
+            .unwrap()
+            .unwrap();
+        target
+            .fail_task_completion(&task, request, "retained failure")
+            .unwrap();
+        let pending = target.task_completion_pending(&task).unwrap();
         complete(&source, &task);
         let completed = export(&source, "/source");
         let before = target.planning_task(&task).unwrap();
@@ -4553,6 +4607,7 @@ mod tests {
             .import_peer_planning("/target", &destination(), "completed", &completed)
             .is_err());
         assert_eq!(target.planning_task(&task).unwrap(), before);
+        assert_eq!(target.task_completion_pending(&task).unwrap(), pending);
         assert_eq!(
             import_revision(&target, "/target", &destination()).as_deref(),
             Some("base")
@@ -4566,6 +4621,7 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_state_receipt")
             .unwrap();
         import(&target, "/target", "completed", &completed);
+        assert!(target.task_completion_pending(&task).unwrap().is_none());
         assert_eq!(
             target.pending_task_state(&task).unwrap().unwrap().target,
             "completed"

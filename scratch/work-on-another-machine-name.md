@@ -143,6 +143,13 @@ this heading. Keep these replacements deleted:
   Task/Project foreign key. Task request idempotence stays on its existing owner.
   Common `planning_export.rs` owns capture, attempts and readback; transitions,
   activation, membership and execution stay local.
+- Peer import's synthetic `task_creation_intents` insertion. Only an actual local
+  creation request owns idempotence; the common receipt already retains its original
+  parent and model. Retain released local requests. Creation validation returns its
+  decoded receipt, and retained receipt reads use typed columns rather than rebuilding
+  wire JSON in SQL. Check distinct origin/projection conflicts without querying the
+  same identity twice. Existing moved-parent and empty-local-history fixtures cover
+  the surviving owner; execution of these changes remains deferred below.
 - Machine-local creation sequence cutoffs. Captured local/peer change IDs bound
   acknowledgement; the original parent is retained for private-selection holds.
   Optional creation groups use the same journal, not a second receipt transport.
@@ -632,7 +639,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check: `cargo test -p loopflow --lib --no-run`, network-isolated lib filters `creation_origins_preserve peer_creation_ peer_project_creation_ peer_migration_preserves_the_populated_predecessor` (8 tests), `cargo clippy --all-targets -- -D warnings`, fmt/diff checks and Python syntax pass. CLI status execution is deferred to gate: supported recovery left 29.4 GiB below the 32 GiB reserve; the queued product build was stopped. Gate retains combined foreground/native-resume, partial-list and Git/Linear acceptance; association remains unfinished.
+Check: `cargo fmt --all --check` and `git diff --check` pass; `scripts/resource_envelope.py --recover` leaves 29.6 GiB below the 32 GiB reserve, so build, all-target Clippy and network-isolated `creation_origins_preserve` / `peer_creation_` / `peer_project_creation_` lib checks are deferred to capable gate. Previous receipt-origin passes: `f1a3b315d`, this heading; they do not verify this reduction. Combined foreground/native-resume, partial-list and Git/Linear acceptance remain gate-owned; association remains unfinished.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

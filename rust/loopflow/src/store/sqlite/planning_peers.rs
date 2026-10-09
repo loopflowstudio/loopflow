@@ -2707,9 +2707,10 @@ mod tests {
                 WorkRef::Task(task.clone()),
             ]
         );
-        let empty_execution = || {
+        let assert_no_local_history = || {
             let conn = target.conn.lock().unwrap();
             for table in [
+                "task_creation_intents",
                 "project_transitions",
                 "agent_sessions",
                 "processes",
@@ -2726,7 +2727,7 @@ mod tests {
                 );
             }
         };
-        empty_execution();
+        assert_no_local_history();
         let project_owner = PlanningChanges::Project(&project);
         let export = target
             .prepare_planning_export(project_owner, "team", "initiative")
@@ -2757,7 +2758,7 @@ mod tests {
                 .unwrap(),
             creation
         );
-        empty_execution();
+        assert_no_local_history();
     }
 
     #[test]
@@ -2948,14 +2949,13 @@ mod tests {
             .bind_project(&wave, &row.snapshot.projects[0].id)
             .unwrap();
         let task = TaskId::new();
-        source
-            .create_task(&crate::planning::NewTask {
-                id: task.clone(),
-                project_id: original.clone(),
-                title: "Created".into(),
-                description: "Brief".into(),
-            })
-            .unwrap();
+        let request = crate::planning::NewTask {
+            id: task.clone(),
+            project_id: original.clone(),
+            title: "Created".into(),
+            description: "Brief".into(),
+        };
+        source.create_task(&request).unwrap();
         let owner = PlanningChanges::Task(&task);
         let creation = source
             .prepare_planning_export(owner, "team", "initiative")
@@ -2983,6 +2983,11 @@ mod tests {
             destination_project
         );
         assert_eq!(
+            source.create_task(&request).unwrap().project_id,
+            destination_project,
+            "the original local request stays idempotent after a move"
+        );
+        assert_eq!(
             target
                 .prepare_planning_export(owner, "other", "other")
                 .unwrap(),
@@ -2994,12 +2999,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT project_id FROM task_creation_intents WHERE task_id=?1",
+                    "SELECT count(*) FROM task_creation_intents WHERE task_id=?1",
                     [task.as_str()],
-                    |r| r.get::<_, String>(0)
+                    |r| r.get::<_, i64>(0)
                 )
                 .unwrap(),
-            original.as_str()
+            0,
+            "import retains the creation receipt, not a local creation request"
         );
         let revisions = target.revisions().unwrap();
         import(&target, "/target", "moved", &moved);

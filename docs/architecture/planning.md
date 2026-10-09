@@ -529,8 +529,9 @@ One derived `planning_exports` view feeds discovery and status. Common
 errors under the original Work ID, separate from the local Task/Project foreign
 key. Multiple origins never overwrite each other's operations. Discovery locks the
 local projection, then reads each origin; status identifies each receipt by origin.
-Task request idempotence is separate from provider effects. No Project transition
-is synthesized for imported planning. Preparation creates a receipt from saved planning. A mapping alone never
+Task request idempotence stays local: importing a provider receipt creates neither
+a Task-creation request nor a Project transition. Preparation captures saved planning;
+import retains that snapshot and its original parent. A mapping alone never
 acknowledges creation. Project acknowledgement also requires the captured Initiative
 attachment; after acknowledgement, a later accepted move does not reopen creation.
 Exact observations attach mappings in the common ingestion transaction before

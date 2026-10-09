@@ -636,10 +636,11 @@ candidates; issue-name fallback persists no association. Projection and cross-ID
 effect deferral share one derived query of retained mappings/creation inputs,
 including losers; nulling a rejected mapping cannot hide ownership. This grants
 no association.
-Effect origin is not projection ownership: common creation receipts now retain
-original UUIDs/models separately from local Work foreign keys. Correspondence,
-lookup and deterministic projection remain unfinished. The earlier 68-test pass
-proves refusal/preservation, not recovery. Preserve execution and private selection.
+Effect origin is not projection ownership: creation receipts retain original
+UUIDs/models separately from local Work foreign keys; imports create no local
+creation request. Correspondence, lookup and deterministic projection remain
+unfinished. The earlier 68-test pass proves refusal/preservation, not recovery.
+Preserve execution and private selection.
 Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery

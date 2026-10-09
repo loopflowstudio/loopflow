@@ -201,16 +201,18 @@ impl SqliteStore {
         let local: String = tx.query_row(
             "SELECT COALESCE(task_id,project_id) FROM planning_creations WHERE kind=?1 AND origin_id=?2",
             params![kind,id], |row| row.get(0))?;
-        let task = TaskId::from_raw(&local);
-        let project = ProjectId::from_raw(&local);
-        super::planning_peers::require_projected_effects(
-            &tx,
-            if kind == "task" {
-                PlanningChanges::Task(&task)
-            } else {
-                PlanningChanges::Project(&project)
-            },
-        )?;
+        if local != id {
+            match origin {
+                PlanningChanges::Task(_) => super::planning_peers::require_projected_effects(
+                    &tx,
+                    PlanningChanges::Task(&TaskId::from_raw(local)),
+                )?,
+                PlanningChanges::Project(_) => super::planning_peers::require_projected_effects(
+                    &tx,
+                    PlanningChanges::Project(&ProjectId::from_raw(local)),
+                )?,
+            }
+        }
         let column = if link {
             "export_link_attempted"
         } else {
@@ -361,7 +363,7 @@ pub(super) fn attach_in(
 /// Portable creation evidence. Rotation, selection and activation do not travel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct CreationReceipt {
+pub(crate) struct CreationReceipt {
     export: PlanningExport,
     attempted: bool,
     link_attempted: bool,
@@ -372,7 +374,7 @@ struct CreationReceipt {
 pub(crate) fn validate_peer_receipt(
     object: &crate::engine::planning_exchange::PlanningObject,
     value: &Value,
-) -> StoreResult<()> {
+) -> StoreResult<CreationReceipt> {
     use crate::engine::planning_exchange::PlanningKind;
     let receipt: CreationReceipt = serde_json::from_value(value.clone())?;
     let export = &receipt.export;
@@ -450,7 +452,7 @@ pub(crate) fn validate_peer_receipt(
             "invalid planning creation receipt".into(),
         ));
     }
-    Ok(())
+    Ok(receipt)
 }
 
 pub(super) fn import_peer_receipts(
@@ -460,49 +462,50 @@ pub(super) fn import_peer_receipts(
     winner: &Value,
     history: &[&Value],
 ) -> StoreResult<()> {
-    validate_peer_receipt(object, winner)?;
+    let mut receipt = validate_peer_receipt(object, winner)?;
     let (kind, local) = owner.owner();
     if kind != object.kind.as_str() {
         return Err(StoreError::InvalidData(
             "creation origin and projection kinds differ".into(),
         ));
     }
-    let mut receipt: CreationReceipt = serde_json::from_value(winner.clone())?;
     for &value in history {
-        validate_peer_receipt(object, value)?;
-        merge_receipt(&mut receipt, serde_json::from_value(value.clone())?)?;
+        merge_receipt(&mut receipt, validate_peer_receipt(object, value)?)?;
     }
-    let saved: Option<(String,Option<String>)> = conn.query_row(
-        "SELECT COALESCE(task_id,project_id),CASE WHEN export_json IS NOT NULL THEN json_object('export',json(export_json),'attempted',json(CASE WHEN export_attempted THEN 'true' ELSE 'false' END),
-            'link_attempted',json(CASE WHEN export_link_attempted THEN 'true' ELSE 'false' END),'error',export_error,
-            'acknowledged',json(CASE WHEN export_acknowledged THEN 'true' ELSE 'false' END)) END
-            FROM planning_creations WHERE kind=?1 AND origin_id=?2",
-        params![kind,object.id], |r| Ok((r.get(0)?,r.get(1)?)),
-    ).optional()?;
+    let mut query = conn.prepare(
+        "SELECT COALESCE(task_id,project_id),export_json,export_attempted,
+            export_link_attempted,export_error,export_acknowledged
+         FROM planning_creations WHERE kind=?1 AND origin_id=?2",
+    )?;
+    let saved = query
+        .query_and_then(params![kind, object.id], |row| -> StoreResult<_> {
+            let export: Option<String> = row.get(1)?;
+            let receipt = match export {
+                Some(export) => Some(CreationReceipt {
+                    export: serde_json::from_str(&export)?,
+                    attempted: row.get(2)?,
+                    link_attempted: row.get(3)?,
+                    error: row.get(4)?,
+                    acknowledged: row.get(5)?,
+                }),
+                None => None,
+            };
+            Ok((row.get::<_, String>(0)?, receipt))
+        })?
+        .next()
+        .transpose()?;
     if let Some((projection, saved)) = saved {
         if projection != local {
             return Err(StoreError::PlanningReceiptConflict {
                 effect: "creation ownership",
             });
         }
-        if let Some(saved) = saved {
-            let mut retained = serde_json::from_str(&saved)?;
+        if let Some(mut retained) = saved {
             merge_receipt(&mut retained, receipt)?;
             receipt = retained;
         }
     }
-    if kind == "task" && local == object.id {
-        conn.execute(
-            "INSERT INTO task_creation_intents(task_id,project_id,title,description)
-             VALUES(?1,?2,?3,?4) ON CONFLICT(task_id) DO NOTHING",
-            params![
-                local,
-                receipt.export.parent,
-                receipt.export.model["name"].as_str(),
-                receipt.export.model["description"].as_str()
-            ],
-        )?;
-    }
+    // Import retains provider effects, never a local Task-creation request.
     let export = serde_json::to_string(&receipt.export)?;
     conn.execute("INSERT INTO planning_creations(kind,origin_id,task_id,project_id,export_json,export_attempted,export_link_attempted,export_error,export_acknowledged)
         VALUES(?1,?2,CASE WHEN ?1='task' THEN ?3 END,CASE WHEN ?1='project' THEN ?3 END,?4,?5,?6,?7,?8)

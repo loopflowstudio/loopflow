@@ -45,11 +45,10 @@ acquisition recognizes partial progress, never detail reads.
 `6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus` for creation, fields/order,
 state, comments, errors and losing values; `086d3560c` removes pending-only
 projections, retaining baselines. Configuration, not mapping, selects pending display.
-Creation receipts advance planning revision. SQL prepares; Rust/Swift stalled
-before tests. Native reconnect is unexecuted.
-Foreground sync follows the repository, not Desktop Task selection. Work-watch/Flow reconnect tests remain
-unexecuted; builds stall at `_dyld_start`. Helper proofs establish
-neither composed nor installed acceptance.
+Creation receipts advance planning revision. SQL prepares; Rust/Swift tests remain unexecuted.
+`29777b8cb` makes foreground sync repository-owned, independent of selection.
+`b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
+TLS smoke proves no composed acceptance; Release's entry-point lesson applies.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

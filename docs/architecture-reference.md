@@ -13,8 +13,9 @@ current-source inventory. [Architecture](architecture.md) introduces the model;
 
 **AgentProcess cutover is incomplete (LOO-443).** Provider identity and attachment
 now live on tagged process rows; recorded-agent views and scheduled settlement
-share that inventory. Optional launches, native pre-exec recording, Claude
-respawn/capture handoff and generation-based wires still need conversion. The
+share that inventory. Captured Claude replacement advances the capture's snapshot
+without refreshing stale operations; runtime verification remains open. Optional
+launches, native pre-exec recording and generation-based wires still need conversion. The
 LfProcess/LfSession rename must integrate before publication. The
 [execution guide](architecture/execution.md#record-actual-processes) records this
 boundary; record fixtures do not establish installed acceptance.

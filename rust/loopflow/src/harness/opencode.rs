@@ -84,7 +84,7 @@ impl OpenCodeHarness {
                 ))
             })
             .transpose()?;
-        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner)));
+        self.history = Arc::new(Mutex::new(opencode_history::History::new(owner.clone())));
         let port = allocate_port()?;
         let mut command = Command::new("opencode");
         command
@@ -107,25 +107,7 @@ impl OpenCodeHarness {
             command.env("OPENCODE_CONFIG_CONTENT", opencode_worktree_config());
         }
         super::configure_vendor_std_env(command.as_std_mut())?;
-        {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, driver)) = &history.owner {
-                store.record_session_provider_launch(session, driver, command.as_std())?;
-            }
-        }
-        let mut child = crate::engine::process::spawn_agent_process(command, None, |pid| {
-            let history = self.history.lock().expect("OpenCode history lock poisoned");
-            if let Some((store, session, attachment)) = &history.owner {
-                let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
-                    std::io::Error::other("AgentProcess birth is unavailable before exec")
-                })?;
-                store
-                    .record_session_provider_process(session, attachment, pid, started_at)
-                    .map_err(std::io::Error::other)?;
-            }
-            Ok(())
-        })
-        .map_err(|err| anyhow!("failed to spawn opencode serve: {err}"))?;
+        let mut child = super::agent_process::spawn(command, None, owner.as_ref())?;
         let stderr = child
             .stderr
             .take()

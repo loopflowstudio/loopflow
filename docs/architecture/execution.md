@@ -74,9 +74,9 @@ store open; unavailable-store coverage is reported explicitly. An inspection
 Process does not reserve agent work or mark a Task Started.
 
 The source cut is incomplete: optional/unattributed launches and native foreground
-pre-exec recording still need conversion. Claude can restart its OS process within
-one invocation; that replacement needs a fresh AgentProcess and an explicitly
-updated capture attachment, not an overwrite of the old PID. Generation-based
+pre-exec recording still need conversion. Captured Claude restarts reserve a fresh
+AgentProcess and update the capture's attachment; pending operations retain their
+old snapshots. This source path still needs runtime verification. Generation-based
 caller/status wires remain until that lifecycle cut. These are publication blockers.
 
 ## Publish before spawn
@@ -93,7 +93,9 @@ Headless Claude, Codex and OpenCode prepare their lifeline before spawning. The 
 establishes its process group, waits for watchdog readiness, then asks a parent
 thread to run its recording callback before exec. For an attached Session, this
 persists OS identity in the AgentProcess row; without an attachment it writes
-nothing. Failed recording refuses exec;
+nothing. The shared harness launch holds the attachment fence through recording
+and saves failed spawns on the record. Admission is synchronous so async cancellation
+cannot discard an admitted child before the harness receives it. Failed recording refuses exec;
 a failed exec retains any recorded identity without claiming provider execution.
 No post-spawn bind is needed. Codex reconnect holds the endpoint's FIFO;
 Claude and OpenCode currently use anonymous lifelines without that handoff path.

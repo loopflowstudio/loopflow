@@ -33,7 +33,6 @@ use crate::chat::types::{ConversationEvent, ConversationItem, TurnUsage};
 use crate::engine::agent::{build_codex_thread_start_params, AgentConfig};
 use crate::engine::process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
-    spawn_agent_process,
 };
 use crate::harness::codex_mapping::ItemPhase;
 use crate::harness::common::spawn_stderr_logger;
@@ -1095,30 +1094,13 @@ impl CodexHarness {
             command.env_remove(name);
         }
 
-        if connection.is_none() {
-            if let Some((store, session, driver)) = &self.session_attachment {
-                store.record_session_provider_launch(session, driver, command.as_std())?;
-            }
-        }
         let lifeline = agent_process_lifeline_path(&endpoint);
         let mut child = if connection.is_none() {
-            Some(
-                spawn_agent_process(command, Some(&lifeline), |pid| {
-                    if let Some((store, session, attachment)) = &self.session_attachment {
-                        let started_at =
-                            crate::journal::process_started_at(pid)?.ok_or_else(|| {
-                                std::io::Error::other(
-                                    "AgentProcess birth is unavailable before exec",
-                                )
-                            })?;
-                        store
-                            .record_session_provider_process(session, attachment, pid, started_at)
-                            .map_err(std::io::Error::other)?;
-                    }
-                    Ok(())
-                })
-                .map_err(|err| anyhow!("failed to spawn codex app-server: {err}"))?,
-            )
+            Some(super::agent_process::spawn(
+                command,
+                Some(&lifeline),
+                self.session_attachment.as_ref(),
+            )?)
         } else {
             None
         };
@@ -1584,9 +1566,7 @@ mod tests {
         };
         let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("failed to spawn codex app-server"),
+            error.to_string().contains("failed to spawn codex"),
             "{error}"
         );
         assert_eq!(

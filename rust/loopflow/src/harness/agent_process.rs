@@ -1,15 +1,64 @@
-//! Settle AgentProcesses from the same inventory used by gates and live views.
+//! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::engine::process::terminate_process_group;
 use crate::journal::{
     process_evidence, process_identity_evidence, process_started_at, ProcessIdentityEvidence,
 };
+use crate::process::SessionAttachment;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
+
+/// One headless launch sequence for every harness. Keep the attachment fence
+/// through pre-exec recording, and retain failed attempts without inventing an
+/// observed exit. Synchronous admission cannot detach a launch on async cancellation.
+pub(super) fn spawn(
+    command: tokio::process::Command,
+    lifeline: Option<&std::path::Path>,
+    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+) -> Result<tokio::process::Child> {
+    super::dispatch::off_reactor(|| {
+        let program = command
+            .as_std()
+            .get_program()
+            .to_string_lossy()
+            .into_owned();
+        let launch = || {
+            if let Some((store, session, attachment)) = owner {
+                store.record_session_provider_launch(session, attachment, command.as_std())?;
+            }
+            let spawned = crate::engine::process::spawn_agent_process(command, lifeline, |pid| {
+                if let Some((store, session, attachment)) = owner {
+                    let started_at = process_started_at(pid)?.ok_or_else(|| {
+                        std::io::Error::other("AgentProcess birth unavailable before exec")
+                    })?;
+                    store
+                        .record_session_provider_process(session, attachment, pid, started_at)
+                        .map_err(std::io::Error::other)?;
+                }
+                Ok(())
+            });
+            if spawned.is_err() {
+                if let Some((store, session, attachment)) = owner {
+                    store.record_native_provider_exit(session, attachment, false)?;
+                }
+            }
+            spawned.map_err(|error| {
+                StoreError::InvalidData(format!("failed to spawn {program}: {error}"))
+            })
+        };
+        match owner {
+            Some((store, session, attachment)) => {
+                store.with_session_attachment(session, attachment, launch)
+            }
+            None => launch(),
+        }
+    })
+    .map_err(Into::into)
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentProcessReapReport {
@@ -223,6 +272,77 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
+
+    #[tokio::test]
+    async fn headless_spawn_retains_attempts_and_refuses_stale_attachments() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
+        let parent = ProcessLfid::new();
+        let first = store
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        let owner = |attachment| Some((store.clone(), session.id.clone(), attachment));
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command.env_clear().args(["-c", "exit 42"]);
+        let mut child = super::spawn(command, None, owner(first.clone()).as_ref()).unwrap();
+        let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(recorded.pid, child.id());
+        assert!(recorded.os_started_at.is_some());
+        assert_eq!(child.wait().await.unwrap().code(), Some(42));
+        // Spawn success alone must not manufacture exit evidence.
+        assert!(recorded.completed_at.is_none());
+        store
+            .record_native_provider_exit(&session.id, &first, true)
+            .unwrap();
+        let next = store
+            .prepare_session_agent_process(&session.id, &first)
+            .unwrap();
+
+        let marker = home.path().join("stale-effect");
+        let mut stale = tokio::process::Command::new("/bin/sh");
+        stale
+            .env_clear()
+            .args(["-c", "printf effect > \"$1\"", "fixture"])
+            .arg(&marker);
+        assert!(super::spawn(stale, None, owner(first.clone()).as_ref()).is_err());
+        assert!(!marker.exists());
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap(),
+            Some(next.clone())
+        );
+        assert!(store
+            .process(&next.agent_process_lfid)
+            .unwrap()
+            .unwrap()
+            .pid
+            .is_none());
+
+        let missing = tokio::process::Command::new(home.path().join("absent-provider"));
+        assert!(super::spawn(missing, None, owner(next.clone()).as_ref()).is_err());
+        let failed = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        assert!(failed.completed_at.is_some());
+        assert!(
+            failed.outcome.is_none(),
+            "failed exec is not a provider outcome"
+        );
+        let retry = store
+            .prepare_session_agent_process(&session.id, &next)
+            .unwrap();
+        assert_ne!(retry.agent_process_lfid, next.agent_process_lfid);
+        assert_eq!(
+            store.process(&next.agent_process_lfid).unwrap(),
+            Some(failed)
+        );
+        assert_eq!(
+            store
+                .process(&first.agent_process_lfid)
+                .unwrap()
+                .unwrap()
+                .pid,
+            recorded.pid
+        );
+    }
 
     #[test]
     fn detached_agent_is_reaped_but_duplicate_historical_identity_is_not_signal_authority() {

@@ -94,14 +94,9 @@ impl ClaudeHarness {
     }
 
     fn turn_origin(&self) -> Result<Option<crate::session::SessionTurnOrigin>> {
-        self.config
-            .as_ref()
-            .and_then(|config| config.session_attachment.as_ref())
-            .map(|(session, attachment)| {
-                let store = crate::store::sqlite::SqliteStore::new(
-                    &crate::store::database_path_from_env()?,
-                )?;
-                Ok(store.session_turn_origin(session, attachment)?)
+        self.owner()?
+            .map(|(store, session, attachment)| {
+                Ok(store.session_turn_origin(&session, &attachment)?)
             })
             .transpose()
     }
@@ -149,48 +144,8 @@ impl ClaudeHarness {
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
-        let owner = config
-            .session_attachment
-            .as_ref()
-            .map(|(session, driver)| {
-                let path = crate::store::database_path_from_env()?;
-                Ok::<_, anyhow::Error>((
-                    crate::store::sqlite::SqliteStore::new(&path)?,
-                    session.clone(),
-                    driver.clone(),
-                ))
-            })
-            .transpose()?;
-        let spawn = || {
-            if let Some((store, session, driver)) = &owner {
-                store.record_session_provider_launch(session, driver, cmd.as_std())?;
-            }
-            let spawned = crate::engine::process::spawn_agent_process(cmd, None, |pid| {
-                if let Some((store, session, attachment)) = &owner {
-                    let started_at = crate::journal::process_started_at(pid)?.ok_or_else(|| {
-                        std::io::Error::other("AgentProcess birth unavailable before exec")
-                    })?;
-                    store
-                        .record_session_provider_process(session, attachment, pid, started_at)
-                        .map_err(std::io::Error::other)?;
-                }
-                Ok(())
-            });
-            if spawned.is_err() {
-                if let Some((store, session, attachment)) = &owner {
-                    store.record_native_provider_exit(session, attachment, false)?;
-                }
-            }
-            spawned.map_err(|error| {
-                crate::store::StoreError::InvalidData(format!("failed to spawn claude: {error}"))
-            })
-        };
-        let mut child = super::dispatch::off_reactor(|| match &owner {
-            Some((store, session, attachment)) => {
-                store.with_session_attachment(session, attachment, spawn)
-            }
-            None => spawn(),
-        })?;
+        let owner = self.owner()?;
+        let mut child = super::agent_process::spawn(cmd, None, owner.as_ref())?;
         drop(activation);
         let stdin = child
             .stdin

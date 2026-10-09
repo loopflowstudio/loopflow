@@ -611,26 +611,25 @@ impl SqliteStore {
             .as_deref()
             .ok_or(StoreError::NotFound)?;
         let _dispatch = self.lock_session_attachment(session)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let matches: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM processes WHERE lfid=?1 AND kind='agent'
+        let matches: bool = {
+            let conn = self.conn.lock().expect("store mutex poisoned");
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM processes WHERE lfid=?1 AND kind='agent'
               AND pid IS ?2 AND os_started_at IS ?3 AND attached_process_lfid IS ?4
               AND attachment_token IS ?5 AND completed_at IS NULL)",
-            params![
-                expected.process.lfid,
-                expected.process.pid,
-                expected.process.os_started_at,
-                expected.attached_process_lfid,
-                expected.attachment_token
-            ],
-            |row| row.get(0),
-        )?;
+                params![
+                    expected.process.lfid,
+                    expected.process.pid,
+                    expected.process.os_started_at,
+                    expected.attached_process_lfid,
+                    expected.attachment_token
+                ],
+                |row| row.get(0),
+            )?
+        };
         if !matches {
             return Ok(false);
         }
-        tx.commit()?;
-        drop(conn);
         terminate()?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1617,7 +1616,16 @@ mod attachment_tests {
             .settle_agent_process(&observed, || panic!("stale signal"))
             .unwrap());
         let current = store.agent_processes().unwrap().remove(0);
-        assert!(store.settle_agent_process(&current, || Ok(())).unwrap());
+        assert!(store
+            .settle_agent_process(&current, || {
+                // Settlement holds the attachment fence, not the SQLite mutex.
+                assert_eq!(
+                    store.process(&current.process.lfid)?.as_ref(),
+                    Some(&current.process)
+                );
+                Ok(())
+            })
+            .unwrap());
         let retained = store.process(&first.agent_process_lfid).unwrap().unwrap();
         assert_eq!(retained.pid, Some(4242));
         assert_eq!(retained.parent_process_lfid, Some(a));

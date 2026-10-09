@@ -285,61 +285,57 @@ impl SqliteStore {
                 d.publication_state,d.publication_error,d.publication_digest
             FROM planning_destinations d WHERE d.repo=?1 ORDER BY d.id",
         )?;
-        let rows = query
-            .query_map([repo], |row| {
-                Ok((
-                    PeerPlanningStatus {
-                        id: row.get(0)?,
-                        reference: row.get(1)?,
-                        active: row.get(2)?,
-                        selected_records: row.get::<_, i64>(3)? as u64,
-                        imported_revision: row.get(4)?,
-                        fetched_revision: row.get(5)?,
-                        acquisition_error: row.get(6)?,
-                        publication_revision: row.get(7)?,
-                        publication_state: row.get(8)?,
-                        publication_error: row.get(9)?,
-                        pending_local: None,
-                        local_error: None,
-                        conflicts: Vec::new(),
-                    },
-                    row.get::<_, Option<String>>(10)?,
-                ))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(query);
+        let mut rows = query.query([repo])?;
         let mut statuses = Vec::new();
-        for (mut status, digest) in rows {
-            status.conflicts = projection_conflicts_in(&tx, repo, &status.id)?;
-            match export_selected(&tx, repo, &status.id) {
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let digest: Option<String> = row.get(10)?;
+            let mut conflicts = projection_conflicts_in(&tx, repo, &id)?;
+            let (pending_local, local_error) = match export_selected(&tx, repo, &id) {
                 Ok((snapshot, held)) => {
-                    status.pending_local = Some(match digest {
+                    let pending = match digest {
                         Some(digest) => digest != planning_digest(&snapshot)?,
                         None => !snapshot.changes.is_empty(),
-                    });
-                    status.conflicts.retain(|conflict| {
+                    };
+                    conflicts.retain(|conflict| {
                         conflict.reason != SHARING_PROJECTION_PENDING
                             || !held.contains_key(&conflict.object)
                     });
                     for (object, reason) in held {
                         let conflict = PeerProjectionConflict { object, reason };
-                        if !status.conflicts.contains(&conflict) {
-                            status.conflicts.push(conflict);
+                        if !conflicts.contains(&conflict) {
+                            conflicts.push(conflict);
                         }
                     }
+                    (Some(pending), None)
                 }
                 // A damaged journal is destination-local evidence, not a reason
                 // to hide the other plans or claim no local changes. SQL failures
                 // still fail the read. Never display raw journal contents here.
-                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => {
-                    status.local_error = Some(
-                        "Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.".into(),
-                    );
-                }
+                Err(StoreError::InvalidData(_) | StoreError::Serde(_)) => (
+                    None,
+                    Some("Local planning journal is invalid; pending changes and sharing holds are unknown. Retained plans and sync receipts are unchanged.".into()),
+                ),
                 Err(error) => return Err(error),
-            }
-            statuses.push(status);
+            };
+            statuses.push(PeerPlanningStatus {
+                id,
+                reference: row.get(1)?,
+                active: row.get(2)?,
+                selected_records: row.get::<_, i64>(3)? as u64,
+                imported_revision: row.get(4)?,
+                fetched_revision: row.get(5)?,
+                acquisition_error: row.get(6)?,
+                publication_revision: row.get(7)?,
+                publication_state: row.get(8)?,
+                publication_error: row.get(9)?,
+                pending_local,
+                local_error,
+                conflicts,
+            });
         }
+        drop(rows);
+        drop(query);
         tx.commit()?;
         Ok(statuses)
     }

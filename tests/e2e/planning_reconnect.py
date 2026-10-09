@@ -509,6 +509,33 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         db.close()
 
 
+def _execution_rows(db: sqlite3.Connection, processes: tuple[str, ...]) -> dict[str, list[tuple]]:
+    rows = {
+        table: db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+        for table in [
+            "agent_sessions",
+            "task_workflows",
+            "task_workflow_moves",
+            "task_prs",
+            "work_placements",
+            "project_transitions",
+        ]
+    }
+    # CLI inspection adds Processes; compare the retained identities, not their count.
+    rows["processes"] = db.execute(
+        "SELECT * FROM processes WHERE lfid IN (SELECT value FROM json_each(?)) ORDER BY rowid",
+        (json.dumps(processes),),
+    ).fetchall()
+    return rows
+
+
+def _assert_execution_unchanged(
+    db: sqlite3.Connection, before: dict[str, list[tuple]], processes: tuple[str, ...]
+) -> None:
+    after = _execution_rows(db, processes)
+    assert after == before, {k: (before[k], v) for k, v in after.items() if before[k] != v}
+
+
 def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
     root, repo = Path(fixture["home"]), Path(fixture["repo"])
     peer = fixture["peer"]
@@ -534,22 +561,9 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
             for c in changes
         )
 
-    def execution() -> dict:
-        return {
-            table: db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
-            for table in [
-                "agent_sessions",
-                "task_workflows",
-                "task_workflow_moves",
-                "task_prs",
-                "work_placements",
-                "project_transitions",
-            ]
-        }
-
     wave_name = db.execute("SELECT name FROM waves WHERE id=?", (peer["wave"],)).fetchone()[0]
     run("wave", "edit", wave_name, "--goal", str(repo / "wave" / wave_name / "GOAL.md"))
-    before = execution()
+    before = _execution_rows(db, ())
     with server.lock:
         server.state["exports"] = dict(
             project_writes=0,
@@ -611,17 +625,13 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
                 ).fetchone()[0]
                 == 1
             )
-        assert execution() == before, {
-            k: (before[k], v) for k, v in execution().items() if before[k] != v
-        }
+        _assert_execution_unchanged(db, before, ())
         # Reopening the real foreground connection reobserves settled receipts.
         watch.close()
         watch = Watch(fixture, env)
         watch.scope(str(repo))
         watch.frame(lambda f: f["part"] == "planning")
-        assert execution() == before, {
-            k: (before[k], v) for k, v in execution().items() if before[k] != v
-        }
+        _assert_execution_unchanged(db, before, ())
         with server.lock:
             assert [exports[k] for k in ["project_writes", "task_writes", "link_writes"]] == [
                 1,
@@ -642,26 +652,8 @@ def _exercise_exports(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
 def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> None:
     db = sqlite3.connect(Path(fixture["home"]) / "loopflow.db", timeout=5)
 
-    def execution() -> list:
-        # Compare all existing execution rows, allowing the CLI to record its
-        # own inspection Processes. The retained Process has no fabricated exit.
-        return [
-            db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
-            for table in [
-                "agent_sessions",
-                "task_workflows",
-                "task_workflow_moves",
-                "task_prs",
-                "work_placements",
-                "project_transitions",
-            ]
-        ] + [
-            db.execute(
-                "SELECT * FROM processes WHERE lfid=?", ("00000000-0000-4000-8000-000000000001",)
-            ).fetchall()
-        ]
-
-    before = execution()
+    processes = ("00000000-0000-4000-8000-000000000001",)
+    before = _execution_rows(db, processes)
     checkout = db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
     saved = subprocess.run(
         [fixture["lf"], "task", "delete", fixture["task"]],
@@ -724,7 +716,7 @@ def _exercise_effects(fixture: dict, env: dict, server: ThreadingHTTPServer) -> 
             ).fetchone()[0]
             > 0
         )
-        assert execution() == before
+        _assert_execution_unchanged(db, before, processes)
         assert (
             db.execute("SELECT worktree FROM tasks WHERE id=?", (fixture["task"],)).fetchone()
             == checkout

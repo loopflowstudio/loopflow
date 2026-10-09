@@ -2,7 +2,6 @@
 
 pub mod active;
 pub(crate) mod activity;
-pub(crate) mod recovery;
 mod runtime;
 
 pub(crate) use runtime::finish_session_driver;
@@ -2096,11 +2095,11 @@ impl CaptureHandle {
                 "session {session:?} is already complete"
             )));
         }
-        let (expected, replace_provider) = provider_driver_claim(&store, session, true)?;
+        let expected = replaceable_driver(&store, session)?;
         next.artifact_key = new_artifact_key();
         next.input_published = false;
         let (next, driver) =
-            store.claim_session_input(next, expected.as_ref(), &process_lfid, replace_provider)?;
+            store.claim_session_input(next, expected.as_ref(), &process_lfid, true)?;
         // Continue the Session's attribution; the manifest still describes the
         // actual process cwd supplied by the caller.
         spec.subjects = crate::ops::human_session::capture_subjects(&next);
@@ -2324,7 +2323,7 @@ impl CaptureHandle {
             }
             return Ok(());
         };
-        let driver = claim_provider_driver(&store, &session.id, &process_lfid, true)?;
+        let driver = claim_provider_driver(&store, &session.id, &process_lfid)?;
         capture.driver = Some((session.id, driver));
         drop(capture);
         self.register_interrupt();
@@ -2870,94 +2869,56 @@ impl SessionCapture {
     }
 }
 
-/// Admit a driver using retained process evidence. Native terminals cannot attach
-/// to a surviving engine; only the managed harness can reuse its connection.
+/// Admit a driver once the previous one is absent or provably dead. The new
+/// driver always starts its own engine and resumes the saved provider thread.
+/// Only a live driver hands over a live engine, and it does so by connecting.
 pub(crate) fn claim_provider_driver(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
     process_lfid: &crate::id::ProcessLfid,
-    can_connect: bool,
 ) -> StoreResult<crate::process::SessionDriver> {
-    let (expected, replace_provider) = provider_driver_claim(store, session, can_connect)?;
-    store.claim_session_driver(session, expected.as_ref(), process_lfid, replace_provider)
+    let expected = replaceable_driver(store, session)?;
+    store.claim_session_driver(session, expected.as_ref(), process_lfid, true)
 }
 
-fn provider_driver_claim(
+/// The driver a new one may replace, after ending any engine it left behind.
+fn replaceable_driver(
     store: &crate::store::sqlite::SqliteStore,
     session: &str,
-    can_connect: bool,
-) -> StoreResult<(Option<crate::process::SessionDriver>, bool)> {
+) -> StoreResult<Option<crate::process::SessionDriver>> {
     let expected = store.session_driver(session)?;
-    if let Some(process) = expected
+    let Some((previous, process)) = expected
         .as_ref()
-        .and_then(|driver| driver.process_lfid.as_ref())
-    {
-        let receipt = crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
-            .ok()
-            .and_then(|receipts| {
-                receipts
-                    .into_iter()
-                    .find(|receipt| receipt.process_lfid == process.as_str())
-            });
-        let dead =
-            receipt.is_some_and(
-                |receipt| match crate::journal::process_started_at(receipt.pid) {
-                    Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
-                    Ok(None) => true,
-                    Err(_) => false,
-                },
-            );
-        if !dead {
-            return Err(StoreError::InvalidAuthority(
-                "Conversation already has a driver; connect to it".into(),
-            ));
-        }
+        .and_then(|driver| Some((driver, driver.process_lfid.as_ref()?)))
+    else {
+        // A driver that finished closed its own engine in the same step.
+        return Ok(expected);
+    };
+    let receipt = crate::journal::read_process_receipts_at(&crate::store::lf_home_dir())
+        .ok()
+        .and_then(|receipts| {
+            receipts
+                .into_iter()
+                .find(|receipt| receipt.process_lfid == process.as_str())
+        });
+    let is_dead =
+        receipt.is_some_and(
+            |receipt| match crate::journal::process_started_at(receipt.pid) {
+                Ok(Some(current)) => (current - receipt.started_at).abs() > 3,
+                Ok(None) => true,
+                Err(_) => false,
+            },
+        );
+    if !is_dead {
+        return Err(StoreError::InvalidAuthority(
+            "Conversation already has a driver; connect to it".into(),
+        ));
     }
-    let mut replace_provider = expected.is_none()
-        || store.session_provider_unstarted(session)?
-        || conversation_engine_exited(store, session)?;
-    let connection = store.session_connection(session)?;
-    if !replace_provider && (connection.is_none() || !can_connect) {
-        replace_provider = recovery::prepare_after_restart(store, session, expected.as_ref())?;
-        if !replace_provider {
-            return Err(StoreError::InvalidAuthority(
-                    "Conversation has no usable connection and no confirmed engine exit; retry requires exact process evidence or an observed restart of the same host".into(),
-                ));
-        }
-    }
-    Ok((expected, replace_provider))
+    runtime::end_abandoned_engine(store, session, previous)?;
+    Ok(expected)
 }
 
 /// The store that holds the conversation for the capture recorded at `dir`.
-/// An absent socket alone says nothing about an engine. Require its recorded
-/// process to have exited; a surviving endpoint wins over launcher death.
-pub(crate) fn conversation_engine_exited(
-    store: &crate::store::sqlite::SqliteStore,
-    session: &str,
-) -> StoreResult<bool> {
-    let exited = match store.session_provider_process(session)? {
-        Some((pid, started)) => match crate::journal::process_started_at(pid) {
-            Ok(Some(current)) => (current - started).abs() > 3,
-            Ok(None) => true,
-            Err(_) => false,
-        },
-        None => store.native_provider_exited(session)?,
-    };
-    if !exited {
-        return Ok(false);
-    }
-    Ok(match store.session_connection(session)? {
-        Some((endpoint, _)) => match std::os::unix::net::UnixStream::connect(endpoint) {
-            Ok(_) => false,
-            Err(error) => matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-            ),
-        },
-        None => true,
-    })
-}
-
 fn row_store(dir: &Path) -> StoreResult<crate::store::sqlite::SqliteStore> {
     crate::store::sqlite::SqliteStore::new(&row_database(dir)?)
 }
@@ -4088,7 +4049,7 @@ mod tests {
     }
 
     #[test]
-    fn continuation_retains_native_history_and_captures_its_request_after_handoff() {
+    fn continuation_resumes_the_saved_thread_on_a_fresh_engine() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original = CaptureHandle::begin_at(ledger.home(), spec(ledger.home())).unwrap();
@@ -4140,11 +4101,17 @@ mod tests {
                 next.conversation_resume_token()?.as_deref(),
                 Some("native-thread")
             );
-            assert_eq!(next_driver.provider_generation, driver.provider_generation);
+            // The finished driver's engine is never adopted.
             assert_eq!(
-                next_driver.provider_process_lfid,
-                driver.provider_process_lfid
+                next_driver.provider_generation,
+                driver.provider_generation + 1
             );
+            assert_eq!(
+                Some(&next_driver.provider_process_lfid),
+                next_driver.process_lfid.as_ref()
+            );
+            assert!(store.session_connection(&session.id)?.is_none());
+            assert!(store.session_provider_process(&session.id)?.is_none());
             assert!(next_driver.generation > driver.generation);
             let saved = super::read_manifest(&next.artifact_dir()).unwrap();
             assert_eq!(
@@ -4213,8 +4180,6 @@ mod tests {
                 .unwrap()
                 .process_lfid
                 .is_none());
-            assert!(store.session_provider_unstarted(&session.id)?);
-            assert!(!store.native_provider_exited(&session.id)?);
             assert!(!store
                 .session_history(&session.id, 0, 0)?
                 .iter()
@@ -4236,90 +4201,153 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
-    fn pre_spawn_failure_can_reclaim_conversation_without_inventing_engine_exit() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let capture = CaptureHandle::begin_at_with_request(
-            ledger.home(),
-            spec(ledger.home()),
-            AgentProcessRequest::from_prepared(
-                &AgentConfig::default(),
-                &AgentCapabilities::default(),
-            ),
-        )
-        .unwrap();
-        let store = super::row_store(&capture.artifact_dir()).unwrap();
-        let session = store
-            .session_for_artifact(&capture.artifact_key())
-            .unwrap()
-            .unwrap();
-        let command = vec!["lf".into(), "skill".into()];
-        crate::journal::with_runtime(ledger.home(), &command, || {
-            capture.claim_conversation_driver()?;
-            let (_, driver) = capture.session_driver().unwrap();
-            store.record_session_connection(
-                &session.id,
-                &driver,
-                "/missing.sock",
-                "saved-thread",
-            )?;
-            // The previous engine exited; the next admission replaces it.
-            store.record_session_provider_process(&session.id, &driver, std::process::id(), 1)?;
-            capture.finish("failed")?;
-            Ok(())
-        })
-        .unwrap();
-        for _ in 0..2 {
-            let manifest = super::read_manifest(&capture.artifact_dir()).unwrap();
-            let retry = CaptureHandle(std::sync::Arc::new(std::sync::Mutex::new(
-                super::SessionCapture::from_manifest(manifest, capture.artifact_dir()),
-            )));
-            crate::journal::with_runtime(ledger.home(), &command, || {
-                assert_eq!(
-                    retry.conversation_resume_token()?.as_deref(),
-                    Some("saved-thread")
-                );
-                retry.claim_conversation_driver()?;
-                assert!(store.session_provider_unstarted(&session.id)?);
-                assert!(!super::conversation_engine_exited(&store, &session.id)?);
-                retry.finish("failed")?;
-                Ok(())
-            })
+    /// A Session whose driver is a throwaway child, so a test can kill it.
+    #[cfg(unix)]
+    fn driven_session(
+        ledger: &crate::journal::TestLedgerGuard,
+    ) -> (
+        crate::store::sqlite::SqliteStore,
+        crate::process::SessionDriver,
+        std::process::Child,
+        crate::id::ProcessLfid,
+    ) {
+        let path = ledger.home().join("loopflow.db");
+        let store = crate::store::sqlite::SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", &super::new_artifact_key());
+        let first = crate::id::ProcessLfid::new();
+        let second = crate::id::ProcessLfid::new();
+        let sql = rusqlite::Connection::open(&path).unwrap();
+        for process in [&first, &second] {
+            sql.execute(
+                "INSERT INTO processes(lfid,trace_id,started_at) VALUES(?1,'fixture',1)",
+                [process.as_str()],
+            )
             .unwrap();
         }
-        let expected = store.session_driver(&session.id).unwrap().unwrap();
-        crate::journal::with_runtime(ledger.home(), &command, || {
-            let process = crate::journal::current_process_lfid().unwrap();
-            let driver =
-                store.claim_session_driver(&session.id, Some(&expected), &process, true)?;
-            store.record_session_provider_launch(&session.id, &driver, false)?;
-            store.record_session_provider_launch(&session.id, &driver, true)?;
-            assert!(!store.session_provider_unstarted(&session.id)?);
-            assert!(!super::conversation_engine_exited(&store, &session.id)?);
-            assert!(store
-                .record_session_provider_launch(&session.id, &expected, false)
-                .is_err());
-            store.record_session_provider_process(
-                &session.id,
-                &driver,
-                std::process::id(),
-                crate::journal::process_started_at(std::process::id())?.unwrap(),
-            )?;
-            assert!(!super::conversation_engine_exited(&store, &session.id)?);
-            store.release_session_driver(&session.id, &driver)?;
-            Ok(())
-        })
+        sql.execute("UPDATE agent_sessions SET provider='codex'", [])
+            .unwrap();
+        let process = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let receipts = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
+        fs::create_dir_all(&receipts).unwrap();
+        fs::write(
+            receipts.join(format!("{first}.json")),
+            serde_json::to_vec(&crate::journal::ProcessReceipt {
+                schema_version: 1,
+                trace_id: "fixture".into(),
+                process_lfid: first.to_string(),
+                pid: process.id(),
+                started_at: crate::journal::process_started_at(process.id())
+                    .unwrap()
+                    .unwrap(),
+            })
+            .unwrap(),
+        )
         .unwrap();
+        let driver = store
+            .claim_session_driver("conversation", None, &first, true)
+            .unwrap();
+        (store, driver, process, second)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn replacing_a_dead_driver_ends_its_engine_before_starting_another() {
+        use std::os::unix::process::CommandExt;
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let (store, driver, mut process, next) = driven_session(&ledger);
+        let mut engine = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let started = crate::journal::process_started_at(engine.id())
+            .unwrap()
+            .unwrap();
+        store
+            .record_session_provider_process("conversation", &driver, engine.id(), started)
+            .unwrap();
+        let socket = ledger.home().join("engine.sock");
+        store
+            .record_session_connection(
+                "conversation",
+                &driver,
+                socket.to_str().unwrap(),
+                "saved-thread",
+            )
+            .unwrap();
+
+        // A live driver keeps both the conversation and its engine.
+        let error = super::claim_provider_driver(&store, "conversation", &next).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Conversation already has a driver; connect to it"),
+            "{error}"
+        );
+        assert!(engine.try_wait().unwrap().is_none());
+
+        process.kill().unwrap();
+        process.wait().unwrap();
+        let replacement = super::claim_provider_driver(&store, "conversation", &next).unwrap();
+        assert!(crate::journal::process_started_at(engine.id())
+            .unwrap()
+            .is_none());
+        // Ending the engine may already have reaped this exact child.
+        let _ = engine.wait();
         assert_eq!(
-            store.session_thread(&session.id).unwrap().as_deref(),
+            replacement.provider_generation,
+            driver.provider_generation + 1
+        );
+        assert_eq!(replacement.provider_process_lfid, next);
+        assert!(store.session_connection("conversation").unwrap().is_none());
+        assert!(store
+            .session_provider_process("conversation")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            store.session_thread("conversation").unwrap().as_deref(),
             Some("saved-thread")
         );
-        assert!(store
-            .session_history(&session.id, 0, 100)
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_dead_driver_is_not_replaced_beside_an_engine_that_cannot_be_ended() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let (store, driver, mut process, next) = driven_session(&ledger);
+        // A provider outside a group of its own is never signalled.
+        let mut provider = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let started = crate::journal::process_started_at(provider.id())
             .unwrap()
-            .iter()
-            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
+            .unwrap();
+        store
+            .record_session_provider_process("conversation", &driver, provider.id(), started)
+            .unwrap();
+        process.kill().unwrap();
+        process.wait().unwrap();
+
+        let error = super::claim_provider_driver(&store, "conversation", &next).unwrap_err();
+        assert!(error.to_string().contains("is still running"), "{error}");
+        assert!(provider.try_wait().unwrap().is_none());
+        assert_eq!(
+            store.session_driver("conversation").unwrap(),
+            Some(driver.clone())
+        );
+
+        provider.kill().unwrap();
+        provider.wait().unwrap();
+        let replacement = super::claim_provider_driver(&store, "conversation", &next).unwrap();
+        assert_eq!(
+            replacement.provider_generation,
+            driver.provider_generation + 1
+        );
     }
 
     #[test]

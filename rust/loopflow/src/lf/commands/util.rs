@@ -208,7 +208,7 @@ pub(crate) fn resume_session_with_env(
         user_name.unwrap_or_default(),
     );
     // A native resume has no CaptureHandle, but still owns an exact driver.
-    // Remote connections already claimed their surviving engine's driver.
+    // Remote connections already claimed their live engine's driver.
     let owned = if remote.is_none() {
         if let Some(process) = crate::journal::current_process_lfid() {
             let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
@@ -216,7 +216,7 @@ pub(crate) fn resume_session_with_env(
                 .session_for_artifact(artifact_key)?
                 .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
             let driver =
-                crate::session_record::claim_provider_driver(&store, &session.id, &process, false)?;
+                crate::session_record::claim_provider_driver(&store, &session.id, &process)?;
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
                 serde_json::to_string(&driver.caller(session.id.clone()))?,

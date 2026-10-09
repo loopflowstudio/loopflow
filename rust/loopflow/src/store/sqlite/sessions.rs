@@ -522,6 +522,8 @@ impl SqliteStore {
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
+        // An input has ended once its terminal record, its turns' completions or
+        // its driver's exit says so: a turn left open by an exited driver is over.
         let inputs = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             let mut query = conn.prepare("WITH inputs AS (
@@ -538,12 +540,14 @@ impl SqliteStore {
                         AND origin.captured_event=i.seq AND origin.kind='started' AND NOT EXISTS (
                             SELECT 1 FROM session_events done WHERE done.session_id=origin.session_id
                             AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
-                            AND done.kind='completed')) THEN NULL ELSE
+                            AND done.kind='completed')
+                        AND NOT EXISTS (SELECT 1 FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>origin.seq)) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),(
+                            SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=s.id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>i.seq)) END AS ended, NULL AS thread, NULL AS turn
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
@@ -555,7 +559,8 @@ impl SqliteStore {
                     OR EXISTS(SELECT 1 FROM session_events origin WHERE origin.captured_event=i.seq AND origin.kind='started'))
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,MIN(e.observed_at),origin.task_id,origin.wave_id,
-                    MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),e.provider_thread,e.provider_turn
+                    COALESCE(MAX(CASE WHEN e.kind='completed' THEN e.observed_at END),(
+                        SELECT MIN(x.observed_at) FROM session_events x WHERE x.session_id=e.session_id AND x.kind='observed' AND x.receipt_key>='driver:' AND x.receipt_key<'driver;' AND substr(x.receipt_key,-5)=':exit' AND x.seq>MIN(e.seq))),e.provider_thread,e.provider_turn
                 FROM session_events e LEFT JOIN session_events origin
                     ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                     AND origin.provider_turn=e.provider_turn AND origin.kind='started'

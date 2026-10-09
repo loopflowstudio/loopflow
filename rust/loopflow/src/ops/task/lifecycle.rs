@@ -1,5 +1,4 @@
 //! Task decisions commit locally; PR and checkout cleanup retain separate authority.
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -18,7 +17,7 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
     if super::task_work_status(store, task).await? != WorkStatus::Done {
         return Ok(());
     }
-    let blockers = associated_execution_blockers(store, task)?;
+    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         eprintln!(
             "Task {} is complete; retained checkout: {}",
@@ -105,7 +104,7 @@ async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore
 }
 
 fn require_idle(store: &SharedStore, task: &Task) -> OpsResult<()> {
-    let blockers = associated_execution_blockers(store, task)?;
+    let blockers = crate::ops::task_automation::task_execution_blockers(&store.sqlite, &task.id)?;
     if !blockers.is_empty() {
         return Err(task_error(blockers.join("; ")));
     }
@@ -465,70 +464,4 @@ pub fn task_repository(directory: &Path, selector: Option<&str>) -> OpsResult<st
     crate::repo::discover_repo_root(directory)
         .map_err(task_error)?
         .ok_or_else(|| task_error("unplaced Task needs a repository; run from its repository"))
-}
-
-/// Checkout restoration and cleanup wait for live or unresolved execution.
-pub(super) fn associated_execution_blockers(
-    store: &SharedStore,
-    task: &Task,
-) -> OpsResult<Vec<String>> {
-    let open = store.sqlite.open_processes().map_err(task_error)?;
-    let work = store
-        .sqlite
-        .task_open_work(&task.id, &open)
-        .map_err(task_error)?;
-    let mut blockers = Vec::new();
-    // The caller cannot outlive the processes that launched it, nor wait on
-    // the Flow whose step it is. Lineage exempts waiting, not authority.
-    let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_process_lfid();
-    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
-        next = store
-            .sqlite
-            .process(&id)
-            .map_err(task_error)?
-            .and_then(|process| process.parent_process_lfid);
-    }
-    // A Flow is its driver and step Processes; the loop over Processes below judges
-    // them. Sessions are judged here on their own evidence.
-    for session in &work.sessions {
-        if let Some(input) = store.sqlite.session(&session.id).map_err(task_error)? {
-            if input.completed_at.is_none() && !input.interactive && !input.input_published {
-                blockers.push(format!("Session {} has a reserved input", session.id));
-            }
-        }
-        if store
-            .sqlite
-            .session_has_pending_turn(&session.id)
-            .map_err(task_error)?
-            && (session.completed_at.is_none()
-                || crate::ops::task_automation::session_engine_unresolved(
-                    &store.sqlite,
-                    &session.id,
-                )?)
-        {
-            blockers.push(format!(
-                "Session {} has an unresolved provider turn",
-                session.id
-            ));
-        }
-    }
-    for process in work
-        .processes
-        .iter()
-        .filter(|process| process.completed_at.is_none())
-    {
-        if lineage.contains(&process.lfid) {
-            continue;
-        }
-        if crate::journal::process_evidence(&store.sqlite, &process.lfid)
-            != crate::journal::ProcessIdentityEvidence::Dead
-        {
-            blockers.push(format!(
-                "Process {} has live or unresolved execution; inspect `lf history show {}`",
-                process.lfid, process.lfid
-            ));
-        }
-    }
-    Ok(blockers)
 }

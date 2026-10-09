@@ -145,6 +145,9 @@ CLI and Desktop project creation, field/order edits, state and comments through
 pending in connected repositories; attempted effects retain uncertainty and errors.
 Observed conflicts show both values after adopting Linear. Disconnected repositories
 show no pending Linear delivery; retained losing values remain inspectable.
+A foreground connection synchronizes its repository, independent of Desktop Task
+selection. Inventory, comments and delivery use separate bounded loops; closing
+or clearing the repository connection ends them. Read projections stay read-only.
 Composed reconnect acceptance remains unfinished. Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.

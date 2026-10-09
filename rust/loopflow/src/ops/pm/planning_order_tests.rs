@@ -118,12 +118,12 @@ fn assert_no_conflicts(fixture: &Fixture) {
 
 #[test]
 fn planning_order_active_connection_delivers_after_outage() {
-    with_order(|runtime, fixture, _repo, tasks, state| {
+    with_order(|runtime, fixture, repo, tasks, state| {
         runtime.block_on(async {
             state.lock().await.field_outage = true;
             let sync = crate::ops::linear_observe::PlanningSync::start(
                 fixture.store.clone(),
-                tasks[0].clone(),
+                repo.to_string_lossy().into_owned(),
             )
             .unwrap();
             reorder(&fixture.store, &tasks[3], 0);

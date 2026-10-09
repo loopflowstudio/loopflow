@@ -185,18 +185,14 @@ and deletion receipts, plus alternate acquisition paths; legacy association and
 Desktop presentation follow. Comments and Task disposition have source composition,
 not composed acceptance. Mixed-provider exchange remains disabled.
 
-Locally available parent history has advanced beyond the integrated `b6f34a6f8`.
-`078a6642e` repairs gate fixtures/DTOs and records Linux migration, public
-Flow/work-watch reconnect and adoption passes; its memory also reports native
-reconnect, with Swift unavailable. Those results concern LOO-406, not this combined
-peer candidate. `ffe986160` removes synthetic state settlement: provider
-observations settle receipts; failures only record errors. Neither cut is integrated
-here, and only a local parent ref contains `ffe986160`; publication was not checked.
-The next coherent parent integration must update the peer lost-reply fixture from
-`settle_task_state(..., Some(...))` to `task_state_error(...)`, preserving its
-uncertainty assertions and this branch's `record_in`/`adopt_peer_in` ownership.
-No compatibility shim or duplicate settlement writer is needed. This is a concrete
-integration seam, not a current compile failure or permission to copy dirty code.
+The owned October 8 sync integrates pinned parent `ffe986160`, including
+`078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
+Flow/work-watch reconnect and adoption passes; Swift remains unavailable. Those
+results concern LOO-406, not this combined peer candidate. `ffe986160` removes
+synthetic state settlement: provider observations settle receipts; failures only
+record errors. The peer lost-reply fixture now uses `task_state_error`, retaining
+its uncertainty assertions and this branch's `record_in`/`adopt_peer_in` ownership.
+No compatibility shim or duplicate settlement writer is needed.
 
 Source reconciliation at `4e3cb2160` supersedes the earlier no-production-caller
 finding: `6c0f2256f` connects exchange and `4e3cb2160` isolates destination attempts.
@@ -469,3 +465,5 @@ Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
 inferred. Its reconciliation checkpoint `e8ff4c7f6` remains preserved.
+
+Sync check (October 8): `cargo test -p loopflow --lib peer_disposition_queues_delivery_without_workflow_and_retains_uncertain_attempts` timed out after 120 seconds before a test result; executable proof remains with capable gate/CI.

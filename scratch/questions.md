@@ -5,7 +5,7 @@ Jack Heart's custom-ref steers supersede host callbacks. The
 deletion cut and remaining acceptance. Earlier callback assumptions are retained
 at `b040c7c8d:scratch/questions.md`.
 
-- LOO-406's common writer is integrated through published `b6f34a6f8`. Peer
+- LOO-406's common writer is integrated through pinned `ffe986160`. Peer
   import/export, ordering and local-only foreground composition exist in source;
   execution verification remains, independent of the parent's Linear delivery.
 - Jack Heart's newer policy: Linear wins observed conflicts; otherwise host

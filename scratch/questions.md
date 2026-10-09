@@ -30,9 +30,11 @@ at `b040c7c8d:scratch/questions.md`.
   failures still roll back the import. Legacy-provider association remains unfinished;
   conflicts preserve both IDs rather than guessing which execution history to use.
 
-Peer source before this repair is committed through `85ced1512`; the integrated cut remains unpublished. Current verification and
-remaining integration are in the existing design; previous adoption-only evidence
-is retained at `5d336868f:scratch/questions.md`.
+The integrated cut remains unpublished. The current design owns verification and
+remaining integration; earlier adoption evidence stays at `5d336868f:scratch/questions.md`.
+October 9's 46 passing peer-storage tests supersede the dated unexecuted claims below
+for that suite. Public/DTO, provider-lifetime, cold-worker, Desktop and mixed-provider
+acceptance remain separate. No new product decision is selected.
 
 - October 8 selection choice: selecting a Wave includes its descendants; joining
   selects nothing. Existing moves never enroll a private parent or change the

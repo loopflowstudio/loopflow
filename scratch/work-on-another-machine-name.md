@@ -120,76 +120,47 @@ whole destination; the boundary and remaining proof are below.
 
 ## Delete — do not maintain
 
-The copied `TaskSource.planning` payload, issue-derived `TaskId::from_issue`, UUID-v5
-feature and exclusive adoption tests are removed. SSH now carries saved Task ID,
-identifier and pushed-code requirements only. Placement consumes already imported
-planning and retains branch/commit and dirty-checkout checks. At `6c0f2256f`,
-the remote fixture binds an empty target and relies on dispatch publication and
-cold acquisition, not manual import. It remains unexecuted and simulates SSH and
-the agent. The earlier walkthrough/captures remain archived at `5960415b3`.
+The prior cut-by-cut inventory and evidence remain at
+`b0f2a00702ccdbe1b11c22fa55f472cc649bf8d1:scratch/work-on-another-machine-name.md`,
+this heading. Keep these replacements deleted:
 
-The manual-conflict-only `PlanningField` model is replaced by immutable mutations
-and deterministic projection. No full-store callback or second planning store
-exists. Docs describe the unfinished public path rather than claiming adoption.
-
-Removed repository-wide export and alias-addressed transport: exchange requires a
-saved destination and selected records. The earlier duplicate SSH parse, Task
-preparation and mutation-decoder cuts remain at
-`81fcf66e3:scratch/work-on-another-machine-name.md`; validation reductions and
-checkpoint fixtures remain at `fea5156eb`.
-
-Keep these replacements deleted:
-
+- Copied `TaskSource.planning`, issue-derived `TaskId::from_issue`, UUID-v5,
+  host callbacks and exclusive adoption fixtures. SSH carries saved identity and
+  pushed-code requirements; common planning supplies the target. The cold-worker
+  fixture uses dispatch publication/acquisition, never manual import.
+- Repository-wide export, alias-addressed transport and selection coupled to moves.
+  One destination-scoped hold calculation excludes whole private histories and
+  dependents without vetoing independent exchange. Returning to a shared parent
+  cannot release private historical references; only explicit selection can.
+- Value-only and copied causal-head indexes, full-journal scans per object and
+  repeated provider-frontier selection on projection retries. The borrowed object
+  view carries winning mutations and eligible provider observations, prepared once
+  for unheld objects. Original history stays in the immutable snapshot; latest
+  revision groups retain contradictions and acquisition ages.
+- Raw Project Markdown mutations, duplicate workflow representation and a SQL
+  content parser. `project_content.rs` owns semantic workflow/KR/target capture,
+  persistence and populated migration; existing list receipt granularity stays.
+- Peer-only scalar/state/comment receipt writers, reconstructed comment provenance,
+  identical-body acquisition bypasses and replay of superseded provider revisions.
+  Common acquisition owns validation; savepoints isolate valid contradictions and
+  retain membership evidence after rollback. Entity revisions never order relationships.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
-  rejection and required ancestor execution placement on first local use. Accepted
-  provider observations reconcile existing Task creation receipts; local placement
-  stays with its existing owner.
+  rejection and required ancestor placement on first local use. Readback reconciles
+  captured saves, not later intentions; local execution placement stays local.
+- Repository-global status/conflict readers and status rendering before dispatch.
+  One destination snapshot retains unknown pending state for malformed journals;
+  healthy plans and receipts remain visible. SQL failures still fail the read.
+- Duplicate cache-miss acquisition in `pm::resolve_saved_task` and `task::prepare_task`:
+  `planning_peer::find_task` acquires only missing planning without placing it.
+  Launch freshness and pushed-code checks remain separate.
+- Task-attributed sync startup and async waiters owning blocking-worker locks.
+  Provider/work-watch lifetimes drive exchange; each worker holds its effect lock
+  through readback/status. Short saves commit and release planning locks first.
 
-- Copied planning, issue-derived identity, callbacks and their adoption fixtures.
-  Placement consumes common planning after acquisition; the cold-worker fixture
-  must not manually import it.
-- Repository-wide export, alias-addressed transport and selection coupled to
-  moves. One destination-scoped selection/hold calculation protects whole private
-  histories and dependents; it does not veto independent exchange.
-- Value-only projection indexes, copied causal-head indexes and per-object scans
-  of the full journal. One borrowed object view groups history and field winners
-  once per import; projection retries reuse it. The immutable snapshot still owns
-  causal links, losing mutations and provider provenance. Frontier selection drops
-  superseded revisions before sorting acquisitions; same-revision contradictions
-  remain. The existing comment regression now retains a second comment with an
-  independently newer frontier, including across edit/readback; it is unexecuted.
-- Raw Project Markdown mutations and duplicate workflow representation are
-  removed. The existing semantic content owner captures all three fields and
-  renders their combined winners; retained Markdown storage and original migration
-  bytes remain. Whole KR/target lists preserve their existing common field semantics.
-- Peer-only scalar/state receipt SQL, identical-body acquisition bypasses and
-  replay of superseded provider revisions. Use common acquisition and receipt
-  owners, retaining typed contradictions after object rollback. Entity revisions
-  never supply Project relationship ordering.
-- Direct peer comment INSERT/UPDATE and reconstructed provider provenance are
-  deleted. Common acquisition and authored insertion own thread/receipt writes;
-  typed author conversion is shared with transport validation.
-- Separate repository-wide conflict/status readers are removed. One per-destination
-  status snapshot supplies pending state and conflicts; malformed journals retain
-  unknown state rather than hiding independent plans. Status and import settlement
-  now share a destination-scoped membership join: no global conflict regrouping or
-  per-conflict membership reads. The isolation fixture also resolves one plan while
-  retaining the other plan's conflicts; Rust execution remains unproved.
-- Duplicated cache-miss acquisition in `pm::resolve_saved_task` and
-  `task::prepare_task` is replaced by `planning_peer::find_task`: saved Tasks need
-  no acquisition, missing Tasks acquire once without execution allocation.
-  Launch's unconditional acquisition and pushed-code checks remain separate.
-  Project content validation lives in the common transactional save, not both
-  its public edit entry and save owner.
-- Task-attributed sync startup, status rendering as a dispatch prerequisite and
-  async waiters owning blocking-worker locks. Repository/provider lifetimes drive
-  exchange; each worker retains its effect lock through readback and status writes.
-
-The completed reduction inventory and exact earlier source cuts remain at
-`a388ed425:scratch/work-on-another-machine-name.md`, “Delete — do not maintain.”
-Existing move/receipt/import fixtures retain local/provider moves, comments,
-independent exchange, losing values and execution. Rust execution remains unproved;
-omission is not convergence. Remaining grouped owners and acceptance are below.
+Test-only `export`/`import` helpers remove repeated successful-call plumbing, not
+assertions or failure-path checks. No predecessor path or second planner is added.
+Remaining grouped owners, legacy association and acceptance are below; omission
+and retained conflicts are not convergence.
 
 ## Remaining integration — October 9
 
@@ -311,7 +282,7 @@ provenance gap; revise it with the completed composition, not as a product limit
 3. Resolve divergent legacy IDs through explicit provider associations without
    renumbering stored Work. Conflict isolation is implemented with new regressions
    for duplicate mappings, dependent comments, retained Sessions, selection and
-   idempotent retry, but Rust execution remains unproved. CLI `planning status`
+   idempotent retry; the focused storage suite passes. CLI `planning status`
    already reads projection conflicts; Desktop still needs that presentation.
    A durable import checkpoint is not completed projection.
    Dispatch and status isolate malformed journals: `pending_local: null` plus a
@@ -344,12 +315,12 @@ provenance gap; revise it with the completed composition, not as a product limit
    coverage imports an equal-value frontier and rejects an older detail response;
    it does not yet cover the Task test's full receipt/contradiction matrix. A separate
    Task test preserves a pending local value on an unchanged provider baseline.
-   Rust execution remains unproved; disposable SQL checks do not execute these tests.
+   The focused storage suite passes; connected-provider composition remains unproved.
 
    Creation, ordering and deletion receipts remain uncomposed. Comments now use the common owners described below. Task disposition now uses the common receipt owner;
    authored regressions cover lost replies, later reopening, late readback exclusion,
    unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
-   Cancellation is covered by the same authored test; Rust execution remains. Common accepted Task/Project acquisition captures
+   Cancellation passes in that storage test. Common accepted Task/Project acquisition captures
    observations; other provider writers still need coverage. Comment payloads now retain the raw provider observation and use common
    acquisition/delivery; public mixed-provider lifetime acceptance remains. Project
    relationships and list ordering have independent frontiers; entity updatedAt
@@ -375,8 +346,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    archive, relationship-only and newer-entity membership conflicts, independent
    Wave import, full journal retention, unchanged Task/Project/Session/Process/
    Workflow/checkout state and idempotent readback. A repeated newer-Project import
-   covers retained unversioned history. Production SQL checks run, but Rust execution
-   remains deferred; no composed CLI/Desktop acceptance is established.
+   covers retained unversioned history. These storage regressions pass; no composed
+   CLI/Desktop acceptance is established.
    October 8 implementation replaces those acquisition owners' ordinary
    `InvalidData` for valid but unordered/contradictory observations with typed
    `ProviderObservationConflict`. Peer import retains it through the existing
@@ -388,9 +359,8 @@ provenance gap; revise it with the completed composition, not as a product limit
    receipt identity/value/baseline/attempt/error, Task/Project/Workflow and execution
    to survive while an independent Wave and checkpoint commit. Repeated import
    must be idempotent. Malformed revision, extra execution payload and mismatched
-   observation/value fixtures require whole-import rollback. These tests are
-   authored, not executed; classification is repaired in source, not verified
-   composed behavior.
+   observation/value fixtures require whole-import rollback. These storage tests
+   pass; they do not establish composed behavior.
 
    Complete grouped receipts through their existing common owners, not the scalar
    field loop. Source inspection identifies the remaining seams:
@@ -413,7 +383,7 @@ provenance gap; revise it with the completed composition, not as a product limit
      also caught JSON key ordering preventing content provenance; trigger groups now
      match the field map's canonical order. New Rust regressions cover authored and
      provider-only comments, lost replies, later edits, retained losers, isolated
-     contradictions, malformed input and unchanged execution, but remain unexecuted.
+     contradictions, malformed input and unchanged execution; the storage suite passes.
      Public reconnect and foreground direction regressions remain gate acceptance.
    - `task_state_delivery.rs::queue_in` now shares `record_in` with peer projection.
      Peer receipts retain the mutation ID, causal baseline and projected completion
@@ -422,15 +392,15 @@ provenance gap; revise it with the completed composition, not as a product limit
      acquisition from a selected concurrent Linear winner: the latter retires a
      losing intention even at its unchanged baseline. Neither moves a Workflow.
      Non-lifecycle cached states (for example started/backlog) project without
-     inventing a local state intention. Alternate-provider-path coverage and Rust
-     execution remain; imported completion-time preservation is asserted explicitly.
+     inventing a local state intention. Imported completion-time preservation passes;
+     alternate-provider-path coverage remains.
    - Project content now travels as semantic workflow/KR/target fields, not raw
      `project_prompt_context`. `project_content.rs` owns parsing and combined
      persistence; peer receipt projection uses its common field-delivery owner.
      Each KR list and target list is one existing semantic field, not a new
      per-item identity model. Acquisition records original provider provenance
      only on equal values. Populated migration and runtime writers use the same
-     capture owner; import suppresses echo. Rust/composed acceptance remains.
+     capture owner; import suppresses echo. Storage tests pass; composed acceptance remains.
    - `planning_order.rs::observe_in` requires complete-list evidence; Task entity
      revisions and scalar peer fields cannot settle a captured move. Deletion
      retains its separate baselines and attempts in `planning_changes.rs`.
@@ -463,7 +433,7 @@ provenance gap; revise it with the completed composition, not as a product limit
 
 ## Committed integration boundary — 2026-10-09
 
-Jack Heart requested stacking on LOO-406 and continuing pursue. Current HEAD
+Jack Heart requested stacking on LOO-406 and continuing pursue. Stack checkpoint
 `a6cb48664` integrates parent `7c626ca23`, preserving the restored scratch checkpoint
 `1ad5e1267` and retained stash. Earlier parent PR #1503's published base `b6f34a6f8b811d95f9fc843ac6592cc2262f2e26` is integrated,
 including `e68f2a423`'s creation receipts, `b1f175bbf`'s ordering,
@@ -527,7 +497,16 @@ and selection survive. No duplicate YAML parser was added. Earlier passing
 comment/import/setup proofs remain at
 `3bebc219d:scratch/work-on-another-machine-name.md`, this heading.
 
-Check (October 9): isolated/network-denied Linux `cargo test --offline -p loopflow --lib store::sqlite::project_content::tests` (2), `--lib peer_creation_readback_reconciles_attempt_after_mapping_only_import` (1), and `--test planning_foreground_tests public_work_connections_exchange_offline_edits_without_replaying_execution` (1) pass; `cargo clippy --offline --all-targets -- -D warnings`, fmt, diff and context checks pass. Gate owns remaining acceptance; no publication, installation or landing.
+Compression review repaired fixture setup, not production guards: Session insertion
+already records Started, so fixtures no longer overwrite it; absence uses the optional
+Task reader, and seeded Projects retain their required timestamp. Shared execution
+setup keeps the Session, Process, Workflow and checkout assertions intact. Prior
+focused Project-content and public work-watch evidence remains at
+`b0f2a00702ccdbe1b11c22fa55f472cc649bf8d1:scratch/work-on-another-machine-name.md`,
+this heading. The storage result supersedes earlier unexecuted claims for this suite,
+not provider-lifetime, public status/DTO, cold-worker, Desktop or mixed-provider acceptance.
+
+Check (October 9): isolated/network-denied Linux `cargo test --offline -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=2` passes all 46 tests; `cargo clippy --offline --all-targets -- -D warnings`, fmt, diff and context checks pass. Gate owns remaining acceptance; no publication, installation or landing.
 
 Prior SQL proofs and macOS startup samples remain at
 `e77d2d1c8:scratch/work-on-another-machine-name.md`. A fresh bounded attempt

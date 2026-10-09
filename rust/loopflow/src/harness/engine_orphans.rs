@@ -300,8 +300,10 @@ mod tests {
             .unwrap()
         }
 
-        fn engine_alive(&mut self) -> bool {
-            self.engine.try_wait().unwrap().is_none()
+        /// The reaper may already have collected this child, so probe the pid.
+        fn engine_alive(&self) -> bool {
+            // SAFETY: signal 0 probes the throwaway child; nothing is delivered.
+            unsafe { libc::kill(self.engine.id() as i32, 0) == 0 }
         }
     }
 
@@ -314,7 +316,7 @@ mod tests {
 
     #[test]
     fn reaps_an_engine_whose_driver_is_provably_dead() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         let pid = fixture.engine.id();
 
         let report = fixture.reap(ProcessIdentityEvidence::Dead);
@@ -362,7 +364,7 @@ mod tests {
 
     #[test]
     fn dry_run_reports_without_signalling() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         let report =
             reap_orphaned_engines_in(&fixture.store, true, |_| ProcessIdentityEvidence::Dead)
                 .unwrap();
@@ -373,7 +375,7 @@ mod tests {
 
     #[test]
     fn leaves_an_engine_with_a_live_or_unknown_driver() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         for evidence in [
             ProcessIdentityEvidence::Live,
             ProcessIdentityEvidence::Unknown,
@@ -390,7 +392,7 @@ mod tests {
 
     #[test]
     fn leaves_a_process_whose_start_time_differs() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         fixture.sql(&format!(
             "UPDATE agent_sessions SET provider_started_at={}",
             fixture.started_at - 600
@@ -404,7 +406,7 @@ mod tests {
 
     #[test]
     fn leaves_an_interactive_session_and_a_shared_engine_still_driven() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         fixture.sql("UPDATE agent_sessions SET interactive=1");
         assert_eq!(
             fixture.reap(ProcessIdentityEvidence::Dead),
@@ -448,7 +450,7 @@ mod tests {
 
     #[test]
     fn leaves_a_reused_pid_running_something_else() {
-        let mut fixture = Fixture::new();
+        let fixture = Fixture::new();
         // Same pid and start time, but the Session expected another provider's
         // server: the command line is not that engine.
         fixture.sql("UPDATE agent_sessions SET provider='opencode'");

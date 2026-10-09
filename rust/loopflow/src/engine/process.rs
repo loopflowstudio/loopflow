@@ -636,6 +636,8 @@ mod tests {
     /// Not a test of its own: re-executed by the tests below as a throwaway
     /// driver process that starts an engine, binds it, and then ends the way
     /// its mode says. Without the mode variable it does nothing.
+    // The driver ends without waiting on purpose: that is the case under test.
+    #[allow(clippy::zombie_processes)]
     #[test]
     fn lifeline_driver_process() {
         let Ok(mode) = std::env::var(DRIVER_MODE) else {

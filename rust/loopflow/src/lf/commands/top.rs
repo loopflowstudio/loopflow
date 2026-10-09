@@ -11,9 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::harness::opencode_runtime::{
-    registered_opencode_servers_at, OpenCodeServerEntry,
-};
+use crate::harness::opencode_runtime::{registered_opencode_servers_at, OpenCodeServerEntry};
 use crate::journal::{prune_process_receipts_at, read_process_receipts_at, ProcessReceipt};
 use crate::lf::output::truncate;
 use crate::store::sqlite::SqliteStore;

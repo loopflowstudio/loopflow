@@ -148,7 +148,7 @@ impl SqliteStore {
             }
         }
         let selected = export_in(&tx, repo, destination)?;
-        require_selected_references(&tx, destination, &selected.resolved())?;
+        require_selected_references(&tx, repo, destination, &selected.resolved())?;
         tx.commit()?;
         Ok(())
     }
@@ -160,14 +160,16 @@ impl SqliteStore {
     ) -> StoreResult<PlanningSnapshot> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.unchecked_transaction()?;
-        let snapshot = export_in(&tx, repo, destination)?;
-        require_selected_references(&tx, destination, &snapshot.resolved())?;
+        let mut snapshot = export_in(&tx, repo, destination)?;
+        let held = selection_conflicts(&tx, repo, destination, &snapshot)?;
+        omit_held(&mut snapshot, &held);
         tx.commit()?;
         Ok(snapshot)
     }
 
     /// A revision acknowledges the retained journal, allowed projections and
-    /// explicit conflicts, not complete projection. No execution writer is called.
+    /// explicit conflicts, not complete projection. The returned snapshot omits
+    /// held history just like export. No execution writer is called.
     pub fn import_peer_planning(
         &self,
         repo: &str,
@@ -181,7 +183,7 @@ impl SqliteStore {
         let merged = saved.merge(incoming).map_err(invalid)?;
         reserve_incoming(&tx, repo, destination, incoming)?;
         let objects = merged.resolved();
-        require_selected_references(&tx, destination, &objects)?;
+        let held = selection_conflicts(&tx, repo, destination, &merged)?;
         retain_mutations(&tx, &saved, incoming)?;
         tx.execute("UPDATE planning_peer_context SET importing=1", [])?;
         for (object, fields) in &objects {
@@ -200,7 +202,10 @@ impl SqliteStore {
             }
         }
         let mut conflicts = BTreeSet::new();
-        let mut pending: Vec<_> = objects.iter().collect();
+        let mut pending: Vec<_> = objects
+            .iter()
+            .filter(|(object, _)| !held.contains_key(*object))
+            .collect();
         loop {
             let count = pending.len();
             let mut retry = Vec::new();
@@ -229,7 +234,10 @@ impl SqliteStore {
         // Wave selection points back at Projects. Set it only after identity and
         // ownership projection, rather than deferring all foreign-key checks.
         for (object, fields) in &objects {
-            if object.kind != PlanningKind::Wave || !exists(&tx, object)? {
+            if object.kind != PlanningKind::Wave
+                || held.contains_key(object)
+                || !exists(&tx, object)?
+            {
                 continue;
             }
             match project_fields(
@@ -251,8 +259,10 @@ impl SqliteStore {
             ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision",
             params![repo, destination, revision],
         )?;
+        let mut portable = merged;
+        omit_held(&mut portable, &held);
         tx.commit()?;
-        Ok(merged)
+        Ok(portable)
     }
 
     pub fn peer_projection_conflicts(
@@ -260,7 +270,24 @@ impl SqliteStore {
         repo: &str,
     ) -> StoreResult<Vec<PeerProjectionConflict>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        projection_conflicts_in(&conn, repo)
+        let tx = conn.unchecked_transaction()?;
+        let mut conflicts = projection_conflicts_in(&tx, repo)?;
+        let mut query =
+            tx.prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?;
+        let destinations = query
+            .query_map([repo], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(query);
+        for destination in destinations {
+            let snapshot = export_in(&tx, repo, &destination)?;
+            conflicts.extend(
+                selection_conflicts(&tx, repo, &destination, &snapshot)?
+                    .into_iter()
+                    .map(|(object, reason)| PeerProjectionConflict { object, reason }),
+            );
+        }
+        tx.commit()?;
+        Ok(conflicts)
     }
 
     pub fn peer_import_revision(
@@ -293,10 +320,14 @@ fn require_destination(conn: &Connection, repo: &str, destination: &str) -> Stor
     Ok(())
 }
 
-fn member_destination(conn: &Connection, object: &PlanningObject) -> StoreResult<Option<String>> {
+fn member_destination(
+    conn: &Connection,
+    repo: &str,
+    object: &PlanningObject,
+) -> StoreResult<Option<String>> {
     conn.query_row(
-        "SELECT destination FROM planning_members WHERE kind=?1 AND object_id=?2",
-        params![object.kind.as_str(), object.id],
+        "SELECT destination FROM planning_members WHERE kind=?1 AND object_id=?2 AND repo=?3",
+        params![object.kind.as_str(), object.id, repo],
         |r| r.get(0),
     )
     .optional()
@@ -309,7 +340,7 @@ fn enroll(
     destination: &str,
     object: &PlanningObject,
 ) -> StoreResult<()> {
-    if let Some(saved) = member_destination(conn, object)? {
+    if let Some(saved) = member_destination(conn, repo, object)? {
         if saved != destination {
             return Err(invalid(format!(
                 "planning record {} belongs to another selected plan",
@@ -343,8 +374,11 @@ fn reserve_incoming(
     // Merge validated mutations before membership can change. Check ownership
     // without resolving field winners or copying their values.
     for object in incoming.objects() {
-        require_repository(conn, object, repo)?;
-        if member_destination(conn, object)?.is_none() && recorded(conn, object)? {
+        let selected = member_destination(conn, repo, object)?;
+        if selected.as_deref() != Some(destination) {
+            require_repository(conn, object, repo)?;
+        }
+        if selected.is_none() && recorded(conn, object)? {
             return Err(invalid(format!(
                 "incoming planning record {} is local and unselected; joining cannot merge it",
                 object.id
@@ -352,41 +386,110 @@ fn reserve_incoming(
         }
         enroll(conn, repo, destination, object)?;
     }
-    require_selected_references(conn, destination, &incoming.resolved())
+    require_selected_references(conn, repo, destination, &incoming.resolved())
+}
+
+fn reference(field: &str, value: &Value) -> Option<PlanningObject> {
+    let kind = match field {
+        "parent_wave_id" | "wave_id" => PlanningKind::Wave,
+        "current_project_id" | "project_id" => PlanningKind::Project,
+        "task_id" => PlanningKind::Task,
+        _ => return None,
+    };
+    value.as_str().map(|id| PlanningObject {
+        kind,
+        id: id.into(),
+    })
+}
+
+fn unselected(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    object: &PlanningObject,
+) -> StoreResult<bool> {
+    Ok(match member_destination(conn, repo, object)? {
+        Some(saved) => saved != destination,
+        None => recorded(conn, object)?,
+    })
 }
 
 fn require_selected_references(
     conn: &Connection,
+    repo: &str,
     destination: &str,
     objects: &BTreeMap<PlanningObject, BTreeMap<String, Value>>,
 ) -> StoreResult<()> {
     for fields in objects.values() {
-        for (field, kind) in [
-            ("parent_wave_id", PlanningKind::Wave),
-            ("wave_id", PlanningKind::Wave),
-            ("current_project_id", PlanningKind::Project),
-            ("project_id", PlanningKind::Project),
-            ("task_id", PlanningKind::Task),
-        ] {
-            if let Some(id) = fields.get(field).and_then(Value::as_str) {
-                let object = PlanningObject {
-                    kind,
-                    id: id.into(),
-                };
-                let selected = member_destination(conn, &object)?;
-                if selected
-                    .as_deref()
-                    .is_some_and(|saved| saved != destination)
-                    || (selected.is_none() && recorded(conn, &object)?)
-                {
+        for (field, value) in fields {
+            if let Some(object) = reference(field, value) {
+                if unselected(conn, repo, destination, &object)? {
                     return Err(invalid(format!(
-                        "planning reference {id} belongs to unselected work"
+                        "planning reference {} belongs to unselected work",
+                        object.id
                     )));
                 }
             }
         }
     }
     Ok(())
+}
+
+/// A common-writer move never enrolls its new parent. Hold the affected object's
+/// entire history and dependents, not the destination. Checking losing references
+/// too prevents a later move back from publishing previously private ancestry.
+/// Omission is not deletion: peers retain their last shared values.
+fn selection_conflicts(
+    conn: &Connection,
+    repo: &str,
+    destination: &str,
+    snapshot: &PlanningSnapshot,
+) -> StoreResult<BTreeMap<PlanningObject, String>> {
+    let mut references: BTreeMap<&PlanningObject, BTreeSet<PlanningObject>> = BTreeMap::new();
+    for change in snapshot.changes.values() {
+        if let Some(parent) = reference(&change.field, &change.value) {
+            references.entry(&change.object).or_default().insert(parent);
+        }
+    }
+    let mut private = BTreeSet::new();
+    for parent in references.values().flatten().collect::<BTreeSet<_>>() {
+        if unselected(conn, repo, destination, parent)? {
+            private.insert(parent.clone());
+        }
+    }
+    let mut held = BTreeMap::new();
+    for object in snapshot.objects() {
+        if belongs_elsewhere(conn, object, repo)? {
+            held.insert(object.clone(), "planning exchange held: record moved outside this repository; local work and peer history are retained".into());
+        }
+    }
+    loop {
+        let before = held.len();
+        for (object, parents) in &references {
+            if held.contains_key(*object) {
+                continue;
+            }
+            if let Some(parent) = parents
+                .iter()
+                .find(|p| private.contains(*p) || held.contains_key(*p))
+            {
+                held.insert((*object).clone(), format!(
+                    "planning exchange held: reference {} is outside the exchangeable selection; local work and peer history are retained",
+                    parent.id
+                ));
+            }
+        }
+        if held.len() == before {
+            break;
+        }
+    }
+    Ok(held)
+}
+
+fn omit_held(snapshot: &mut PlanningSnapshot, held: &BTreeMap<PlanningObject, String>) {
+    snapshot
+        .changes
+        .retain(|_, change| !held.contains_key(&change.object));
 }
 
 fn retain_mutations(
@@ -444,9 +547,6 @@ fn export_in(conn: &Connection, repo: &str, destination: &str) -> StoreResult<Pl
         snapshot.changes.insert(row.get(7)?, read_mutation(row)?);
     }
     snapshot.validate().map_err(invalid)?;
-    for object in snapshot.objects() {
-        require_repository(conn, object, repo)?;
-    }
     let expected: BTreeSet<_> = snapshot.heads().into_values().flatten().collect();
     let mut query = conn.prepare(
         "SELECT h.id FROM planning_peer_heads h
@@ -502,6 +602,16 @@ fn require_complete(object: &PlanningObject, fields: &BTreeMap<String, Value>) -
 }
 
 fn require_repository(conn: &Connection, object: &PlanningObject, repo: &str) -> StoreResult<()> {
+    if belongs_elsewhere(conn, object, repo)? {
+        return Err(invalid(format!(
+            "planning {} belongs to another repository",
+            object.id
+        )));
+    }
+    Ok(())
+}
+
+fn belongs_elsewhere(conn: &Connection, object: &PlanningObject, repo: &str) -> StoreResult<bool> {
     let sql = match object.kind {
         PlanningKind::Wave => "SELECT repo FROM waves WHERE id=?1",
         PlanningKind::Project => "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",
@@ -516,15 +626,8 @@ fn require_repository(conn: &Connection, object: &PlanningObject, repo: &str) ->
             |r| r.get(0),
         )
         .optional()?;
-    if owner.as_deref().is_some_and(|owner| owner != repo)
-        || retained.as_deref().is_some_and(|owner| owner != repo)
-    {
-        return Err(invalid(format!(
-            "planning {} belongs to another repository",
-            object.id
-        )));
-    }
-    Ok(())
+    Ok(owner.as_deref().is_some_and(|owner| owner != repo)
+        || retained.as_deref().is_some_and(|owner| owner != repo))
 }
 
 fn exists(conn: &Connection, object: &PlanningObject) -> StoreResult<bool> {
@@ -646,7 +749,7 @@ fn reconcile_conflicts(
     conflicts: &BTreeSet<(PlanningObject, String)>,
 ) -> StoreResult<()> {
     for PeerProjectionConflict { object, reason } in projection_conflicts_in(conn, repo)? {
-        if member_destination(conn, &object)?.as_deref() != Some(destination) {
+        if member_destination(conn, repo, &object)?.as_deref() != Some(destination) {
             continue;
         }
         if !conflicts.contains(&(object.clone(), reason.clone())) {
@@ -787,6 +890,312 @@ mod tests {
             .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
             .unwrap();
         task
+    }
+
+    #[test]
+    fn a_shared_endpoint_does_not_transfer_repository_ownership() {
+        let (_home, store) = store();
+        let task = seed(&store);
+        let before = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let error = store
+            .import_peer_planning("/target", &destination(), "foreign", &before)
+            .unwrap_err();
+        assert!(error.to_string().contains("another repository"), "{error}");
+        assert_eq!(
+            store
+                .peer_import_revision("/target", &destination())
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .export_peer_planning("/source", &destination())
+                .unwrap(),
+            before
+        );
+        assert!(store.task(&task).unwrap().is_some());
+    }
+
+    #[test]
+    fn refiling_to_private_work_holds_only_affected_history_and_keeps_receiving() {
+        let (_left_home, left) = store();
+        let (_right_home, right) = store();
+        let task = seed(&left);
+        let original = left.task(&task).unwrap().unwrap();
+        let sibling = TaskId::new();
+        left.conn.lock().unwrap().execute(
+            "INSERT INTO tasks(id,project_id,issue_identifier,issue_title,created_at) VALUES(?1,?2,'FIX-2','Sibling',1)",
+            params![sibling, original.project_id],
+        ).unwrap();
+        let base = left
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        right
+            .import_peer_planning("/target", &destination(), "base", &base)
+            .unwrap();
+        let private = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        left.create_wave(&private).unwrap();
+        let private_project = ProjectId::new();
+        {
+            let conn = left.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,wave_id,created_at,status) VALUES(?1,?2,1,'started')",
+                params![private_project, private.id()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                params![private.id(), private_project],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE projects SET status='started' WHERE id=?1",
+                [&original.project_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+                params![original.wave_id, original.project_id],
+            )
+            .unwrap();
+        }
+        left.refile_unplaced_task(&task, &original.project_id, &private_project)
+            .unwrap();
+        left.append_task_comment(
+            &task,
+            &TaskComment {
+                id: "private-comment".into(),
+                body: "Private after move".into(),
+                author: TaskCommentAuthor::Person {
+                    name: Some("Author".into()),
+                },
+                created_at: Some("2026-10-08T12:00:00Z".into()),
+            },
+        )
+        .unwrap();
+        let held = left.peer_projection_conflicts("/source").unwrap();
+        assert_eq!(held.len(), 2);
+        assert!(held.iter().any(|c| c.object.id == task.as_str()));
+        let outgoing = left
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let bytes = String::from_utf8(outgoing.to_bytes().unwrap()).unwrap();
+        assert!(!bytes.contains(private_project.as_str()));
+        assert!(!bytes.contains("Private after move"));
+        assert!(!outgoing.objects().iter().any(|o| o.id == task.as_str()));
+        right
+            .import_peer_planning("/target", &destination(), "held", &outgoing)
+            .unwrap();
+        // Omission retains the peer's last shared Task, not a deletion or a move.
+        assert_eq!(
+            right.task(&task).unwrap().unwrap().project_id,
+            original.project_id
+        );
+        let remote = right.task(&sibling).unwrap().unwrap();
+        right
+            .edit_task(
+                &sibling,
+                remote.plan.revision,
+                &crate::pm::PmItemUpdate {
+                    name: Some("Independent remote edit".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let received = right
+            .export_peer_planning("/target", &destination())
+            .unwrap();
+        let portable = left
+            .import_peer_planning("/source", &destination(), "remote", &received)
+            .unwrap();
+        assert!(!portable.objects().iter().any(|o| o.id == task.as_str()));
+        assert_eq!(
+            left.task(&task).unwrap().unwrap().project_id,
+            private_project
+        );
+        assert_eq!(
+            left.task(&sibling).unwrap().unwrap().plan.title,
+            "Independent remote edit"
+        );
+        assert_eq!(
+            left.peer_import_revision("/source", &destination())
+                .unwrap()
+                .as_deref(),
+            Some("remote")
+        );
+        assert_eq!(left.peer_projection_conflicts("/source").unwrap(), held);
+        assert!(left
+            .pending_task_changes(&task)
+            .unwrap()
+            .iter()
+            .any(|c| c.field == "project_id"));
+        // Returning to the shared parent does not leak the losing private reference.
+        left.refile_unplaced_task(&task, &private_project, &original.project_id)
+            .unwrap();
+        assert!(!left
+            .export_peer_planning("/source", &destination())
+            .unwrap()
+            .objects()
+            .iter()
+            .any(|o| o.id == task.as_str()));
+        // Only explicit selection makes that retained history exchangeable again.
+        left.select_peer_waves(
+            "/source",
+            &destination(),
+            std::slice::from_ref(private.id()),
+        )
+        .unwrap();
+        let released = left
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert!(released.objects().iter().any(|o| o.id == task.as_str()));
+        assert!(left
+            .peer_projection_conflicts("/source")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn provider_move_to_unselected_project_preserves_execution_and_sibling_exchange() {
+        let (_home, store) = store();
+        let wave = Wave::new(WaveId::new(), "planning".into(), "/source".into());
+        store.create_wave(&wave).unwrap();
+        let mut snapshot: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        snapshot.items.truncate(2);
+        for item in &mut snapshot.items {
+            item.state = Some("unstarted".into());
+        }
+        let row = crate::store::PmSnapshotRow {
+            wave_id: wave.id().clone(),
+            provider: "linear".into(),
+            initiative: "initiative".into(),
+            synced_at: 42,
+            snapshot,
+        };
+        store.put_pm_snapshot(&row).unwrap();
+        store
+            .select_peer_waves("/source", &destination(), std::slice::from_ref(wave.id()))
+            .unwrap();
+        let task = store
+            .task_by_issue(&row.snapshot.items[0].id)
+            .unwrap()
+            .unwrap();
+        let sibling = store
+            .task_by_issue(&row.snapshot.items[1].id)
+            .unwrap()
+            .unwrap();
+        // Existing private Project enters this Wave without selecting its history.
+        let private_wave = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        store.create_wave(&private_wave).unwrap();
+        let private_id = ProjectId::new();
+        let mut project = row.snapshot.projects[0].clone();
+        project.id = "private-project".into();
+        project.slug = "private-project".into();
+        project.name = "Private project".into();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,?3,1)", params![private_id,private_wave.id(),project.id]).unwrap();
+            conn.execute(
+                "UPDATE projects SET wave_id=?2 WHERE id=?1",
+                params![private_id, wave.id()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET worktree='/retained/work',started_at=1 WHERE id=?1",
+                [&task.id],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('session-retained','Retained','human',1,0,'/retained/work',?1,?2)", params![task.id,wave.id()]).unwrap();
+        }
+        let driver = ProcessLfid::new();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO processes(lfid,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
+            params![driver,TraceId::new()],
+        ).unwrap();
+        store
+            .take_up_workflow(
+                &task.id,
+                &crate::engine::workflow::WorkflowDefinition {
+                    name: "review".into(),
+                    nodes: vec![crate::engine::workflow::WorkflowNode {
+                        name: "review".into(),
+                        skill: "review".into(),
+                        description: None,
+                    }],
+                    edges: Vec::new(),
+                },
+                &driver,
+                None,
+            )
+            .unwrap();
+        let workflow = store.workflow(&task.id).unwrap();
+        let mut item = row.snapshot.items[0].clone();
+        item.project_id = Some(project.id.clone());
+        item.project = Some(project.slug.clone());
+        item.revision = Some("2026-10-08T12:00:00Z".into());
+        store
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item,
+                    project: Some(project),
+                    observed_at: 43,
+                },
+                Some((wave.id(), "initiative")),
+            )
+            .unwrap();
+        assert_eq!(
+            store.task(&task.id).unwrap().unwrap().project_id,
+            private_id
+        );
+        let outgoing = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert!(!outgoing.objects().iter().any(|o| o.id == task.id.as_str()));
+        assert!(outgoing
+            .objects()
+            .iter()
+            .any(|o| o.id == sibling.id.as_str()));
+        assert!(!String::from_utf8(outgoing.to_bytes().unwrap())
+            .unwrap()
+            .contains(private_id.as_str()));
+        assert!(store
+            .peer_projection_conflicts("/source")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == task.id.as_str()));
+        let (_peer_home, peer) = self::store();
+        peer.import_peer_planning("/target", &destination(), "provider-move", &outgoing)
+            .unwrap();
+        assert_eq!(
+            peer.task(&sibling.id).unwrap().unwrap().plan.title,
+            sibling.plan.title
+        );
+        assert_eq!(store.workflow(&task.id).unwrap(), workflow);
+        let conn = store.conn.lock().unwrap();
+        assert_eq!(
+            conn.query_row("SELECT worktree FROM tasks WHERE id=?1", [&task.id], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "/retained/work"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT task_id FROM agent_sessions WHERE id='session-retained'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            task.id.as_str()
+        );
+        assert!(conn.query_row("SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE kind='task' AND object_id=?1 AND field='project_id' AND linear=1 AND json_extract(value,'$')=?2)", params![task.id,private_id], |r| r.get::<_,bool>(0)).unwrap());
     }
 
     #[test]

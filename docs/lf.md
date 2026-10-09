@@ -102,9 +102,13 @@ execution history remain unchanged.
 Custom-ref planning synchronization is under implementation. The common store now
 retains peer mutation identities and imports planning atomically without moving
 Workflows. Saved destinations pin an endpoint/ref and export only explicitly selected
-records; joining does not select existing local plans. Destination setup and automatic
-exchange are not yet exposed; an absent
-remote Task reports that planning must synchronize instead of bootstrapping a copy.
+records; joining does not select existing local plans. Moving selected work under
+an unselected parent keeps the local move but holds that record's history and comments
+out of exchange. Other records continue; peers retain their last shared values.
+Returning to the original parent does not share private history automatically.
+Destination setup, hold/recovery presentation and automatic exchange are not yet
+exposed; an absent remote Task reports that planning must synchronize instead of
+bootstrapping a copy.
 
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's

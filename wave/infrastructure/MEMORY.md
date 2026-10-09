@@ -639,12 +639,13 @@ empty; new descendants inherit selection. Key recovery exists; public setup,
 root selection, foreground exchange and legacy association remain unfinished.
 Peer projection still bypasses Linear delivery receipts.
 
-Selection checks at import/export do not fence common-writer reparenting. October 8
-SQL replay permits a selected Task move to an unselected Project; source validation
-then rejects the entire export. Insert-only membership is insufficient: cover moves
-after joining without implicit sharing or blocking unrelated exchange. SQL proves
-no Rust/public acceptance. Design: `scratch/work-on-another-machine-name.md`;
-prior isolation proofs and limits: `fea5156eb`, this heading.
+Move-after-join evidence: `a43f3e2ea`, this heading. Source now holds affected
+journals/dependents out of exchange, preserving accepted moves and private ancestry.
+Historical references count; moving back cannot expose the loser. Explicit selection
+can release history. Omission retains peers' last shared values, not convergence.
+Import retains held mutations without overwriting local work. Rust execution,
+public exchange and conflict presentation remain unproved. Design:
+`scratch/work-on-another-machine-name.md`; prior isolation limits: `fea5156eb`.
 
 ## Synced planning integration (LOO-334)
 

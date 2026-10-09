@@ -645,8 +645,8 @@ acknowledgement requires its accepted frontier. Focused proof only.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
 Private histories/dependents stay held; omission is not convergence.
-Wave reads show null placement, never allocate it. Legacy association, Desktop peer presentation and public
-composition remain. Mixed-provider exchange stays disabled.
+Reads expose absence without placing Work. Legacy association, Desktop peer UI
+and public composition remain. Mixed-provider exchange stays disabled.
 Design: `scratch/work-on-another-machine-name.md`. Earlier proofs:
 `7f206cd0e:wave/infrastructure/MEMORY.md`, this heading.
 

@@ -621,27 +621,26 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected custom-ref sync; LOO-412 owns transport/machines, LOO-406
+Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear. Plan ownership above governs sharing and execution exclusion.
-Publication is review-only; no landing or public-remote planning export.
+Review-only publication; no landing or public-remote planning export.
 
 Causal ordering retains losers. Scalar receipts lack provider frontiers: older
 reads/equal-value observations remain unsafe, separately from the parent's unseen
 provider-write race. Grouped receipts and legacy association remain.
 
 Setup retains keys/empty bindings; future roots use selection, children inherit it.
-Joining publishes nothing. Repository-scoped `PlanningSync` drives local-only
-exchange and cold acquisition. Dispatch checks pushed code before publishing.
-Target-only dispatch needs no source repository. Rust/public proofs remain
-unexecuted; SQL runs. Linear-connected exchange reports the provenance gap
-without activation, not a final product limit.
+Joining publishes nothing. `6c0f2256f` connects Task-bound agents/work-watch,
+dispatch publication and cold acquisition; `4e3cb2160` isolates destinations.
+Target-only dispatch needs no source repository. Linear exchange reports its
+provenance gap without activation, not a product limit.
 
-Fetch/import/publication remain separate; confirmation excludes later saves.
-Uncertainty recovers by readback. Workers retain effect locks through cancellation;
-acquisition/saves stay independent. Dispatch reads destinations, not every journal's
-status: one damaged journal must not block another plan. Its regression and Release's
-public cold-dispatch/reconnect proofs are unexecuted. Short taskless lifetimes and
-Desktop peer status remain.
+Fetch/import/publication stay separate; confirmation excludes later saves.
+Readback resolves uncertainty; workers retain effect locks through cancellation.
+Acquisition/saves stay independent. A damaged journal breaks CLI status, not independent exchange. Taskless/mutation lifetimes and Desktop status remain.
+The work-watch fixture uses SQL edits. Release's entry-point lesson applies:
+transport proofs cannot establish public saves, cold dispatch or reconnect.
+SQL runs; Rust remains unexecuted.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
 moves, private journals and dependents. Only explicit selection releases history.

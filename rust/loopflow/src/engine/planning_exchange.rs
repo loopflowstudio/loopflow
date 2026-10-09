@@ -195,13 +195,12 @@ impl PlanningMutation {
     }
 
     pub(crate) fn order_receipt(&self) -> Option<&str> {
-        (self.object.kind == PlanningKind::Project)
-            .then(|| {
-                self.field
-                    .strip_prefix("order:")
-                    .filter(|id| !id.is_empty())
-            })
-            .flatten()
+        if self.object.kind != PlanningKind::Project {
+            return None;
+        }
+        self.field
+            .strip_prefix("order:")
+            .filter(|id| !id.is_empty())
     }
 
     pub(crate) fn deletion_receipt(&self) -> Option<&str> {

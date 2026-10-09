@@ -114,6 +114,20 @@ fn status(runtime: &tokio::runtime::Runtime, store: &Store, repo: &str) -> PeerP
         .remove(0)
 }
 
+fn rows(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Vec<Vec<rusqlite::types::Value>> {
+    let mut query = conn.prepare(sql).unwrap();
+    let columns = query.column_count();
+    query
+        .query_map(params, |row| (0..columns).map(|i| row.get(i)).collect())
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
+}
+
 fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
     [
         "agent_sessions",
@@ -130,17 +144,11 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
         } else {
             ("task_id=?1", task)
         };
-        let mut query = conn
-            .prepare(&format!(
-                "SELECT * FROM {table} WHERE {predicate} ORDER BY rowid"
-            ))
-            .unwrap();
-        let columns = query.column_count();
-        query
-            .query_map([identity], |row| (0..columns).map(|i| row.get(i)).collect())
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
+        rows(
+            conn,
+            &format!("SELECT * FROM {table} WHERE {predicate} ORDER BY rowid"),
+            [identity],
+        )
     })
     .collect()
 }
@@ -728,21 +736,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     .unwrap();
     let before = execution(&conn, &retained);
     let imported_before = execution(&conn, fixture.task.id.as_str());
-    let placements = || {
-        let mut query = conn
-            .prepare("SELECT * FROM work_placements ORDER BY rowid")
-            .unwrap();
-        let columns = query.column_count();
-        query
-            .query_map([], |row| {
-                (0..columns)
-                    .map(|i| row.get(i))
-                    .collect::<Result<Vec<rusqlite::types::Value>, _>>()
-            })
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    };
+    let placements = || rows(&conn, "SELECT * FROM work_placements ORDER BY rowid", []);
     let placements_before = placements();
     let imported_work = loopflow::durable::WorkRef::Wave(fixture.task.wave_id.clone());
     assert!(worker.find_placement(&imported_work).unwrap().is_none());

@@ -51,6 +51,15 @@ impl<T> Default for FieldHistory<T> {
     }
 }
 
+impl<T: Clone> FieldHistory<T> {
+    fn push(&mut self, value: T, is_head: bool) {
+        if is_head {
+            self.heads.push(value.clone());
+        }
+        self.values.push(value);
+    }
+}
+
 /// Rejected projections can retain effects only in the peer journal. Never
 /// acquire a new effect from an incomplete local projection. The caller holds
 /// the same write transaction through recording its attempt; acquisition and
@@ -84,7 +93,9 @@ fn changes_by_object(
             .winners
             .insert(change.field.as_str(), (id, change));
     }
-    for change in snapshot.changes.values() {
+    let heads: BTreeSet<_> = snapshot.heads().map(|(id, _)| id).collect();
+    for (id, change) in &snapshot.changes {
+        let is_head = heads.contains(id.as_str());
         let object = objects
             .get_mut(&change.object)
             .expect("every retained object has a winning field");
@@ -103,16 +114,14 @@ fn changes_by_object(
                 .orders
                 .entry(receipt)
                 .or_default()
-                .values
-                .push(&change.value);
+                .push(&change.value, is_head);
         }
         if change.provider_evidence() {
             object
                 .evidence
                 .entry(change.field.as_str())
                 .or_default()
-                .values
-                .push(serde_json::from_value(change.value.clone())?);
+                .push(serde_json::from_value(change.value.clone())?, is_head);
         }
         let Some(observation) = &change.linear else {
             continue;
@@ -132,28 +141,6 @@ fn changes_by_object(
                 && winner.value.as_str() == observation.body["id"].as_str()
         }) {
             object.observations.push(observation);
-        }
-    }
-    for (_, change) in snapshot.heads() {
-        if change.provider_evidence() {
-            objects
-                .get_mut(&change.object)
-                .expect("retained provider object")
-                .evidence
-                .entry(change.field.as_str())
-                .or_default()
-                .heads
-                .push(serde_json::from_value(change.value.clone())?);
-        }
-        if let Some(receipt) = change.order_receipt() {
-            objects
-                .get_mut(&change.object)
-                .expect("retained order object")
-                .orders
-                .entry(receipt)
-                .or_default()
-                .heads
-                .push(&change.value);
         }
     }
     // Retain decoded evidence outside dependency retries. Removal ages

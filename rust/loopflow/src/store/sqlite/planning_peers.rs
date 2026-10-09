@@ -2544,15 +2544,8 @@ mod tests {
 
     fn complete(store: &SqliteStore, task: &TaskId) {
         let record = store.task(task).unwrap().unwrap();
-        assert!(store
-            .complete_task(
-                &record,
-                None,
-                &super::super::task_work::EndMove::Set,
-                None,
-                None,
-            )
-            .unwrap());
+        let request = store.request_task_completion(task, None).unwrap().unwrap();
+        assert!(store.complete_task(&record, request).unwrap());
     }
 
     fn acquire_comment(store: &SqliteStore, task: &TaskId, comment: &crate::pm::IssueComment) {
@@ -2938,6 +2931,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project,
                 title: "Created".into(),
@@ -3058,6 +3052,61 @@ mod tests {
     }
 
     #[test]
+    fn peer_due_date_readback_preserves_execution_and_local_completion_request() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, mut row, task) = linear_seed(&source);
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
+        preserve_execution(&target, &wave, &task);
+        let request = target.request_task_completion(&task, None).unwrap();
+        let execution = execution_rows(&target);
+        for (revision, due) in [
+            ("2026-10-09T10:00:00Z", Some("2026-10-20")),
+            ("2026-10-09T11:00:00Z", None),
+        ] {
+            row.snapshot.items[0].revision = Some(revision.into());
+            row.snapshot.items[0].due_date = due.map(str::to_owned);
+            source.put_pm_snapshot(&row).unwrap();
+            let incoming = export(&source, "/source");
+            let due_change = incoming
+                .winners()
+                .find(|(_, change)| {
+                    change.object.id == task.as_str() && change.field == "planning_due_date"
+                })
+                .unwrap()
+                .1;
+            assert!(due_change.linear.is_some());
+            import(&target, "/target", revision, &incoming);
+            import(&target, "/target", "older", &base);
+            import(&target, "/target", revision, &incoming);
+            assert_eq!(
+                target
+                    .planning_task(&task)
+                    .unwrap()
+                    .record
+                    .unwrap()
+                    .item
+                    .due_date
+                    .as_deref(),
+                due
+            );
+            assert_eq!(
+                target
+                    .task_completion_pending(&task)
+                    .unwrap()
+                    .map(|(id, _)| id),
+                request
+            );
+            assert_eq!(execution_rows(&target), execution);
+            assert!(target
+                .peer_projection_conflicts("/target")
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    #[test]
     fn peer_creation_prepares_unprepared_plans_without_execution_or_transitions() {
         use super::super::planning_changes::PlanningChanges;
         use crate::durable::WorkRef;
@@ -3065,6 +3114,15 @@ mod tests {
         let (_source_home, source) = store();
         let (_target_home, target) = store();
         let task = seed(&source);
+        source
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET planning_due_date='2026-10-20' WHERE id=?1",
+                [task.as_str()],
+            )
+            .unwrap();
         import(
             &target,
             "/target",
@@ -3123,6 +3181,7 @@ mod tests {
             .prepare_planning_export(task_owner, "team", "initiative")
             .unwrap();
         assert_eq!(creation.parent, project.as_str());
+        assert_eq!(creation.input["dueDate"], "2026-10-20");
         assert_eq!(creation.input["title"], "Original");
         assert_eq!(creation.input["projectId"], export.id);
         let captured = target
@@ -3136,6 +3195,7 @@ mod tests {
             .0;
         for (field, value) in [
             ("title", json!("Uncaptured title")),
+            ("dueDate", json!(null)),
             ("projectId", json!(null)),
             ("teamId", json!("")),
             ("process_lfid", json!("forbidden")),
@@ -3167,6 +3227,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project.clone(),
                 title: "Initial".into(),
@@ -3342,6 +3403,7 @@ mod tests {
             .unwrap();
         let task = TaskId::new();
         let request = crate::planning::NewTask {
+            due_date: None,
             id: task.clone(),
             project_id: original.clone(),
             title: "Created".into(),
@@ -3422,6 +3484,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project.clone(),
                 title: "Work".into(),
@@ -6834,6 +6897,10 @@ mod tests {
         conn.execute(r#"INSERT INTO task_changes(seq,id,task_id,field,value_json) VALUES(2,'captured-task',?1,'name','"Captured task"'),(3,'later-task',?1,'name','"Later task"')"#, [created_task.as_str()]).unwrap();
         // The existing deletion owns sequence 1; this creation captured through 2.
         let mut task_receipt = task_receipt;
+        task_receipt["model"]
+            .as_object_mut()
+            .unwrap()
+            .remove("due_date");
         task_receipt["through"] = json!(2);
         conn.execute("INSERT INTO task_creation_intents(task_id,project_id,title,description,export_json,export_attempted,export_error)
             VALUES(?1,?2,'Captured task','Brief',?3,1,'lost creation')",params![created_task.as_str(),created.as_str(),task_receipt.to_string()]).unwrap();
@@ -6963,7 +7030,18 @@ mod tests {
         assert_eq!(owner, created_task.as_str());
         assert_eq!(migrated.parent, created.as_str());
         assert_eq!(migrated.captured, ["captured-task".into()].into());
-        assert_eq!(migrated.model, task_receipt["model"]);
+        let mut model = task_receipt["model"].clone();
+        model["due_date"] = json!(null);
+        assert_eq!(migrated.model, model);
+        super::super::planning_export::validate_peer_receipt(
+            &crate::engine::planning_exchange::PlanningObject {
+                kind: crate::engine::planning_exchange::PlanningKind::Task,
+                id: created_task.to_string(),
+            },
+            &json!({"export":migrated,"attempted":true,"link_attempted":false,
+                "error":error,"acknowledged":false}),
+        )
+        .unwrap();
         assert_eq!(migrated.input, task_receipt["input"]);
         assert!(attempted);
         assert_eq!(error, "lost creation");
@@ -7278,6 +7356,7 @@ mod tests {
             let local_task = TaskId::new();
             target
                 .create_task(&crate::planning::NewTask {
+                    due_date: None,
                     id: local_task.clone(),
                     project_id: local_project.clone(),
                     title: "Private title".into(),

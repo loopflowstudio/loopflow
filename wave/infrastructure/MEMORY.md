@@ -628,21 +628,21 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected review-only custom-ref sync; no landing/export. Joining
+Jack Heart selected review-only custom-ref sync; no landing or real-plan export. Joining
 publishes nothing; imports stay unplaced. Malformed input aborts import;
 contradictions defer effects, not saves/acquisition. Preserve execution, uncertainty,
 losers and exact receipt origins. Correspondence grants no identity or authority;
 private references hold groups. Causality precedes ranking; equal revisions can
 carry different ranks, so retain bodies.
 
-`af7730926` supplies journal-derived recovery without enrollment or confirmation.
-Unknown authors stay unknown; ordinary edits restore. Proofs: `f55d6c5b7:wave/infrastructure/MEMORY.md`, this heading.
-
-`81df09092` retires unattempted equal-desired saves after changed-baseline readback,
-adopting Linear without inventing attempts/acknowledgement. Unchanged baselines
-preserve saves; readback proves no atomicity. Git/HTTPS association tests pass,
-retaining private and failed-projection holds. Creation/link-origin, combined-lifetime
-and installed acceptance remain unproved. Plan: `scratch/work-on-another-machine-name.md`.
+Journal recovery preserves unknown authors and restores through ordinary edits,
+without enrollment: `af7730926`; earlier proofs: `f55d6c5b7`, this heading.
+`81df09092` proves Git/HTTPS association and changed-baseline retirement without
+inventing attempts or atomicity; unchanged baselines preserve saves/private holds.
+#1499 integration separates checkout branches from PRs and adds due-date exchange;
+creation receipts retain exact optional inputs. Completion requests stay local.
+Creation/link-origin, combined-lifetime and installed acceptance remain unproved.
+Plan and focused integration evidence: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

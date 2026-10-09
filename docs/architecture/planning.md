@@ -603,6 +603,9 @@ One derived `planning_exports` view feeds discovery and status. Common
 errors under the original Work ID, separate from the local Task/Project foreign
 key. Multiple origins never overwrite each other's operations. Discovery locks the
 local projection, then reads each origin; status identifies each receipt by origin.
+Task due dates travel as planning fields, including explicit removal observed at
+Linear; completion requests and follow-through events remain local. Retained creation
+inputs keep omitted optional null fields and historical state selection unchanged.
 Task request idempotence stays local: importing a provider receipt creates neither
 a Task-creation request nor a Project transition. Preparation captures saved planning;
 import retains that snapshot and its original parent. A mapping alone never

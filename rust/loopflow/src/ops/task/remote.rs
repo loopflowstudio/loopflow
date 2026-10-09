@@ -31,18 +31,13 @@ impl TaskSource {
         let Some(worktree) = task.worktree.as_deref() else {
             return Ok(None);
         };
-        let pr = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {} has no active PR", task.plan.identifier)))?;
         if !is_clean(worktree)? {
-            return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.plan.identifier, pr.branch)));
+            return Err(task_error(format!("Task {} has uncommitted work on branch {}; commit and push it before running it on another machine", task.plan.identifier, task.branch)));
         }
         let commit = rev_parse(worktree, "HEAD")?;
-        require_pushed_code(worktree, &task.plan.identifier, &pr.branch, &commit)?;
+        require_pushed_code(worktree, &task.plan.identifier, &task.branch, &commit)?;
         Ok(Some(Self {
-            branch: pr.branch,
+            branch: task.branch,
             commit,
             task_id: task.id,
             identifier: task.plan.identifier,

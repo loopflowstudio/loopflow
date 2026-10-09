@@ -1,4 +1,4 @@
--- depends_on: local_planning
+-- depends_on: optional_task_pr
 -- The migration data hook seeds retained provider invalidation/removal/archive evidence with unknown age.
 -- One mutation journal on the common planning writer. No execution is exported.
 CREATE TABLE planning_peer_context (
@@ -288,7 +288,7 @@ BEGIN
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
             AND (h.accepted
                 OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
-    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j ;
+    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'planning_due_date',NEW.planning_due_date,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j ;
 END;
 
 CREATE TRIGGER peer_task_update AFTER UPDATE ON tasks
@@ -304,7 +304,7 @@ BEGIN
             WHERE h.kind='task' AND h.object_id=NEW.id AND h.field=j.key
             AND (h.accepted
                 OR j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)))
-    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j WHERE j.value IS NOT json_extract(json_object('project_id',OLD.project_id,'external_issue_id',OLD.external_issue_id,'issue_identifier',OLD.issue_identifier,'issue_title',OLD.issue_title,'issue_description',OLD.issue_description,'planning_rank',OLD.planning_rank,'planning_assignee',OLD.planning_assignee,'disposition',json_object('planning_completed',OLD.planning_completed,'planning_completed_at',OLD.planning_completed_at,'planning_state',OLD.planning_state),'planning_deleted_at',OLD.planning_deleted_at,'planning_url',OLD.planning_url,'planning_branch_name',OLD.planning_branch_name,'planning_team_id',OLD.planning_team_id), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
+    FROM json_each(json_object('project_id',NEW.project_id,'external_issue_id',NEW.external_issue_id,'issue_identifier',NEW.issue_identifier,'issue_title',NEW.issue_title,'issue_description',NEW.issue_description,'planning_rank',NEW.planning_rank,'planning_assignee',NEW.planning_assignee,'planning_due_date',NEW.planning_due_date,'disposition',json_object('planning_completed',NEW.planning_completed,'planning_completed_at',NEW.planning_completed_at,'planning_state',NEW.planning_state),'planning_deleted_at',NEW.planning_deleted_at,'planning_url',NEW.planning_url,'planning_branch_name',NEW.planning_branch_name,'planning_team_id',NEW.planning_team_id)) j WHERE j.value IS NOT json_extract(json_object('project_id',OLD.project_id,'external_issue_id',OLD.external_issue_id,'issue_identifier',OLD.issue_identifier,'issue_title',OLD.issue_title,'issue_description',OLD.issue_description,'planning_rank',OLD.planning_rank,'planning_assignee',OLD.planning_assignee,'planning_due_date',OLD.planning_due_date,'disposition',json_object('planning_completed',OLD.planning_completed,'planning_completed_at',OLD.planning_completed_at,'planning_state',OLD.planning_state),'planning_deleted_at',OLD.planning_deleted_at,'planning_url',OLD.planning_url,'planning_branch_name',OLD.planning_branch_name,'planning_team_id',OLD.planning_team_id), '$.' || j.key) OR ((SELECT observation FROM planning_peer_context) IS NOT NULL
         AND j.key IN (SELECT key FROM json_each((SELECT fields FROM planning_peer_context)))
         AND j.value IS json_extract((SELECT fields FROM planning_peer_context), '$.' || j.key)
         AND (NOT EXISTS(SELECT 1 FROM planning_peer_observed h JOIN planning_peer_changes c ON c.id=h.id
@@ -317,7 +317,7 @@ END;
 INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,parents)
 SELECT lower(hex(randomblob(16))),'task',r.id,j.key,
     CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
-    0,NULL,'[]' FROM tasks r, json_each(json_object('project_id',r.project_id,'external_issue_id',r.external_issue_id,'issue_identifier',r.issue_identifier,'issue_title',r.issue_title,'issue_description',r.issue_description,'planning_rank',r.planning_rank,'planning_assignee',r.planning_assignee,'disposition',json_object('planning_completed',r.planning_completed,'planning_completed_at',r.planning_completed_at,'planning_state',r.planning_state),'planning_deleted_at',r.planning_deleted_at,'planning_url',r.planning_url,'planning_branch_name',r.planning_branch_name,'planning_team_id',r.planning_team_id)) j;
+    0,NULL,'[]' FROM tasks r, json_each(json_object('project_id',r.project_id,'external_issue_id',r.external_issue_id,'issue_identifier',r.issue_identifier,'issue_title',r.issue_title,'issue_description',r.issue_description,'planning_rank',r.planning_rank,'planning_assignee',r.planning_assignee,'planning_due_date',r.planning_due_date,'disposition',json_object('planning_completed',r.planning_completed,'planning_completed_at',r.planning_completed_at,'planning_state',r.planning_state),'planning_deleted_at',r.planning_deleted_at,'planning_url',r.planning_url,'planning_branch_name',r.planning_branch_name,'planning_team_id',r.planning_team_id)) j;
 
 CREATE TRIGGER peer_comment_insert AFTER INSERT ON task_comments
 WHEN (SELECT importing FROM planning_peer_context)=0
@@ -423,7 +423,7 @@ CREATE INDEX planning_creations_project ON planning_creations(project_id);
 -- Migrate the released owners directly into the final representation.
 INSERT INTO planning_creations(kind,origin_id,task_id,export_json,export_attempted,export_error)
 SELECT 'task',c.task_id,c.task_id,
-    json_remove(json_set(c.export_json,'$.parent',(SELECT p.id FROM projects p WHERE
+    json_remove(json_set(c.export_json,'$.model.due_date',json_extract(c.export_json,'$.model.due_date'),'$.parent',(SELECT p.id FROM projects p WHERE
         p.id=json_extract(c.export_json,'$.model.project_id') OR p.external_project_id=json_extract(c.export_json,'$.model.project_id')),
         '$.captured',json((SELECT json_group_array(id) FROM task_changes WHERE task_id=c.task_id
             AND seq<=json_extract(c.export_json,'$.through')))),'$.through'),

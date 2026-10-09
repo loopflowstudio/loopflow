@@ -53,6 +53,7 @@ impl PlanningKind {
                 "issue_description",
                 "planning_rank",
                 "planning_assignee",
+                "planning_due_date",
                 "disposition",
                 "planning_deleted_at",
                 "planning_url",
@@ -102,7 +103,7 @@ impl LinearObservation {
                 serde_json::json!({
                     "external_issue_id":item.id,"issue_identifier":item.identifier,
                     "issue_title":item.name,"issue_description":item.description,
-                    "planning_assignee":item.assignee,
+                    "planning_assignee":item.assignee,"planning_due_date":item.due_date,
                     "disposition":{"planning_state":item.state,"planning_completed":i32::from(item.completed),"planning_completed_at":item.completed_at},
                     "planning_url":item.url,"planning_branch_name":item.branch_name,"planning_team_id":item.team_id,
                 })

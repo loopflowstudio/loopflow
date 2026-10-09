@@ -55,7 +55,7 @@ fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
 
     let origin_home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(origin_home.path()));
-    let fixture = support::register_unrun_task(
+    let fixture = support::register_task_without_pr(
         &origin_home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         branch,
@@ -236,7 +236,8 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
             .block_on(target_store.task_prs(&task.id))
             .unwrap()
             .len(),
-        1
+        0,
+        "Remote placement must not invent publication"
     );
     assert_eq!(
         loopflow::engine::worktrees::list_worktrees(&target.path().join("repo"))
@@ -357,7 +358,7 @@ fn machine_selector_names_unpushed_source_work_before_connecting_and_keeps_legac
     git(repo.path(), &["push", "origin", branch]);
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_lf_home(&[], home.path());
-    let fixture = support::register_unrun_task(
+    let fixture = support::register_task_without_pr(
         home.path(),
         &repo.path().canonicalize().unwrap(),
         branch,

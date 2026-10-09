@@ -429,9 +429,21 @@ pub(crate) fn validate_peer_receipt(
             ))
         }
     };
+    // Retained effects may omit optional null inputs. Preserve their exact bytes;
+    // an omitted non-null value still contradicts the captured model.
+    if !project {
+        for field in ["assigneeId", "dueDate"] {
+            if export.input.get(field).is_none() && input[field].is_null() {
+                input
+                    .as_object_mut()
+                    .expect("Task input is an object")
+                    .remove(field);
+            }
+        }
+    }
     let status = if project { "statusId" } else { "stateId" };
     if let Some(id) = export.input.get(status) {
-        if !id.is_string() {
+        if !id.is_string() && !(!project && id.is_null()) {
             return Err(StoreError::InvalidData("invalid creation state".into()));
         }
         input[status] = id.clone();
@@ -448,7 +460,7 @@ pub(crate) fn validate_peer_receipt(
         || input != export.input
         || !project && export.input["projectId"].as_str().is_none_or(str::is_empty)
         || uuid::Uuid::parse_str(&export.link_id).is_err()
-        || export.initiative.is_empty()
+        || project && export.initiative.is_empty()
         || receipt.link_attempted && (!project || !receipt.attempted)
         || receipt.acknowledged && !receipt.attempted
         || export.captured.iter().any(String::is_empty)
@@ -563,7 +575,11 @@ pub(super) fn retain_follow_through_export_in(
     let export = PlanningExport {
         id: intent.issue_id.clone(),
         model: serde_json::to_value(model)?,
-        parent: conn.query_row("SELECT project_id FROM tasks WHERE id=?1", [task.as_str()], |row| row.get(0))?,
+        parent: conn.query_row(
+            "SELECT project_id FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )?,
         captured: BTreeSet::new(),
         input: json!({"id":intent.issue_id,"teamId":intent.team_id,"projectId":intent.project_id,
             "stateId":intent.state_id,"title":intent.title,"description":intent.notes,"dueDate":intent.due}),

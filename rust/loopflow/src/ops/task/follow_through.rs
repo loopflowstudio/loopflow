@@ -1,4 +1,4 @@
-use super::{acquire_task, block_on_task, owning_wave, task_error, task_store};
+use super::{block_on_task, owning_wave, task_error, task_store};
 use crate::ops::OpsResult;
 use crate::store::Store;
 use crate::work::task::follow_through::{FollowThroughIntent, FollowThroughLink};
@@ -74,7 +74,7 @@ pub fn task_follow_up(repo: &Path, issue: &str, options: &FollowUpOptions) -> Op
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("follow-up destination Project is unavailable"))?;
             let (issue_id, title, existing) = if let Some(selector) = &options.existing {
-                let saved = acquire_task(&store, repo, selector).await?;
+                let (_, saved) = crate::ops::pm::resolve_saved_task(repo, None, selector).await?;
                 if saved.id == task.id {
                     return Err(task_error("a Task cannot follow up itself"));
                 }
@@ -148,7 +148,7 @@ async fn link_intent(
         .map_err(task_error)?;
     // Filing reservations already retain their child locally. Acquisition remains
     // necessary only for historical links to an existing, not-yet-retained issue.
-    let saved = acquire_task(store, repo, &intent.issue_id).await?;
+    let (_, saved) = crate::ops::pm::resolve_saved_task(repo, None, &intent.issue_id).await?;
     let item = super::task_planning_item(store, &saved)?;
     let link = FollowThroughLink {
         key: intent.key.clone(),

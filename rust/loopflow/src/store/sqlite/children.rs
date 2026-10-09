@@ -381,7 +381,7 @@ impl SqliteStore {
             "SELECT t.id, COALESCE(t.issue_title, t.issue_identifier, t.id) FROM tasks t
              LEFT JOIN projects p ON p.id=t.project_id LEFT JOIN waves w ON w.id=p.wave_id
              WHERE t.id=?1 OR ((t.external_issue_id=?1 OR t.issue_identifier=?1
-                OR t.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)
+                OR t.id=(SELECT task_id FROM planning_creations WHERE kind='task' AND json_extract(export_json,'$.id')=?1)
                 OR substr(lower(t.id), 6, length(?2))=?2) AND (?3 IS NULL OR w.repo=?3))
              ORDER BY t.id",
         )?;

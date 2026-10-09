@@ -3041,7 +3041,10 @@ pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        let task = store.sqlite.reopen_task(&task.id, note).map_err(task_error)?;
+        let task = store
+            .sqlite
+            .reopen_task(&task.id, note)
+            .map_err(task_error)?;
         let wave = owning_wave(&store, &task).await?;
         super::planning_peer::sync_after_save(&store, wave.repo()).await;
         Ok(task)

@@ -46,13 +46,11 @@ acquisition recognizes partial progress, never detail reads.
 projections, retaining baselines. Configuration selects pending display; creation
 receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-`078a6642e`'s LOO-406 Linux migration, native/public Flow/work-watch reconnect
-and adoption passed after fixture/DTO repairs, not peer acceptance.
+`078a6642e`: LOO-406 Linux migration/reconnect/adoption pass, not peer acceptance.
 `ffe986160` removes synthetic settlement; queue gate's 15-second lock refusal
-leaves receipt verification open. Swift/full matrix need CI. After queue,
-Jack Heart authorized LOO-406 landing and CI checks; this does not extend
-LOO-412's publication-only boundary. PR #1503's classifier proves no acceptance;
-installation remains unproved.
+leaves receipt verification open. Swift/matrix await CI. Jack Heart authorized
+LOO-406 landing/CI after queue. #1503's classifier proves
+no acceptance; installation is unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;

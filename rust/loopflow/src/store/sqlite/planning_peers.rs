@@ -29,6 +29,7 @@ struct ObjectChanges<'a> {
     winners: WinningFields<'a>,
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
+    deletions: BTreeMap<&'a str, Vec<&'a Value>>,
 }
 
 fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, ObjectChanges<'_>> {
@@ -40,16 +41,21 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             .winners
             .insert(change.field.as_str(), (id, change));
     }
-    for change in snapshot
-        .changes
-        .values()
-        .filter(|change| change.field == "creation" || change.linear.is_some())
-    {
+    for change in snapshot.changes.values().filter(|change| {
+        change.field == "creation" || change.linear.is_some() || change.deletion_receipt().is_some()
+    }) {
         let object = objects
             .get_mut(&change.object)
             .expect("every retained object has a winning field");
         if change.field == "creation" {
             object.creation.push(&change.value);
+        }
+        if let Some(receipt) = change.deletion_receipt() {
+            object
+                .deletions
+                .entry(receipt)
+                .or_default()
+                .push(&change.value);
         }
         let Some(observation) = &change.linear else {
             continue;
@@ -1051,8 +1057,22 @@ fn insert_and_project(
             &changes.creation,
         )?;
     }
+    if object.kind == PlanningKind::Task {
+        for (receipt, history) in &changes.deletions {
+            super::planning_changes::import_peer_deletion(
+                conn,
+                &TaskId::from_raw(&object.id),
+                receipt,
+                history,
+            )?;
+        }
+    }
     let previous = delivery_fields(conn, object)?;
     acquire_linear_frontier(conn, object, changes, repo)?;
+    let deletion_receipts = object.kind == PlanningKind::Task && !changes.deletions.is_empty();
+    if deletion_receipts {
+        super::planning_changes::reconcile_deletion(conn, &TaskId::from_raw(&object.id))?;
+    }
     project_fields(
         conn,
         object,
@@ -1060,6 +1080,8 @@ fn insert_and_project(
             .values()
             .filter(|(_, change)| {
                 !(change.field == "creation"
+                    || change.deletion_receipt().is_some()
+                    || deletion_receipts && change.field == "planning_deleted_at"
                     || object.kind == PlanningKind::Wave && change.field == "current_project_id"
                     || object.kind == PlanningKind::Project && content_field(&change.field))
             })
@@ -1457,6 +1479,7 @@ fn projection_conflict(error: &StoreError) -> bool {
         StoreError::InvalidData(reason) => matches!(
             reason.as_str(),
             "competing planning creation receipts"
+                | "competing planning deletion receipts"
                 | "comment identity already belongs to another comment"
                 | "comment belongs to another Task"
                 | "Wave parent would create a cycle"
@@ -1731,6 +1754,386 @@ mod tests {
         let tx = conn.transaction().unwrap();
         super::super::task_comments::ingest_task_comment(&tx, task, comment, 42).unwrap();
         tx.commit().unwrap();
+    }
+
+    fn deletion_change(store: &SqliteStore, task: &TaskId) -> crate::planning::PlanningChange {
+        store
+            .pending_task_changes(task)
+            .unwrap()
+            .into_iter()
+            .find(|c| c.field == "deleted")
+            .unwrap()
+    }
+
+    fn deletion_receipt(store: &SqliteStore, id: &str) -> serde_json::Value {
+        let body: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT json_object('id',id,'value',json(value_json),'base',json(base_json),
+             'attempted',attempted,'acknowledged',acknowledged,'revision',acknowledged_revision,
+             'conflict',json(conflict_json),'error',error) FROM task_changes WHERE id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        serde_json::from_str(&body).unwrap()
+    }
+
+    fn execution_rows(store: &SqliteStore) -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        let conn = store.conn.lock().unwrap();
+        [
+            "agent_sessions",
+            "processes",
+            "task_workflows",
+            "task_workflow_moves",
+            "task_prs",
+            "work_placements",
+            "project_transitions",
+        ]
+        .into_iter()
+        .map(|table| {
+            let mut query = conn
+                .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                .unwrap();
+            let count = query.column_count();
+            query
+                .query_map([], |row| (0..count).map(|i| row.get(i)).collect())
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+        })
+        .collect()
+    }
+
+    #[test]
+    fn peer_deletion_retains_attempt_until_positive_acknowledgement_without_execution() {
+        use super::super::planning_changes::PlanningChanges;
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let execution = execution_rows(&target);
+        let checkout = target.task(&task).unwrap().unwrap().worktree;
+        source.delete_task(&task).unwrap();
+        let change = deletion_change(&source, &task);
+        assert!(source
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &change,
+                row.snapshot.items[0].revision.as_deref()
+            )
+            .unwrap());
+        source
+            .planning_field_error(PlanningChanges::Task(&task), &change, "response lost")
+            .unwrap();
+        let attempted = export(&source, "/source");
+        import(&target, "/target", "attempted", &attempted);
+        assert_eq!(
+            deletion_receipt(&target, &change.id),
+            deletion_receipt(&source, &change.id)
+        );
+        assert_eq!(deletion_change(&target, &task), change);
+        assert!(!target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &change,
+                row.snapshot.items[0].revision.as_deref()
+            )
+            .unwrap());
+        // Neither a missing peer record nor absent inventory acknowledges deletion.
+        import(&target, "/target", "omitted", &Default::default());
+        let mut inventory = row.clone();
+        inventory.snapshot.items.clear();
+        inventory.synced_at += 1;
+        target.put_pm_snapshot(&inventory).unwrap();
+        assert_eq!(deletion_receipt(&target, &change.id)["acknowledged"], 0);
+        assert_eq!(deletion_receipt(&target, &change.id)["attempted"], 1);
+        // The exact provider mutation acknowledgement travels on the same receipt.
+        assert!(source
+            .acknowledge_task_deletion(&task, &change, None)
+            .unwrap());
+        let acknowledged = export(&source, "/source");
+        import(&target, "/target", "acknowledged", &acknowledged);
+        assert_eq!(deletion_receipt(&target, &change.id)["acknowledged"], 1);
+        assert_eq!(
+            deletion_receipt(&target, &change.id)["error"],
+            serde_json::Value::Null
+        );
+        assert!(target
+            .pending_task_changes(&task)
+            .unwrap()
+            .iter()
+            .all(|c| c.field != "deleted"));
+        target
+            .planning_field_error(PlanningChanges::Task(&task), &change, "late error")
+            .unwrap();
+        import(&target, "/target", "late-attempt", &attempted);
+        let revisions = target.revisions().unwrap();
+        import(&target, "/target", "late-attempt", &attempted);
+        assert_eq!(target.revisions().unwrap(), revisions);
+        assert_eq!(
+            deletion_receipt(&target, &change.id),
+            deletion_receipt(&source, &change.id)
+        );
+        assert_eq!(target.task(&task).unwrap().unwrap().worktree, checkout);
+        assert_eq!(execution_rows(&target), execution);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn peer_deletion_explicit_active_evidence_retires_concurrent_losers_not_inventory() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let execution = execution_rows(&target);
+        source.delete_task(&task).unwrap();
+        let removed = deletion_change(&source, &task);
+        let mut item = row.snapshot.items[0].clone();
+        item.revision = Some("2026-10-08T12:00:00Z".into());
+        source
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item: item.clone(),
+                    project: Some(row.snapshot.projects[0].clone()),
+                    observed_at: 50,
+                },
+                Some((&wave, "initiative")),
+            )
+            .unwrap();
+        assert!(source.planning_task(&task).unwrap().state == crate::store::PlanningState::Removed);
+        source
+            .observe_task_deletion(&task, item.revision.as_deref().unwrap())
+            .unwrap();
+        assert!(source.planning_task(&task).unwrap().state != crate::store::PlanningState::Removed);
+        // An offline save made later in wall time cannot defeat observed Linear activity.
+        target.delete_task(&task).unwrap();
+        let concurrent = deletion_change(&target, &task);
+        import(&target, "/target", "active", &export(&source, "/source"));
+        assert!(target.planning_task(&task).unwrap().state != crate::store::PlanningState::Removed);
+        for id in [&removed.id, &concurrent.id] {
+            let receipt = deletion_receipt(&target, id);
+            assert_eq!(receipt["value"], true);
+            assert_eq!(receipt["acknowledged"], 0);
+            assert_eq!(receipt["conflict"]["value"], false);
+            assert_eq!(receipt["conflict"]["revision"], json!(item.revision));
+        }
+        let revisions = target.revisions().unwrap();
+        import(&target, "/target", "active", &export(&source, "/source"));
+        assert_eq!(target.revisions().unwrap(), revisions);
+        assert_eq!(execution_rows(&target), execution);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn peer_deletion_late_history_cannot_hide_a_newer_pending_save() {
+        use super::super::planning_changes::PlanningChanges;
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        source.delete_task(&task).unwrap();
+        let mut item = row.snapshot.items[0].clone();
+        item.revision = Some("2026-10-08T12:00:00Z".into());
+        for (store, repo) in [(&source, "/source"), (&target, "/target")] {
+            store
+                .put_pm_task(
+                    repo,
+                    "linear",
+                    &crate::store::PmTaskRecord {
+                        item: item.clone(),
+                        project: Some(row.snapshot.projects[0].clone()),
+                        observed_at: 50,
+                    },
+                    Some((&wave, "initiative")),
+                )
+                .unwrap();
+        }
+        source
+            .observe_task_deletion(&task, item.revision.as_deref().unwrap())
+            .unwrap();
+        // This save follows the active provider revision. The other machine's
+        // older retired receipt arrives last and gets a later local sequence.
+        target.delete_task(&task).unwrap();
+        let current = deletion_change(&target, &task);
+        let mut history = export(&source, "/source");
+        let scalar_clock = export(&target, "/target")
+            .changes
+            .values()
+            .map(|c| c.clock)
+            .max()
+            .unwrap()
+            + 1;
+        for change in history.changes.values_mut().filter(|c| {
+            c.object.id == task.as_str()
+                && c.field == "planning_deleted_at"
+                && c.value.is_null()
+                && !c.parents.is_empty()
+        }) {
+            change.clock = scalar_clock;
+        }
+        import(&target, "/target", "old-history", &history);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+        assert_eq!(deletion_change(&target, &task), current);
+        assert_eq!(
+            target.planning_task(&task).unwrap().state,
+            crate::store::PlanningState::Removed
+        );
+        assert!(target
+            .planning_field_owners("/target")
+            .unwrap()
+            .contains(&crate::durable::WorkRef::Task(task.clone())));
+        assert!(target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &current,
+                item.revision.as_deref()
+            )
+            .unwrap());
+        assert!(!target
+            .attempt_planning_field(
+                PlanningChanges::Task(&task),
+                &current,
+                item.revision.as_deref()
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn peer_deletion_creation_readback_fills_baseline_without_acknowledging_removal() {
+        use super::super::planning_changes::PlanningChanges;
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, existing) = linear_seed(&source);
+        let project = source.task(&existing).unwrap().unwrap().project_id;
+        source
+            .bind_project(&wave, row.snapshot.items[0].project_id.as_deref().unwrap())
+            .unwrap();
+        let task = TaskId::new();
+        source
+            .create_task(&crate::planning::NewTask {
+                id: task.clone(),
+                project_id: project,
+                title: "Created".into(),
+                description: String::new(),
+            })
+            .unwrap();
+        let owner = PlanningChanges::Task(&task);
+        let creation = source
+            .prepare_planning_export(owner, "team", "initiative")
+            .unwrap();
+        assert!(source
+            .attempt_planning_export(owner, &creation.input, false)
+            .unwrap());
+        source.delete_task(&task).unwrap();
+        let deletion = deletion_change(&source, &task);
+        assert_eq!(deletion.base, None);
+        let before = export(&source, "/source");
+        import(&target, "/target", "before-readback", &before);
+        let mut item: crate::pm::PmItem = serde_json::from_value(creation.model.clone()).unwrap();
+        item.id = creation.id.clone();
+        item.identifier = "FIX-CREATED".into();
+        item.project_id = row.snapshot.items[0].project_id.clone();
+        item.revision = Some("2026-10-08T12:00:00Z".into());
+        source
+            .put_pm_task(
+                "/source",
+                "linear",
+                &crate::store::PmTaskRecord {
+                    item: item.clone(),
+                    project: Some(row.snapshot.projects[0].clone()),
+                    observed_at: 50,
+                },
+                Some((&wave, "initiative")),
+            )
+            .unwrap();
+        import(&target, "/target", "readback", &export(&source, "/source"));
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            deletion_receipt(&target, &deletion.id),
+            deletion_receipt(&source, &deletion.id)
+        );
+        assert_eq!(
+            deletion_change(&target, &task).base,
+            Some(json!({"revision":item.revision,"value":false}))
+        );
+        assert_eq!(deletion_receipt(&target, &deletion.id)["acknowledged"], 0);
+        import(&target, "/target", "late", &before);
+        assert_eq!(
+            deletion_receipt(&target, &deletion.id),
+            deletion_receipt(&source, &deletion.id)
+        );
+        // Positive trash readback, unlike creation readback, settles this identity.
+        assert!(target
+            .acknowledge_task_deletion(&task, &deletion, Some("2026-10-08T13:00:00Z"))
+            .unwrap());
+        import(&source, "/source", "trashed", &export(&target, "/target"));
+        assert_eq!(deletion_receipt(&source, &deletion.id)["acknowledged"], 1);
+        assert_eq!(
+            deletion_receipt(&source, &deletion.id)["revision"],
+            "2026-10-08T13:00:00Z"
+        );
+    }
+
+    #[test]
+    fn peer_deletion_rejects_malformed_receipts_and_isolates_competing_baselines() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, _, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let execution = execution_rows(&target);
+        source.delete_task(&task).unwrap();
+        let incoming = export(&source, "/source");
+        let (mutation, _) = incoming
+            .changes
+            .iter()
+            .find(|(_, c)| c.deletion_receipt().is_some())
+            .unwrap();
+        let mut malformed = incoming.clone();
+        malformed.changes.get_mut(mutation).unwrap().value["process_lfid"] = json!("not-planning");
+        assert!(target
+            .import_peer_planning("/target", &destination(), "invalid", &malformed)
+            .is_err());
+        assert_eq!(
+            import_revision(&target, "/target", &destination()).as_deref(),
+            Some("base")
+        );
+        let mut competing = incoming.clone();
+        let mut other = competing.changes[mutation].clone();
+        other.value["base"]["revision"] = json!("2026-10-08T11:00:00Z");
+        other.clock += 1;
+        other.parents.insert(mutation.clone());
+        competing.changes.insert("competing-deletion".into(), other);
+        import(&target, "/target", "competing", &competing);
+        assert!(target.planning_task(&task).unwrap().state != crate::store::PlanningState::Removed);
+        assert!(target.pending_task_changes(&task).unwrap().is_empty());
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == task.as_str()
+                && c.reason.contains("competing planning deletion receipts")));
+        assert_eq!(export(&target, "/target"), competing);
+        assert_eq!(execution_rows(&target), execution);
     }
 
     fn comment_receipt(
@@ -4741,6 +5144,12 @@ mod tests {
             VALUES('acquired','task','Provider body','{\"kind\":\"integration\"}',NULL,'2026-10-08T10:00:00Z');",
         )
         .unwrap();
+        conn.execute(
+            "UPDATE tasks SET planning_deleted_at=42 WHERE id='task'",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO task_changes(id,task_id,field,value_json,base_json,attempted,error) VALUES('retained-deletion','task','deleted','true',?1,1,'lost response')", [json!({"revision":"2026-10-08T10:00:00Z","value":null}).to_string()]).unwrap();
         let retained_content = "workflow: review\n\n## KRs\n- [x] Keep the accepted proof\n";
         conn.execute(
             "UPDATE projects SET project_prompt_context=?1,workflow='review' WHERE id='project'",
@@ -4816,6 +5225,16 @@ mod tests {
         .unwrap();
         let before = super::export_in(&conn, "/fixture", &destination()).unwrap();
         assert!(!before.changes.is_empty());
+        let deletion = before
+            .changes
+            .values()
+            .find(|change| change.deletion_receipt() == Some("retained-deletion"))
+            .unwrap();
+        assert_eq!(deletion.value["deleted_at"], 42);
+        assert_eq!(deletion.value["attempted"], true);
+        assert_eq!(deletion.value["acknowledged"], false);
+        assert_eq!(deletion.value["error"], "lost response");
+        assert_eq!(deletion.value["base"]["revision"], "2026-10-08T10:00:00Z");
         let content: std::collections::BTreeMap<_, _> = before
             .winners()
             .filter(|(_, c)| c.object.id == "project")

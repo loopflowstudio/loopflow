@@ -183,6 +183,17 @@ pub struct PlanningSnapshot {
     pub changes: BTreeMap<String, PlanningMutation>,
 }
 
+impl PlanningMutation {
+    pub(crate) fn deletion_receipt(&self) -> Option<&str> {
+        if self.object.kind != PlanningKind::Task {
+            return None;
+        }
+        self.field
+            .strip_prefix("deletion:")
+            .filter(|id| !id.is_empty())
+    }
+}
+
 impl PlanningSnapshot {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, PlanningExchangeError> {
         let snapshot: Self = serde_json::from_slice(bytes)?;
@@ -259,7 +270,8 @@ impl PlanningSnapshot {
                     || (matches!(
                         change.object.kind,
                         PlanningKind::Task | PlanningKind::Project
-                    ) && change.field == "creation"))
+                    ) && change.field == "creation")
+                    || change.deletion_receipt().is_some())
             {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
@@ -310,6 +322,10 @@ impl PlanningSnapshot {
 
 fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {
     let value = &change.value;
+    if change.deletion_receipt().is_some() {
+        return crate::store::sqlite::planning_changes::validate_peer_deletion(value)
+            .map_err(|_| PlanningExchangeError::Invalid("invalid planning deletion receipt"));
+    }
     let text = |value: &Value| value.is_null() || value.is_string();
     let valid = match change.field.as_str() {
         "workflow" | "krs" | "metric_targets" if change.object.kind == PlanningKind::Project => {

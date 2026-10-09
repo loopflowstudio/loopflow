@@ -85,7 +85,7 @@ fn fields(
             CASE WHEN c.conflict_json IS NOT NULL THEN json_quote(json_extract(c.conflict_json,'$.value')) END
          FROM {owner}_changes c WHERE c.{owner}_id=?1 {filter} AND
          (c.conflict_json IS NOT NULL OR (?2 AND c.acknowledged=0 AND
-            (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?1 AND field=c.field))))
+            (c.field='deleted' OR c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=?1 AND field=c.field))))
          ORDER BY c.seq"), id, connected)?;
     Ok(changes)
 }

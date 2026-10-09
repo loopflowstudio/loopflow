@@ -621,35 +621,32 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync. Review-only; no landing
-or public-remote planning export. Joining publishes nothing. Malformed input aborts
-import; contradictions isolate objects. Execution stays local.
+Jack Heart selected custom-ref sync. Review-only; no landing or public-remote
+planning export. Joining publishes nothing; malformed input aborts import,
+contradictions isolate objects, and execution stays local.
 
-Creation/link receipts retain captured saves, parent and attempts on Project rows
-and Task receipts, never imported transitions. Competing histories survive.
-One common view exposes unprepared plans and mapped uncertainty to foreground
-sync/status. Readback alone acknowledges effects; settled receipts reject late errors.
+Creation/link receipts keep captured saves, parents and attempts, never imported
+transitions. One view exposes unprepared plans/mapped uncertainty. Only readback
+acknowledges effects; late errors cannot reopen settlement.
+Earlier creation proofs exclude populated Processes; revised status assertions
+await gate. Acquisition no longer places work. Unplaced-Wave presentation, SSH
+and installation remain.
 
-`a002e4060` proves Linux foreground creation recovery and later saves after import,
-not mixed-provider Git exchange. Its six-table comparison catches fabricated placement
-and transitions, not populated Process/control preservation. `098de8033` revises
-status assertions; gate retains that rerun. Acquisition-side placement is removed;
-Rust/Swift Wave status must represent absent Machine placement. SSH/installation remain.
+Deletion receipts retain save times, baselines, attempts and acknowledgements. Explicit active evidence retains losing deletions; inventory
+absence proves nothing. Creation readback can fill an unattempted baseline, never
+acknowledge removal. Local sequence order cannot hide pending removals. Conflicting captured effects isolate projection. Focused
+fixtures compare populated Session/Process/Workflow rows, not live control behavior.
 
-Acquisition preserves provider age; entity revisions never order relationships.
-Missing inventory is not negative membership; archive, unresolved membership and
-configured-Initiative contradictions block. Lookup and launch freshness differ.
-Imports stay unplaced; explicit placement uses this machine without a placed parent.
-Existing placement survives.
-
+Provider age survives; entity revisions never order relationships. Missing inventory
+is not negative membership. Archive, unresolved membership and Initiative
+contradictions block; imports stay unplaced. Lookup and launch freshness differ.
 Fetch/import/publication stay separate; effect locks block neither saves nor
-acquisition. Damaged journals retain unknown pending state without hiding plans.
-Private moves hold whole histories/dependents, including retained Git documents,
-until explicit selection; omission is not convergence. Recovery/losing-edit UX,
-order/deletion receipts, alternate acquisition, relationship ordering, legacy
-association and Desktop remain before mixed-provider activation.
-Design: `scratch/work-on-another-machine-name.md`; earlier proofs:
-`a67c7f7cb:wave/infrastructure/MEMORY.md`, this heading.
+acquisition. Broken journals mean unknown pending state. Private histories/dependents,
+including Git documents, stay held until explicit selection; omission is not convergence. Ordering receipts, alternate removal/archive
+and relationship acquisition, legacy association, recovery/losing-edit UX and
+Desktop remain before mixed-provider activation. Design:
+`scratch/work-on-another-machine-name.md`; earlier proofs:
+`2657d594a:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

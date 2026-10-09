@@ -107,11 +107,10 @@ Store/CLI/migration checks pass.
 **Retention is not observation:** `44d73dbcd`/`d62003e0f` separate accepted
 frontiers from rejected heads (counterexample: `29fa9a90e`). October 9's
 `7165f9a62`/`dffdbaaa5` jointly project associated origins, preserving original
-journals/receipts and private holds. Foreign-bridge regression: direct parents left
-an old Linear fact winning over a local continuation. Transitive projection now
-retires that ancestor before ranking, retaining stricter mapping validation and
-per-origin portable/creation heads. Causality grants no identity/selection.
-Git fixture composition excludes configured Linear. Mixed exchange, delegation,
+journals/receipts and private holds. `1ece5cc52`: a foreign bridge left old Linear
+winning over local continuation. Transitive retirement precedes ranking, preserving
+mapping validation and per-origin portable/creation heads. Causality grants no identity/selection. Git tests call
+transport/Store, not foreground exchange/Desktop. Mixed exchange, delegation,
 admission and remote/native proof remain.
 
 #1512 (`3e1e6245c`): live connect hands off; dead-driver resume starts an engine

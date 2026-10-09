@@ -398,3 +398,5 @@ it is Loopflow uses configurable workflows to ensure that tasks are designed
 thoughtfully, built simply,, shipped, and validated thoroughly all
 automatically. sometign closer to that". Both now head the list under the
 video in `x6`, the sentence in his words.
+Jack Heart: "the lower case in exports and your-app in the mock are also
+killing me". The mock's repository and Wave names are capitalised.

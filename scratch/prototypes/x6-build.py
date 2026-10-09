@@ -13,16 +13,16 @@ main = f'''
   <p class="slot"><span>Video goes here</span><span>A mock of the app stands in until it is recorded</span></p>
   <div class="win">
     <aside class="side">
-      <h4>your-app</h4>
-      <p class="on">exports</p>
+      <h4>Your App</h4>
+      <p class="on">Exports</p>
       <ul><li class="wait">Add CSV export</li><li>Filter exports by date</li><li class="wait">Schedule a weekly export</li><li>Export to Google Sheets</li></ul>
-      <p>onboarding</p>
+      <p>Onboarding</p>
       <ul><li>Invite a teammate</li><li>First-run checklist</li></ul>
-      <p>billing</p>
+      <p>Billing</p>
       <ul><li>Annual plans</li></ul>
     </aside>
     <div class="pane">
-      <h2>exports</h2>
+      <h2>Exports</h2>
       <p class="obj">People can get their data out of the app in the form they need it, without asking us.</p>
       <p class="lab">Workflow · <code>feature</code></p>
       <ol class="wf" aria-label="The feature workflow: start, design, demo, end">

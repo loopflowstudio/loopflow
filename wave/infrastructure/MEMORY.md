@@ -225,14 +225,14 @@ Jack Heart requested one inventory. #1512: `3e1e6245c`; records: `446cfb2b5`;
 reads: `ea205e3d0`. Integrate LOO-441 before publication. Retain detached rows;
 duplicate PID/birth and late history grant no control. Tokens fence A → B → A.
 
-`6fe75717f`: Claude capture-owner replacement; `a81397932`: fenced admission.
-Runtime untested. Async cancellation
-must not detach an admitted child. Hold the Session lock, not SQLite across I/O
-or nested reads. Synchronous admission cannot depend on its blocked reactor.
-Only Codex has FIFO handoff; live-orphan termination covers noninteractive
-Codex/OpenCode. Optional/native launches, generation removal, death orders and
-fixtures remain. Public-entry agreement, two-second removal and installed settlement
-remain unproved. Earlier proofs: `a55f5345b`.
+Claude replacement: `6fe75717f`; admission: `a81397932`. Native pre-exec
+recording preserves terminal groups; exact wait attachments fence late exits.
+Runtime untested. Synchronous admission must survive cancellation without
+blocking its reactor. Hold the Session lock, not SQLite across I/O.
+Only Codex has FIFO handoff; orphan termination covers noninteractive Codex/OpenCode.
+Optional launches, foreground cleanup, generation removal, death orders and
+public-entry agreement remain. Two-second removal and installed settlement are
+unproved. Earlier proofs: `a55f5345b`.
 
 ## Process vocabulary (LOO-400, curated 2026-10-09)
 

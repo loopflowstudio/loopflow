@@ -73,11 +73,12 @@ commands must reach their exact-store authority checks before any logging-induce
 store open; unavailable-store coverage is reported explicitly. An inspection
 Process does not reserve agent work or mark a Task Started.
 
-The source cut is incomplete: optional/unattributed launches and native foreground
-pre-exec recording still need conversion. Captured Claude restarts reserve a fresh
-AgentProcess and update the capture's attachment; pending operations retain their
-old snapshots. This source path still needs runtime verification. Generation-based
-caller/status wires remain until that lifecycle cut. These are publication blockers.
+The source cut is incomplete: optional/unattributed launches still need conversion.
+Captured Claude and native restarts reserve a fresh AgentProcess and update the
+capture's attachment; pending operations retain their old snapshots. Owned native
+launches record before exec without changing their terminal or process group.
+These source paths still need runtime verification. Generation-based caller/status
+wires remain until that lifecycle cut. These are publication blockers.
 
 ## Publish before spawn
 
@@ -102,7 +103,11 @@ Claude and OpenCode currently use anonymous lifelines without that handoff path.
 Writers remain held until OS exit, even after attachment transfer;
 only the last holder's exit closes the lifeline and stops the group, including
 after SIGKILL. The lifeline does not itself enforce current attachment authority.
-Native terminal process groups are unchanged.
+Owned native launches use the same pre-exec recording channel under the attachment
+lock, but no headless group/watchdog setup. Failed recording prevents provider code
+from running. Captured native waits retain the spawned attachment snapshot: a late
+wait cannot mark a replacement exited. Native terminal process groups are unchanged;
+foreground orphan cleanup remains unfinished.
 
 Scheduled settlement reads unfinished AgentProcess rows, but live-orphan
 termination currently recognizes only noninteractive Codex app-server and

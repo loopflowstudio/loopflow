@@ -2353,23 +2353,56 @@ impl CaptureHandle {
         store.session_thread(&session.id)
     }
 
-    pub(crate) fn begin_provider_spawn(&self, command: &std::process::Command) -> StoreResult<()> {
-        let capture = self.0.lock().expect("Session capture mutex poisoned");
-        if let Some((session, driver)) = &capture.driver {
-            row_store(&capture.dir)?.record_session_provider_launch(session, driver, command)?;
+    pub(crate) fn spawn_native_agent(
+        &self,
+        mut command: std::process::Command,
+    ) -> anyhow::Result<(
+        std::process::Child,
+        Option<crate::process::SessionAttachment>,
+    )> {
+        let mut capture = self.0.lock().expect("Session capture mutex poisoned");
+        if capture.settled_outcome.is_some() {
+            return Err(StoreError::InvalidAuthority("Capture already settled".into()).into());
         }
-        Ok(())
+        let Some((session, expected)) = &capture.driver else {
+            return Ok((
+                crate::harness::agent_process::spawn_native(command, None)?,
+                None,
+            ));
+        };
+        let store = row_store(&capture.dir)?;
+        let session = session.clone();
+        let attachment = store.prepare_session_agent_process(&session, expected)?;
+        command.env(
+            crate::process::AGENT_CALLER_ENV,
+            serde_json::to_string(&attachment.caller(session.clone()))?,
+        );
+        capture.driver = Some((session.clone(), attachment.clone()));
+        // Keep the capture's settlement snapshot fixed through admission. The
+        // recorder only touches the store, never this mutex.
+        let child = crate::harness::agent_process::spawn_native(
+            command,
+            Some(&(store, session, attachment.clone())),
+        )?;
+        Ok((child, Some(attachment)))
     }
 
-    pub(crate) fn record_provider_process(&self, pid: u32) -> StoreResult<()> {
+    pub(crate) fn record_native_agent_exit(
+        &self,
+        expected: &crate::process::SessionAttachment,
+    ) -> StoreResult<()> {
         let capture = self.0.lock().expect("Session capture mutex poisoned");
-        if let Some((session, driver)) = &capture.driver {
-            if let Some(started) = crate::journal::process_started_at(pid).map_err(record_error)? {
-                row_store(&capture.dir)?
-                    .record_session_provider_process(session, driver, pid, started)?;
-            }
+        let Some((session, attachment)) = &capture.driver else {
+            return Err(StoreError::InvalidAuthority(
+                "Capture has no attachment".into(),
+            ));
+        };
+        if attachment != expected {
+            return Err(StoreError::InvalidAuthority(
+                "Capture attachment changed".into(),
+            ));
         }
-        Ok(())
+        row_store(&capture.dir)?.record_native_provider_exit(session, expected, true)
     }
 
     pub(crate) fn session_attachment(&self) -> Option<(String, crate::process::SessionAttachment)> {
@@ -3399,6 +3432,60 @@ mod tests {
             flow: crate::session_record::SessionFlowMembership::Independent,
             work: None,
         }
+    }
+
+    #[test]
+    fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            let capture = CaptureHandle::begin_at(home, spec(home))?;
+            capture.claim_conversation_driver()?;
+            let (session, first) = capture.session_attachment().unwrap();
+            let store = super::row_store(&capture.artifact_dir())?;
+            let command = || {
+                let mut command = std::process::Command::new("/bin/sh");
+                command.env_clear().args(["-c", "exit 42"]);
+                command
+            };
+            let (mut child, snapshot) = capture.spawn_native_agent(command())?;
+            assert_eq!(snapshot.as_ref(), Some(&first));
+            assert_eq!(child.wait()?.code(), Some(42));
+            // Observed wait, not successful spawn or a finished capture, ends it.
+            capture.record_native_agent_exit(&first)?;
+            let ended = store.process(&first.agent_process_lfid)?.unwrap();
+            assert_eq!(ended.pid, Some(child.id()));
+            assert!(ended.completed_at.is_some());
+
+            let (mut child, snapshot) = capture.spawn_native_agent(command())?;
+            let second = snapshot.unwrap();
+            assert_ne!(first.agent_process_lfid, second.agent_process_lfid);
+            assert_eq!(
+                capture.session_attachment(),
+                Some((session.clone(), second.clone()))
+            );
+            assert_eq!(child.wait()?.code(), Some(42));
+            assert!(capture.record_native_agent_exit(&first).is_err());
+            assert!(store
+                .process(&second.agent_process_lfid)?
+                .unwrap()
+                .completed_at
+                .is_none());
+            // The child exited but without its wait receipt another launch is refused.
+            assert!(capture.spawn_native_agent(command()).is_err());
+            capture.record_native_agent_exit(&second)?;
+            assert_eq!(store.process(&first.agent_process_lfid)?, Some(ended));
+            capture.finish("completed")?;
+            assert!(capture.spawn_native_agent(command()).is_err());
+            assert!(store
+                .session_attachment(&session)?
+                .unwrap()
+                .process_lfid
+                .is_none());
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

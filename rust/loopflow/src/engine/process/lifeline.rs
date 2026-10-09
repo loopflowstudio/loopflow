@@ -32,55 +32,96 @@ pub(crate) fn spawn_agent_process(
     let (reader, writer) = open_lifeline(path)?;
     let null = above_stdio(File::options().write(true).open("/dev/null")?)?;
     command.process_group(0);
-    // Command::spawn waits for exec, so recording on its calling thread would
-    // deadlock the child. The scoped thread writes in the parent, never after fork.
-    let (parent, child) = std::os::unix::net::UnixStream::pair()?;
-    let mut parent = above_stdio(File::from(OwnedFd::from(parent)))?;
-    let child = above_stdio(File::from(OwnedFd::from(child)))?;
-    let parent_fd = parent.as_raw_fd();
     let writer_fd = writer.as_raw_fd();
-    // SAFETY: the child closes inherited writers, starts the watchdog and
-    // exchanges identity using async-signal-safe syscalls only. The parent
-    // owns the recorder and performs all allocation, locking and database I/O.
-    unsafe {
-        command.pre_exec(move || {
-            // Close before forking the watchdog: neither child may keep the
-            // lifeline or recording peer alive if lf dies before provider exec.
-            libc::close(writer_fd);
-            libc::close(parent_fd);
-            start_watchdog(reader.as_raw_fd(), null.as_raw_fd())?;
-            let pid = libc::getpid() as u32;
-            transfer(child.as_raw_fd(), &mut pid.to_ne_bytes(), true)?;
-            await_ready(child.as_raw_fd())
-        });
-    }
-    let child = std::thread::scope(|scope| {
-        let recorder = std::thread::Builder::new()
-            .name("agent-process-record".into())
-            .spawn_scoped(scope, move || {
-                let mut pid = [0u8; 4];
-                match parent.read_exact(&mut pid) {
-                    Ok(()) => {}
-                    // Spawn failed before reaching our hook; preserve that error.
-                    Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
-                        return Ok(())
-                    }
-                    Err(error) => return Err(error),
-                }
-                record(u32::from_ne_bytes(pid))?;
-                parent.write_all(b".")
-            })?;
+    let recording = SpawnRecording::prepare(command.as_std_mut(), move || {
+        // SAFETY: this hook runs only after fork. Neither provider nor watchdog
+        // may keep the parent's lifeline writer open.
+        unsafe { libc::close(writer_fd) };
+        start_watchdog(reader.as_raw_fd(), null.as_raw_fd())
+    })?;
+    let child = recording.spawn(record, move || {
         let spawned = command.spawn();
-        // A failed spawn might never enter pre_exec. Close the parent's copy
-        // of the child endpoint before waiting for the recorder's EOF.
         drop(command);
-        recorder
-            .join()
-            .map_err(|_| std::io::Error::other("AgentProcess recorder panicked"))??;
         spawned
     })?;
     retain_lifeline(writer);
     Ok(child)
+}
+
+/// Record a foreground provider before exec without changing its inherited
+/// process group, controlling terminal, stdio or signal behavior.
+pub(crate) fn spawn_native_agent_process(
+    mut command: std::process::Command,
+    record: impl FnOnce(u32) -> std::io::Result<()> + Send,
+) -> std::io::Result<std::process::Child> {
+    let recording = SpawnRecording::prepare(&mut command, || Ok(()))?;
+    recording.spawn(record, move || {
+        let spawned = command.spawn();
+        drop(command);
+        spawned
+    })
+}
+
+/// Parent-side pre-exec recording channel. Consuming the command after spawn
+/// closes its child endpoint even when an earlier pre-exec hook fails.
+struct SpawnRecording(File);
+
+impl SpawnRecording {
+    fn prepare(
+        command: &mut std::process::Command,
+        before_record: impl FnMut() -> std::io::Result<()> + Send + Sync + 'static,
+    ) -> std::io::Result<Self> {
+        use std::os::unix::process::CommandExt;
+
+        let (parent, child) = std::os::unix::net::UnixStream::pair()?;
+        let parent = above_stdio(File::from(OwnedFd::from(parent)))?;
+        let child = above_stdio(File::from(OwnedFd::from(child)))?;
+        let parent_fd = parent.as_raw_fd();
+        let mut before_record = before_record;
+        // SAFETY: only async-signal-safe syscalls run in the child. The parent
+        // thread owns the recorder, including allocation, locking and SQLite.
+        unsafe {
+            command.pre_exec(move || {
+                libc::close(parent_fd);
+                before_record()?;
+                let pid = libc::getpid() as u32;
+                transfer(child.as_raw_fd(), &mut pid.to_ne_bytes(), true)?;
+                await_ready(child.as_raw_fd())
+            });
+        }
+        Ok(Self(parent))
+    }
+
+    fn spawn<T>(
+        self,
+        record: impl FnOnce(u32) -> std::io::Result<()> + Send,
+        spawn: impl FnOnce() -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        // Command::spawn waits for exec; recording on its thread would deadlock.
+        std::thread::scope(|scope| {
+            let mut parent = self.0;
+            let recorder = std::thread::Builder::new()
+                .name("agent-process-record".into())
+                .spawn_scoped(scope, move || {
+                    let mut pid = [0u8; 4];
+                    match parent.read_exact(&mut pid) {
+                        Ok(()) => {}
+                        // Spawn failed before our hook; retain the spawn error.
+                        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => {
+                            return Ok(())
+                        }
+                        Err(error) => return Err(error),
+                    }
+                    record(u32::from_ne_bytes(pid))?;
+                    parent.write_all(b".")
+                })?;
+            let spawned = spawn();
+            recorder
+                .join()
+                .map_err(|_| std::io::Error::other("AgentProcess recorder panicked"))??;
+            spawned
+        })
+    }
 }
 
 /// Complete a tiny pre-exec handshake without allocating or using Rust locks.
@@ -270,8 +311,80 @@ mod tests {
     use std::process::{Child, Command, Stdio};
     use std::time::{Duration, Instant};
 
-    use super::{hold_agent_process_lifeline, spawn_agent_process};
+    use super::{hold_agent_process_lifeline, spawn_agent_process, spawn_native_agent_process};
     use crate::engine::process::{kill_process_group, terminate_process_group};
+
+    #[test]
+    fn native_spawn_records_before_exec_and_preserves_terminal_and_group() {
+        use std::fs::File;
+        use std::os::fd::FromRawFd;
+
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("executed");
+        let (mut master, mut slave) = (-1, -1);
+        // SAFETY: openpty writes two valid output descriptors; optional termios,
+        // window size and name pointers are null. Files take ownership once.
+        let (master, slave) = unsafe {
+            assert_eq!(
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                0
+            );
+            (File::from_raw_fd(master), File::from_raw_fd(slave))
+        };
+        let mut command = Command::new("/bin/sh");
+        command
+            .env_clear()
+            .args([
+                "-c",
+                "[ -t 0 ] && [ -t 1 ] && [ -t 2 ] || exit 1; printf executed > \"$1\"; exit 42",
+                "fixture",
+            ])
+            .arg(&marker)
+            .stdin(slave.try_clone().unwrap())
+            .stdout(slave.try_clone().unwrap())
+            .stderr(slave);
+        let mut recorded = None;
+        let mut child = spawn_native_agent_process(command, |pid| {
+            assert!(!marker.exists(), "provider code ran before recording");
+            // SAFETY: queries only; no process is signalled or modified.
+            unsafe {
+                assert_eq!(libc::getpgid(pid as i32), libc::getpgrp());
+            }
+            recorded = Some(pid);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(recorded, Some(child.id()));
+        assert_eq!(child.wait().unwrap().code(), Some(42));
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "executed");
+        drop(master);
+    }
+
+    #[test]
+    fn native_record_failure_prevents_effects_and_preserves_spawn_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("executed");
+        let mut command = Command::new("/bin/sh");
+        command
+            .env_clear()
+            .args(["-c", "printf executed > \"$1\"", "fixture"])
+            .arg(&marker);
+        let error =
+            spawn_native_agent_process(command, |_| Err(std::io::Error::other("record refused")))
+                .unwrap_err();
+        assert_eq!(error.to_string(), "record refused");
+        assert!(!marker.exists());
+        let error =
+            spawn_native_agent_process(Command::new(root.path().join("absent")), |_| Ok(()))
+                .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    }
 
     const ATTACHED_MODE: &str = "LF_TEST_LIFELINE_LF";
     const ATTACHED_OUT: &str = "LF_TEST_LIFELINE_OUT";

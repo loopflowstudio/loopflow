@@ -60,6 +60,36 @@ pub(super) fn spawn(
     .map_err(Into::into)
 }
 
+/// Native terminals keep their foreground process group. Remote clients do not
+/// own the provider; owned native launches use the same admission fence and
+/// pre-exec recording as headless launches.
+pub(crate) fn spawn_native(
+    mut command: std::process::Command,
+    owner: Option<&(SqliteStore, String, SessionAttachment)>,
+) -> Result<std::process::Child> {
+    let Some((store, session, attachment)) = owner else {
+        return Ok(command.spawn()?);
+    };
+    store
+        .with_session_attachment(session, attachment, || {
+            store.record_session_provider_launch(session, attachment, &command)?;
+            let spawned = crate::engine::process::spawn_native_agent_process(command, |pid| {
+                let started_at = process_started_at(pid)?.ok_or_else(|| {
+                    std::io::Error::other("AgentProcess birth unavailable before exec")
+                })?;
+                store
+                    .record_session_provider_process(session, attachment, pid, started_at)
+                    .map_err(std::io::Error::other)
+            });
+            if spawned.is_err() {
+                store.record_native_provider_exit(session, attachment, false)?;
+            }
+            // Preserve the OS error (including NotFound) for the caller's message.
+            Ok(spawned)
+        })?
+        .map_err(Into::into)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentProcessReapReport {
     pub orphaned: Vec<u32>,
@@ -334,6 +364,61 @@ mod tests {
             store.process(&next.agent_process_lfid).unwrap(),
             Some(failed)
         );
+        assert_eq!(
+            store
+                .process(&first.agent_process_lfid)
+                .unwrap()
+                .unwrap()
+                .pid,
+            recorded.pid
+        );
+    }
+
+    #[test]
+    fn native_spawn_retains_identity_and_fences_effects_after_takeover() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let session = store.test_session("native", &crate::session_record::new_artifact_key());
+        let parent = ProcessLfid::new();
+        let first = store
+            .claim_session_attachment(&session.id, None, &parent, true)
+            .unwrap();
+        let owner = (store.clone(), session.id.clone(), first.clone());
+        let mut command = Command::new("/bin/sh");
+        command.env_clear().args(["-c", "exit 42"]);
+        let mut child = super::spawn_native(command, Some(&owner)).unwrap();
+        let recorded = store.process(&first.agent_process_lfid).unwrap().unwrap();
+        assert_eq!(recorded.pid, Some(child.id()));
+        assert!(recorded.os_started_at.is_some());
+        assert_eq!(child.wait().unwrap().code(), Some(42));
+        store
+            .record_native_provider_exit(&session.id, &first, true)
+            .unwrap();
+        let next = store
+            .prepare_session_agent_process(&session.id, &first)
+            .unwrap();
+        let marker = home.path().join("stale-effect");
+        let mut stale = Command::new("/bin/sh");
+        stale
+            .env_clear()
+            .args(["-c", "printf effect > \"$1\"", "fixture"])
+            .arg(&marker);
+        assert!(super::spawn_native(stale, Some(&owner)).is_err());
+        assert!(!marker.exists());
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap(),
+            Some(next.clone())
+        );
+        let owner = (store.clone(), session.id.clone(), next.clone());
+        let error = super::spawn_native(Command::new(home.path().join("absent")), Some(&owner))
+            .unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        let failed = store.process(&next.agent_process_lfid).unwrap().unwrap();
+        assert!(failed.completed_at.is_some());
+        assert!(failed.outcome.is_none());
         assert_eq!(
             store
                 .process(&first.agent_process_lfid)

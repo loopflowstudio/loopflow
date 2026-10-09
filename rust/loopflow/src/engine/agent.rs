@@ -1995,7 +1995,7 @@ fn _run_agent_once(
     let result = if process.auto && process.stream {
         // Stream mode: capture stdout line by line
         run_streaming(
-            &mut cmd,
+            cmd,
             process.stream_format,
             process.timeout,
             capture,
@@ -2003,10 +2003,10 @@ fn _run_agent_once(
         )
     } else if process.auto {
         // Batch mode: capture all output
-        run_batch(&mut cmd, process.timeout, capture, activation)
+        run_batch(cmd, process.timeout, capture, activation)
     } else {
         // Interactive mode: inherit stdio
-        run_interactive(&mut cmd, process.timeout, capture, activation, title)
+        run_interactive(cmd, process.timeout, capture, activation, title)
     };
     if let (Some(capture), Ok(result)) = (capture, &result) {
         capture.observe_provider(
@@ -2047,29 +2047,33 @@ fn _run_agent_once(
 /// `activation` is the native credential lock a shared launch took; it is
 /// released once the provider process exists.
 fn spawn_agent_child(
-    cmd: &mut Command,
+    cmd: Command,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
-) -> Result<Child, CoreError> {
-    if let Some(capture) = capture {
-        capture
-            .begin_provider_spawn(cmd)
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+) -> Result<(Child, Option<crate::process::SessionAttachment>), CoreError> {
+    let child = match capture {
+        Some(capture) => capture.spawn_native_agent(cmd),
+        None => crate::harness::agent_process::spawn_native(cmd, None).map(|child| (child, None)),
     }
-    let mut child = cmd.spawn()?;
+    .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     drop(activation);
-    if let Some(capture) = capture {
-        if let Err(error) = capture.record_provider_process(child.id()) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(CoreError::ExecutionFailed(error.to_string()));
-        }
-    }
     Ok(child)
 }
 
+fn record_native_agent_exit(
+    capture: Option<&CaptureHandle>,
+    attachment: Option<&crate::process::SessionAttachment>,
+) -> Result<(), CoreError> {
+    if let Some((capture, attachment)) = capture.zip(attachment) {
+        capture
+            .record_native_agent_exit(attachment)
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+    }
+    Ok(())
+}
+
 fn run_batch(
-    cmd: &mut Command,
+    mut cmd: Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
@@ -2077,7 +2081,7 @@ fn run_batch(
     let start = Instant::now();
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
 
     let stdout = child
@@ -2103,6 +2107,7 @@ fn run_batch(
     });
 
     let (status, timed_out) = wait_for_exit(&mut child, timeout, || {})?;
+    record_native_agent_exit(capture, attachment.as_ref())?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent batch completed"
@@ -2149,14 +2154,14 @@ fn run_batch(
 }
 
 fn run_interactive(
-    cmd: &mut Command,
+    cmd: Command,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
     activation: Option<std::fs::File>,
     mut title: Option<crate::engine::terminal_title::TerminalTitle>,
 ) -> Result<AgentProcessResult, CoreError> {
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
@@ -2167,6 +2172,7 @@ fn run_interactive(
             title.refresh();
         }
     })?;
+    record_native_agent_exit(capture, attachment.as_ref())?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent interactive completed"
@@ -2187,7 +2193,7 @@ fn run_interactive(
 }
 
 fn run_streaming(
-    cmd: &mut Command,
+    mut cmd: Command,
     stream_format: StreamFormat,
     timeout: Option<Duration>,
     capture: Option<&CaptureHandle>,
@@ -2197,7 +2203,7 @@ fn run_streaming(
     cmd.stderr(Stdio::piped());
 
     let start = Instant::now();
-    let mut child = spawn_agent_child(cmd, capture, activation)?;
+    let (mut child, attachment) = spawn_agent_child(cmd, capture, activation)?;
     let _pid_guard = ChildPidGuard::new(child.id());
     tracing::debug!(elapsed_ms = start.elapsed().as_millis(), "agent spawned");
 
@@ -2319,6 +2325,7 @@ fn run_streaming(
     }
 
     let status = child.wait()?;
+    record_native_agent_exit(capture, attachment.as_ref())?;
     tracing::debug!(
         elapsed_ms = start.elapsed().as_millis(),
         "agent streaming completed"

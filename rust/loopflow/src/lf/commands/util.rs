@@ -719,38 +719,21 @@ fn session_command_status_with_env(
     // A remote terminal is only a client of the surviving engine. A local
     // terminal owns the provider generation created by this exact Process.
     let owned = native_provider_driver(environment)?;
-    if let Some((store, session, driver)) = &owned {
-        store.record_session_provider_launch(session, driver, &process)?;
-    }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),
         "prepared native provider launch"
     );
-    let mut child = match process.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            if let Some((store, session, driver)) = &owned {
-                store.record_native_provider_exit(session, driver, false)?;
+    let mut child =
+        crate::harness::agent_process::spawn_native(process, owned.as_ref()).map_err(|error| {
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
+                anyhow!(missing_agent_message(&command.program))
+            } else {
+                error
             }
-            if error.kind() == std::io::ErrorKind::NotFound {
-                return Err(anyhow!(missing_agent_message(&command.program)));
-            }
-            return Err(error.into());
-        }
-    };
-    if let Some((store, session, driver)) = &owned {
-        let recorded = (|| -> Result<()> {
-            if let Some(started) = crate::journal::process_started_at(child.id())? {
-                store.record_session_provider_process(session, driver, child.id(), started)?;
-            }
-            Ok(())
-        })();
-        if let Err(error) = recorded {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-    }
+        })?;
 
     drop(activation);
     let client = match ProviderClientGuard::publish(capture_dir.as_deref(), child.id()) {

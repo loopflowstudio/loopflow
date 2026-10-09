@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::SqliteStore;
 use crate::durable::{ProjectId, TaskId};
 use crate::planning::PlanningChange;
-use crate::store::StoreResult;
+use crate::store::{StoreError, StoreResult};
 
 impl SqliteStore {
     pub(crate) fn planning_field_owners(
@@ -500,28 +500,25 @@ pub(super) fn import_peer_deletion(
 ) -> StoreResult<()> {
     let mut receipts = history
         .iter()
-        .map(|value| {
-            serde_json::from_value::<DeletionReceipt>((*value).clone()).map_err(Into::into)
-        })
-        .collect::<StoreResult<Vec<_>>>()?;
+        .map(|value| serde_json::from_value::<DeletionReceipt>((*value).clone()));
     let local: Option<(String, String, String)> = conn.query_row(
         "SELECT task_id,field,json_object('deleted_at',deletion_saved_at,'base',json(base_json),'attempted',json(CASE WHEN attempted THEN 'true' ELSE 'false' END),
         'acknowledged',json(CASE WHEN acknowledged THEN 'true' ELSE 'false' END),'acknowledged_revision',acknowledged_revision,
         'conflict',json(conflict_json),'error',error) FROM task_changes WHERE id=?1",
         [id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
     ).optional()?;
-    if let Some((owner, field, body)) = local {
+    let mut merged = if let Some((owner, field, body)) = local {
         if owner != task.as_str() || field != "deleted" {
-            return Err(crate::store::StoreError::InvalidData(
-                "competing planning deletion receipts".into(),
-            ));
+            return Err(StoreError::PlanningReceiptConflict { effect: "deletion" });
         }
-        receipts.push(serde_json::from_str(&body)?);
-    }
-    let mut merged = receipts
-        .pop()
-        .expect("a deletion field has at least one mutation");
+        serde_json::from_str::<DeletionReceipt>(&body)?
+    } else {
+        receipts
+            .next_back()
+            .expect("a deletion field has at least one mutation")?
+    };
     for receipt in receipts {
+        let receipt = receipt?;
         let baseline_conflict = match (&merged.base, &receipt.base) {
             (Some(left), Some(right)) => left != right,
             (None, Some(_)) => merged.attempted,
@@ -538,9 +535,7 @@ pub(super) fn import_peer_deletion(
         {
             // Unordered active/trash evidence stays a retained projection conflict;
             // a clock is not authority to discard either provider result.
-            return Err(crate::store::StoreError::InvalidData(
-                "competing planning deletion receipts".into(),
-            ));
+            return Err(StoreError::PlanningReceiptConflict { effect: "deletion" });
         }
         // Creation readback may fill an unattempted, baseline-free deletion.
         // A captured attempt's baseline cannot subsequently change.
@@ -572,17 +567,40 @@ pub(super) fn import_peer_deletion(
     if merged.acknowledged || merged.conflict.is_some() {
         merged.error = None;
     }
-    PlanningChanges::Task(task).record_value(
-        conn,
-        "deleted",
-        id,
-        Value::Bool(true),
-        merged.base.as_ref().map(serde_json::to_value).transpose()?,
+    // Import the captured receipt directly. The scalar save path would sample
+    // this machine's provider baseline and visibility only to overwrite them.
+    conn.execute(
+        "INSERT INTO task_changes(id,task_id,field,value_json,base_json,attempted,
+            acknowledged,acknowledged_revision,conflict_json,error,deletion_saved_at)
+         VALUES(?1,?2,'deleted','true',?3,?4,?5,?6,?7,?8,?9)
+         ON CONFLICT(id) DO UPDATE SET base_json=excluded.base_json,
+            attempted=excluded.attempted,acknowledged=excluded.acknowledged,
+            acknowledged_revision=excluded.acknowledged_revision,
+            conflict_json=excluded.conflict_json,error=excluded.error,
+            deletion_saved_at=excluded.deletion_saved_at
+         WHERE base_json IS NOT excluded.base_json OR attempted IS NOT excluded.attempted
+            OR acknowledged IS NOT excluded.acknowledged
+            OR acknowledged_revision IS NOT excluded.acknowledged_revision
+            OR conflict_json IS NOT excluded.conflict_json OR error IS NOT excluded.error
+            OR deletion_saved_at IS NOT excluded.deletion_saved_at",
+        params![
+            id,
+            task.as_str(),
+            merged
+                .base
+                .map(|base| serde_json::to_string(&base))
+                .transpose()?,
+            merged.attempted,
+            merged.acknowledged,
+            merged.acknowledged_revision,
+            merged
+                .conflict
+                .map(|conflict| serde_json::to_string(&conflict))
+                .transpose()?,
+            merged.error,
+            merged.deleted_at
+        ],
     )?;
-    conn.execute("UPDATE task_changes SET base_json=?2,attempted=?3,acknowledged=?4,acknowledged_revision=?5,conflict_json=?6,error=?7,deletion_saved_at=?8
-        WHERE id=?1 AND (deletion_saved_at IS NOT ?8 OR base_json IS NOT ?2 OR attempted IS NOT ?3 OR acknowledged IS NOT ?4 OR acknowledged_revision IS NOT ?5 OR conflict_json IS NOT ?6 OR error IS NOT ?7)",
-        params![id,merged.base.map(|base| serde_json::to_string(&base)).transpose()?,merged.attempted,merged.acknowledged,
-            merged.acknowledged_revision,merged.conflict.map(|conflict| serde_json::to_string(&conflict)).transpose()?,merged.error,merged.deleted_at])?;
     Ok(())
 }
 

@@ -1478,9 +1478,7 @@ fn projection_conflict(error: &StoreError) -> bool {
         }
         StoreError::InvalidData(reason) => matches!(
             reason.as_str(),
-            "competing planning creation receipts"
-                | "competing planning deletion receipts"
-                | "comment identity already belongs to another comment"
+            "comment identity already belongs to another comment"
                 | "comment belongs to another Task"
                 | "Wave parent would create a cycle"
                 | "Wave parent is unavailable"
@@ -1488,7 +1486,8 @@ fn projection_conflict(error: &StoreError) -> bool {
                 | "Linear removal prevents peer Task projection"
                 | "Linear archive prevents peer Project projection"
         ),
-        StoreError::ProjectMembershipConflict { .. }
+        StoreError::PlanningReceiptConflict { .. }
+        | StoreError::ProjectMembershipConflict { .. }
         | StoreError::ProviderObservationConflict { .. } => true,
         _ => false,
     }
@@ -1771,7 +1770,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT json_object('id',id,'value',json(value_json),'base',json(base_json),
+                "SELECT json_object('id',id,'deleted_at',deletion_saved_at,'value',json(value_json),'base',json(base_json),
              'attempted',attempted,'acknowledged',acknowledged,'revision',acknowledged_revision,
              'conflict',json(conflict_json),'error',error) FROM task_changes WHERE id=?1",
                 [id],

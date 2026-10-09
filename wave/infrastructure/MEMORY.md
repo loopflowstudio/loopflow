@@ -632,10 +632,12 @@ Earlier creation proofs exclude populated Processes; revised status assertions
 await gate. Acquisition no longer places work. Unplaced-Wave presentation, SSH
 and installation remain.
 
-Deletion receipts retain save times, baselines, attempts and acknowledgements. Explicit active evidence retains losing deletions; inventory
-absence proves nothing. Creation readback can fill an unattempted baseline, never
-acknowledge removal. Local sequence order cannot hide pending removals. Conflicting captured effects isolate projection. Focused
-fixtures compare populated Session/Process/Workflow rows, not live control behavior.
+Deletion receipts retain save times, baselines, attempts and acknowledgements.
+Explicit active evidence retains losing deletions; inventory absence proves nothing.
+Creation readback can fill an unattempted baseline, never acknowledge removal.
+Local sequence order cannot hide pending removals. Typed effect conflicts isolate
+projection. Imports write captured receipts directly; fixtures compare populated
+execution rows, not live controls.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
 is not negative membership. Archive, unresolved membership and Initiative

@@ -90,6 +90,8 @@ pub enum StoreError {
     InvalidData(String),
     #[error("unordered or conflicting {entity} facts for {id}; refresh planning")]
     ProviderObservationConflict { entity: &'static str, id: String },
+    #[error("competing planning {effect} receipts")]
+    PlanningReceiptConflict { effect: &'static str },
     #[error("Project {project_id} membership changed without relationship ordering evidence")]
     ProjectMembershipConflict { project_id: String },
     #[error("development store is incompatible: {0}")]

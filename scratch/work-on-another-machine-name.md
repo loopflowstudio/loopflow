@@ -167,6 +167,11 @@ this heading. Keep these replacements deleted:
   removal receipt: neither imported arrival nor that clock orders provider evidence.
   Common pending/attempt/status readers retain every unresolved
   removal identity. Tombstone projection alone never prepares or settles a delete.
+- Deletion import's scalar `record_value` followed by an overwrite. The common
+  deletion owner now upserts the merged captured receipt once, without sampling
+  this machine's baseline or visibility. History decoding streams rather than
+  collecting another receipt vector. Creation/deletion conflicts use one typed
+  Store error, not diagnostic-string matching; malformed input still aborts import.
 - Acquisition-side `inherit_project_placement`: provider readback is planning,
   not first local execution. Explicit placement retains its existing owner.
 - Task creation receipt bypass after mapping-only import, missing-list readiness
@@ -235,29 +240,17 @@ receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrate
 Their owners and preservation boundaries are described under **Delete — do not
 maintain** and item 4 below.
 
-Prepared Task/Project creation and link attempts now travel through the common
-`planning_export.rs` owner. Stable saved IDs, original input/parent, captured change
-IDs and attempted flags survive import. Historical uncertainty is unioned, never
-clock-selected away; competing effect snapshots isolate projection while the journal
-and independent plans commit. Project readback, like Task readback, can reconcile
-a receipt after a mapping-only import. Entity readback does not clear an uncertain
-attachment without matching Initiative evidence, and later accepted moves remain
-legal. Import fabricates no local transition or execution.
-
-Foreground creation now uses the existing common owner for unprepared peer-born
-Tasks and Projects. One derived `planning_exports` view feeds acquisition,
-`sync_export` eligibility and CLI/DTO status; local transitions and preexisting
-Task creation intents no longer determine eligibility. Preparation creates a
-missing Task intent transactionally from saved planning. No Project transition,
-rotation, selection, activation or execution is fabricated.
-
-Mapped receipts stay eligible until explicit common readback acknowledgement.
-Task acknowledgement requires the attempted saved UUID; Project acknowledgement
-also requires the captured Initiative. Acknowledgement travels with the same
-receipt, merges monotonically only for matching captured effects, and suppresses
-late errors. Mapping alone never grants acknowledgement or another write. A later
-accepted Project move does not reopen its acknowledged creation. Existing attempts,
-errors, original parent and captured-save boundaries remain.
+Creation/link receipts remain owned by `planning_export.rs`: saved UUIDs, original
+input/parent, captured change IDs, attempts and acknowledgement travel together.
+Competing effects isolate projection; matching receipts retain attempts and union
+acknowledgement. One `planning_exports` view feeds foreground preparation,
+acquisition and status for unprepared peer plans and mapped uncertain creations.
+Preparation alone creates missing Task receipts; import fabricates no transition,
+selection, rotation, activation or execution. Readback acknowledges attempted UUIDs
+and, for Projects, the captured Initiative; mapping alone permits neither
+acknowledgement nor another write. Later accepted moves stay legal and late errors
+cannot reopen acknowledgement. Earlier detailed account:
+`95e81c688:scratch/work-on-another-machine-name.md`, **Remaining integration**.
 
 At `a002e4060`, the isolated Linux connected-provider fixture passed after importing
 unprepared plans before connecting Linear. It exercises public work-watch, Task
@@ -640,7 +633,7 @@ Prior creation/export and Linux public recovery results: `a002e4060:scratch/work
 Compression's build, Project-content/migration and static-check evidence remains at
 `098de8033:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 
-Check (October 9 implement): `cargo test -p loopflow --lib peer_deletion --no-run`, network-isolated `peer_deletion` (5) / `peer_migration_preserves_the_populated_predecessor` (1), `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `git diff --check` and `lf context --skill implement` pass; combined/public/Desktop checks remain with gate.
+Check (October 9 compress): `cargo test -p loopflow --lib peer_deletion --no-run`, network-isolated lib-test `store::sqlite::planning_peers::tests::` (55), all-target Clippy, fmt, `git diff --check` and `lf context --skill compress` pass; public/combined/Desktop acceptance remains with gate. Earlier deletion-cut checks: `95e81c688`, this heading.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

@@ -494,9 +494,7 @@ fn merge_receipt(saved: &mut CreationReceipt, incoming: CreationReceipt) -> Stor
     if before != after
         || saved.attempted && incoming.attempted && saved.export.input != incoming.export.input
     {
-        return Err(StoreError::InvalidData(
-            "competing planning creation receipts".into(),
-        ));
+        return Err(StoreError::PlanningReceiptConflict { effect: "creation" });
     }
     if !saved.attempted && incoming.attempted {
         saved.export.input = incoming.export.input;

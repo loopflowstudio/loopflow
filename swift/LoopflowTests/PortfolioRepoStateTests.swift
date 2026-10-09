@@ -56,7 +56,7 @@ struct PortfolioRepoStateTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         func git(_ args: [String], at dir: URL) throws {
-            let process = Foundation.Process()
+            let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["git", "-C", dir.path] + args
             process.standardOutput = Pipe()
@@ -122,7 +122,7 @@ struct PortfolioRepoStateTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         func git(_ args: [String], at dir: URL) throws {
-            let process = Foundation.Process()
+            let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["git", "-C", dir.path] + args
             process.standardOutput = Pipe()

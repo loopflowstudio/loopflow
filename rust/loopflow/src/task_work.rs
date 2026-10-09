@@ -3,14 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::FlowProcessInventoryEntry;
-use crate::process::Process;
+use crate::process::LfProcess;
 
 /// All retained work in a checkout, plus explicitly attributed work elsewhere.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub flow_processes: Vec<FlowProcessInventoryEntry>,
-    pub processes: Vec<Process>,
+    pub processes: Vec<LfProcess>,
     /// The Task's Workflow; `None` when it runs only ad hoc Flows.
     pub workflow: Option<crate::ops::workflow::Workflow>,
 }

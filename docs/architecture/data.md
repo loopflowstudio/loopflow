@@ -35,7 +35,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
 | Agent conversation, title, feedback, native identity and driver | `agent_sessions` |
-| Native starts, outcomes, retries and usage | AgentSession history, correlated to native turn and driving Process |
+| Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Flow's identity, state and step results | Its driver Process and child step processes in `processes` |
 | A Flow's name, launched graph and each step's node | FlowProcess: `flow_processes` and `flow_process_steps`, appended by the driver |
 | A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task move` |
@@ -56,10 +56,10 @@ retains exact current tables, source paths and subprocess edges in one place.
 
 Process records one actual lf process, including agent-issued nested commands.
 Each executed Flow step has its own child lf Process. Multiple provider turns may
-belong to that Process; their results remain distinct in AgentSession history.
+belong to that Process; their results remain distinct in LfSession history.
 A provider may succeed before its command fails later.
 
-AgentSession identity, name and feedback survive driver replacement. Its current
+LfSession identity, name and feedback survive driver replacement. Its current
 driver is a nullable Process reference with a generation fence. The native engine
 has separate identity and generation: a driver can die while the engine continues.
 History retains the original Process and provider generation when a later driver
@@ -113,7 +113,7 @@ authority, and do not synchronize private writes back to the installation.
 
 ## Attribution and Started
 
-Typed ancestry belongs to AgentSession and Process. Task implies Wave;
+Typed ancestry belongs to LfSession and Process. Task implies Wave;
 constructors fill omitted ancestors and reject contradictions in the transaction.
 Flow members share their owner's nullable Task. Historical work events retain
 their recorded attribution independently of current assignment or driver.

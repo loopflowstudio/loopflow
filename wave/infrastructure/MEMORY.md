@@ -633,8 +633,8 @@ on explicit correspondence. Earlier cuts: `521c7040f`, this heading.
 Causality precedes ranking; portable parents prove observation, not identity or
 authority. Private references hold groups. Membership delivery/readback resolves
 aliases without rewriting inputs (`79e478550`/`521c7040f`); exact readback rebases
-later saves. Receipt origin and local projection must remain distinct through
-capture, order selection and list comparison—not only import. Order/deletion
+later saves. Receipt origin stays distinct from projection through capture, order selection
+and list comparison. Order/deletion
 composition and association/mixed exchange remain held. Focused proofs establish
 no public/installed acceptance. Earlier proofs: `163362aad`, this heading.
 Plan: `scratch/work-on-another-machine-name.md`.

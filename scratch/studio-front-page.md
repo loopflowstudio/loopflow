@@ -392,3 +392,9 @@ by the life of the work, show the person's part as a visible state, and keep
 mechanism to one line. cmux is a feature list with outcomes left to quotes.
 The `x6` list now follows one Task, "Add CSV export" from the mock, from goal
 to merge in eight items, with the terminal last.
+
+Jack Heart: "Every Task ends shipped this is ag ood title. I think text below
+it is Loopflow uses configurable workflows to ensure that tasks are designed
+thoughtfully, built simply,, shipped, and validated thoroughly all
+automatically. sometign closer to that". Both now head the list under the
+video in `x6`, the sentence in his words.

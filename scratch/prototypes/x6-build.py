@@ -51,6 +51,8 @@ main = f'''
   </div>
 </section>
 <section class="reading">
+  <h2>Every Task ends shipped.</h2>
+  <p class="say">Loopflow uses configurable workflows to ensure that Tasks are designed thoughtfully, built simply, shipped, and validated thoroughly, all automatically.</p>
   <ul class="plain">
 {items([
 ("It starts with a goal", "A Wave is a goal that outlasts any one conversation, like getting people’s data out of your app. It keeps its key results, its plan, and its memory."),
@@ -83,7 +85,7 @@ main = f'''
 </section>
 '''
 extra = '''
-.x6{padding-top:36px}.home-page .closing .actions{margin-bottom:14px}
+.x6{padding-top:36px}.home-page .reading .say{font-size:18px;line-height:1.6;color:#333;max-width:700px;margin:0}.home-page .closing .actions{margin-bottom:14px}
 .x6 .slot{display:flex;justify-content:space-between;gap:6px 24px;flex-wrap:wrap;margin:0;padding:10px 16px;font:500 11px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--burgundy);background:#f4f0ea;border:1px solid #d9d4cc;border-bottom:0;border-radius:12px 12px 0 0}
 .x6 .slot span+span{color:var(--text-secondary)}.x6 .win{border-radius:0 0 12px 12px}
 .x6 .pane h2{font:400 34px/1.1 var(--font-serif);color:var(--text);margin:0 0 8px}

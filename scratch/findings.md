@@ -36,41 +36,22 @@ Readback cannot exclude unseen Linear reopening; composed Git/Desktop proof rema
 
 ### Committed exchange update — October 9
 
-LOO-412 through `19e31f64d` is composed locally; earlier observations follow.
-Receipt ordering, independent removal/archive/Team rollback, original acquisition
-ages and causal invalidation findings remain at
-`2c23acbb8:scratch/findings.md`, this heading. Complete lists alone settle order;
-scalar/list replay cannot clear freshness. Earlier 63 peer-storage passes and four
-focused invalidation checks are bounded evidence, not combined acceptance.
+`96b3217fe:scratch/findings.md`, this heading, preserves receipt ordering,
+provider rollback, acquisition ages, causal invalidation, unplaced-Wave/Work-stream
+checks and failed attempts. Complete lists alone settle order; replay cannot clear
+freshness. Raw-SQL unmapping risks duplicates; explicit correspondence supersedes it.
+`ops/planning_peer.rs` still refuses connected Linear exchange. Partial-list,
+foreground provider lifetime, native reconnect and peer-exclusive start remain
+unproved. Seeded execution cannot establish running-control preservation.
 
-Unplaced-Wave/Work-stream composition and the inspected-only provider-mapping
-fixture: `75fff9cb0:scratch/findings.md`, this heading. Scoped last-good readings
-survive unavailability. Raw-SQL unmapping could create duplicate provider Work;
-explicit correspondence below supersedes that recovery proposal. Per-Work
-sharing/recovery and native acceptance remain unproved.
+## Arrangement and terminal evidence — October 8–9
 
-`ops/planning_peer.rs` still refuses connected Linear exchange. Partial-list/public
-composition, foreground provider lifetime/native reconnect and peer-exclusive start
-remain unproved. Imported unrun records and populated storage fixtures cannot prove
-live control preservation. Dependency plan/memory: `7260e4602`, **Remaining integration**
-and **Tasks across machines**; no mixed-provider activation follows from these reads.
-
-
-## Arrangement evidence — October 8
-
-`d9fa2b829`–`caa48b5c1`: exact-target arrangement and shared companion insertion;
-direct Swift/model checks passed, packaged execution stalled. Failed attempts:
-`0dba18b79:scratch/findings.md`, this heading. Native drafts/responders and
-cross-machine composition remain unproved.
-
-## Terminal identity and extraction boundary — October 8–9
-
-Detailed surface-key corrections, failed builds and lf3 publication receipts:
-`43cc417ca:scratch/findings.md`, this heading and **Exact-target read boundary**.
-The plan retains the current contract. Machine-qualified membership/callbacks,
-passive exact-target lookup and the published bounded reader are composed;
-native input/extraction fixtures remain unexecuted. Primitive formatter proof
-and DTO/headless checks are not mounted-surface or complete-path acceptance.
+`96b3217fe:scratch/findings.md`, **Arrangement evidence** and **Terminal identity
+and extraction boundary**, retain exact-target insertion, surface-key corrections,
+failed builds and lf3 publication receipts. Machine-qualified membership/callbacks,
+passive lookup and the published bounded reader are composed. Native input,
+extraction, drafts/responders and cross-machine composition remain unproved;
+primitive and headless checks are not mounted-surface acceptance.
 
 ## Scoped dispatch and preview — October 9
 
@@ -155,15 +136,10 @@ Store-seeded lookup is not Git acquisition; resource limits: `18d02a610`.
 Merge `663f78256` retains creation origins/exact-fact links through `3c67b29b1`,
 prepared validation and snapshot lookup. Import/readback creates no local requests.
 
-October 9's rejected-import counterexample: `29fa9a90e:wave/product/MEMORY.md`,
-**Current direction**, and `/tmp/loo427-realign-1n6oVz/`. `44d73dbcd` composes
-`ccdd273d0`; `d62003e0f` shares decoding without conflating retained and accepted
-queries. Import suppression precedes retention; successful projection alone advances
-observations in its savepoint. Rejection/repair, replay, populated-frontier seeding,
-equal-value and associated-readback fixtures retain execution and private ancestry.
-Those observation fixtures prove neither Git acquisition nor joint projection. Failed duplicate-column/origin
-references and full pre-reconciliation notes: `/tmp/loo427-realign-CaxZkz/scratch/`
-and `/tmp/loo427-before-observations.patch`.
+Rejected-import counterexample, accepted-frontier repair, population seeding and
+failed duplicate-column/origin attempts: `96b3217fe:scratch/findings.md`, this heading.
+Retention never parents a save; only successful projection advances accepted
+observations. Those fixtures establish neither acquisition nor joint projection.
 
 Joint-projection setup failures and the foreign-bridge regression remain at
 `859c414d1:scratch/findings.md`, this heading. The regression failed before
@@ -214,3 +190,21 @@ unknown IDs never authorize creating a named Wave.
 The first refile fixture failed because setup had already created chapter locks
 (`/tmp/loo427-refile.log`); remove owned setup locks before testing preview absence.
 This is no peer admission, synchronization or native acceptance proof.
+
+## Task completion integration — October 9
+
+`96b3217fe` finished the inherited local sync of LOO-418/#1499. Its combined
+build failed on obsolete EndOptions, receipt fields and fixture APIs. Reconciliation
+removes force/terminal-planning conflicts, reads checkout branch from Task placement
+without a PR, and keeps arrival separate from completion settlement. Historical
+filing now uses `planning_creations`, retaining original input and unknown delivery.
+Review also found duplicated preparation before Work routing/Desktop dispatch;
+preparation now has one path, after routing, with resolved-directory Process admission.
+Focused checks then exposed missing historical receipt-ID lookup and handoff
+resolution collapsing the caller subdirectory. Receipt lookup now retains repository
+scope in the same snapshot; handoff keeps the exact caller directory. Direct
+binding cannot precede Task-run preparation: an unplaced Task has no checkout yet.
+The local-first-start fixture preserves explicit run options; its initial create
+syntax failed before exercising that path. Action refusal retains resolved identity. Preview labels
+handoff validation unperformed. Failure logs: `/tmp/loo427-integrated-*.log`. Mixed-provider,
+first-start and native proof limits remain unchanged.

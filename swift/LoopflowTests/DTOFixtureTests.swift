@@ -88,13 +88,13 @@ struct DTOFixtureTests {
         #expect(reports[0].action?.reason == "Restart Workflow")
         #expect(reports[1].action?.workflow == nil)
         #expect(reports[1].action?.from == nil)
-        #expect(reports[1].action?.force == true)
+        #expect(reports[1].action?.to == "end")
         #expect(!reports[1].unavailable.isEmpty)
         #expect(reports[2].action == nil)
         #expect(try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONEncoder().encode(reports)) == reports)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         var action = try #require(wire[0]["action"] as? [String: Any])
-        action.removeValue(forKey: "force")
+        action.removeValue(forKey: "to")
         wire[0]["action"] = action
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONSerialization.data(withJSONObject: wire))

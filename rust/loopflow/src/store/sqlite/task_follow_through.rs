@@ -41,7 +41,7 @@ impl SqliteStore {
              JOIN projects p ON p.id=source.project_id JOIN waves w ON w.id=p.wave_id
              JOIN tasks target ON target.id=json_extract(e.kind_json, '$.intent.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.intent.issue_id')
-                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
+                OR target.id=(SELECT task_id FROM planning_creations WHERE kind='task' AND json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.intent.issue_id'))
              WHERE w.repo=?1 AND json_extract(e.kind_json, '$.kind')='follow_through_intent'
                 AND source.external_issue_id IS NOT NULL AND target.external_issue_id IS NOT NULL
                 AND source.planning_deleted_at IS NULL AND target.planning_deleted_at IS NULL
@@ -222,7 +222,7 @@ impl SqliteStore {
              FROM task_events e JOIN tasks t ON t.id = e.task_id
              LEFT JOIN tasks target ON target.id=json_extract(e.kind_json, '$.link.issue_id')
                 OR target.external_issue_id=json_extract(e.kind_json, '$.link.issue_id')
-                OR target.id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.link.issue_id'))
+                OR target.id=(SELECT task_id FROM planning_creations WHERE kind='task' AND json_extract(export_json,'$.id')=json_extract(e.kind_json,'$.link.issue_id'))
              WHERE json_extract(e.kind_json, '$.kind') = 'follow_through_linked'
              ORDER BY e.id",
         )?;
@@ -261,7 +261,7 @@ impl SqliteStore {
 fn follow_through_in(conn: &Connection, events: &[TaskEvent]) -> StoreResult<FollowThrough> {
     let mut follow_through = FollowThrough::from_events(events);
     let mut query = conn.prepare(
-        "SELECT issue_identifier,planning_url,planning_due_date FROM tasks WHERE id=?1 OR external_issue_id=?1 OR id=(SELECT task_id FROM task_creation_intents WHERE json_extract(export_json,'$.id')=?1)",
+        "SELECT issue_identifier,planning_url,planning_due_date FROM tasks WHERE id=?1 OR external_issue_id=?1 OR id=(SELECT task_id FROM planning_creations WHERE kind='task' AND json_extract(export_json,'$.id')=?1)",
     )?;
     for link in &mut follow_through.links {
         if let Some((identifier, url, due)) = query

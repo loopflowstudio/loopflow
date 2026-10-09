@@ -199,7 +199,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let target_key = target.to_str().unwrap();
     fs::write(left.path().join("config.yaml"), "user:\n  name: Maya\n").unwrap();
     fs::write(right.path().join("config.yaml"), "user:\n  name: Lee\n").unwrap();
-    let fixture = support::register_unrun_task(left.path(), &source, "main", &repo.head_sha());
+    let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     let source_store = SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
     let worker = open_store(right.path());
     let binding =
@@ -643,7 +643,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
     let right = tempfile::tempdir().unwrap();
     let source = repo.path().canonicalize().unwrap();
     let target = other.path().canonicalize().unwrap();
-    let fixture = support::register_unrun_task(left.path(), &source, "main", &repo.head_sha());
+    let fixture = support::register_task_with_pr(left.path(), &source, "main", &repo.head_sha());
     let source_store =
         loopflow::store::sqlite::SqliteStore::new(&left.path().join("loopflow.db")).unwrap();
     let retained = create(&target, right.path(), "");

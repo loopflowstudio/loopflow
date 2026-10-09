@@ -442,6 +442,7 @@ mod tests {
         let task = store
             .create_task(
                 &crate::planning::NewTask {
+                    due_date: None,
                     id: TaskId::new(),
                     project_id: project.id,
                     title: "Inspect before starting".into(),

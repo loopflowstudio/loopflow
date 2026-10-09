@@ -601,6 +601,7 @@ not fabricated; a real run checks them again.
 
 `task checkout [TASK] --explain` reports a proposed preparation, reuse or restoration
 of the recorded checkout, with the preparation owner's planning and path checks.
+Task placement owns branch and base even without a PR.
 Omit TASK to use `--task` or checkout inference. JSON separates `resolution`,
 `action`, `impediments` and `unavailable`. Local path/branch proposals reserve
 nothing: previews never fetch, allocate a checkout, take a lease, change a stack
@@ -609,10 +610,10 @@ shared first-start admission stays refused.
 
 `task move TASK NODE --explain` and `task workflow restart TASK --explain`
 validate the captured Workflow without moving it. JSON adds the intended `action`
-(including the exact prior node/edge, reason and force choice), `impediments` and
+(including the exact prior node/edge and reason), `impediments` and
 `unavailable` to `resolution`. Restart means move to `start`, not run a Flow.
-Moving to `end` describes completion and possible checkout cleanup but leaves PR
-reconciliation and completion gates explicitly unperformed; it grants no permission.
+Moving to `end` records arrival before requesting completion. Settlement checks PR
+gates and may clean an eligible checkout; preview performs none of these effects.
 Missing or remote execution evidence stays unavailable.
 
 `task create/edit/comment/refile/save --explain` validates mutation input through the same

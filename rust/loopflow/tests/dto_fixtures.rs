@@ -1087,7 +1087,7 @@ fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
     let completion = reports[1].action.as_ref().unwrap();
     assert!(completion.workflow.is_none());
     assert!(completion.from.is_none());
-    assert!(completion.force);
+    assert_eq!(completion.to, "end");
     assert!(!reports[1].unavailable.is_empty());
     assert!(reports[2].action.is_none());
     assert_eq!(
@@ -1095,10 +1095,7 @@ fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
     let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing[0]["action"]
-        .as_object_mut()
-        .unwrap()
-        .remove("force");
+    missing[0]["action"].as_object_mut().unwrap().remove("to");
     assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
 }
 

@@ -134,12 +134,6 @@ async fn read_checkout(
     let repo = crate::engine::worktrees::main_repo_root(Path::new(wave.repo()))?;
     report.unavailable.push("Checkout leases, placement admission and concurrent changes are rechecked only during execution; this reading reserves nothing".into());
     if let Some(worktree) = &task.worktree {
-        let Some(pr) = store.active_task_pr(&task.id).await? else {
-            report
-                .impediments
-                .push("Task has no active PR from which to restore its checkout".into());
-            return Ok(());
-        };
         let present = worktree.join(".git").try_exists()?;
         report.action = Some(TaskCheckoutAction {
             behavior: if present {
@@ -148,22 +142,22 @@ async fn read_checkout(
                 TaskCheckoutBehavior::Restore
             },
             path: worktree.display().to_string(),
-            branch: pr.branch.clone(),
+            branch: task.branch.clone(),
             stack_on: options.stack_on.clone(),
         });
         if !present {
-            match super::validate_checkout_restoration(store, &task, &pr, &repo) {
+            match super::validate_checkout_restoration(store, &task, &repo) {
                 Ok(()) => {}
                 Err(super::OpsError::Message(reason)) => report.impediments.push(reason),
                 Err(error) => return Err(error.into()),
             }
-            if !crate::engine::worktrees::branch_exists(&repo, &pr.branch)? {
+            if !crate::engine::worktrees::branch_exists(&repo, &task.branch)? {
                 report.unavailable.push("Recorded branch is absent locally; restoration must fetch before deciding whether its history can be recovered. No fetch was performed".into());
             }
         }
-        report.unavailable.push("Checkout finalization may record PrStarted and clear inherited scratch for an untouched stacked PR; it has not run".into());
+        report.unavailable.push("Checkout finalization may record CheckoutReady and clear inherited scratch for an untouched stacked PR; it has not run".into());
         if let Some(parent) = options.stack_on.as_deref() {
-            match super::select_existing_stack_parent(store, &task, &pr, parent).await {
+            match super::select_existing_stack_parent(store, &task, parent).await {
                 Ok(_) => report.unavailable.push("Stack mutation validation runs under the execution lock; no dependency was changed".into()),
                 Err(error) => report.impediments.push(error.to_string()),
             }

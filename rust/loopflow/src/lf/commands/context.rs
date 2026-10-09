@@ -220,7 +220,6 @@ pub fn explain_task_move(
     wave: Option<&str>,
     node: &str,
     reason: Option<&str>,
-    force: bool,
 ) -> Result<crate::ops::task::TaskMoveExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -236,7 +235,6 @@ pub fn explain_task_move(
                     },
                     node,
                     reason,
-                    &crate::ops::task::EndOptions { force },
                 )
                 .await
             }

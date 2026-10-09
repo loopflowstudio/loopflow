@@ -733,6 +733,18 @@ fn historical_filing_converts_to_one_local_child_and_preserves_export_uncertaint
                     .unwrap()
                     .unwrap();
                 assert_eq!(child.project_id, task.project_id);
+                assert_eq!(
+                    store
+                        .sqlite
+                        .resolve_task_id(&intent.issue_id, Some(wave.repo()))
+                        .unwrap(),
+                    Some(child.id.clone())
+                );
+                assert!(store
+                    .sqlite
+                    .resolve_task_id(&intent.issue_id, Some("/another-repository"))
+                    .unwrap()
+                    .is_none());
                 runtime
                     .block_on(super::link_intent(&store, repo.path(), &task.id, &intent))
                     .unwrap();

@@ -559,16 +559,22 @@ pub(super) fn retain_follow_through_export_in(
     let export = PlanningExport {
         id: intent.issue_id.clone(),
         model: serde_json::to_value(model)?,
-        through: 0,
+        parent: conn.query_row(
+            "SELECT project_id FROM tasks WHERE id=?1",
+            [task.as_str()],
+            |row| row.get(0),
+        )?,
+        captured: BTreeSet::new(),
         input: json!({"id":intent.issue_id,"teamId":intent.team_id,"projectId":intent.project_id,
             "stateId":intent.state_id,"title":intent.title,"description":intent.notes,"dueDate":intent.due}),
         initiative: String::new(),
         link_id: intent.relation_id.clone(),
     };
     conn.execute(
-        "UPDATE task_creation_intents SET export_json=?2,export_attempted=1,
-        export_error='Historical creation outcome is unknown; awaiting exact provider readback'
-        WHERE task_id=?1 AND export_json IS NULL",
+        "INSERT INTO planning_creations(kind,origin_id,task_id,export_json,export_attempted,export_error)
+        VALUES('task',?1,?1,?2,1,'Historical creation outcome is unknown; awaiting exact provider readback')
+        ON CONFLICT(kind,origin_id) DO UPDATE SET export_json=excluded.export_json,
+        export_attempted=1,export_error=excluded.export_error WHERE planning_creations.export_json IS NULL",
         params![task.as_str(), serde_json::to_string(&export)?],
     )?;
     Ok(())

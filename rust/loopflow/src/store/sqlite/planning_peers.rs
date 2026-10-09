@@ -2522,15 +2522,8 @@ mod tests {
 
     fn complete(store: &SqliteStore, task: &TaskId) {
         let record = store.task(task).unwrap().unwrap();
-        assert!(store
-            .complete_task(
-                &record,
-                None,
-                &super::super::task_work::EndMove::Set,
-                None,
-                None,
-            )
-            .unwrap());
+        let request = store.request_task_completion(task, None).unwrap().unwrap();
+        assert!(store.complete_task(&record, request).unwrap());
     }
 
     fn acquire_comment(store: &SqliteStore, task: &TaskId, comment: &crate::pm::IssueComment) {
@@ -2916,6 +2909,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project,
                 title: "Created".into(),
@@ -3131,6 +3125,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project.clone(),
                 title: "Initial".into(),
@@ -3306,6 +3301,7 @@ mod tests {
             .unwrap();
         let task = TaskId::new();
         let request = crate::planning::NewTask {
+            due_date: None,
             id: task.clone(),
             project_id: original.clone(),
             title: "Created".into(),
@@ -3386,6 +3382,7 @@ mod tests {
         let task = TaskId::new();
         source
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: task.clone(),
                 project_id: project.clone(),
                 title: "Work".into(),
@@ -7399,6 +7396,7 @@ mod tests {
             let local_task = TaskId::new();
             target
                 .create_task(&crate::planning::NewTask {
+                    due_date: None,
                     id: local_task.clone(),
                     project_id: local_project.clone(),
                     title: "Private title".into(),

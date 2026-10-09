@@ -687,6 +687,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             .unwrap();
         store
             .create_task(&loopflow::planning::NewTask {
+                due_date: None,
                 id: loopflow::durable::TaskId::parse(id).unwrap(),
                 project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
                 title: title.into(),
@@ -1034,7 +1035,7 @@ fn desktop_open_explain_preserves_state_and_matches_explicit_and_inferred_work()
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("open-explain");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "open-explain",
@@ -1181,7 +1182,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("explain-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "explain-proof",
@@ -1245,8 +1246,11 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         "--json",
     ]);
     assert!(invalid["action"].is_null());
-    assert_eq!(invalid["resolution"]["wave"]["state"], "unavailable");
-    assert_eq!(invalid["resolution"]["task"]["state"], "unbound");
+    assert_eq!(invalid["resolution"]["wave"]["state"], "bound");
+    assert_eq!(
+        invalid["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
     assert!(invalid["impediments"][0]
         .as_str()
         .unwrap()
@@ -1309,7 +1313,7 @@ fn task_run_explain_reports_remote_unknown_and_refused_evidence_without_effects(
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("explain-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "explain-proof",
@@ -1864,7 +1868,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("move-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "move-proof",
@@ -1918,7 +1922,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
     );
     assert_eq!(
         preview["action"],
-        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"process_lfid":process,"running":false},"to":"start","reason":"Restart Workflow","force":false})
+        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"process_lfid":process,"running":false},"to":"start","reason":"Restart Workflow"})
     );
     assert_eq!(preview["impediments"], serde_json::json!([]));
     assert_eq!(
@@ -1957,13 +1961,7 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("conflicting Task selections"));
     }
-    let cases = [
-        (vec!["task", "move", "INF-123", "missing"], "has no node"),
-        (
-            vec!["task", "move", "INF-123", "start", "--force"],
-            "--force applies only",
-        ),
-    ];
+    let cases = [(vec!["task", "move", "INF-123", "missing"], "has no node")];
     let mut reasons = Vec::new();
     for (args, expected) in &cases {
         let mut args = args.clone();
@@ -1974,17 +1972,8 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         assert!(reason.contains(expected), "{report}");
         reasons.push(reason.to_owned());
     }
-    let completion = read(&[
-        "task",
-        "move",
-        "INF-123",
-        "end",
-        "--force",
-        "--explain",
-        "--json",
-    ]);
+    let completion = read(&["task", "move", "INF-123", "end", "--explain", "--json"]);
     assert_eq!(completion["action"]["to"], "end");
-    assert_eq!(completion["action"]["force"], true);
     assert!(completion["unavailable"][0]
         .as_str()
         .unwrap()
@@ -2067,7 +2056,7 @@ fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
     assert!(!home.path().join(".lf/loopflow.db").exists());
     support::bind_task_planning(&repo);
     repo.create_branch("move-proof");
-    support::register_task(
+    support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "move-proof",
@@ -2105,7 +2094,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("planning-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "planning-proof",
@@ -2252,7 +2241,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
     assert!(!home.path().join(".lf/loopflow.db").exists());
     support::bind_task_planning(&repo);
     repo.create_branch("planning-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "planning-proof",
@@ -2342,8 +2331,11 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
         "--json",
     ]);
     assert!(invalid["action"].is_null());
-    assert_eq!(invalid["resolution"]["wave"]["state"], "unavailable");
-    assert_eq!(invalid["resolution"]["task"]["state"], "unbound");
+    assert_eq!(invalid["resolution"]["wave"]["state"], "bound");
+    assert_eq!(
+        invalid["resolution"]["task"]["value"],
+        registered.task.id.as_str()
+    );
     assert!(invalid["impediments"][0]
         .as_str()
         .unwrap()
@@ -2358,7 +2350,7 @@ fn task_planning_explain_create_uses_piped_input_and_current_project_validation(
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("creation-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "creation-proof",
@@ -2540,6 +2532,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     let destination = project("destination");
     let task = store
         .create_task(&loopflow::planning::NewTask {
+            due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: loopflow::durable::ProjectId::parse(&source).unwrap(),
             title: "Unallocated work".into(),
@@ -2608,6 +2601,7 @@ fn task_planning_explain_refile_resolves_destination_and_retains_recorded_work()
     // Execution addresses the same durable destination, not a new Wave named after its ID.
     let second = store
         .create_task(&loopflow::planning::NewTask {
+            due_date: None,
             id: loopflow::durable::TaskId::new(),
             project_id: task.project_id.clone(),
             title: "Refile by ID".into(),
@@ -2698,7 +2692,7 @@ fn task_planning_explain_save_validates_draft_without_changing_files_or_storage(
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("save-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "save-proof",
@@ -2792,7 +2786,7 @@ fn task_checkout_explain_reuses_explicit_and_inferred_work_without_effects() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("checkout-proof");
-    let registered = support::register_task(
+    let registered = support::register_task_without_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "checkout-proof",
@@ -2887,7 +2881,7 @@ fn task_checkout_explain_reads_restoration_and_refusals_without_restoring() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
-    let registered = support::register_task(
+    let registered = support::register_task_without_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
         "restore-proof",
@@ -3087,4 +3081,53 @@ fn checkout_snapshot(root: &Path) -> std::collections::BTreeMap<std::path::PathB
         }
     }
     files
+}
+
+#[test]
+fn scoped_first_task_run_prepares_with_its_own_options() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+    fs::write(
+        repo.path().join(".lf/flows/first-start.yaml"),
+        "- cmd: list\n",
+    )
+    .unwrap();
+    repo.stage_all();
+    repo.commit("Fixture Flow");
+    repo.push();
+    let created: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "create", "--title", "First run", "--json"],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "-b",
+                "--task",
+                id,
+                "task",
+                "run",
+                id,
+                "first-start",
+                "--name",
+                "selected-first-checkout",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    let db = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let task = db.task_by_issue(id).unwrap().unwrap();
+    assert_eq!(task.workspace_slug, "selected-first-checkout");
+    assert!(task.worktree.unwrap().join(".git").exists());
 }

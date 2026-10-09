@@ -1685,39 +1685,6 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    // Resolve existing placement before recording where this Process performs
-    // work. A failed resolution is still observed at the directory it reached.
-    let mut _work_declaration = None;
-    let mut _bound_cwd = None;
-    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
-        if let Some(name) = &cli.wt {
-            _bound_cwd = Some(CwdGuard::enter(
-                &loopflow::lf::commands::ops::resolve_worktree(name)?,
-            )?);
-        }
-        if let Some(task) = cli.task.as_ref() {
-            let directory = loopflow::repo::working_directory()?;
-            let repo = loopflow::ops::task::task_repository(&directory, Some(task))?;
-            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-            if let Some(cwd) = cli.bound_cwd.clone() {
-                binding.cwd = cwd;
-            }
-            if cli.agent.is_none() {
-                cli.agent = binding.agent.clone();
-            }
-            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
-            binding.cwd = std::env::current_dir()?;
-            _work_declaration = Some(EnvGuard::set(
-                loopflow::lf::WORK_DECLARATION_ENV,
-                format!("task:{}", binding.work.id()),
-            ));
-            return Ok(Some(binding));
-        }
-        Ok(None)
-    })();
-    let directory = std::env::current_dir()?;
-    journal::admit_process(&directory, &args);
-    let direct_binding = placement?;
     {
         let _account_isolation = cli
             .isolate
@@ -1740,7 +1707,7 @@ fn run() -> anyhow::Result<()> {
         };
         debug!(batch = cli.batch, "parsed CLI arguments");
 
-        dispatch(cli, &args, direct_binding)
+        dispatch(cli, &args)
     }
 }
 
@@ -1807,7 +1774,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on,
                 directive,
                 reason,
-                force,
                 ..
             },
     }) = &cli.command
@@ -1822,7 +1788,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 flow: flow.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
-                end: loopflow::ops::task::EndOptions { force: *force },
             },
         )?;
         if json {
@@ -1838,11 +1803,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 name,
                 stack_on,
                 directive,
+                design,
                 ..
             },
     }) = &cli.command
     {
-        let report = loopflow::lf::commands::context::explain_task_checkout(
+        let mut report = loopflow::lf::commands::context::explain_task_checkout(
             task,
             &loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
@@ -1852,6 +1818,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 ..Default::default()
             },
         )?;
+        if let Some(path) = design {
+            report.unavailable.push(format!(
+                "Design handoff from {} is requested; source validation, retained receipt and child-file conflict checks have not run",
+                path.display()
+            ));
+        }
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
@@ -1949,24 +1921,22 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     issue,
                     node,
                     reason,
-                    force,
                 },
-        }) => Some((issue.as_str(), node.as_str(), reason.as_deref(), *force)),
+        }) => Some((issue.as_str(), node.as_str(), reason.as_deref())),
         Some(Commands::Task {
             cmd:
                 TaskCommand::Workflow {
                     cmd: loopflow::lf::TaskWorkflowCommand::Restart { issue },
                 },
-        }) => Some((issue.as_str(), "start", Some("Restart Workflow"), false)),
+        }) => Some((issue.as_str(), "start", Some("Restart Workflow"))),
         _ => None,
     };
-    if let Some((task, node, reason, force)) = movement {
+    if let Some((task, node, reason)) = movement {
         let report = loopflow::lf::commands::context::explain_task_move(
             task,
             cli.wave.as_deref(),
             node,
             reason,
-            force,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2096,7 +2066,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
 
-    let mut direct_binding = None;
     let mut _work_declaration = None;
     let mut _bound_cwd = None;
     if let Some(name) = &cli.wt {
@@ -2131,6 +2100,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 name,
                 stack_on,
                 directive,
+                design,
                 json,
             },
     }) = &cli.command
@@ -2139,7 +2109,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             .as_deref()
             .or(cli.task.as_deref())
             .context("No Task selected")?;
-        let directory = loopflow::repo::working_directory()?;
+        let directory = std::env::current_dir()?;
         let repo = selected_task_repository(&cli, &directory, Some(issue))?;
         let wave = cli
             .wave
@@ -2147,20 +2117,55 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             .map(loopflow::work::wave::context::resolve_explicit_wave)
             .transpose()?
             .map(|wave| wave.slug().to_string());
+        journal::admit_process(&directory, args);
         return with_runtime(&repo, args, || {
             let task = loopflow::ops::task::task_checkout(
-                &repo,
+                &directory,
                 issue,
                 loopflow::ops::task::TaskCheckoutOptions {
                     wave,
                     name: name.clone(),
                     stack_on: stack_on.clone(),
                     directive: directive.clone(),
+                    design: design.clone(),
                 },
             )?;
             print_task(&task, *json)
         });
     }
+    // Route and view-only dispatch precede preparation. Capture the resolved
+    // execution directory once, including on a failed preparation.
+    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
+        // Task run owns preparation and its options, including a first checkout.
+        // Direct skill/Flow launches bind only already prepared Work here.
+        let task = match &cli.command {
+            Some(Commands::Task {
+                cmd: TaskCommand::Run { .. },
+            }) => None,
+            _ => cli.task.as_ref(),
+        };
+        if let Some(task) = task {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = selected_task_repository(&cli, &directory, Some(task))?;
+            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            if let Some(cwd) = cli.bound_cwd.clone() {
+                binding.cwd = cwd;
+            }
+            if cli.agent.is_none() {
+                cli.agent = binding.agent.clone();
+            }
+            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
+            _work_declaration = Some(EnvGuard::set(
+                loopflow::lf::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            ));
+            binding.cwd = std::env::current_dir()?;
+            return Ok(Some(binding));
+        }
+        Ok(None)
+    })();
+    journal::admit_process(&std::env::current_dir()?, args);
+    let mut direct_binding = placement?;
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE flow FLOW`.
     if let Some(Commands::Task {
@@ -2212,23 +2217,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             task.worktree()?,
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
-    }
-    if let Some(task) = cli.task.as_ref() {
-        let directory = loopflow::repo::working_directory()?;
-        let repo = selected_task_repository(&cli, &directory, Some(task))?;
-        let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-        if let Some(cwd) = cli.bound_cwd.clone() {
-            binding.cwd = cwd;
-        }
-        if cli.agent.is_none() {
-            cli.agent = binding.agent.clone();
-        }
-        _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
-        _work_declaration = Some(EnvGuard::set(
-            loopflow::lf::WORK_DECLARATION_ENV,
-            format!("task:{}", binding.work.id()),
-        ));
-        direct_binding = Some(binding);
     }
     let explicit_wave = cli
         .wave

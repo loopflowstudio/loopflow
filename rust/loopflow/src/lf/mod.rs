@@ -1272,6 +1272,8 @@ impl TaskCommand {
             | Self::Checkout { issue, .. } => issue.as_deref(),
             Self::Sync { issue, .. }
             | Self::Move { issue, .. }
+            | Self::Complete { issue, .. }
+            | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
             | Self::File { issue, .. }

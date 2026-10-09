@@ -96,8 +96,8 @@ dispatch; an unscoped ambiguous prefix still fails.
 
 October 9 context: complete launch source
 `.lf/tmp/context/b5b56963daca0b2b5aee3f8ed9b9ab63729d3acb4587956e1eb29c1bf3544e1e.md`
-was inspected. `lf context --skill compress` reports 32,172 generated Work-seed
-tokens (16,172 over), from the manifest/historical steers. Authored notes fit;
+was inspected. `lf context --skill implement` reports 32,686 generated Work-seed
+tokens (16,686 over), from the manifest/historical steers. Authored notes fit;
 curation cannot change that producer gap without rewriting historical input or
 raising budgets. Neither is authorized.
 

@@ -29,7 +29,7 @@ LOO-389 comments failed on an unbound Initiative.
   reuse these owners. LOO-415 owns the transparent relay and all lf status
   emission; LOO-398 is reading only. LOO-422 owns host status/title fidelity.
 - LOO-418: a Task has zero or one PR; follow-through is another Task. Serial PR
-  chains below describe the implementation being replaced. LOO-401 selects
+  chains below describe the retired implementation. LOO-401 selects
   `self`, `config user`, app opening and HTML screenshot removal without a
   replacement. Desktop's native snapshot is separate. LOO-406 owns the accepted local
   planning lifecycle, preserving connected Linear repositories; LOO-412 owns exchange.
@@ -137,7 +137,10 @@ rejects non-agent commands before stdin. Refile resolves IDs before initializati
 preview never locks. Save shares pinned-path/revision/draft checks, not recovery
 writes. Creation stays unplaced; initialization/authorship remain unavailable.
 Checkout shares preparation checks without fetches/leases; missing checkout means
-restoration, not launch refusal. Abandon/delete/interrupt remain identity-only.
+restoration, not launch refusal. LOO-418 integration removes move/run force and
+PR-required checkout reads: Task placement owns branch/base independently. Historical
+follow-up delivery uses common creation receipts, preserving uncertain original input.
+Abandon/delete/interrupt remain identity-only.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)
@@ -259,134 +262,60 @@ from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
 `a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
 live-planning, configured-provider acceptance or chapter KR.
 
-## Task conversation and Workflows (LOO-353, PR #1439; 2026-10-04 to 10-06)
+## Task conversation and Workflows (LOO-353, PR #1439; October 4–6)
 
-Jack Heart approved landing on October 6 after three Desktop looks at a fixture
-Task in a private Home: "good enough. approved", then "lets get this landed."
-The approval covers the Task view as shown: no real provider, populated store
-or live Home (LOO-391). The design, every unreviewed choice and the
-demo notes are at `e67cdc62f:scratch/` (`focus-on-your-own-work.md`,
-`questions.md`, `task-workflow.md`, `demo-task-workflow.md`).
+Jack Heart approved the October 6 fixture Task view after three Desktop looks
+("good enough. approved", then "lets get this landed"). No real provider,
+populated store or live Home was shown (LOO-391). Full dated decisions,
+unreviewed implementation choices, failures and lessons:
+`96b3217fe:wave/product/MEMORY.md`, this heading; original design and demo:
+`e67cdc62f:scratch/` (`focus-on-your-own-work.md`, `questions.md`,
+`task-workflow.md`, `demo-task-workflow.md`).
 
-**Jack's decisions, October 4.**
+Surviving decisions:
+- One ongoing Task conversation holds design/review. Headless work is ordinary
+  `lf -b`; more conversations are deliberate. Session means interactive, Run
+  headless, with the same LfSession continuity.
+- Jack removed Task workers, mutable Flow switching, automatic database recovery,
+  `session ready/complete` and their handshake. Caller owns recovery; hiding or
+  selecting never terminates or approves. Task association includes checkout and
+  explicit binds, excluding repo/Wave scopes. Operational Flows hold autonomous
+  loops/XORs; `loop-or-next` decides.
+- Workflow is a captured, immutable graph with live position. Person and agent
+  choose through the same Task operation and Desktop buttons. Project Workflow
+  is future take-up; Task override wins. Restart returns to start without replacing
+  graph/history. Flow/Process naming and root `run` removal are superseded above.
+- `--steers-after` prevents repeated context growth. Nodes may run several Flow
+  processes; no chosen "primary" Flow. Task completion is now independent of
+  Workflow position under LOO-418, not the older ready/active/done derivation.
+- The Task header owns its Workflow graph, one Task Session plus shells and one
+  **+** menu for shell, Files or Flow log. No Monitor, Sessions-sidebar toggle
+  or Flow chip. Task pages consume only the Work stream's Task part.
+- Jack deferred nonreporter shell Waiting (LOO-384), no-PR completion/reopening
+  (LOO-385, now overlapping 418), inner Flow naming (386) and clipped graph (392).
 
-- One ongoing Task conversation holds design and review; headless work is
-  ordinary `lf -b`. More conversations may be opened deliberately. Substantial
-  implementation inside the conversation is discouraged.
-- Product says Session for interactive and Run for headless; both keep
-  LfSession identity and history through mode changes.
-- Waiting is the one attention state; `--waiting` replaces `--needs-me`;
-  `--interactive` stays a mode filter. False positives are acceptable. Claude
-  uses only binary stream-json, never SDK, hooks or permission hosts.
-- Delete all Task-worker machinery, mutable Flow switching and automatic
-  database-backed recovery; the caller owns recovery. Delete `lf session ready`
-  and `complete` with their handshake, under no new name.
-- Task membership is owning Home, resolved checkout and explicit binds,
-  excluding repo/Wave scopes. Hiding or selecting never terminates or approves.
-- Operational Flows hold autonomous loops and XORs only; deciders use
-  `loop-or-next`.
+Unreviewed behavior and remaining evidence: whole failed Flows retry three times;
+exit 3 stays held. LOO-435 owns Jack's later failed-step retry request. Driver death
+and the step-registration gap retain uncertain liveness; another Task run is not
+excluded by Desktop's disabled Start button. Quiet/stream Waiting is superseded
+for reporters by OSC 7501, but nonreporter inference remains. A lone headless skill
+Run's visibility outside the Flow log remains Jack's open question. Older
+completion/force and no-Workflow startup behaviors are historical, not current
+requirements. The archive retains all prior evidence instead of inferring closure.
 
-**October 5.** Jack rejected parallel Task-worker drivers: Task launch must enter
-ordinary `lf run`; `-b` blocks and callers background it. Steps are plain commands,
-tracked only by their driver; launch-time PR preparation is unjustified. October
-7's Process vocabulary supersedes the FlowExec/FlowSession naming discussion.
-Original feedback and record proposals: `f5f742058:wave/product/MEMORY.md`, this
-heading. Task Workflow and Flow execution remain separate owners.
+Lessons: capture the model before implementing records; delete hidden jobs only
+with their replacements (Started, steer cursors, attribution, normalization).
+`INSERT OR REPLACE` skips update triggers; use upsert where revisions require them.
+SQL strings can compile against deleted columns. Whole-suite failures after passing
+slices are retained in the archive; diff rewritten plans for accidentally dropped work.
 
-**October 6.**
-
-- "lets just call TaskWorkflow Workflow"; nodes and edges, not stages. The
-  graph is "fixed upfront when it's loaded and never mutated"; position is
-  live state in the store. Person and agent both choose XORs and loop-backs
-  through one Task command and matching Desktop buttons; no choice ends the
-  conversation.
-- "projects have workflows instead of default"; a Task's own choice wins.
-- "no separate Task is ready state": ready at `start`, active between, done
-  at `end`; the abandoned mark stays.
-- "run is one conceptual attempt, exec is one lf invocation." `lf task run`
-  moves the Workflow and `lf run` does not: "worth it to keep lf run simple."
-- Jack retained Flow, with edges named by their Flow/skill and unique per
-  departure node. One Task run can start several Flow processes. October 7's
-  Workflow/Flow decision supersedes the naming draft; original steers and
-  retired alternatives: `af79d4762:wave/product/MEMORY.md`, this heading.
-- Dropping per-node steer acknowledgement was "potentially bad": it had
-  stopped runaway token counts. Restored as `--steers-after`.
-- The first Task sheet was "kinda yucky." Wanted and built: the Workflow graph
-  in the header, one Task Session plus shells, and one **+** menu adding a
-  shell, Files or the Flow exec log as panes. Monitor, the Sessions sidebar
-  toggle and the Flow chip are deleted.
-- Follow LOO-382: the Task page reads only the stream's `task` part.
-- Deferred by Jack: Waiting for native terminals, "not the right product
-  experience, but OK to defer" (LOO-384); no-PR completion and a reopened
-  Task that cannot run (LOO-385); naming inner Flows (LOO-386); a clipped
-  Flow exec diagram (LOO-392).
-
-**The agent's choices, unreviewed by Jack.**
-
-- One `lf task run` retries a failed Flow exec three times with no pause;
-  exit 3 (blocked or stopped short) is not retried. `lf task move ISSUE end`
-  replaces `lf task complete`; correction is `lf -b session resume ID MESSAGE`,
-  three turns at most.
-- The driver learns a step's Exec by polling every 10 ms; killed in that gap,
-  the step goes unrecorded. A killed driver's run reads as running forever.
-- `lf` allows a second `lf task run` while an edge runs; only Desktop's
-  disabled Start keeps two drivers out of a checkout.
-- The answer contract is message text; provider structured output is deleted.
-  Any `lf` command can be a `cmd:` step. `feature` and `code` are workflows
-  only, and `lf run feature` fails naming `lf task run`.
-- A Task that has not run on this model has no Workflow and reads `not_ready`:
-  every started unfinished Task on an existing Home, until its next run.
-- An edge that runs nothing ends a Task over uncommitted changes and keeps its
-  checkout; an empty unpublished PR is retired at `end` (reverses part of
-  W2-151). Risk: if Linear completes an issue when its PR merges before `lf`
-  settles the landing, the Task stays active and flagged until forced.
-- Superseded Flow-template and `lf commit -p` observations remain at
-  `51dd1ea90:wave/product/MEMORY.md`, this heading. The accepted Workflow
-  names and owner-scoped commands are recorded above.
-- Waiting is one reading per Session, saved at most every 5 s: an unanswered
-  question, or no open tool call and a hand-back or 120 s of quiet. Codex
-  approvals count as questions; OpenCode permissions do not.
-- `tasks.primary_session_id` and `lf session ensure --task`; Desktop asks once,
-  into an empty workspace only. A lone headless skill Run is not in the Flow
-  exec log (Jack's open question).
-- From merging main's #1463: a Wave's selected Project gates an unstarted Task
-  at `lf task run`; a rotation holding a checkout refuses a Flow launch and
-  each step; a Project's `workflow:` may be empty, and its Tasks read not
-  ready. `lf task restart` is not kept. `lf` still reads a Project's `flow:`
-  line until rewritten.
-
-**Lessons.**
-
-- Settle model, store, CLI and Desktop contract before building a record. The
-  first Workflow derived position from append-only rows and Jack sent it back.
-- Check main's history before calling a flag missing: `-b` had been removed by
-  #1356, not left unbuilt.
-- Deleting a record exposes its hidden jobs. The Flow row carried a Started
-  trigger, per-node steer acknowledgement, the S1–S5 note key and command
-  normalization.
-- Skill prose narrating a builtin Flow drifts when its YAML changes.
-- `INSERT OR REPLACE` fires no update trigger; a revision rule comparing old
-  and new rows needs an upsert. Waiting by quiet is no write, so the stream's
-  reader keeps that clock.
-- Run touched suites whole before trusting a slice: twelve slices passed
-  focused tests and whole suites then failed three. SQL in strings compiles
-  against a dropped column; grep every dropped name.
-- When main renames types under conflicting hunks, take one side and apply the
-  rename from the two trees' token sets.
-- Diff a plan rewrite for dropped items: a queued cleanup slice vanished in
-  `f9e74029e` with no reason recorded.
-
-**Evidence limits.** Headless tests and a fake provider only. Unshown: a real
-provider step (the JSON contract with no schema request), a
-driver killed mid-turn, the migration on a populated store, Desktop Start
-against real `lf`, a cron-fired Flow. September 30's workspace proof items
-(provider continuation, remote owning-Home association, cross-Task focus,
-symlink transitions, twenty layout actions against p95 <100 ms) are also
-unshown and have no Task. Gate, October 6 (`scripts/test.py`):
-Rust 2265 (one stale migration test repaired), Clippy, Desktop, website
-pass with `LF_*` cleared. Four `test_checkout_refresh` tests fail on Jack's
-host: branch `lf wt prune` refuses a Home lacking the draft; CI owns them.
-Eleven `ops::chapter` tests fail only in `cargo test --lib`.
+October 6 gate passed Rust 2265, Clippy, Desktop and website with inherited LF
+pins cleared, after one stale-migration repair. Four checkout-refresh tests failed
+on Jack's host lacking the draft; eleven chapter tests failed only under `--lib`.
+No real provider step, killed driver, populated migration, Desktop Start against
+real lf or cron Flow was proved. September 30's provider continuation, remote
+association, cross-Task focus and symlink-transition proof also remained absent.
+October 7 retired numeric layout/soak acceptance, not those evidence limits.
 
 ## Session and operate pairs (2026-10-05)
 

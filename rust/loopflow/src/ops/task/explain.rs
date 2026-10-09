@@ -155,17 +155,12 @@ async fn read_task_run(
             take_up,
         } => {
             let edge = &workflow.definition.edges[index as usize];
-            if edge.to == crate::engine::workflow::END && !options.end.force {
-                if let Some(conflict) = super::planning_conflict(store, &task).await? {
-                    report.impediments.push(conflict);
-                }
-            }
             if let Some(flow) = &edge.flow {
                 if let Err(error) = super::load_task_flow(checkout, flow) {
                     report.impediments.push(error.to_string());
                 }
             } else {
-                report.unavailable.push("Completion will reconcile PR evidence before moving to end; no reconciliation was performed".into());
+                report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
             }
             TaskRunAction::Edge {
                 workflow: workflow.definition.name,
@@ -189,7 +184,6 @@ pub struct TaskMoveAction {
     pub from: Option<crate::ops::workflow::WorkflowPosition>,
     pub to: String,
     pub reason: Option<String>,
-    pub force: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,19 +207,13 @@ impl TaskMoveExplanation {
                     .map(|name| format!(" of Workflow {name}"))
                     .unwrap_or_default(),
                 if action.to == crate::engine::workflow::END {
-                    "complete and attempt checkout cleanup after reconciliation"
+                    "record arrival then request completion; settlement checks PR gates and eligible checkout cleanup"
                 } else {
                     "run nothing; leave existing Processes alone"
                 },
             ));
             if let Some(reason) = &action.reason {
                 lines.push(format!("Reason: {reason}"));
-            }
-            if action.force {
-                lines.push(
-                    "Force: bypass only the planning-completion conflict, not completion gates"
-                        .into(),
-                );
             }
         } else {
             lines.push("Intended action: unavailable".into());
@@ -251,7 +239,6 @@ pub async fn explain_task_move(
     selection: WorkSelection<'_>,
     node: &str,
     reason: Option<&str>,
-    end: &super::EndOptions,
 ) -> TaskMoveExplanation {
     let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
     let mut report = TaskMoveExplanation {
@@ -260,7 +247,7 @@ pub async fn explain_task_move(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
-    if let Err(error) = read_task_move(store, node, reason, end, &mut report).await {
+    if let Err(error) = read_task_move(store, node, reason, &mut report).await {
         report.unavailable.push(error.to_string());
     }
     report
@@ -270,13 +257,12 @@ async fn read_task_move(
     store: &SharedStore,
     node: &str,
     reason: Option<&str>,
-    end: &super::EndOptions,
     report: &mut TaskMoveExplanation,
 ) -> anyhow::Result<()> {
     let task = read_local_task(store, &mut report.resolution).await?;
     let workflow = store.sqlite.workflow(&task.id)?;
     if let Err(error) =
-        super::validate_workflow_move(workflow.as_ref(), &task.plan.identifier, node, end)
+        super::validate_workflow_move(workflow.as_ref(), &task.plan.identifier, node)
     {
         report.impediments.push(error.to_string());
         return Ok(());
@@ -291,10 +277,9 @@ async fn read_task_move(
             .map(str::trim)
             .filter(|reason| !reason.is_empty())
             .map(str::to_owned),
-        force: end.force,
     });
     if node == crate::engine::workflow::END {
-        report.unavailable.push("Completion requires fresh reconciliation, PR gates and checkout cleanup checks; none were performed. This is not completion permission".into());
+        report.unavailable.push("Arrival, completion reconciliation and eligible checkout cleanup are execution effects; none were performed. This is not completion permission".into());
     }
     Ok(())
 }

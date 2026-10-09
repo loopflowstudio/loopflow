@@ -2339,7 +2339,8 @@ fn task_edges_keep_single_skill_execution_after_removing_run_dispatch() {
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
     let checkout = repo.path().canonicalize().unwrap();
-    let task = support::register_unrun_task(home.path(), &checkout, "skill-edge", &repo.head_sha());
+    let task =
+        support::register_task_with_pr(home.path(), &checkout, "skill-edge", &repo.head_sha());
     observe_planning(&task, &checkout);
     repo.create_branch("skill-edge");
     write_skill(repo.path(), "list", "Perform the single-skill edge.");

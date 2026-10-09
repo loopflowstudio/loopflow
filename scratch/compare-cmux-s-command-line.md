@@ -7,6 +7,7 @@ implemented locally. Passive reads use the published, checksum-verified lf3
 fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
+LOO-418/#1499 is integrated; completion/checkout previews and creation receipts are reconciled.
 LOO-406/#1503 and LOO-412 through `96f714bd6` are composed locally;
 `1ece5cc52` reconciles transitive ancestry. Section 2 retains remaining composition.
 Remaining: mixed-path proof, delegation exchange, first-start admission, remote
@@ -210,15 +211,12 @@ scratch stays at `19e31f64d`, not beside this Task's plan. Desktop replaces the
 path-only peer reading key with the existing Machine/repository reading key.
 
 
-Bounded-reader and native-fixture deletions: `7d5bcf939`, this section;
-section 4 retains their surviving owners and evidence limits.
-
-Command/opening deletion detail: `97bf9dbcb`, this file, **Delete — do not maintain**.
-The surviving owners are shared prompt/graph assembly, read-only selection,
-parsed transport, Session/Files/pane readiness and Wave planning. Preview performs
-no preparation, Process writes or excerpt persistence. Session explanation reads
-recorded endpoints without probing a live driver's protocol. No removed launch,
-Project/roadmap or callback path is retained beside those owners.
+LOO-418 integration removes preview's EndOptions/force and PR-required checkout
+lookup. Task placement owns branch/base; completion requests replace the older
+terminal-planning conflict. Keep scoped dispatch and read-only previews, deleting
+duplicate preparation before routing. Historical filing uses `planning_creations`,
+not removed export columns on `task_creation_intents`. Original command, reader
+and callback deletions: `96b3217fe`, this section; surviving owners remain below.
 
 Window retention/fence deletion details: `6ce198b75`, this section. Scene equality
 cannot fence A→B→A; receiver, delivery and native lifetimes stay separate.
@@ -404,7 +402,7 @@ Desktop open, Session connect and interactive message-less resume also have
 operation-specific readings. Planning previews share input/scope/current-Project
 and saved-record validation; transaction-time validation remains in the writer.
 New Task identity/location, initialization and comment provenance stay unavailable
-or unallocated. Movement retains prior node/edge, reason and force; end intent
+or unallocated. Movement retains prior node/edge and reason; end intent
 performs no completion reconciliation or cleanup.
 
 **Refile/save explanation, October 9:** shared read-only validation now reports the
@@ -414,8 +412,13 @@ revision with the existing pinned-file preparation; preview creates no recovery.
 Execution resolves known destination IDs before initialization, rather than creating
 a Wave named after an ID. Concurrent writes still require execution-time validation.
 
-**Remaining explanation work:** checkout, abandon/delete and interrupt still omit
-preparation, cleanup or control impediments. `history show` and agent invocations
+Checkout reads Task-owned placement without requiring a PR; restoration and
+preparation share validators without fetches or leases. LOO-418 removes move/run
+`--force`; arrival records a completion request before settlement checks PR gates
+and eligible cleanup. Preview performs neither.
+
+**Remaining explanation work:** abandon/delete and interrupt still omit cleanup or
+control impediments; complete/reopen/follow-up and design-handoff explanation remain. `history show` and agent invocations
 remain identity-only; `--context` previews input. §2 composition and native proof remain.
 
 **Required proof:** cold opens for two repositories arriving before registration and
@@ -534,4 +537,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo build -p loopflow --bin lf`, fmt, Clippy and isolated `global_commands {previews_,task_planning_explain_}` / `context_launch_tests flow_context_preview_` PASS (10 tests); broader suites: gate/CI; native: demo.
+Check: `cargo test -p loopflow` focused global run/move/checkout previews, local first start, Desktop opening, handoff, historical filing and DTO checks PASS (14); fmt/Clippy PASS; `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --jobs 2 --filter taskMoveExplanationsPreservePositionsAndCompletionUncertainty` PASS (1). Broader suites/migrations: gate/CI; native: demo.

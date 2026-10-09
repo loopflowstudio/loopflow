@@ -216,6 +216,7 @@ mod tests {
             let project = store.ensure_wave_project(repo, "inbox").unwrap();
             store
                 .create_task(&NewTask {
+                    due_date: None,
                     id: id.clone(),
                     project_id: project.id,
                     title: repo.into(),

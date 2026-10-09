@@ -142,7 +142,6 @@ public struct TaskMoveAction: Codable, Equatable, Sendable {
     public let from: Workflow.Position?
     public let to: String
     public let reason: String?
-    public let force: Bool
 }
 
 public struct TaskMoveExplanation: Codable, Equatable, Sendable {

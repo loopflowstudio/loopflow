@@ -949,7 +949,7 @@ fn remote_preview_uses_the_same_work_for_explicit_and_inferred_task_selection() 
     support::bind_task_planning(&repo);
     repo.create_branch("remote-preview");
     let remote_store = fixture.root.path().join("remote/store");
-    let registered = support::register_task(
+    let registered = support::register_task_with_pr(
         &remote_store,
         &repo.path().canonicalize().unwrap(),
         "remote-preview",

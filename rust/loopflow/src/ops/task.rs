@@ -635,7 +635,6 @@ async fn traverse_workflow(
     task: &Task,
     requested: Option<&str>,
     note: Option<&str>,
-    end: &EndOptions,
 ) -> OpsResult<Option<String>> {
     let (workflow, index, take_up) =
         match select_task_run(store, task, task.worktree()?, requested)? {
@@ -736,7 +735,7 @@ pub fn workflow_set(issue: &str, node: &str, note: Option<&str>) -> OpsResult<St
         let note = note.map(str::trim).filter(|note| !note.is_empty());
         let issue = &task.plan.identifier;
         let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
-        validate_workflow_move(workflow.as_ref(), issue, node, end)?;
+        validate_workflow_move(workflow.as_ref(), issue, node)?;
         let workflow = workflow.expect("nonterminal move requires a captured Workflow");
         let definition = &workflow.definition;
         let process = crate::journal::current_process_lfid()
@@ -762,14 +761,10 @@ fn validate_workflow_move(
     workflow: Option<&crate::ops::workflow::Workflow>,
     issue: &str,
     node: &str,
-    end: &EndOptions,
 ) -> OpsResult<()> {
     if node == END {
-        // Completion can create the terminal Workflow; its reconciliation belongs to reach_end.
+        // Completion can create the terminal Workflow; its request belongs to reach_end.
         return Ok(());
-    }
-    if end.force {
-        return Err(task_error("--force applies only to reaching `end`"));
     }
     let workflow = workflow.ok_or_else(|| {
         task_error(format!(
@@ -909,7 +904,7 @@ async fn validate_task_preparation(store: &SharedStore, task: &Task) -> OpsResul
 fn validate_preparation_status(task: &Task, status: WorkStatus) -> OpsResult<()> {
     match status {
         WorkStatus::Done => Err(task_error(format!(
-            "Task {} is done; `lf task move {} <node>` puts it back on its workflow",
+            "Task {} is done; `lf task reopen {}` reopens planning without moving its Workflow",
             task.plan.identifier, task.plan.identifier
         ))),
         WorkStatus::Abandoned => Err(task_error(format!(
@@ -976,11 +971,7 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
     finish_task_checkout(store, task).await
 }
 
-fn validate_checkout_restoration(
-    store: &SharedStore,
-    task: &Task,
-    repo: &Path,
-) -> OpsResult<()> {
+fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) -> OpsResult<()> {
     let worktree = task.worktree()?;
     if match worktree.symlink_metadata() {
         Ok(_) => true,
@@ -5065,7 +5056,7 @@ mod tests {
                 let snapshot = super::task_snapshot(&fixture.task).unwrap();
                 assert_eq!(snapshot.machine_id, Some(local.clone()));
                 assert_eq!(snapshot.task_id, fixture.task.id.as_str());
-                assert_eq!(snapshot.active_pr, Some(pr.id.clone()));
+                assert_eq!(snapshot.pr.as_ref().map(|pr| &pr.id), Some(&pr.id));
                 for issue in [
                     "FILES-1",
                     fixture.task.id.as_str(),
@@ -5163,6 +5154,7 @@ mod tests {
             .unwrap();
         let task = store
             .create_task(&crate::planning::NewTask {
+                due_date: None,
                 id: TaskId::new(),
                 project_id: fixture.task.project_id.clone(),
                 title: "Another Task".into(),

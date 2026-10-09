@@ -51,8 +51,7 @@
         "running": true
       },
       "to": "start",
-      "reason": "Restart Workflow",
-      "force": false
+      "reason": "Restart Workflow"
     },
     "impediments": [],
     "unavailable": []
@@ -104,8 +103,7 @@
       "workflow": null,
       "from": null,
       "to": "end",
-      "reason": null,
-      "force": true
+      "reason": null
     },
     "impediments": [],
     "unavailable": [

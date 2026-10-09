@@ -80,8 +80,8 @@ selection, read-only storage and launch-only excerpt persistence survive.
 Compression centralizes non-agent `--context` rejection before stdin, replacing
 per-action checks; invalid UTF-8 input exercises that boundary. Save constructs
 one action after validation, preserving normalized paths and refused input.
-The focused check exposed a stale expectation that Flow context must fail; deleted
-it because Flow preview is implemented (failure: `/tmp/loo427-compress-checks.log`).
+Removed the stale Flow-context refusal assertion: Flow preview is implemented
+(failure: `/tmp/loo427-compress-checks.log`).
 Generic action gaps and provider/remote proof limits remain in the plan.
 
 ## Composed-opening review — October 9

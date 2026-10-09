@@ -1398,7 +1398,18 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 .home-page .group > .lede + .lede { margin-top: -20px; }
 .home-page .group > .install-row { margin-bottom: 18px; }
 .home-page .group > .term { max-width: 680px; }
-.home-page .group > .work-rows, .home-page .group > .strip { margin-top: 44px; }
+/* The engineers' page: a narrow column of plain lists. */
+.home-page .reading { max-width: 900px; padding-top: 36px; }
+.home-page .reading h2 { font-size: clamp(30px, 3.2vw, 42px); margin: 30px 0 12px; }
+.home-page .plain { list-style: none; margin: 26px 0 0; padding: 22px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); font: 13.5px/1.7 var(--font-mono); color: #333; }
+.home-page .plain li { list-style: none; margin: 0 0 9px; padding-left: 2ch; text-indent: -2ch; }
+.home-page .plain li:last-child { margin-bottom: 0; }
+.home-page .plain li::before { content: "- "; color: var(--text-secondary); }
+.home-page .plain b { color: var(--text); font-weight: 500; }
+.home-page .plain code { display: inline; text-indent: 0; color: var(--text); }
+.home-page .plain b::after { content: ":"; }
+.home-page .more { font: 12px/1.6 var(--font-mono); color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 0; }
+.home-page .more a { text-decoration: underline; text-underline-offset: 4px; }
 .home-hero .intro { font-size: 20px; line-height: 1.55; color: #333; max-width: 680px; margin-bottom: 34px; }
 .home-page .install-row { display: flex; align-items: stretch; max-width: 680px; background: #1c1718; border-radius: 8px; overflow: hidden; }
 .home-page .install-row .term { flex: 1; min-width: 0; border-radius: 0; padding: 14px 18px; }
@@ -1502,6 +1513,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
     .home-page .install-row .term { font-size: 12px; padding: 14px; }
     .home-page .copy { min-width: 72px; padding: 0 12px; }
     .home-page .group { padding-top: 56px; }
+    .home-page .plain { font-size: 12.5px; }
     .home-page .claim, .home-page .claim.wide { grid-template-columns: 1fr; gap: 12px; padding: 30px 0; }
     .home-page .number { padding-top: 0; }
     .home-page .kinds { grid-template-columns: 1fr; }

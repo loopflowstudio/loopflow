@@ -11,7 +11,7 @@ Edit homepage copy and examples in `content.yaml`. `main.py` renders the
 hero with the Mac capture, numbered claims under For you and For your agents,
 the FAQ, then install; `static/style.css` controls their layout. Backticks in
 claim and answer copy set code. The `cli` block is the page for
-engineers at `/cli`: the commands, the data model, and where it runs. `navigation` at the top of the file
+engineers at `/cli`: the commands and two plain lists, with no Mac app. `navigation` at the top of the file
 is the one bar on the homepage and studio pages, including its Company menu.
 Flows navigation on docs pages goes to `/cli#flows`.
 

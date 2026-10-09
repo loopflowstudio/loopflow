@@ -23,7 +23,7 @@ def test_cli_navigation(page: Page, base_url: str, path: str, label: str, destin
         "link", name=label, exact=True
     ).click()
     expect(page).to_have_url(f"{base_url}{destination}")
-    heading = page.locator("#flows h2")
+    heading = page.locator("#flows .plain")
     heading.scroll_into_view_if_needed()
     expect(heading).to_be_visible()
 

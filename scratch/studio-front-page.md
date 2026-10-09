@@ -205,3 +205,11 @@ Jack Heart: the Mac app / anyone page "really needs a video of a flow from initi
 What exists in the app today (read from source, not yet seen running): no onboarding flow; Go > Open Repo (⇧⌘O); New Session with a skill picker; Waves → Tasks → Sessions navigator; pane splits (⌘D, ⇧⌘D) and worktree-level splits; a Task workflow graph above the terminals. `LF_HOME` isolates state; `--repo` picks the repository.
 Kata today: Waves core, dj, ear, release, teacher, theory (scores abandoned), 8 tasks.
 Blocked: the cmux Computer Use helper is not running, so nothing has been recorded.
+
+## /cli page, cmux feel (2026-10-09)
+
+Jack Heart on `/cli`: "Cut Ask your agents... Cut For Engineers. Cut the headers for the lf skill frame. Replace the list that follows with a list expanding on the cmd list that gradually explains: Align your agent sessions around core hierarchy of work: repo->wave->task; task=worktree=branch git workflows; skills and workflows to implement PRs; ... other cool shit and why you should use lf to launch your agent sessions in whatever terminal you like".
+Then: "this is probably a little more on the cmux-y feel" and "in this world were tryign to get users of cmux to use lf inside lf, not pushing Loopflow Desktop". (Read as: lf inside cmux.)
+Built: headline, install command, the command list, one plain `- Name: detail` list, "It works wherever you work." as a second list, install without the Mac download. The Task / Workflow / Wave / Project rows are gone; the first list carries them.
+
+On the video: "legified" meant "made more legible, optimized for the audience rather than the author". So the recording uses a copy of kata whose Wave and Task names read well to a stranger, not kata as it stands.

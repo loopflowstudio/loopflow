@@ -814,26 +814,6 @@ def _install_row() -> FT:
     )
 
 
-def _work_rows(rows: list) -> FT:
-    return Div(
-        *[
-            Article(
-                Div(item["label"], Span(item["title"]), cls="tag"),
-                Div(
-                    P(*_inline_code(item["text"])),
-                    P(A(item["link"]["label"], href=item["link"]["href"]), cls="needs")
-                    if "link" in item
-                    else None,
-                ),
-                _terminal(item["commands"], item["label"] + " example"),
-                cls="work-row",
-            )
-            for item in rows
-        ],
-        cls="work-rows",
-    )
-
-
 def _claims_section(content: dict, section_id: str, first_number: int, *opening) -> FT:
     """One group of numbered claims; numbers run on across groups."""
 
@@ -858,8 +838,8 @@ def _claims_section(content: dict, section_id: str, first_number: int, *opening)
         )
 
     return Section(
-        P(content["label"], cls="eyebrow"),
-        H2(content["heading"]),
+        P(content["label"], cls="eyebrow") if "label" in content else None,
+        H2(content["heading"]) if "heading" in content else None,
         *[P(line, cls="lede") for line in content.get("introduction", [])],
         *opening,
         Div(
@@ -892,7 +872,7 @@ def _faq_section() -> FT:
     )
 
 
-def _install_section() -> FT:
+def _install_section(download: bool = True) -> FT:
     return Section(
         P(INSTALL_CONTENT["label"], cls="eyebrow"),
         H2(INSTALL_CONTENT["heading"]),
@@ -905,7 +885,9 @@ def _install_section() -> FT:
                 data_copy=INSTALL_CONTENT["install_command"],
                 aria_live="polite",
             ),
-            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button"),
+            A(INSTALL_CONTENT["download_label"], href=INSTALL_CONTENT["download_url"], cls="button")
+            if download
+            else None,
             cls="actions",
         ),
         P(
@@ -1050,39 +1032,35 @@ def build_homepage() -> tuple:
     )
 
 
+def _plain_list(items: list) -> FT:
+    return Ul(*[Li(B(item["name"]), " ", *_inline_code(item["text"])) for item in items], cls="plain")
+
+
 def build_cli_page() -> tuple:
-    hero, agents = CLI_CONTENT["hero"], CLI_CONTENT["agents"]
-    model, where = CLI_CONTENT["model"], CLI_CONTENT["where"]
+    hero, agents, where = CLI_CONTENT["hero"], CLI_CONTENT["agents"], CLI_CONTENT["where"]
     return _product_page(
         "Loopflow — " + hero["heading"],
         "/cli",
         Section(
-            P(hero["label"], cls="eyebrow kicker"),
             H1(hero["heading"]),
-            P(hero["introduction"], cls="intro"),
             _install_row(),
             P(hero["cost"], cls="cost"),
             cls="home-hero",
         ),
-        _claims_section(agents, "flows", 1, _terminal(agents["commands"], "lf commands")),
         Section(
-            P(model["label"], cls="eyebrow"),
-            H2(model["heading"]),
-            _work_rows(model["rows"]),
-            id="model",
-            cls="group",
+            _terminal(agents["commands"], "lf commands"),
+            _plain_list(agents["items"]),
+            P(*[A(link["label"], href=link["href"]) for link in agents["links"]], cls="more"),
+            id="flows",
+            cls="reading",
         ),
         Section(
-            P(where["label"], cls="eyebrow"),
             H2(where["heading"]),
-            Div(
-                *[Div(B(item["title"]), *_inline_code(item["text"])) for item in where["items"]],
-                cls="strip points",
-            ),
+            _plain_list(where["items"]),
             id="where",
-            cls="group",
+            cls="reading",
         ),
-        _install_section(),
+        _install_section(download=False),
     )
 
 

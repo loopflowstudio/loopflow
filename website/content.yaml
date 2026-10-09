@@ -84,137 +84,62 @@ studio:
     heading: Jack Heart
     lede: Founder of Loopflow Studio.
 # The page for engineers, at /cli. Direction from Jack Heart on 2026-10-08: "Loopflow
-# is the CLI for software engineering", argued through the data model and the
-# commands; not selling the Mac app here. Section headings and row copy are draft.
+# is the CLI for software engineering". Plain lists in a narrow column; written for
+# people who already use cmux or another terminal, not selling the Mac app here.
+# List copy is draft.
 cli:
   hero:
-    label: For engineers
     heading: Loopflow is the CLI for software engineering.
-    introduction: >-
-      Ask your agents to build software and they can do it through this one command, breaking the
-      work into concrete steps you can trace and pick back up.
     cost: >-
       Free and open source. The coding agent it drives (Claude Code, Codex, or OpenCode) runs on
       your own account and has its own cost.
   agents:
-    label: For your agents
-    heading: Give your agents the tools to do things the right way.
     commands: |-
-      $ lf skill design "Add CSV export"  # one session
-      $ lf run ship-api                   # a Flow: sessions in order
-      $ lf flow list                      # the Flows you have
-      $ lf task create --title "Add CSV export"
+      $ lf wave status exports            # the plan
+      $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                # a task's next step
       $ lf task status EXP-12
-      $ lf session list                   # every conversation
-      $ lf wave status exports            # the plan
+      $ lf skill design "Add CSV export"  # one session
+      $ lf run ship-api                   # a Flow: sessions in order
       $ lf pr land                        # merge it
-    claims:
-    - title: One command covers the whole job.
-      text: >-
-        `lf` covers each part of building software: planning, designing, prototyping, implementing,
-        testing, optimizing, researching, landing. A Flow is a file that puts those parts in order.
-        Each step is its own session, with a commit between them.
-      link:
-        label: Write your own Flow ↗
-        href: /docs/authoring#flows
-      commands: |-
-        $ lf skill design "Add CSV export"  # one session
-        $ lf run ship-api                   # a Flow: sessions in order
-        $ lf flow list                      # the Flows you have
-    - title: Each task gets its own branch.
-      text: >-
-        Each task gets its own working copy, branch, and pull request. Its sessions stay with it.
-        Return to a task and its work is where you left it.
-      link:
-        label: Worktrees and delivery ↗
-        href: /architecture/delivery
-      commands: |-
-        $ lf task create --title "Add CSV export"
-        $ lf task run EXP-12                # a task's next step
-        $ lf task status EXP-12
-    - title: The work is checked before it reaches you.
-      text: >-
-        Checks run on each change. After a task’s pull request is handed off for landing, a failed
-        required check can start a repair in the same task.
-      link:
-        label: Review workflows ↗
-        href: /docs/authoring#loopflows
-      commands: |-
-        $ lf pr land                        # merge it
-    - title: Your way of working is a file.
-      text: >-
-        Instructions are Markdown and sequences are YAML, kept in your repository, or use the
-        built-ins. Your agents follow the same steps every time. A Flow is a file, so a team can
-        review how it works with agents the way it reviews code.
-      link:
-        label: Skills and workflows ↗
-        href: /docs/authoring
-      commands: |-
-        # .lf/workflows/feature.yaml
-        nodes:
-          design: review-design
-          demo: demo
-        edges:
-          - { from: start,  to: design, flow: task-design }
-          - { from: design, to: demo,   flow: pursue }
-          - { from: demo,   to: demo,   flow: pursue }
-          - { from: demo,   to: end,    flow: ship }
-  model:
-    label: The data model
-    heading: It keeps what matters in software work.
-    rows:
-    - label: Task
-      title: One outcome
-      text: Each task gets its own working copy, branch, and pull request. Its sessions stay with
-        it. Return to a task and its work is where you left it.
-      commands: |-
-        $ lf task run EXP-12
-        $ lf task status EXP-12
-      link:
-        label: Worktrees and delivery ↗
-        href: /architecture/delivery
-    - label: Workflow
-      title: Your part in it
-      text: A workflow names the points where you take part in a task’s conversation and the Flow
-        that runs between each.
-      commands: |-
-        # .lf/workflows/feature.yaml
-        nodes:
-          design: review-design
-          demo: demo
-      link:
-        label: Write a workflow ↗
-        href: /docs/authoring#workflows
-    - label: Wave
-      title: A goal
-      text: A lasting objective, with its plan and its memory. Reviewed notes carry goals and lessons
-        into later sessions, so you do not rebuild context by hand.
-      commands: |-
-        $ lf --wave exports : "Review the goal"
-        $ lf wave status exports
-      link:
-        label: Tasks and Waves ↗
-        href: /docs/waves
-    - label: Project
-      title: The plan
-      text: 'What the Wave is doing now: its tasks, its key results, and the workflow its tasks follow.'
-      commands: |-
-        $ lf task create --wave exports \
-             --title "Add CSV export"
+      $ lf session list                   # every conversation
+    items:
+    - name: Repo → Wave → Task
+      text: Your agent sessions line up under the work. A Wave is a lasting objective with its plan
+        and its memory, a Task is one outcome, and every session is filed under one of them.
+    - name: Task = worktree = branch
+      text: Each Task gets its own working copy, its own branch, and one pull request. Agents on
+        different Tasks never share a checkout.
+    - name: Skills
+      text: One instruction, written in Markdown, kept in your repository. `lf skill design` runs
+        one in its own session.
+    - name: Flows and workflows
+      text: A Flow runs Skills in order, with a commit between them, up to the pull request. A
+        workflow names the points where you take part and the Flow that runs between each.
+    - name: Checks
+      text: Checks run on each change. After a pull request is handed off for landing, a failed
+        required check can start a repair in the same Task.
+    - name: Sessions
+      text: '`lf` starts Claude Code, Codex, or OpenCode for you. The session knows its Task and its
+        Wave, carries the Wave’s reviewed notes, and can be found and picked back up later.'
+    links:
+    - label: Tasks and Waves ↗
+      href: /docs/waves
+    - label: Skills and workflows ↗
+      href: /docs/authoring
+    - label: Worktrees and delivery ↗
+      href: /architecture/delivery
   where:
-    label: Where it runs
     heading: It works wherever you work.
     items:
-    - title: Your terminal
-      text: '`lf` is a command. Run it in the terminal you already use, cmux and herdr included,
-        locally or over SSH.'
-    - title: Use as much as you want
-      text: Run one skill, one Flow, or a whole task. Stay in the session and steer, come in at
+    - name: Your terminal
+      text: '`lf` is a command. Run it in cmux, herdr, or whatever terminal you already use, locally
+        or over SSH.'
+    - name: Use as much as you want
+      text: Run one Skill, one Flow, or a whole Task. Stay in the session and steer, come in at
         design and demo, or let it run.
-    - title: Change whatever you want
-      text: Skills are Markdown and Flows are YAML, kept in your repository. Edit them or use the
-        built-ins. MIT licensed.
+    - name: Change whatever you want
+      text: Skills are Markdown and Flows are YAML. Edit them or use the built-ins. MIT licensed.
 # Set by Jack Heart on 2026-10-08: lead with the Mac app at full size, then For
 # you, then the terminal for your agents, questions, install. Claim
 # titles and answers beyond his quoted lines are draft. Backticks set code.

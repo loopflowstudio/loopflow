@@ -198,6 +198,13 @@ this heading. Keep these replacements deleted:
   bodies. Their common transaction helpers now also acquire peer evidence;
   the existing journal retains original ages, negative facts and Team baselines.
   Scalar projection never turns these facts into list-order or execution authority.
+- Non-removal capture exclusion and unconditional freshness clearing on peer scalar
+  acquisition. Causal detail acknowledgements replace them in the existing journal;
+  receiving-time ordering and a second body/reader are not added.
+- Replaying every historical invalidation revision against the cache and duplicate
+  head replay loops. The greatest retained revision supplies the same floor;
+  one outstanding-head handler runs before and after scalar acquisition. Freshness
+  reconciliation reads only the cached revision, not another complete entity body.
 - Repeated provider-evidence decoding, validation and removal-age sorting inside
   projection retries. `ObjectChanges` retains typed evidence histories beside
   borrowed order histories; document validation remains the malformed-input owner.
@@ -345,9 +352,8 @@ combined launch/Flow verification remains with gate.
    lists. Concurrent contradictory Team confirmations isolate the object. Retained
    membership uncertainty still needs a fresh common confirmation, not an old
    imported receipt. Migration seeds retained negative evidence with unknown age;
-   it does not invent historical Team confirmations. Non-removal invalidation is
-   not transported as a durable negative fact; replay-safe invalidation transport
-   remains a composition question before mixed activation, not a retired requirement.
+   it does not invent historical Team confirmations. Non-removal notifications
+   use the causal invalidation cut in item 4, not durable removal evidence.
    Each fact has its own savepoint:
    conflicting Teams cannot roll back an independently confirmed archive.
    Review/tests repaired unchanged removal writes and reteam's stale unversioned
@@ -361,14 +367,28 @@ combined launch/Flow verification remains with gate.
    rejects a cold empty list. Neither proves partial-list acquisition composed with
    alternate provider evidence. That case and public acquisition remain gate coverage,
    not reasons to weaken acceptance or claim mixed-provider lifetime behavior.
-4. **Replay-safe invalidation remains implementation work.**
-   `observe_pm_issue_change` still invalidates locally, but `capture_provider_evidence`
-   deliberately omits non-removal notifications and the peer validator rejects them.
-   The missing boundary is distinguishing an old unversioned invalidation from a
-   later successful detail acquisition without using receiving time or inventing a
-   provider revision. Preserve local invalidation and retained frontiers; cover delayed
-   replay after successful detail and a genuinely new invalidation before mixed
-   activation. No new product policy is needed to preserve that existing contract.
+4. **Replay-safe invalidation is implemented with focused proof.**
+   `provider_invalidation` shares the existing journal's causal heads between
+   notifications and successful detail acknowledgements. Detail retires only the
+   notices it observed; unseen concurrent notices remain outstanding. Known revision
+   floors survive acknowledgement. Neither arrival time nor the receipt's clock
+   becomes a provider revision. Import clears freshness only after accepting the
+   corresponding entity frontier; scalar/list replay no longer clears it alone.
+   The acknowledgement carries identity, revision and original age, not another
+   entity body or parent mapping. A cache-only detail without transported scalar
+   facts cannot refresh another machine's older body; the fixture distinguishes
+   that from acquisition with confirmed Wave ownership. Null-detail invalidation
+   uses the same capture path; migration retains unknown ages and known floors.
+   Cold import reapplies outstanding notices after creating the cache. Each fact's
+   existing savepoint and private-selection holds remain. Tests cover delayed replay,
+   genuinely new and concurrent notifications, equal-body detail, null-detail
+   invalidation, populated execution, migration and private-history withholding.
+   Review removed unconditional scalar freshness clearing and an unnecessary second
+   detail body/reader. A marker-only import also exposed a fresh but older cache;
+   the detail's actual revision now fences it through common invalidation, without
+   fabricating a revision or accepting a stale local read. Repeated unchanged detail
+   does not mint another acknowledgement. Public composition remains gate work,
+   not mixed activation.
 5. **Legacy association and presentation remain implementation work.** Divergent
    existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
    presentation, not placement on read. Desktop still needs selected-plan,
@@ -415,8 +435,8 @@ compared with the attempted snapshot digest. Fetched, imported and publication
 revisions remain separate. The public work-watch case passes in isolated Linux;
 other composed cases remain gate acceptance.
 Linear-connected repositories still do not exchange: the removal/archive/Team
-storage cut exists, but replay-safe invalidation, legacy association, presentation
-and combined public acceptance remain. The diagnostic is temporary, not product policy.
+storage cut exists, but legacy association, presentation and combined public acceptance (including
+invalidation) remain. The diagnostic is temporary, not product policy.
 
 1. Public `lf planning key/connect/use/select/status` now provisions/recover keys,
    pins an empty binding, selects exact Wave IDs and displays retained imports/holds.
@@ -483,7 +503,7 @@ and combined public acceptance remain. The diagnostic is temporary, not product 
    Removal/archive/reteam now use common acquisition with the focused storage
    proof in Remaining integration item 3. Gate still owns public alternate
    acquisition, complete-list ordering and comment composition, not only detail
-   reads. Replay-safe invalidation, legacy association and Desktop status remain
+   reads. Legacy association, Desktop status and public invalidation verification remain
    before mixed-provider exchange and removal of its temporary diagnostic. This
    cut cannot repair LOO-406's unseen provider-write race or supply Linear
    compare-and-swap semantics.
@@ -583,7 +603,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 realign): `git diff --check` passes; prose-only reconciliation reuses `25cbc0a09`’s lib build, 63 peer-storage tests, fmt and all-target Clippy passes; combined/public/Desktop verification remains with gate.
+Check (October 9 compress): `cargo test -p loopflow --lib peer_invalidation --no-run` builds; `scripts/test_network.py <lib-test>` passes `peer_invalidation` (2), `peer_provider_removal_and_archive_precede_stale_detail_without_losing_work` and `provider_move_to_unselected_project_preserves_execution_and_sibling_exchange` (4 total); `cargo fmt --check`, `git diff --check` and `cargo clippy --all-targets -- -D warnings` pass. Combined public, partial-list and Desktop checks remain with gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

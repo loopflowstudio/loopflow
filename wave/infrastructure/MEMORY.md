@@ -639,8 +639,8 @@ ages and Team baselines; legacy ages stay unknown. Entity revisions cannot order
 relationships. Team and cold-list fixtures prove no composed partial-list acceptance.
 
 **Invalidation needs causal acknowledgement.** Detail retires observed notices,
-not unseen notices. Replay cannot reinvalidate that readback. Revision floors
-survive; clocks create no provider revision. Scalar/list replay cannot clear
+not unseen notices. Replay cannot reinvalidate that readback. The greatest retained revision
+sets the floor; clocks create no provider revision. Scalar/list replay cannot clear
 freshness; acknowledgement requires its accepted frontier.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.

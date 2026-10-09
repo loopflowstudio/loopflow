@@ -78,8 +78,8 @@ remain separate. No new product decision is selected.
   Identical bodies still undergo removal/archive checks; superseded entity revision
   groups remain journal history, not reacquisition. Common no-op upserts preserve
   readback idempotence. The October 9 storage suite covers these regressions. Grouped
-  receipts and removal/archive/Team transport are now implemented. Replay-safe
-  invalidation, legacy association and Desktop presentation remain. No mixed-provider
+  receipts and removal/archive/Team transport are implemented. Public invalidation
+  verification, legacy association and Desktop presentation remain. No mixed-provider
   completion or compare-and-swap is claimed.
 
 - October 8 foreground safety choice: until all provider paths are composed and
@@ -165,7 +165,8 @@ remain separate. No new product decision is selected.
   owner pending full receipt composition. The later receipt-transport cut below
   supersedes the missing-transport finding;
   foreground creation has focused proof. Ordering and removal/archive/Team transport
-  now exist; replay-safe invalidation and mixed-provider activation remain unfinished.
+  now exist; public invalidation verification and mixed-provider activation remain
+  unfinished.
   No new product policy is selected.
 
 - October 9 effect-eligibility choice: a rejected or sharing-held peer object
@@ -187,7 +188,7 @@ remain separate. No new product decision is selected.
   selection. Unordered active/trash evidence isolates projection; no inferred
   deletion settlement. Full rationale and prior checks:
   `225b8c95f:scratch/questions.md`, final two entries. The current design owns
-  remaining replay-safe invalidation and presentation work;
+  remaining public invalidation verification and presentation work;
   mixed-provider exchange remains disabled.
 
 - October 9 ordering choices and counterexamples now live in the design's
@@ -204,9 +205,18 @@ remain separate. No new product decision is selected.
   unknown acquisition age; no Team evidence is fabricated by migration. This is
   an implementation choice, not a new product decision. Mixed-provider exchange
   remains disabled; full-list acquisition is still an independent boundary.
-  Non-removal invalidations are excluded: replaying an old unversioned invalidation
-  could invalidate later successful detail forever. Replay-safe invalidation
-  transport remains unresolved before mixed activation, not deliberately dropped.
+  The later causal invalidation cut below supersedes omission of non-removal
+  notifications; public composition remains unproved before mixed activation.
   Unknown legacy ages never
   rewrite a Task's removal timestamp. Each independent fact gets its own savepoint,
   so Team contradictions cannot roll back an accepted archive.
+
+- October 9 replay-safe invalidation choice: use causal heads in one optional
+  `provider_invalidation` journal field. Notifications and successful detail
+  readbacks share that field; a detail retires only notifications it observed.
+  Concurrent/unseen notifications remain invalid, irrespective of receiving time.
+  Acknowledgements carry identity/revision/age only and clear freshness after an
+  accepted matching-or-newer frontier; no duplicate body or parent mapping travels.
+  List/scalar replay cannot clear freshness. Null-detail invalidation uses the same
+  capture path, and migration retains unknown-age invalid caches. No new provider
+  revision, execution authority or mixed-provider activation is introduced.

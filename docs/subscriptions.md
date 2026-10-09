@@ -306,6 +306,8 @@ another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login
 is installed before that wait, so new lf launches need not wait. lf's Codex
 terminals use `--no-daemon` and keep their own login until restarted.
+This flag was verified with codex-cli 0.161.0; older versions without it reject
+lf's terminal launches.
 
 | | Codex | Claude |
 |---|---|---|
@@ -322,6 +324,8 @@ unrecognized login beside the stored accounts rather than discarding it.
 A shared launch follows the active account while it is eligible and below the
 95% threshold, and otherwise moves the home to the next account in the route.
 `--account codex=work@` makes that account active before launching.
+These launch-time switches do not restart Codex's shared daemon. If plain
+`codex` keeps the old login, run `lf account codex use` with the selected account.
 
 `--isolate` runs the invocation and its children in the selected account's own
 home, unmoved by any switch. `isolate: true` in `.lf/config.yaml` makes that the

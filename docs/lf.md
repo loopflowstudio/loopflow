@@ -291,8 +291,7 @@ and checkout history. Missing provider evidence keeps deletion pending; newer
 observed Linear edits retire removal and restore planning visibility. The active
 connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies
 never allocate replacement identities. Later local edits survive creation readback.
-The local ID works before a Linear alias arrives. Composed reconnect acceptance
-remains unfinished.
+The local ID works before a Linear alias arrives.
 
 ```bash
 lf task refile <task-id> --wave exports

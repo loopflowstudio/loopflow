@@ -3744,8 +3744,8 @@ pub fn task_sync(issue: &str) -> OpsResult<String> {
 }
 
 /// Put the Task at `end` of its Workflow by `how`. Reaching `end` is
-/// completion: refused while delivery is unsettled, it writes
-/// Linear and retires the checkout, unless the edge taken ran nothing.
+/// completion: unsettled PRs refuse it; the decision and pending Linear delivery
+/// commit locally before checkout cleanup. An empty edge retains the checkout.
 /// Returns false when `how` no longer applied to where the Task stood.
 async fn reach_end(
     store: &SharedStore,

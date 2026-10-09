@@ -148,7 +148,7 @@ show no pending Linear delivery; retained losing values remain inspectable.
 A foreground connection synchronizes its repository, independent of Desktop Task
 selection. Inventory, comments and delivery use separate bounded loops; closing
 or clearing the repository connection ends them. Read projections stay read-only.
-Composed reconnect acceptance remains unfinished. Ingestion adopts observed Linear conflicts and retains the losing
+Ingestion adopts observed Linear conflicts and retains the losing
 local intentions in field, state and comment receipts. Retired intentions never
 reenter delivery after a late acknowledgement or matching observation.
 The documented unconditional-update race remains a protocol limit.
@@ -352,9 +352,9 @@ and selected membership, preserving later edits. Pre-cutover unfinished provider
 transitions remain unresolved with their original receipts; local rotation does not
 claim to recover their uncertain external effects.
 
-The planning store can retain explicit archival acknowledgements. Integrating
-archival into the provider-backed chapter operation and preserving old acknowledgements
-across the combined migration frontier remain unfinished.
+Historical provider transitions and archival acknowledgements remain evidence;
+local rotation does not recreate the removed provider-first chapter operation
+or infer that its uncertain effects settled.
 
 ## Capture a Flow once
 
@@ -542,7 +542,7 @@ pending IDs and losing local bodies from one SQLite snapshot. An observed commen
 conflict adopts Linear’s body, author and time while the receipt retains both
 complete comments; no replacement comment is created. Connected repositories show
 pending sync, including comments on unmapped Tasks;
-a foreground Task Session or Desktop Task connection delivers saved comments and
+a foreground Task Session or Desktop repository connection delivers saved comments and
 acquires incoming comments independently. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved direction. The shared skill path supplies Task context and live steers when

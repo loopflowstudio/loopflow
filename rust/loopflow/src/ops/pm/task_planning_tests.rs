@@ -1348,10 +1348,18 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             .sqlite
             .put_pm_task(&repo.display().to_string(), "linear", &remote, None)
             .unwrap();
+        let mut late = remote.item.clone();
+        late.state = Some("completed".into());
+        late.completed = true;
+        assert!(!fixture
+            .store
+            .sqlite
+            .observe_task_state(&delivery, &late)
+            .unwrap());
         fixture
             .store
             .sqlite
-            .settle_task_state(&delivery, None)
+            .task_state_error(&delivery, "late failure")
             .unwrap();
         assert!(fixture
             .store
@@ -1474,16 +1482,12 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
             Some("unstarted")
         );
         assert_eq!(reopened.target, "unstarted");
+        // A superseded attempt stays uncertain. Neither its readback nor its
+        // failure can settle the newer reopening or invent successful delivery.
         fixture
             .store
             .sqlite
-            .settle_task_state(&completed, None)
-            .unwrap();
-        // A stale failure cannot erase the receipt for that completed effect.
-        fixture
-            .store
-            .sqlite
-            .settle_task_state(&completed, Some("late failure"))
+            .task_state_error(&completed, "late failure")
             .unwrap();
         assert_eq!(
             fixture
@@ -1514,7 +1518,7 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(receipt, (true, None));
+        assert_eq!(receipt, (false, Some("late failure".into())));
         assert!(conn
             .query_row(
                 "SELECT attempted FROM task_state_deliveries WHERE id=?1",
@@ -2001,12 +2005,15 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
                 .unwrap(),
             WorkStatus::Done
         );
-        // A delayed acknowledgement cannot erase an already observed collision.
-        fixture
+        // A delayed matching readback cannot erase an already observed collision.
+        let mut late = adopted.clone();
+        late.state = Some("completed".into());
+        late.completed = true;
+        assert!(!fixture
             .store
             .sqlite
-            .settle_task_state(&original, None)
-            .unwrap();
+            .observe_task_state(&original, &late)
+            .unwrap());
         assert!(fixture
             .store
             .sqlite

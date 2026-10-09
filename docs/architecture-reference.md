@@ -484,9 +484,9 @@ and Project creation/edits, rotation and refiling use common transactions and fi
 receipts. Wave provisioning and document ingestion use common stored definitions;
 deletion commits local removal and its pending receipt without changing execution.
 Observed conflicts adopt Linear; unchanged baselines preserve pending saves.
-Provider export, field/cancellation/deletion delivery, complete pending presentation
-and composed reconnect remain unfinished. The unconditional-update race remains
-a protocol limit.
+Independent foreground loops deliver creation, fields, ordering, state, deletion
+and comments; receipt-backed CLI/Desktop projections expose pending and uncertain
+effects. The unconditional-update race remains a protocol limit.
 
 <!-- architecture-map:start -->
 | Concept | Truth and authority | Data structure | Persistence | Process owner | Public surface | External edge |
@@ -494,9 +494,9 @@ a protocol limit.
 | **User** — a person or external harness originating work | User-attributed actions author root input and decide effects that require user intervention. User is actor provenance, not a control credential. | [`Author`](../rust/loopflow/src/durable.rs) | Git supplies `user.name` unless personal Loopflow config overrides it; input records retain source author names. No User row; authored effects persist on the concept they change. | `lf` | `lf :`, `lf open`, `lf config`, `lf user` | `process:open`, `process:osascript`, `process:pbpaste`, `process:id` |
 | **Skill** — one reusable prompt with assembled context | Repository/builtin Skill Markdown is authoritative; discovery selects one source. | [`Skill`](../rust/loopflow/src/engine/flow.rs), [`SkillSource`](../rust/loopflow/src/engine/skill_catalog.rs) | `.lf/skills/`, builtin Skill files, installed vendor Skill directories | `lf-prompt` | `lf skill`, `lf self sync-skills`, `lf list`, `lf help` (local command/definition discovery) | `process:python3` |
 | **Flow** — definition and one execution | The driver process compiles the FlowDefinition, including Xor paths, and holds the graph and cursor in memory. It records the graph and each step's node in FlowProcess; a step's result is its process exit. | `FlowDefinition`, `FlowComposition`, `FlowProcess`, typed node ID | `.lf/flows/`; `flow_processes`, `flow_process_steps` beside the driver and step Process rows | One CLI driver Process per Flow; each step is its own child process running the plain command | `lf flow`, `lf run` (flow-first definition execution), `lf task run` | — |
-| **Workflow** — a Task's nodes, the Flows between them, and where the Task stands | A workflow definition is authored YAML: nodes, where a person takes part in the Task conversation, and edges, each running one Flow. A Task's Workflow is the definition it took up, fixed from then on, and its stored position: at a node, or on an edge with the Process carrying it. Choosing an edge and setting a node are the two writes; the `lf task run` process carrying an edge starts its Flow as a child, again when a Flow process fails, writes the arrival when one succeeds, and otherwise leaves the Task on its edge. Every move is appended with its Process and note. It executes nothing itself. | [`WorkflowDefinition`](../rust/loopflow/src/engine/workflow.rs), [`Workflow`](../rust/loopflow/src/ops/workflow.rs) | `.lf/workflows/`, builtin workflow files, `wave_workflows`; `task_workflows` (one row per Task), `task_workflow_moves` (append-only) | `lf task run` chooses an edge, then starts its Flow as the plain `lf --task ISSUE run FLOW`; `lf task move` sets a node | Task status JSON (`execution.work.workflow`), the Workflow catalog, node guidance in a bound Task launch | — |
+| **Workflow** — a Task's nodes, the Flows between them, and where the Task stands | A workflow definition is authored YAML: nodes, where a person takes part in the Task conversation, and edges, each running one Flow. A Task's Workflow is the definition it took up, fixed from then on, and its stored position: at a node, or on an edge with the Process carrying it. Choosing an edge and setting a node are the two writes; the `lf task run` process carrying an edge starts its Flow as a child, again when a Flow process fails, writes the arrival when one succeeds, and otherwise leaves the Task on its edge. Every move is appended with its Process and note. It executes nothing itself. | [`WorkflowDefinition`](../rust/loopflow/src/engine/workflow.rs), [`Workflow`](../rust/loopflow/src/ops/workflow.rs) | Wave-owned definitions and builtin workflow files; `task_workflows` (one row per Task), `task_workflow_moves` (append-only) | `lf task run` chooses an edge, then starts its Flow as the plain `lf --task ISSUE run FLOW`; `lf task move` sets a node | Task status JSON (`execution.work.workflow`), the Workflow catalog, node guidance in a bound Task launch | — |
 | **Wave** — durable operating context with goal, memory, cadence, chat, and project selection | The Wave UUID is durable identity, carried in authored `GOAL.md` frontmatter. SQLite stores a one-segment name and optional parent Wave ID; the readable address is derived through parents within the canonical repository. Explicit provisioning imports repository Markdown and Workflow definitions without changing their bytes. SQLite owns goal, memory and plan membership in both connection modes; Linear Initiative IDs are optional links. Renaming changes stored addresses, retaining definitions and execution. | [`Wave`](../rust/loopflow/src/work/wave/mod.rs), [`WaveLocator`](../rust/loopflow/src/work/wave/mod.rs), [`CanonicalRepo`](../rust/loopflow/src/repository.rs), [`WaveConfig`](../rust/loopflow/src/work/wave/config.rs) | `waves`, `wave_documents`, `wave_workflows`; repository files are import sources; historical relocation receipts remain retained | Finite Wave-attributed conversations; relocation commits expected addresses in one store transaction | `lf wave`, `lf wave list`, `lf wave status`, `lf roadmap`, `lf cron`, `lf discord` | Discord when configured |
-| **Chapter / Project** — shared current plan name and one selected Project per Wave | Project names, summaries and Workflow content save locally with per-field delivery/conflict receipts. Creation, selection, activation and rotation save locally with pending effects; provider delivery remains unfinished. The repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_changes`, `project_events`; Linear Project observations | one local rotation transaction; foreground provider observation | `lf project`, `lf project workflow`, `lf repo new-chapter`, `lf repo reteam` | Linear |
+| **Chapter / Project** — shared current plan name and one selected Project per Wave | Project names, summaries and Workflow content save locally with per-field delivery/conflict receipts. Creation, selection, activation and rotation save locally with receipts consumed by foreground provider delivery. The repository chapter name is derived from its Waves' In Progress Projects. | `Project`, `ProjectStatus` | `projects`, `project_changes`, `project_events`; Linear Project observations | one local rotation transaction; foreground provider observation | `lf project`, `lf project workflow`, `lf repo new-chapter`, `lf repo reteam` | Linear |
 | **Live metric** — one reviewed measurement contract owned by exactly one Wave, plus revision-bound current evidence | `wave/<name>/metrics/*.md` owns meaning and Wave ownership; an accepted instrument observation owns its source-time fact; [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) is the sole derived reading shared across surfaces. Metrics inform KRs but never complete them. | [`MetricContract`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricObservation`](../rust/loopflow/src/work/wave/metrics.rs), [`MetricPortfolioDto`](../rust/loopflow/src/work/wave/metrics.rs) | `wave/<name>/metrics/`, `metric_instruments`, `metric_observations` | Metric instruments write observations; foreground Rust readers derive bounded portfolios. | Status/roadmap JSON, Wave and Task prompts, the shared Swift DTO, and Mac Wave detail expose the same `metric_portfolio`. | — |
 | **Task** — concrete work inside exactly one Project | SQLite owns Task creation, field edits, comments, local state decisions, membership and deletion. Local mutations and pending delivery receipts commit together. Task identity exists before optional checkout placement. The checked-out branch identifies a placed Task through its active PR; the stored worktree path is placement. Git upstream tracking does not select Task identity. Every Flow process for the Task is equally its work; helpers and delivery commands may mutate the worktree without driving a Flow. Git owns commits/branch state; GitHub owns PR/check/merge truth. | [`Task`](../rust/loopflow/src/work/task/mod.rs), [`TaskPr`](../rust/loopflow/src/work/task/mod.rs) | `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events`, `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments`; Linear Issue; Git worktree | `lf task run` places the worktree, then drives a fresh Flow in the foreground; foreground operations record delivery evidence | `lf task`, `lf pr`, `lf wt`, `lf sync`, `lf commit` | Linear |
 | **PR landing** — one recorded intent to merge an exact PR head | GitHub is authoritative for the PR head, required checks, and merge. One landing generation admits one check at a time; an incident without a recorded response admits one repair. | [`PrLanding`](../rust/loopflow/src/pr_landing.rs), [`CiIncident`](../rust/loopflow/src/work/task/mod.rs) | `pr_landings`, `ci_incidents` | The process holding the claim: `lf pr reconcile` to observe and settle, `lf ci watch` to repair | `lf arm`, `lf land`, `lf pr reconcile`, `lf ci watch`, `lf pr checks` | `provider:github`, model provider for `ci-fix`, `process:git`, `process:gh` |
@@ -541,7 +541,7 @@ kernel locks                 live local exclusion authority
 | Planning | `waves`, `wave_documents`, `wave_workflows`, `projects`, `project_changes`, `project_events`, `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events` | Stored plans and definitions, optional provider links, stable Work identity, creation receipts, comments and deletion recovery |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the current observations Waiting is judged from |
 | Flow processes | `flow_processes`, `flow_process_steps` | One append-only row per Flow process and per step its driver started |
-| Workflows | `wave_workflows`, `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
+| Workflows | `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Serial PR chain and provider observations |
 | Work adjuncts | `tool_responses`, `work_placements` | Tool answers and Machine placement |
@@ -574,8 +574,7 @@ a disposable copy and leaves the installed Machine unchanged.
 ### External systems
 
 Task and Project rows own saved planning; Linear mappings link optional provider
-observations and pending effects. LOO-406's Wave-definition and deletion cutover
-remains unfinished, as described above. Local settlement proves no provider delivery;
+observations and pending effects. Local settlement proves no provider delivery;
 inbound planning grants no Workflow movement or Process control. GitHub owns PR
 heads, checks and merge. Git owns commits and worktrees. Model providers own their
 session and usage semantics; local observations do not replace those authorities.
@@ -704,22 +703,23 @@ Process's argv.
 
 A driver that dies leaves dead Processes as history. Nothing restarts or resumes
 it. Liveness comes from OS process evidence, and missing evidence stays uncertain.
-Only live or unresolved execution, a live Process or an unresolved provider turn,
-holds Task completion, cleanup and landing. The caller inspects that history
-before launching fresh work, which starts another Flow.
+Live or unresolved execution retains checkouts and exact controls; it does not
+veto authorized Task completion or cancellation. Git/PR delivery still needs its
+own evidence. Fresh work starts another Flow after inspecting existing execution.
 
 Independent helpers may carry the same Task and independent Git/PR
 operations. Binding to done Work assigns a conversation without reopening it.
 Legacy review boundaries remain readable history when their Work is terminal.
 
 Chapter rotation preserves Task, AgentSession, PR and worktree
-identity when moving started unfinished Tasks. Linear status changes converge
-through fresh provider reads; there is no atomic repository-wide Chapter switch.
+identity when moving started unfinished Tasks. Local selection, membership and
+pending effects commit atomically across the selected Waves. Provider delivery
+converges independently; there is no cross-system atomic switch.
 
 ## Durable communication
 
 Task steering saves a comment and its stable delivery UUID atomically in SQLite.
-Foreground Task Sessions and Desktop Task connections independently acquire
+Foreground Task Sessions and Desktop repository connections independently acquire
 comments and deliver pending Linear writes. The saved thread enters Desktop's
 Task stream; provider echoes do not repeat local direction. Provider acknowledgement,
 seed inclusion and model acceptance remain distinct evidence.
@@ -1069,8 +1069,9 @@ dated evidence, excluded from live vocabulary and compatibility-seam discovery.
 
 ## Authority and failure invariants
 
-- Linear owns Project status and shared planning. A Chapter is the shared name of
-  one In Progress Project per Wave; partial rotation is visible and retryable.
+- SQLite owns planning with optional Linear synchronization; observed Linear
+  conflicts win while losing intentions remain history. A Chapter is the shared
+  name of one In Progress Project per Wave; uncertain delivery stays visible.
 - Wave instruments and observations survive Chapter changes. Missing target
   planning is unknown, not proof that an instrument is untargeted; it cannot
   erase an observed reading.

@@ -61,12 +61,15 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
             [db.last_insert_rowid()],
         )
         .unwrap();
-        let store = &registered.store.sqlite;
-        let session = store.session("retained-session").unwrap().unwrap();
-        let unresolved = store.process(&process).unwrap().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let store = &registered.store;
+        let session = runtime
+            .block_on(store.session("retained-session"))
+            .unwrap()
+            .unwrap();
+        let unresolved = runtime.block_on(store.process(&process)).unwrap().unwrap();
         let authored = repo.path().join("unfinished.txt");
         std::fs::write(&authored, "Retain unfinished work\n").unwrap();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         registered.pr.publication = Some(PrPublication {
             requested_at: time::OffsetDateTime::now_utc(),
             presentation: None,
@@ -124,8 +127,17 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 })
                 .unwrap();
             assert!(abandoned);
-            assert_eq!(store.process(&process).unwrap().unwrap(), unresolved);
-            assert_eq!(store.session("retained-session").unwrap().unwrap(), session);
+            assert_eq!(
+                runtime.block_on(store.process(&process)).unwrap().unwrap(),
+                unresolved
+            );
+            assert_eq!(
+                runtime
+                    .block_on(store.session("retained-session"))
+                    .unwrap()
+                    .unwrap(),
+                session
+            );
             assert_eq!(
                 runtime
                     .block_on(registered.store.task_prs(&registered.task.id))

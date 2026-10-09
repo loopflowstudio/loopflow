@@ -25,10 +25,19 @@ def test_instruction_channel_is_not_first_turn():
 
 
 def test_multiple_requests_do_not_prove_single_turn_transport():
-    assert not _assess([_request("request"), _request("request")], "request")["one_model_request"]
+    for first in ["wrong launch input", "request"]:
+        checks = _assess([_request(first), _request("request")], "request")
+        assert not checks["one_model_request"]
+        assert checks["complete_first_turn"] is (first == "request")
 
 
 def test_later_or_duplicate_turn_cannot_mask_the_launch_input():
     for texts in [["request", "another turn"], ["request", "request"]]:
         request = {"input": [item for text in texts for item in _request(text)["input"]]}
         assert not _assess([request], "request")["complete_first_turn"]
+
+
+def test_native_guide_before_first_turn_is_preserved():
+    request = _request("native guide")
+    request["input"].extend(_request("request")["input"])
+    assert all(_assess([request], "request").values())

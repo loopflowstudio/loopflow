@@ -62,14 +62,14 @@ def _assess(requests: list[dict], skill: Path, marker: str, context: str, argume
 
 def _user_texts(request: dict) -> list[str]:
     texts = []
-    for message in request.get("messages", []):
-        if message["role"] != "user":
+    for message in request.get("messages", request.get("input", [])):
+        if message.get("role") != "user":
             continue
         content = message["content"]
         if isinstance(content, str):
             texts.append(content)
         else:
-            texts.extend(block.get("text", "") for block in content)
+            texts.extend(block["text"] for block in content if "text" in block)
     return texts
 
 

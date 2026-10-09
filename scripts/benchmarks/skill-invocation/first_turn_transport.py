@@ -12,22 +12,15 @@ import subprocess
 import sys
 import tempfile
 import termios
-import threading
 import time
 from pathlib import Path
 
 from context_delivery import Requests
+from request_mapping import _user_texts
 
 
 def _assess(requests: list[dict], prompt: str) -> dict[str, bool]:
-    texts = [
-        block.get("text", "")
-        for request in requests
-        for item in request.get("input", [])
-        if item.get("role") == "user"
-        for block in item.get("content", [])
-        if isinstance(block, dict)
-    ]
+    texts = _user_texts(requests[0]) if requests else []
     return {
         "one_model_request": len(requests) == 1,
         "complete_first_turn": bool(texts) and texts[-1] == prompt and texts.count(prompt) == 1,
@@ -122,10 +115,8 @@ def main() -> int:
         timeout=10,
         check=True,
     ).stdout.strip()
-    server = Requests("codex")
-    serving = threading.Thread(target=server.serve_forever, daemon=True)
-    serving.start()
-    (root / "native/config.toml").write_text(f'''model = "gpt-5.4"
+    with Requests("codex") as server:
+        (root / "native/config.toml").write_text(f'''model = "gpt-5.4"
 model_provider = "fixture"
 cli_auth_credentials_store = "file"
 allow_login_shell = false
@@ -145,8 +136,7 @@ enabled = false
 [projects."{root / "work"}"]
 trust_level = "trusted"
 ''')
-    observations = {}
-    try:
+        observations = {}
         for surface, options in [
             ("headless", ["exec", "--skip-git-repo-check", "--json", "-"]),
             ("terminal", ["--no-alt-screen", "--no-daemon", "-"]),
@@ -179,10 +169,6 @@ trust_level = "trusted"
             )
             else 1
         )
-    finally:
-        server.shutdown()
-        server.server_close()
-        serving.join(timeout=5)
 
 
 if __name__ == "__main__":

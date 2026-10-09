@@ -26,6 +26,14 @@ class Requests(ThreadingHTTPServer):
         self.provider = provider
         self.bodies: list[dict] = []
 
+    def __enter__(self) -> "Requests":
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.shutdown()
+        super().__exit__(*args)
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
@@ -283,20 +291,16 @@ def main() -> int:
     (root / "current.txt").write_text("LOO444_START_CONTEXT")
     env = {"PATH": os.environ["PATH"], "HOME": str(root / "home")}
     server = Requests(args.provider)
-    serving = threading.Thread(target=server.serve_forever, daemon=True)
-    serving.start()
     try:
-        (_claude if args.provider == "claude" else _codex)(root, env, server.server_port)
-        events = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()]
-        checks = _assess(args.provider, server.bodies, events)
-        result = {"provider": args.provider, "checks": checks, "evidence": str(root)}
-        (root / "result.json").write_text(json.dumps(result, indent=2))
-        print(json.dumps(result, indent=2))
-        return 0 if all(checks.values()) else 1
+        with server:
+            (_claude if args.provider == "claude" else _codex)(root, env, server.server_port)
+            events = [json.loads(line) for line in (root / "hooks.jsonl").read_text().splitlines()]
+            checks = _assess(args.provider, server.bodies, events)
+            result = {"provider": args.provider, "checks": checks, "evidence": str(root)}
+            (root / "result.json").write_text(json.dumps(result, indent=2))
+            print(json.dumps(result, indent=2))
+            return 0 if all(checks.values()) else 1
     finally:
-        server.shutdown()
-        server.server_close()
-        serving.join(timeout=5)
         (root / "requests.json").write_text(json.dumps(server.bodies, indent=2))
 
 

@@ -138,68 +138,53 @@ additive developer instructions and its native base survived manual compaction.
 The app-server probe uses exact per-thread fixture hook hashes: the TUI bypass
 flag did not authorize app-server hooks. Never substitute global trust changes.
 
-### First-turn transport boundary
+### Hook-size boundary
 
 ```sh
-uv run python scripts/test_network.py uv run --no-sync python \
-  scripts/benchmarks/skill-invocation/first_turn_transport.py \
-  --output /tmp/lf-first-turn-proof
-uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
-```
-
-Compares 285 KB Unicode stdin turns on Codex exec/TUI with terminal stdout, fresh
-Homes and a fake API. Saves requests, terminal output, argv sizes and exit/timeout
-evidence. Nonzero means failed delivery.
-
-Codex 0.161.0 (October 9): exec delivered exact user text; TUI exited 1 with
-`stdin is not a terminal`, without a request. This rejects file-backed stdin
-only. Production is unchanged.
-
-```sh
-uv run python scripts/test_network.py uv run --no-sync python \
-  scripts/benchmarks/skill-invocation/first_turn_transport.py \
-  --transport paste --output /tmp/lf-paste-proof
-# Repeat with --case carriage-return and --case paste-marker (expected failures).
 uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/context_delivery.py \
   --provider codex --context-chars 10000 --output /tmp/lf-hook-size-proof
 # Repeat with --provider claude, and with --unicode on both (expected failures).
 ```
 
-Codex 0.161.0's bracketed paste delivered 285,023 UTF-8 bytes including emoji
-with a maximum 86-byte argument. Raw-editor readiness, resize, follow-up history
-and `/quit` passed. CRLF became LF and a literal paste terminator was consumed:
-this is not a lossless transport. Exact first-request comparison rejects those
-cases even though the client exits successfully. Signals, concurrent input,
-native resume, Claude terminal transport and cmux remain unproved.
-
 Claude 2.1.295 and Codex 0.161.0 preserve 10,000 ASCII characters at start and
 manual compaction. Both spill and truncate 10,000 Unicode scalars / 39,901 UTF-8
-bytes. Codex retains the boundary markers around a cut in the middle; the probe
-now compares the entire context string. A 2,500-scalar / 9,901-byte Codex block
-passes. Count provider units before selecting whole files, not just Unicode
-scalars; a native spill preview is still truncation. These samples prove no
-Loopflow integration or automatic compaction.
+bytes. Codex retains the boundary markers around a cut in the middle; compare
+whole strings. A 2,500-scalar / 9,901-byte Codex block passes. Count provider units
+before selecting whole files, not just Unicode scalars; a native spill preview
+is still truncation. These samples prove no Loopflow integration or automatic
+compaction.
 
+### First-turn editor boundary
 
 ```sh
 uv run python scripts/test_network.py uv run --no-sync python \
   scripts/benchmarks/skill-invocation/first_turn_transport.py \
-  --transport editor --output /tmp/lf-editor-proof
+  --output /tmp/lf-editor-proof
 # Repeat with --case carriage-return, paste-marker, and trailing-whitespace.
+uv run pytest scripts/benchmarks/skill-invocation/test_first_turn_transport.py -q
 ```
 
-Codex 0.161.0's external editor preserves 285 KB Unicode, embedded CRLF and a
-literal paste terminator exactly in the first request. A fixture `VISUAL` copies
-bytes into the native draft; Ctrl-G and Enter remain terminal input. The probe
-checks editor terminal descriptors, raw-mode restoration, no premature request,
-resize, follow-up history and clean exit. Maximum observed argument, including
-editor arguments: 86 bytes. Composer echo precedes thread readiness; the probe
-waits for the native session footer before requesting the editor.
+Checks exact first-request text, follow-up history and terminal behavior with
+fresh Homes and a fake API. A fixture `VISUAL` copies bytes into the native draft;
+Ctrl-G and Enter remain terminal input. Saves requests, terminal output, argument
+sizes and check results. Nonzero means a failed check, even with a clean client exit.
 
-The trailing-whitespace case fails exact equality despite successful exit:
-285,027 bytes become 285,023. Codex trims the editor result and submitted text.
-The editor is therefore not a lossless transport for arbitrary requests. These
-are provider-only observations, not production integration, preserved user editor
-settings, signal/input ownership, resume or cmux acceptance. Production remains
-unchanged; normalization and a protective message envelope are not selected.
+Codex 0.161.0 (October 9) preserves 285 KB Unicode, embedded CRLF and a literal
+paste terminator. Editor terminal descriptors, raw-mode restoration, no premature
+request, resize, follow-up history and clean exit pass. Maximum observed argument,
+including editor arguments: 86 bytes. Composer echo precedes thread readiness;
+the probe waits for the native session footer before requesting the editor.
+
+Trailing whitespace fails exact equality: 285,027 bytes become 285,023 despite
+successful exit. Codex trims the editor result and submitted text. These
+provider-only results prove neither a lossless transport nor production integration,
+preserved user editor settings, signal/input ownership, resume or cmux acceptance.
+Production is unchanged; normalization and a protective envelope are not selected.
+
+Rejected stdin/paste probes and their invocation examples are preserved at
+`d008a9761:scripts/benchmarks/skill-invocation/first_turn_transport.py` and that
+revision's README. Exec accepted stdin; TUI rejected it before a request.
+Bracketed paste delivered 285,023 Unicode bytes with 86-byte arguments but changed
+CRLF to LF and consumed literal paste terminators. The active probe keeps only the
+editor path; exact-equality tests retain these corruption cases.

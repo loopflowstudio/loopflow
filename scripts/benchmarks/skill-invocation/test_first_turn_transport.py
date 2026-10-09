@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from first_turn_transport import _assess, _editor_command, _terminal_replies
+from first_turn_transport import _editor_command, _first_turn_matches, _terminal_replies
 
 
 def _request(text: str, role: str = "user") -> dict:
@@ -13,40 +13,40 @@ def _request(text: str, role: str = "user") -> dict:
 
 def test_full_first_turn_arrives_in_one_user_message():
     prompt = "skill\n\nrequest λ\n" * 20000
-    assert all(_assess([_request(prompt)], prompt).values())
+    assert _first_turn_matches([_request(prompt)], prompt)
 
 
 def test_no_request_is_not_delivery():
-    assert not any(_assess([], "request").values())
+    assert not _first_turn_matches([], "request")
 
 
 def test_truncated_or_pointer_turn_is_not_delivery():
     prompt = "skill\n\nrequest"
     for text in [prompt[:-1], "Read prompt.txt", "prefix " + prompt]:
-        assert not _assess([_request(text)], prompt)["complete_first_turn"]
+        assert not _first_turn_matches([_request(text)], prompt)
 
 
 def test_instruction_channel_is_not_first_turn():
-    assert not _assess([_request("request", "developer")], "request")["complete_first_turn"]
+    assert not _first_turn_matches([_request("request", "developer")], "request")
 
 
-def test_multiple_requests_do_not_prove_single_turn_transport():
+def test_later_request_cannot_repair_the_first_turn():
     for first in ["wrong launch input", "request"]:
-        checks = _assess([_request(first), _request("request")], "request")
-        assert not checks["one_model_request"]
-        assert checks["complete_first_turn"] is (first == "request")
+        assert _first_turn_matches([_request(first), _request("request")], "request") is (
+            first == "request"
+        )
 
 
 def test_later_or_duplicate_turn_cannot_mask_the_launch_input():
     for texts in [["request", "another turn"], ["request", "request"]]:
         request = {"input": [item for text in texts for item in _request(text)["input"]]}
-        assert not _assess([request], "request")["complete_first_turn"]
+        assert not _first_turn_matches([request], "request")
 
 
 def test_native_guide_before_first_turn_is_preserved():
     request = _request("native guide")
     request["input"].extend(_request("request")["input"])
-    assert all(_assess([request], "request").values())
+    assert _first_turn_matches([request], "request")
 
 
 def test_terminal_normalization_is_not_exact_delivery():
@@ -55,7 +55,7 @@ def test_terminal_normalization_is_not_exact_delivery():
         ("literal \x1b[201~ request", "literal  request"),
         ("request \t\r\n", "request"),
     ]:
-        assert not _assess([_request(received)], original)["complete_first_turn"]
+        assert not _first_turn_matches([_request(received)], original)
 
 
 @pytest.mark.parametrize("query,reply", [(b"\x1b[6n", b"\x1b[1;1R"), (b"\x1b[c", b"\x1b[?1;2c")])

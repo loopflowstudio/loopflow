@@ -16,7 +16,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from launch import _codex_response
+from launch import _codex_config, _codex_response
 from request_mapping import _marker_locations, _message_texts, _response, _run
 
 
@@ -128,27 +128,6 @@ def _claude(root: Path, env: dict[str, str], port: int) -> None:
         (root / f"{phase}.stdout").write_text(result.stdout)
         (root / f"{phase}.stderr").write_text(result.stderr)
         assert result.returncode == 0, f"Claude {phase} failed: see {root}"
-
-
-def _codex_config(port: int) -> str:
-    return f"""model = "gpt-5.4"
-model_provider = "fixture"
-cli_auth_credentials_store = "file"
-allow_login_shell = false
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-[features]
-shell_snapshot = false
-[model_providers.fixture]
-name = "Local fixture"
-base_url = "http://127.0.0.1:{port}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-[analytics]
-enabled = false
-[feedback]
-enabled = false
-"""
 
 
 def _codex(root: Path, env: dict[str, str], port: int) -> None:

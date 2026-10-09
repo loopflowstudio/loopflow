@@ -1013,10 +1013,10 @@ Fake APIs: Claude 2.1.295/Codex 0.161.0 preserve 10 KB ASCII hooks,
 truncate 10,000 emoji scalars. Codex retains markers: compare whole strings,
 budget provider units. SessionStart injects, PostCompact not. Codex retains
 native base/guides/additions; trust is scoped.
-Codex's editor preserves 285 KB Unicode/CRLF/paste terminators, trims trailing
-whitespace. TUI rejects stdin; paste alters CRLF/terminators. Lossless production,
-resume, automatic compact, OpenCode and cmux are open. Normalization/envelopes
-need review.
+Codex's editor preserves 285 KB Unicode/CRLF/paste terminators, trims trailing whitespace.
+Rejected stdin/paste probes: `d008a9761`; exact-byte tests remain. Lossless
+production, resume, automatic compact, OpenCode and cmux are open.
+Normalization/envelopes need review.
 [Evidence](../../scripts/benchmarks/skill-invocation/README.md).
 
 Main `3e1e6245c` (#1512): driver lifelines own engines. Replacement resumes native

@@ -1,4 +1,4 @@
-"""Probe exact first turns through native Codex stdin, paste and external-editor transports."""
+"""Probe exact first turns through the native Codex external editor."""
 
 import argparse
 import fcntl
@@ -20,21 +20,19 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import pyte
-from context_delivery import Requests, _codex_config
+from context_delivery import Requests
+from launch import _codex_config
 from request_mapping import _message_texts
 
 
-def _assess(requests: list[dict], prompt: str) -> dict[str, bool]:
+def _first_turn_matches(requests: list[dict], prompt: str) -> bool:
     texts = _message_texts(requests[0], "user") if requests else []
-    return {
-        "one_model_request": len(requests) == 1,
-        "complete_first_turn": bool(texts) and texts[-1] == prompt and texts.count(prompt) == 1,
-    }
+    return bool(texts) and texts[-1] == prompt and texts.count(prompt) == 1
 
 
 @contextmanager
 def _terminal(
-    command: list[str], root: Path, env: dict[str, str], *, file_stdin: bool = False
+    command: list[str], root: Path, env: dict[str, str]
 ) -> Iterator[tuple[subprocess.Popen, int]]:
     with ExitStack() as resources:
         master, slave = pty.openpty()
@@ -42,18 +40,16 @@ def _terminal(
         with ExitStack() as inputs:
             inputs.callback(os.close, slave)
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 160, 0, 0))
-            source = inputs.enter_context((root / "prompt.txt").open("rb")) if file_stdin else slave
 
             def _controlling_terminal() -> None:
                 os.setsid()
-                # stdout stays a controlling terminal even when stdin is the prompt file.
                 fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
 
             process = subprocess.Popen(
                 command,
                 cwd=root / "work",
                 env=env,
-                stdin=source,
+                stdin=slave,
                 stdout=slave,
                 stderr=slave,
                 preexec_fn=_controlling_terminal,
@@ -74,43 +70,12 @@ def _terminal_replies(output: bytearray, start: int) -> bytes:
     )
 
 
-def _run(command: list[str], root: Path, env: dict[str, str]) -> tuple[int, bytes, bool]:
-    output = bytearray()
-    deadline = time.monotonic() + 30
-    timed_out = False
-    with _terminal(command, root, env, file_stdin=True) as (process, master):
-        while True:
-            if time.monotonic() >= deadline:
-                timed_out = True
-                break
-            if not select.select([master], [], [], 0.1)[0]:
-                if process.poll() is not None:
-                    break
-                continue
-            try:
-                data = os.read(master, 65536)
-            except OSError:
-                break
-            if not data:
-                break
-            start = len(output)
-            output.extend(data)
-            if replies := _terminal_replies(output, start):
-                os.write(master, replies)
-        try:
-            process.wait(timeout=max(0.1, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-    return process.returncode, bytes(output), timed_out
-
-
-def _run_interactive(
+def _run_editor(
     command: list[str],
     root: Path,
     env: dict[str, str],
     prompt: str,
     server: Requests,
-    transport: str,
 ) -> tuple[int, bytes, dict[str, bool]]:
     with _terminal(command, root, env) as (process, master):
         os.set_blocking(master, False)
@@ -150,13 +115,14 @@ def _run_interactive(
                 except BlockingIOError:
                     pass
 
-        def _wait(predicate) -> None:
-            while not predicate():
+        def _wait(predicate):
+            while not (value := predicate()):
                 if process.poll() is not None:
                     raise RuntimeError("terminal exited before the observation")
                 if time.monotonic() >= deadline:
                     raise TimeoutError("terminal observation deadline exceeded")
                 _pump()
+            return value
 
         def _submit() -> None:
             # Codex 0.161.0 treats Enter within its 120 ms paste-burst window as
@@ -182,17 +148,11 @@ def _run_interactive(
             checks["editor_ready"] = True
             # Clear the readiness marker without submitting it.
             pending.extend(b"\x15")
-            if transport == "editor":
-                pending.extend(b"\x07")
-                _wait(lambda: (root / "editor.json").exists())
-                receipt = json.loads((root / "editor.json").read_text())
-                checks["input_loaded"] = receipt["exact_copy"] and receipt["terminal"]
-                _wait(lambda: _visible("LOO444_END"))
-            else:
-                pending.extend(b"\x1b[200~" + prompt.encode() + b"\x1b[201~")
-                _wait(lambda: not pending)
-                checks["input_loaded"] = True
-                _wait(lambda: _visible("Pasted") or _visible("LOO444_END"))
+            pending.extend(b"\x07")
+            _wait(lambda: (root / "editor.json").exists())
+            receipt = json.loads((root / "editor.json").read_text())
+            checks["input_loaded"] = receipt["exact_copy"] and receipt["terminal"]
+            _wait(lambda: _visible("LOO444_END"))
             attrs = termios.tcgetattr(master)
             checks["editor_returned_raw"] = not attrs[3] & (termios.ECHO | termios.ICANON)
             checks["no_request_before_submit"] = not server.bodies
@@ -205,21 +165,17 @@ def _run_interactive(
             pending.extend(b"LOO444_FOLLOWUP")
             _wait(lambda: _visible("LOO444_FOLLOWUP"))
             _submit()
+
             # Codex can make an independent title-generation request between turns.
-            _wait(
-                lambda: any(
-                    _message_texts(body, "user")[-1:] == ["LOO444_FOLLOWUP"]
-                    for body in server.bodies
-                )
-            )
-            texts = next(
-                _message_texts(body, "user")
-                for body in server.bodies
-                if _message_texts(body, "user")[-1:] == ["LOO444_FOLLOWUP"]
-            )
-            checks["followup_preserves_first_turn"] = (
-                texts.count(prompt) == 1 and texts[-1] == "LOO444_FOLLOWUP"
-            )
+            def _followup() -> list[str] | None:
+                for body in server.bodies:
+                    texts = _message_texts(body, "user")
+                    if texts[-1:] == ["LOO444_FOLLOWUP"]:
+                        return texts
+                return None
+
+            texts = _wait(_followup)
+            checks["followup_preserves_first_turn"] = texts.count(prompt) == 1
             pending.extend(b"/quit")
             _wait(lambda: _visible("/quit"))
             _submit()
@@ -253,7 +209,6 @@ def _editor_command(root: Path) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--transport", choices=["stdin", "paste", "editor"], default="stdin")
     parser.add_argument(
         "--case",
         choices=["unicode", "carriage-return", "paste-marker", "trailing-whitespace"],
@@ -265,7 +220,7 @@ def main() -> int:
         raise SystemExit("Codex is required")
     executable = str(Path(executable).resolve())
     args.output.mkdir(parents=True, exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix=f"{args.transport}-", dir=args.output)).resolve()
+    root = Path(tempfile.mkdtemp(prefix="editor-", dir=args.output)).resolve()
     for name in ["home", "native", "work"]:
         (root / name).mkdir()
     prompt = "LOO444_BEGIN\n" + "all first-turn bytes survive. λ 🐙\n" * 7500 + "LOO444_END"
@@ -299,66 +254,29 @@ def main() -> int:
 trust_level = "trusted"
 '''
         )
-        if args.transport in {"paste", "editor"}:
-            if args.transport == "editor":
-                env["VISUAL"] = _editor_command(root)
-            command = [executable, "--no-alt-screen", "--no-daemon"]
-            status, output, checks = _run_interactive(
-                command, root, env, prompt, server, args.transport
-            )
-            checks["complete_first_turn"] = _assess(server.bodies, prompt)["complete_first_turn"]
-            max_argument_bytes = max(len(arg.encode()) for arg in command)
-            if args.transport == "editor" and (root / "editor.json").exists():
-                receipt = json.loads((root / "editor.json").read_text())
-                max_argument_bytes = max(max_argument_bytes, receipt["max_argument_bytes"])
-            result = {
-                "version": version,
-                "evidence": str(root),
-                "exit": status,
-                "case": args.case,
-                "model_requests": len(server.bodies),
-                "prompt_bytes": len(prompt.encode()),
-                "max_argument_bytes": max_argument_bytes,
-                "checks": checks,
-            }
-            (root / "terminal.output").write_bytes(output)
-            (root / "requests.json").write_text(json.dumps(server.bodies, indent=2))
-            (root / "result.json").write_text(json.dumps(result, indent=2))
-            print(json.dumps(result, indent=2))
-            return 0 if all(checks.values()) else 1
-        observations = {}
-        for surface, options in [
-            ("headless", ["exec", "--skip-git-repo-check", "--json", "-"]),
-            ("terminal", ["--no-alt-screen", "--no-daemon", "-"]),
-        ]:
-            command = [executable, *options]
-            status, output, timed_out = _run(command, root, env)
-            bodies = list(server.bodies)
-            (root / f"{surface}.output").write_bytes(output)
-            (root / f"{surface}.requests.json").write_text(json.dumps(bodies, indent=2))
-            observations[surface] = {
-                "exit": status,
-                "timed_out": timed_out,
-                "max_argument_bytes": max(len(arg.encode()) for arg in command),
-                "checks": _assess(bodies, prompt),
-            }
-            server.bodies.clear()
+        env["VISUAL"] = _editor_command(root)
+        command = [executable, "--no-alt-screen", "--no-daemon"]
+        status, output, checks = _run_editor(command, root, env, prompt, server)
+        checks["complete_first_turn"] = _first_turn_matches(server.bodies, prompt)
+        max_argument_bytes = max(len(arg.encode()) for arg in command)
+        if (root / "editor.json").exists():
+            receipt = json.loads((root / "editor.json").read_text())
+            max_argument_bytes = max(max_argument_bytes, receipt["max_argument_bytes"])
         result = {
             "version": version,
             "evidence": str(root),
+            "exit": status,
+            "case": args.case,
+            "model_requests": len(server.bodies),
             "prompt_bytes": len(prompt.encode()),
-            **observations,
+            "max_argument_bytes": max_argument_bytes,
+            "checks": checks,
         }
+        (root / "terminal.output").write_bytes(output)
+        (root / "requests.json").write_text(json.dumps(server.bodies, indent=2))
         (root / "result.json").write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))
-        return (
-            0
-            if all(
-                result["exit"] == 0 and not result["timed_out"] and all(result["checks"].values())
-                for result in observations.values()
-            )
-            else 1
-        )
+        return 0 if all(checks.values()) else 1
 
 
 if __name__ == "__main__":

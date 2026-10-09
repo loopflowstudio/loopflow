@@ -111,6 +111,27 @@ def _codex_response(path: Path, done: bool, shell: str) -> bytes:
     ).encode()
 
 
+def _codex_config(port: int) -> str:
+    return f"""model = "gpt-5.4"
+model_provider = "fixture"
+cli_auth_credentials_store = "file"
+allow_login_shell = false
+sandbox_mode = "danger-full-access"
+approval_policy = "never"
+[features]
+shell_snapshot = false
+[model_providers.fixture]
+name = "Local fixture"
+base_url = "http://127.0.0.1:{port}/v1"
+wire_api = "responses"
+requires_openai_auth = false
+[analytics]
+enabled = false
+[feedback]
+enabled = false
+"""
+
+
 def _fidelity(
     requests: list[dict], status: int, body: str, argument: str, asset: Path, provider: str
 ) -> dict[str, bool]:
@@ -239,24 +260,7 @@ def _probe(
             output.mkdir(parents=True, exist_ok=True)
             env["RUST_LOG"] = "loopflow=debug"
         Path(env["CODEX_HOME"]).mkdir()
-        (Path(env["CODEX_HOME"]) / "config.toml").write_text(f"""model = "gpt-5.4"
-model_provider = "fixture"
-cli_auth_credentials_store = "file"
-allow_login_shell = false
-sandbox_mode = "danger-full-access"
-approval_policy = "never"
-[features]
-shell_snapshot = false
-[model_providers.fixture]
-name = "Local fixture"
-base_url = "http://127.0.0.1:{server.server_port}/v1"
-wire_api = "responses"
-requires_openai_auth = false
-[analytics]
-enabled = false
-[feedback]
-enabled = false
-""")
+        (Path(env["CODEX_HOME"]) / "config.toml").write_text(_codex_config(server.server_port))
         # -i follows lf's native terminal launcher. Adapt only the final client
         # to print/exec for headless acceptance; this does not test terminal rendering.
         flags = (

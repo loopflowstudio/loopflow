@@ -479,6 +479,8 @@ async fn planning_graphql(
 
 #[tokio::test]
 async fn project_workflow_uses_stored_definition_offline() {
+    use crate::ops::project::{self, PlanTarget};
+
     let fixture = Fixture::new().await;
     let (repo, wave) = planning_repo(&fixture).await;
     let definition = "nodes: {}\nedges: [{from: start, to: end}]\n";
@@ -486,17 +488,17 @@ async fn project_workflow_uses_stored_definition_offline() {
     std::fs::write(&source, definition).unwrap();
     PM_TEST_CONTEXT
         .scope(fixture.context("http://127.0.0.1:1"), async {
-            let selected =
-                crate::ops::project::workflow(&repo, "project-1", Some("code"), Some(&source))
-                    .await
-                    .unwrap();
+            let target = PlanTarget::Project("project-1");
+            let selected = project::set_workflow(&repo, target, "code", Some(&source))
+                .await
+                .unwrap();
             assert_eq!(selected.project.workflow, "code");
             assert_eq!(selected.project.id, "project-1");
             assert_eq!(selected.project.initiative_ids, ["initiative-1"]);
             assert_eq!(selected.project.team_ids, ["team-1"]);
             std::fs::remove_file(&source).unwrap();
             assert_eq!(
-                crate::ops::project::workflow_source(&repo, "project-1", "code")
+                project::workflow_source(&repo, target, "code")
                     .await
                     .unwrap(),
                 definition
@@ -510,7 +512,7 @@ async fn project_workflow_uses_stored_definition_offline() {
                     .as_deref(),
                 Some(definition)
             );
-            let catalog = crate::ops::project::workflow_catalog(&repo, Some(wave.id().as_str()))
+            let catalog = project::workflow_catalog(&repo, Some(wave.id().as_str()))
                 .await
                 .unwrap();
             let entries = catalog

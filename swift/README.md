@@ -169,8 +169,9 @@ how long it ran. A row opens to its id, graph and steps (the shape of
 as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** sets the Project's workflow from the catalogue
-(`lf wave workflow list`); **Customize** or **Edit** opens its source in
-your editor, writing a builtin to `.lf/` first.
+(`lf wave workflow list`); **Customize** or **Edit** opens its source in a
+sheet. Save stores the definition in the Wave and selects it for the current
+chapter; captured Task Workflows stay unchanged.
 **Session history** under the Flow reads nothing until expanded; it then lists that
 Task's complete recorded input history (`lf usage --days 0 --task ID --json`) with each recorded
 outcome. Session rows show the provider recorded on their Run and a ready summary

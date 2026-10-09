@@ -640,6 +640,15 @@ pub struct WavePlanTarget {
     pub project: Option<String>,
 }
 
+impl WavePlanTarget {
+    pub fn as_plan_target(&self) -> crate::ops::project::PlanTarget<'_> {
+        match self.project.as_deref() {
+            Some(project) => crate::ops::project::PlanTarget::Project(project),
+            None => crate::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
     /// Read the authored definition without creating a repository file

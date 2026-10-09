@@ -30,7 +30,7 @@ lf wave show                             # tasks in this project, sorted by what
 lf wave show --all                       # every project on this computer
 lf top                                 # what is running right now
 lf usage --days 0 --wave infra                   # the record of each time the AI was started
-lf --machine <machine-id> roadmap               # ask another computer the same question
+lf --machine <machine-id> wave show               # ask another computer the same question
 ```
 
 Each command reads the computer it runs on. Nothing watches every machine

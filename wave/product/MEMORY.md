@@ -99,13 +99,13 @@ Router receipts expose pre-registration failures; plain Task links await mounted
 content. Validated request IDs fence registration, never URLs or later arrivals.
 Headless callbacks prove neither compositor usability nor native Session readiness.
 
-October 9 planning reads skip Process admission; missing-registry tests exposed its
-fallback initialization. Previews share Task admission/Workflow, Desktop URL validation and
-skill/Flow syntax with launch. Builtins dispatch parsed commands.
-Only launch prepares Work; proposals grant neither native readiness nor peer start.
-Checkpointed WAL exposed fallback Process writes missed by main-file comparisons;
-parsed previews suppress them. Linux opening previews report platform impediments;
-Linux/native/remote acceptance remains unproved.
+October 9 planning reads skip Process admission and use read-only storage;
+missing-registry and checkpointed-WAL tests exposed fallback Process writes.
+Resolve chapter targets once on the operation's store, without a CLI ID round trip.
+Workflow reads and writes have separate APIs.
+Previews share Task admission/Workflow, Desktop URL validation and skill/Flow syntax
+with launch. Only launch prepares Work. Linux previews report platform impediments;
+Linux/native/remote acceptance and peer start remain unproved.
 
 ## Terminal-host adoption (2026-10-07)
 

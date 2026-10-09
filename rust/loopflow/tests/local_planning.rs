@@ -2870,6 +2870,25 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         ],
     );
     assert_eq!(scoped["id"], current.id.as_str());
+    let source = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "workflow", "source", "code", wave.slug()],
+    );
+    let historical_source = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "workflow",
+            "source",
+            "code",
+            "--project",
+            historical.id.as_str(),
+        ],
+    );
+    assert!(source.as_str().unwrap().contains("nodes:"));
+    assert_eq!(historical_source, source);
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
@@ -2899,6 +2918,42 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     assert_eq!(selected["workflow"], "code");
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
     assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "edit-plan",
+            wave.slug(),
+            "--name",
+            "Current chapter",
+        ],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &[
+            "wave",
+            "edit-plan",
+            "--project",
+            historical.id.as_str(),
+            "--summary",
+            "Retained proof",
+        ],
+    );
+    assert_eq!(
+        store.project(&current.id).unwrap().unwrap().plan.name,
+        "Current chapter"
+    );
+    assert_eq!(
+        store.project(&historical.id).unwrap().unwrap().plan.name,
+        historical.plan.name
+    );
+    assert_eq!(
+        store.project(&historical.id).unwrap().unwrap().plan.summary,
+        "Retained proof"
+    );
+    assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
 }
 
 #[test]
@@ -2908,7 +2963,27 @@ fn wave_planning_distinguishes_missing_registry_from_unreadable_and_removes_old_
     let shown = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     assert_eq!(shown["waves"], serde_json::json!([]));
     assert!(!home.path().join("loopflow.db").exists());
+    let workflow_reads = [
+        vec!["wave", "workflow", "show", "missing", "--json"],
+        vec!["wave", "workflow", "source", "code", "missing"],
+        vec!["wave", "workflow", "list", "--wave", "missing", "--json"],
+    ];
+    for args in &workflow_reads {
+        let output = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("registry is absent"));
+        assert!(!home.path().join("loopflow.db").exists());
+    }
     std::fs::write(home.path().join("loopflow.db"), "not a database").unwrap();
+    for args in &workflow_reads {
+        let output = command(repo.path(), home.path(), args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert_eq!(
+            std::fs::read(home.path().join("loopflow.db")).unwrap(),
+            b"not a database"
+        );
+    }
     let output = command(repo.path(), home.path(), &["wave", "show", "--json"])
         .output()
         .unwrap();

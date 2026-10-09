@@ -179,9 +179,10 @@ files override only their own kind. `WorkflowCatalogEntry` carries a Workflow,
 while `FlowCatalogEntry` carries its compiled graph and `FlowComposition`
 disclosure tree. Invalid sources remain visible with their error.
 
-`lf wave workflow list/customize` handles reusable definitions; `show/set`
-addresses a Project by durable ID, provider ID or unique name/slug. Task
-`workflow show/restart` handles its captured instance. Restart is the existing
+`lf wave workflow list/source` reads reusable definitions; `show/set`
+uses the Wave's current chapter, with `--project` for an exact retained Project
+(ID, provider ID or unique name/slug). `set --file` saves an edited definition.
+Task `workflow show/restart` handles its captured instance. Restart is the existing
 move to `start`, preserving graph, moves and execution history.
 
 Task status and roadmap separate `workflow_name`, `latest_flow_process`,

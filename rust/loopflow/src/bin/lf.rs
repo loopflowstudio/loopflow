@@ -781,22 +781,20 @@ fn print_task_control(
 }
 
 fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
+    use loopflow::ops::project;
+
     match command {
         WaveCommand::EditPlan {
             target,
             name,
             summary,
         } => {
-            let saved = tokio::runtime::Runtime::new()?.block_on(async {
-                let project = loopflow::ops::project::plan_selector(
-                    repo,
-                    target.wave.as_deref(),
-                    target.project.as_deref(),
-                )
-                .await?;
-                loopflow::ops::project::edit(repo, &project, name.as_deref(), summary.as_deref())
-                    .await
-            })?;
+            let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
+                repo,
+                target.as_plan_target(),
+                name.as_deref(),
+                summary.as_deref(),
+            ))?;
             print_planning_sync(&saved.sync);
             Ok(())
         }
@@ -805,8 +803,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cmd {
                     WaveWorkflowCommand::List { wave, json } => {
-                        let entries =
-                            loopflow::ops::project::workflow_catalog(repo, wave.as_deref()).await?;
+                        let entries = project::workflow_catalog(repo, wave.as_deref()).await?;
                         if *json {
                             println!("{}", serde_json::to_string(&entries)?);
                         } else {
@@ -823,26 +820,13 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                         }
                     }
                     WaveWorkflowCommand::Source { target, name } => {
-                        let project = loopflow::ops::project::plan_selector(
-                            repo,
-                            target.wave.as_deref(),
-                            target.project.as_deref(),
-                        )
-                        .await?;
                         print!(
                             "{}",
-                            loopflow::ops::project::workflow_source(repo, &project, name).await?
+                            project::workflow_source(repo, target.as_plan_target(), name).await?
                         );
                     }
                     WaveWorkflowCommand::Show { target, json } => {
-                        let project = loopflow::ops::project::plan_selector(
-                            repo,
-                            target.wave.as_deref(),
-                            target.project.as_deref(),
-                        )
-                        .await?;
-                        let selected =
-                            loopflow::ops::project::workflow(repo, &project, None, None).await?;
+                        let selected = project::workflow(repo, target.as_plan_target()).await?;
                         if *json {
                             println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
@@ -854,16 +838,10 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                         }
                     }
                     WaveWorkflowCommand::Set { target, name, file } => {
-                        let project = loopflow::ops::project::plan_selector(
+                        let saved = project::set_workflow(
                             repo,
-                            target.wave.as_deref(),
-                            target.project.as_deref(),
-                        )
-                        .await?;
-                        let saved = loopflow::ops::project::workflow(
-                            repo,
-                            &project,
-                            Some(name),
+                            target.as_plan_target(),
+                            name,
                             file.as_deref(),
                         )
                         .await?;
@@ -895,8 +873,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             Ok(())
         }
         WaveCommand::Ensure { wave, json } => {
-            let result = tokio::runtime::Runtime::new()?
-                .block_on(loopflow::ops::project::ensure(repo, wave))?;
+            let result = tokio::runtime::Runtime::new()?.block_on(project::ensure(repo, wave))?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
@@ -913,7 +890,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             json,
         } => {
             let result = tokio::runtime::Runtime::new()?
-                .block_on(loopflow::ops::project::bind_project(repo, wave, project))?;
+                .block_on(project::bind_project(repo, wave, project))?;
             if *json {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {

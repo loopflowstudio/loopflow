@@ -128,8 +128,9 @@ cli:
       text: Run any Skill or Flow as a conversation (`-i`) or headless (`-b`). A step can name its
         own agent and model.
     - name: Sessions
-      text: Every conversation is recorded. `lf resume` picks one back up by its Loopflow, Claude
-        Code, or Codex ID.
+      text: Every conversation `lf` starts is recorded, whether in Claude Code, Codex, or OpenCode.
+        `lf resume` picks one back up. It also takes the ID of a Claude Code or Codex conversation
+        started without `lf`.
     - name: Accounts and usage
       text: '`lf account` shows your logins and their capacity. `lf usage` shows tokens and cost,
         and can filter by Task or Wave.'

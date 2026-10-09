@@ -247,3 +247,4 @@ Jack Heart on the separate Flows section of `/cli`: "I think this should mostly 
 Found false and removed: "Each step can be interactive or autonomous". Interactivity is per run (`-i`/`-b`); a step can name its own agent and model.
 Jack Heart also: the double gap before the install section was awkward (fixed); "I think i prefer $ curl -fsSL https://loopflow.studio/install.sh | sh at the end for now" (moved; the top of `/cli` is headline then commands); "probably worth a structural design pass once we've done this copy update" (not started).
 Not shown on the page yet: a Flow file with per-step `agent:`; `--json`, `--machine`, `--account`, `lf monitor`, `lf roadmap`.
+Jack Heart asked to add OpenCode to the Sessions line. Source: `lf resume` relaunches OpenCode Sessions that lf started (`opencode <dir> --session <id>`), but adopting a conversation started outside lf covers only Codex and Claude (provider_conversation.rs find). Line reworded to say exactly that.

@@ -54,21 +54,21 @@ struct RepositoryWorkspaceView: View {
     let query: RegistryQuery
     let router: WorkLinkRouter
     let openRepository: (String, URL?) -> Void
-    @State private var ready = false
-    @State private var error: String?
+    @State private var reading: WorkReading<RepositoryWorkspace> = .loading
 
     var body: some View {
         Group {
-            if ready {
-                RepoView(portfolioService: portfolioService, initialRepoPath: workspace.path,
-                         query: query, taskLinks: router, repository: workspace.id,
+            switch reading {
+            case .available(let resolved):
+                RepoView(portfolioService: portfolioService, initialRepoPath: resolved.path,
+                         query: query, taskLinks: router, repository: resolved.id,
                          openRepository: openRepository)
-            } else if let error {
+            case .unavailable(_, let reason):
                 VStack {
-                    Text(error).textSelection(.enabled)
+                    Text(reason).textSelection(.enabled)
                     Button("Retry") { Task { await resolve() } }
                 }.padding()
-            } else {
+            case .loading:
                 ProgressView("Opening repository…")
             }
         }
@@ -76,14 +76,14 @@ struct RepositoryWorkspaceView: View {
     }
 
     private func resolve() async {
-        error = nil
+        reading = .loading
         do {
             let current = try await RepositoryWorkspace.resolve(path: workspace.path, query: query)
             guard current.id == workspace.id else {
                 throw RegistryQueryError("This location now selects another repository plan. Open it explicitly from Open Repo; the restored workspace was not changed.")
             }
-            ready = true
-        } catch { self.error = error.localizedDescription }
+            reading = .available(current)
+        } catch { reading = .unavailable(lastGood: nil, reason: error.localizedDescription) }
     }
 }
 

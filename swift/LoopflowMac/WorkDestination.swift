@@ -63,7 +63,6 @@ struct WorkLinkReceiver: NSViewRepresentable {
         let router: WorkLinkRouter
         let repository: String
         var receive: (URL) async -> Void
-        private var deliveries: Task<Void, Never>?
 
         init(router: WorkLinkRouter, repository: String, receive: @escaping (URL) async -> Void) {
             self.router = router
@@ -77,16 +76,8 @@ struct WorkLinkReceiver: NSViewRepresentable {
             if let window {
                 router.register(id, repository: repository, focus: { [weak window] in
                     window?.makeKeyAndOrderFront(nil)
-                }) { [weak self] links in
-                    guard let self else { return }
-                    let preceding = deliveries
-                    deliveries = Task { [weak self] in
-                        await preceding?.value
-                        for link in links {
-                            guard let self, self.window != nil else { return }
-                            await self.receive(link)
-                        }
-                    }
+                }) { [weak self] link in
+                    await self?.receive(link)
                 }
             }
         }

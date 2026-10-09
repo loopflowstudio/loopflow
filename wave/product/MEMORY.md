@@ -60,12 +60,12 @@ cannot prove a peer never started a Task. Even fresh negative observation is no
 reservation: first-start admission must exclude a peer starting before allocation.
 One store's SQLite transaction cannot provide that guarantee; never synchronize
 runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
-control and composed proof remain. Product has no child memories in this checkout.
+control and composed proof remain.
 
-LOO-427 keys local windows/queues by plan, replacing focus fallback and Portfolio
-Task sheets. Navigation preserves the origin model. Router smoke and Ghostty-disabled
-typecheck pass; configured SwiftPM, native retention/convergence and remote proof
-remain unverified.
+LOO-427 keys windows and serial link queues by plan; views own no pending delivery.
+Receiver replacement keeps undelivered links; Portfolio owns no panes. Router smoke
+and Ghostty-disabled typecheck pass; configured SwiftPM, native retention/convergence
+and remote proof remain unverified.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

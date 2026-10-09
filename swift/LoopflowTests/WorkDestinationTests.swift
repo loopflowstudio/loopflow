@@ -396,7 +396,7 @@ struct WorkDestinationTests {
         #expect(model.showsTaskLink == !scoped)
     }
 
-    @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() throws {
+    @Test func coldRepositoriesRegisterInReverseOrderWithoutLosingDestinations() async throws {
         let router = WorkLinkRouter()
         let a = try #require(URL(string: "loopflow://task/A"))
         let a2 = try #require(URL(string: "loopflow://task/A2"))
@@ -406,15 +406,17 @@ struct WorkDestinationTests {
         #expect(!router.deliver(a2, repository: "plan-a"))
         var first: [URL] = []
         var second: [URL] = []
-        router.register(UUID(), repository: "plan-b", focus: {}) { second += $0 }
+        router.register(UUID(), repository: "plan-b", focus: {}) { second.append($0) }
+        while second.isEmpty { await Task.yield() }
         #expect(second == [b])
         #expect(first.isEmpty)
-        router.register(UUID(), repository: "plan-a", focus: {}) { first += $0 }
+        router.register(UUID(), repository: "plan-a", focus: {}) { first.append($0) }
+        while first.count < 2 { await Task.yield() }
         #expect(first == [a, a2])
         #expect(second == [b])
     }
 
-    @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() throws {
+    @Test func samePlanReusesItsRetainedWorkspaceRegardlessOfFocusOrLocator() async throws {
         let a = RepositoryWorkspace(id: "plan", path: "/machine-a/repo")
         let b = RepositoryWorkspace(id: "plan", path: "/machine-b/repo")
         #expect(Set([a, b]).count == 1)
@@ -423,28 +425,62 @@ struct WorkDestinationTests {
         var focused: [String] = []
         var received: [URL] = []
         let url = try #require(URL(string: "loopflow://task/A"))
-        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }) { received += $0 }
+        router.register(UUID(), repository: a.id, focus: { focused.append("retained") }) { received.append($0) }
         router.register(UUID(), repository: "other", focus: { focused.append("other") }) { _ in
             Issue.record("A repository must never receive another repository's link")
         }
         #expect(router.deliver(url, repository: b.id))
         #expect(router.deliver(nil, repository: a.id))
         #expect(focused == ["retained", "retained"])
+        while received.isEmpty { await Task.yield() }
         #expect(received == [url])
     }
 
-    @Test func lateWindowRemovalDoesNotRemoveItsReplacement() throws {
+    @Test func lateWindowRemovalDoesNotRemoveItsReplacement() async throws {
         let router = WorkLinkRouter()
         let old = UUID(), replacement = UUID()
         router.register(old, repository: "plan", focus: {}) { _ in }
         var received: [URL] = []
-        router.register(replacement, repository: "plan", focus: {}) { received += $0 }
+        router.register(replacement, repository: "plan", focus: {}) { received.append($0) }
         router.remove(old, repository: "plan")
         let url = try #require(URL(string: "loopflow://task/A"))
         #expect(router.deliver(url, repository: "plan"))
+        while received.isEmpty { await Task.yield() }
         #expect(received == [url])
         router.remove(replacement, repository: "plan")
         #expect(!router.deliver(url, repository: "plan"))
+    }
+
+    @Test func delayedDeliveryKeepsOneQueueAcrossReceiverReplacement() async throws {
+        let router = WorkLinkRouter()
+        let first = try #require(URL(string: "loopflow://task/first"))
+        let second = try #require(URL(string: "loopflow://task/second"))
+        let third = try #require(URL(string: "loopflow://task/third"))
+        let other = try #require(URL(string: "loopflow://task/other"))
+        let old = UUID(), replacement = UUID()
+        let barrier = LinkedDestinationBarrier()
+        var delivered: [URL] = []
+        router.register(old, repository: "plan", focus: {}) { link in
+            delivered.append(link)
+            await barrier.wait("first")
+        }
+        router.deliver(first, repository: "plan")
+        router.deliver(second, repository: "plan")
+        while !(await barrier.contains("first")) { await Task.yield() }
+        #expect(delivered == [first])
+        router.remove(old, repository: "plan")
+        #expect(!router.deliver(third, repository: "plan"))
+        router.register(replacement, repository: "plan", focus: {}) { delivered.append($0) }
+        router.remove(old, repository: "plan")
+
+        // A slow repository never blocks another repository's opening.
+        router.register(UUID(), repository: "other", focus: {}) { delivered.append($0) }
+        router.deliver(other, repository: "other")
+        while delivered.count < 2 { await Task.yield() }
+        #expect(delivered == [first, other])
+        await barrier.release("first")
+        while delivered.count < 4 { await Task.yield() }
+        #expect(delivered == [first, other, second, third])
     }
 
     @Test func repositoryNavigationLeavesTheOriginSelectionAndDraftWorkspaceAlone() async throws {

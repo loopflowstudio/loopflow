@@ -1,6 +1,4 @@
-// Repository rail, Wave list, and the selected Wave's work map + conversation.
-// Discovery is a periodic registry query (`lf wave list`); Work and Session
-// motion stream directly from that Wave's listener.
+// Portfolio's repository rail and Wave inspectors. Tasks open in their repository window.
 
 import SwiftUI
 import Loopflow
@@ -17,9 +15,7 @@ private final class WindowModel {
 
 struct WavesView: View {
     let portfolioService: PortfolioService
-    @State private var sessionWorkspaces = SessionsWorkspaceRegistry()
-    /// The window's one workspace model: the Work list and the Task sheet both
-    /// read it, and it opens from the saved workspace like every other window.
+    /// The Work list and Wave inspectors share this window's readings.
     /// Built when a window first renders: the app describes this view at every
     /// launch, and a model decodes the saved workspace.
     @State private var window = WindowModel()
@@ -306,10 +302,8 @@ struct WavesView: View {
                 }
             )
             .id(waveSelectionId(wave))
-            .environment(sessionWorkspaces)
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave)
-            .environment(sessionWorkspaces)
         }
     }
 

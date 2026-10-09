@@ -387,13 +387,13 @@ fn build_prompt_at(
             wave,
             message: message.map(|value| value.to_string()),
             skill_arguments: arguments.to_string(),
-            no_loopflow: cli.no_loopflow || standalone_native,
+            no_loopflow: standalone_native,
             agent: task_input
                 .as_ref()
                 .and_then(|(_, seed)| seed.task.agent.clone())
                 .or_else(|| cli.agent.clone()),
             cwd: Some(repo_root.clone()),
-            max_turns: cli.max_turns,
+            max_turns: None,
             yolo_mode: cli.yolo || config.yolo,
             source_overrides: ContextSourceOverrides {
                 diff_files: cli.diff_files_setting(),
@@ -520,7 +520,6 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
-        cli.no_loopflow,
         cli_agent,
     );
     eprintln!(

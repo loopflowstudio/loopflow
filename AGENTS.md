@@ -229,7 +229,7 @@ A Workflow is the Task's outer shape: the workflow definition it took up,
 whose nodes are where a person takes part in the Task conversation and whose
 edges each run one Flow, plus the Task's stored position on it. The graph is
 fixed when taken up. `lf task run` chooses an edge, starts its Flow as a child
-`lf run`, again when a Flow process fails, and writes the arrival when one
+`lf flow`, again when a Flow process fails, and writes the arrival when one
 succeeds; a stopped Flow leaves the Task on its edge;
 `lf task move` sets a node. Each move is appended to the Task's history. It
 executes nothing, and no command approves or completes a node.

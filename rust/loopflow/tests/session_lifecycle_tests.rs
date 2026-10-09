@@ -1426,14 +1426,7 @@ fn unavailable_store_starts_no_provider() {
     for args in [
         LAUNCH.as_slice(),
         &["--batch", "--agent", "opencode", ":", "Tidy the parser"],
-        &[
-            "--agent",
-            "opencode",
-            "flow",
-            "work-then-decide",
-            "--batch",
-            "--no-loopflow",
-        ],
+        &["--agent", "opencode", "flow", "work-then-decide", "--batch"],
     ] {
         let mut launch = fixture.command(args);
         store.select(&mut launch);
@@ -1531,14 +1524,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             "",
         )
         .unwrap();
-        let output = fixture.run(&[
-            "--agent",
-            "opencode",
-            "flow",
-            "work-then-decide",
-            "--batch",
-            "--no-loopflow",
-        ]);
+        let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
         assert_eq!(
             output.status.success(),
             !exhausted,
@@ -1616,14 +1602,8 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("blocked-once"), "").unwrap();
-    let mut command = fixture.command(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let mut command =
+        fixture.command(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -1684,14 +1664,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.repo.path().join(".lf/flows/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "choose",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "choose", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1724,14 +1697,7 @@ fn public_taskless_flow_records_distinct_completed_loop_passes() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("remaining-passes"), "2").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(
         output.status.success(),
         "{}",
@@ -1771,14 +1737,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("disconnect-after-tool"), "").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
     let rows: (i64, i64) = fixture
@@ -1808,14 +1767,7 @@ fn opencode_automatic_retry_keeps_conversation_and_rejects_failed_turn_output() 
     let fixture = Fixture::new(false);
     saved_flow_stand_in(&fixture);
     std::fs::write(fixture.home.path().join("transient-once"), "").unwrap();
-    let output = fixture.run(&[
-        "--agent",
-        "opencode",
-        "flow",
-        "work-then-decide",
-        "--batch",
-        "--no-loopflow",
-    ]);
+    let output = fixture.run(&["--agent", "opencode", "flow", "work-then-decide", "--batch"]);
     assert!(
         output.status.success(),
         "{}",

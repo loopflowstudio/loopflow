@@ -91,7 +91,7 @@ lf task run EXP-12 --reason "take the smaller approach"
 `--task` and `--wt` select a location. `--wave` supplies context and identity;
 it cannot override a Task's owning Wave. `task run` places the Task's
 worktree, defaults to its Project's Flow, then starts
-`lf --task ISSUE run FLOW`: it prints the Flow's output and returns when the
+`lf --task ISSUE flow FLOW`: it prints the Flow's output and returns when the
 Flow ends. A Flow that fails is started again from its first step, three
 times at most; one that is blocked, interrupted or waiting on a landing is
 not. Background it yourself when you will not wait. It never continues
@@ -423,8 +423,8 @@ Use an always-available Machine for progress through laptop logout or shutdown.
 
 ```bash
 lf account connect codex work@example.com --chrome-profile Work
-lf --account codex=work@ run code
-lf --only-account codex=work@ run code
+lf --account codex=work@ flow pursue
+lf --only-account codex=work@ flow pursue
 lf account route set codex work@ personal@
 ```
 

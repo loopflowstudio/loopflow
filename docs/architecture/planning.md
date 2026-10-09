@@ -378,7 +378,7 @@ step processes, with no separate record or driver.
 
 Every Flow naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-driver. Each `task run` starts a fresh Flow as a child `lf run`, and a fresh
+driver. Each `task run` starts a fresh Flow as a child `lf flow`, and a fresh
 one again when that Flow process fails. Flows hold autonomous
 steps only: launching one with a `human: true` step is rejected. Finishing
 retains history and chooses no successor; Flow completion alone does not
@@ -493,7 +493,7 @@ process and effect receipts, then launch fresh work. Observation does not replay
 work or consume a surviving child's result.
 
 `task run` places the Task, then runs a fresh ordinary Flow in its checkout:
-the same command, checks and records as `lf --task ISSUE run FLOW` or a run
+the same command, checks and records as `lf --task ISSUE flow FLOW` or a run
 from the worktree. It blocks until the Flow ends; a caller that will not wait
 backgrounds it. `--reason` publishes direction to the Task first. To change
 direction, interrupt, inspect, then run.

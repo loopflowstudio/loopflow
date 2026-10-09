@@ -57,13 +57,13 @@ LOO-427's local window, exact-pane arrangement, Machine-qualified terminal and
 bounded-read work retains partial proof in `scratch/findings.md`; native artifact,
 peer composition and packaged acceptance remain unfinished. Read grants no input authority; proof remains partial.
 
-Jack queued the reviewed API for implementation (October 8): `--context` previews agent input without launch;
-`--explain` is broader. Remove `--max-turns` and probably `--no-loopflow`;
-`--chrome`: execution. Monitoring: ps/top. Combine activity/history; `history usage`: aggregates.
-Favor Wave-owned planning over public Project/roadmap, remove duplicate `run NAME`,
-`desktop open/list` with unique shorthand.
-Repo lookup defaults to `~/src` with a user override; remembered names remain open.
-Discord changes deferred. Keep `--steers-after`; repeated-node filtering is wired, not cross-restart deduplication.
+Jack queued the API (October 8): `--context` previews input without launch;
+`--explain` is broader; `--chrome` controls execution. Source removes root `run`,
+`--max-turns` and `--no-loopflow`, preserving Task skill/Flow selection and steer
+filtering; Rust execution remains unverified. Pending: Wave-owned planning,
+monitor ps/top, combined history/activity and `history usage`, Desktop open/list.
+Repository lookup defaults to configurable `~/src`; remembered names remain open.
+Discord stays unchanged. `--steers-after` filters repeated nodes, not across restarts.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending

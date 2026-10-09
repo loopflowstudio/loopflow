@@ -581,14 +581,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
         ));
         let output = command(
             home.path(),
-            &[
-                "--batch",
-                "--no-loopflow",
-                "session",
-                "resume",
-                &id,
-                "another instruction",
-            ],
+            &["--batch", "session", "resume", &id, "another instruction"],
         )
         .current_dir(&cwd)
         .env("PATH", std::env::join_paths(paths).unwrap())
@@ -674,14 +667,7 @@ printf '%s\n' '{"type":"result","session_id":"fixture-native","subtype":"success
     .unwrap();
     let output = command(
         home.path(),
-        &[
-            "-b",
-            "--no-loopflow",
-            "session",
-            "resume",
-            &id,
-            "Continue here",
-        ],
+        &["-b", "session", "resume", &id, "Continue here"],
     )
     .current_dir(&caller)
     .env("PATH", path)

@@ -44,7 +44,7 @@ or liveness evidence; never a reason to start a second driver). “Ready” or
    Only an edge leaving the current node moves the Task:
    `lf task run <issue>` takes the only one or names them,
    `lf task run <issue> <flow>` picks one, `lf task run <issue> end` takes an
-   edge that runs nothing. `lf --task <issue> run <flow>` runs a Flow without
+   edge that runs nothing. `lf --task <issue> flow <flow>` runs a Flow without
    moving the Task. Without a workflow, choose as follows.
    Leave a Flow with a live driver running. A stopped
    Flow is history: read what it finished and which effects it recorded before

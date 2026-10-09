@@ -88,7 +88,7 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 ```
 
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
-remain separate targets; `lf run NAME` selects only those definitions. Use
+remain separate targets; `lf skill NAME` and `lf flow NAME` select their kind. Use
 `cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
 
 ### Working notes and feedback
@@ -228,8 +228,8 @@ lf task move DES-123 design    # go back without running anything
 
 `start` and `end` are implicit. A node may say what you do there:
 `design: { skill: review-design, description: you review the plan }`;
-without one, the skill's first line stands in. An edge runs anything `lf run` accepts, a
-skill included. Only an edge into `end` may omit `flow:`; take it with
+without one, the skill's first line stands in. An edge names a Flow or skill; Task launch resolves it and uses the explicit
+`flow` or `skill` invocation. Only an edge into `end` may omit `flow:`; take it with
 `lf task run ISSUE end`. A Task with no PR is a workflow with no landing edge,
 like builtin `research`. An edge is named by what it runs, so two edges
 leaving one node run different things.
@@ -246,7 +246,7 @@ settled after its Flow stopped. An edge cannot be chosen while another is
 running. `lf task status ISSUE --json` carries the position, the edges that
 can be chosen now and every move with who made it and its `--reason`. There
 is no approve or complete command. Give feedback in the Task conversation,
-which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE run FLOW` runs a Flow without moving the Task.
+which is told its node's skill and the command for each edge leaving it. `lf --task ISSUE flow FLOW` runs a Flow without moving the Task.
 
 Builtins are `feature` (design, demo, land), `code` (demo, land) and
 `research` (findings, no PR). `lf project workflow list` lists Workflows;

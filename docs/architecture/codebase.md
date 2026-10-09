@@ -86,7 +86,7 @@ round-trip the same fixtures under `tests/fixtures/dto/`.
 
 `lf checkout` belongs to tracked Work and delivery: it starts no execution.
 `lf task run ISSUE` places the Task and fills its defaults, then is
-`lf --task ISSUE run FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
+`lf --task ISSUE flow FLOW` in that checkout. `lf --task ... <skill>` goes directly through execution with
 Task attribution and never moves a Flow's position.
 
 ## Dependency direction

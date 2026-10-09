@@ -241,7 +241,6 @@ def _probe(claude: str, model: str, lf: str, flow: bool, terminal: bool, command
                 [
                     lf,
                     "--tui" if terminal else "-b",
-                    "--no-loopflow",
                     "--agent",
                     f"claude:{model}",
                     "--docs",

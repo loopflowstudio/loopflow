@@ -35,7 +35,7 @@ def main() -> None:
         "`--task` selects a Task checkout; `--wt` selects an existing worktree.",
         "`--wave` adds context without moving directories and must match a Task's",
         "owning Wave. `task run` places a Task's worktree and then runs like",
-        "`lf --task ISSUE run FLOW`; every Flow naming a Task is equally its work.",
+        "`lf --task ISSUE flow FLOW`; every Flow naming a Task is equally its work.",
         "",
         "A preference (`--account`) permits fallback. A restriction (`--only-account`)",
         "limits this launch and its children. A Flow retains its provider selections;",

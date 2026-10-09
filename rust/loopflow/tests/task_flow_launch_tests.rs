@@ -27,8 +27,8 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
 /// worktree. All block in the foreground and reach the same checks.
 const LAUNCHES: [&[&str]; 3] = [
     &["-b", "task", "run", "INF-123", "proof"],
-    &["-b", "--task", "INF-123", "run", "proof"],
-    &["-b", "run", "proof"],
+    &["-b", "--task", "INF-123", "flow", "proof"],
+    &["-b", "flow", "proof"],
 ];
 
 #[test]
@@ -626,16 +626,37 @@ fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
 }
 
 #[test]
+fn task_edges_launch_flows_named_after_collection_commands() {
+    let task = WorkflowTask::new();
+    fs::write(
+        task.repo.path().join(".lf/flows/list.yaml"),
+        "- cmd: task sync --plan\n",
+    )
+    .unwrap();
+    fs::write(
+        task.repo.path().join(".lf/workflows/reserved.yaml"),
+        "edges:\n  - {from: start, to: review, flow: list}\n",
+    )
+    .unwrap();
+    task.ok(&["-b", "task", "run", "INF-123", "reserved"]);
+    assert_eq!(
+        task.workflow()["position"],
+        serde_json::json!({"kind":"node","node":"review"})
+    );
+    assert_eq!(support::recorded_flows(task.home.path()).len(), 1);
+}
+
+#[test]
 fn a_plain_flow_process_in_the_worktree_does_not_move_the_task() {
     let task = WorkflowTask::new();
     task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
     let before = task.workflow();
-    task.ok(&["-b", "run", "land-proof"]);
-    task.ok(&["-b", "--task", "INF-123", "run", "land-proof"]);
+    task.ok(&["-b", "flow", "land-proof"]);
+    task.ok(&["-b", "--task", "INF-123", "flow", "land-proof"]);
     assert_eq!(support::recorded_flows(task.home.path()).len(), 3);
     assert_eq!(task.workflow(), before);
     // A workflow is traversed, never run as a Flow.
-    let refused = task.run(&["-b", "run", "rounds"]);
+    let refused = task.run(&["-b", "flow", "rounds"]);
     assert!(!refused.status.success());
     let error = String::from_utf8_lossy(&refused.stderr).to_string();
     assert!(error.contains("lf task run <issue> rounds"), "{error}");
@@ -656,7 +677,7 @@ fn a_task_takes_up_the_workflow_when_an_autonomous_flow_has_the_same_name() {
         captured["position"],
         serde_json::json!({"kind":"node","node":"review"})
     );
-    task.ok(&["-b", "run", "feature"]);
+    task.ok(&["-b", "flow", "feature"]);
     assert_eq!(task.workflow(), captured);
     assert_eq!(support::recorded_flows(task.home.path()).len(), 2);
 }

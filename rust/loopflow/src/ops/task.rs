@@ -542,7 +542,7 @@ async fn traverse_workflow(
     let node = workflow.node();
     let refuse = |asked: String| {
         task_error(format!(
-            "Task {issue} is at {node} of workflow {name}: {asked}. Outgoing edges: {}. `lf task move {issue} <node>` puts the Task at a node without running anything; `lf task run {issue} <workflow>` takes up another workflow; `lf run <flow>` in the Task worktree runs a Flow without moving the Task",
+            "Task {issue} is at {node} of workflow {name}: {asked}. Outgoing edges: {}. `lf task move {issue} <node>` puts the Task at a node without running anything; `lf task run {issue} <workflow>` takes up another workflow; `lf flow <flow>` in the Task worktree runs a Flow without moving the Task",
             workflow.describe_outgoing(),
         ))
     };

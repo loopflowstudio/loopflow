@@ -25,7 +25,7 @@ homepage:
       href: '#start'
     commands: |-
       $ lf skill design "Add CSV export"  # one session
-      $ lf run ship-api                   # a Flow: sessions in order
+      $ lf flow ship-api                   # a Flow: sessions in order
       $ lf flow list                      # the Flows you have
       $ lf task create --title "Add CSV export"
       $ lf task run EXP-12                # a task's next step
@@ -84,7 +84,7 @@ homepage:
       $ lf implement "Rate-limit the export endpoint"
 
       # the Flow: three sessions, in order
-      $ lf run ship-api "Rate-limit the export endpoint"
+      $ lf flow ship-api "Rate-limit the export endpoint"
     parts:
     - title: Skills & workflows
       description: Instructions are Markdown and sequences are YAML, kept in your repository,

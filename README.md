@@ -63,7 +63,7 @@ The harness acts as a User over the same `lf` API. See
 ```bash
 lf list                    # commands, skills, and flows
 lf help debug              # inspect a definition without launching it
-lf run feature             # select a flow, otherwise a skill
+lf flow pursue             # select a flow explicitly
 lf skill release-run       # explicitly select the skill
 lf land --help           # inspect the landing command
 lf pr-review               # build an HTML walkthrough of the important code in this PR

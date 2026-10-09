@@ -1917,7 +1917,7 @@ fi"#;
         };
         let handed_off = if flow {
             command()
-                .args(["flow", "repair-proof", "--batch", "--no-loopflow"])
+                .args(["flow", "repair-proof", "--batch"])
                 .output()
                 .unwrap()
         } else {

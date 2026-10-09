@@ -1,6 +1,7 @@
 use crate::durable::WorkRef;
 use crate::engine::flow::return_target;
 use crate::engine::flow_output::FlowOutput;
+use crate::engine::target::{resolve_definition, Target};
 use crate::engine::{
     compile_flow, ConcreteSkill, ConcreteStep, ConcreteXor, ExecutionContext, ExecutionCursor,
     FlowDefinition, FlowEngine, FlowOutcome, SkillExecutor, SkillOutcome, StepProgress,
@@ -94,17 +95,24 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Flow before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// Carry one Task run: start `flow` as the plain `lf --task ISSUE run FLOW`
-/// child, and again while a Flow process fails. Each attempt is its own FlowProcess
-/// beneath this process. A Flow held for a person or a watcher, an interrupted
+/// Carry one Task run: resolve the edge to an explicit skill or Flow child,
+/// and start it again while a Flow process fails. Each Flow attempt records its
+/// own FlowProcess beneath this process; a single skill remains a skill launch. A Flow held for a person or a watcher, an interrupted
 /// one, and a launch refused before any Flow started are returned as they
 /// ended.
-pub fn run_for_task(cli: &Cli, issue: &str, flow: &str) -> Result<()> {
+pub fn run_for_task(cli: &Cli, issue: &str, flow: &str, checkout: &Path) -> Result<()> {
+    let owner = match resolve_definition(checkout, flow, None)? {
+        Target::Flow(_) => "flow",
+        Target::Skill(_) => "skill",
+        Target::Command(_) | Target::Xor(_) => {
+            unreachable!("named definitions are skills or Flows")
+        }
+    };
     let mut args = cli.step_args();
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
-    args.extend(["--task", issue, "run", flow].map(str::to_owned));
+    args.extend(["--task", issue, owner, "--", flow].map(str::to_owned));
     let lf = crate::engine::process::resolve_pinned_lf_binary()?;
     let store = block_on(open_flow_store())?;
     let store = &store.sqlite;

@@ -433,7 +433,6 @@ fn resolve_cli_target(
             };
             (name, Some(kind), join_args(&messages))
         }
-        Some(Commands::Run { name, args: rest }) => (name.clone(), None, join_args(rest)),
         Some(Commands::External(rest)) => {
             let (name, messages) = loopflow::lf::commands::run::split_skill_args(rest)?;
             (name, None, join_args(&messages))
@@ -1586,7 +1585,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         )?);
     }
     // `lf task run` places the Task and fills its defaults; from here it is
-    // `lf --task ISSUE run FLOW`.
+    // `lf --task ISSUE flow FLOW`.
     if let Some(Commands::Task {
         cmd:
             TaskCommand::Run {
@@ -1628,7 +1627,12 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // This process carries the edge and writes where it left the Task: at
         // the edge's target once an attempt at its Flow succeeded, otherwise
         // still on the edge.
-        loopflow::lf::commands::flow::run_for_task(&cli, &task.plan.identifier, &flow)?;
+        loopflow::lf::commands::flow::run_for_task(
+            &cli,
+            &task.plan.identifier,
+            &flow,
+            task.worktree()?,
+        )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task, &end)?);
     }
     if let Some(task) = cli.task.as_ref() {
@@ -2013,7 +2017,7 @@ fn execute_command(
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },
-        Some(Commands::Skill { .. } | Commands::Run { .. } | Commands::External(_)) => {
+        Some(Commands::Skill { .. } | Commands::External(_)) => {
             anyhow::bail!("a command target must name a builtin command")
         }
         None => anyhow::bail!("a command target requires a command"),
@@ -2113,7 +2117,10 @@ mod tests {
             ["lf", "pr", "land", "--message", "Keep this together"]
         );
         assert!(message.is_none());
-        assert!(matches!(resolve(&["lf", "run", "land"]).0, Target::Flow(_)));
+        assert!(matches!(
+            resolve(&["lf", "flow", "land"]).0,
+            Target::Flow(_)
+        ));
         assert!(matches!(
             resolve(&["lf", "skill", "land"]).0,
             Target::Skill(_)
@@ -2305,17 +2312,6 @@ mod tests {
             result,
             vec!["lf", "--interactive", "-c", "-a", "claude", "implement"]
         );
-    }
-
-    #[test]
-    fn reorder_args_no_loopflow_flag_after_skill() {
-        let args = vec![
-            "lf".to_string(),
-            "gate".to_string(),
-            "--no-loopflow".to_string(),
-        ];
-        let result = reorder_args(args);
-        assert_eq!(result, vec!["lf", "--no-loopflow", "gate"]);
     }
 
     #[test]

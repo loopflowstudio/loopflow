@@ -17,7 +17,7 @@ are internal process boundaries and are marked below.
 `--task` selects a Task checkout; `--wt` selects an existing worktree.
 `--wave` adds context without moving directories and must match a Task's
 owning Wave. `task run` places a Task's worktree and then runs like
-`lf --task ISSUE run FLOW`; every Flow naming a Task is equally its work.
+`lf --task ISSUE flow FLOW`; every Flow naming a Task is equally its work.
 
 A preference (`--account`) permits fallback. A restriction (`--only-account`)
 limits this launch and its children. A Flow retains its provider selections;
@@ -64,7 +64,6 @@ Open Loopflow or run its CLI
 | `--__cron-receipt` | Exact cron receipt attribution for mechanical release execution Internal. |
 | `--__cron-lock-fd` | cron lock fd Internal. |
 | `--diff` | Select changed-code context; omission inherits configuration |
-| `--max-turns` | Maximum agent turns for this invocation |
 | `--machine` | Run the command on this saved machine in its repository |
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
@@ -72,7 +71,6 @@ Open Loopflow or run its CLI
 | `--steers-after` | Give the agent only Task direction newer than this steer |
 | `--wt` | Execute in an existing worktree by name or branch |
 | `--__cwd` | Keep a Work-bound internal launch in this exact checkout Internal. |
-| `--no-loopflow` | Exclude loopflow operating guidance Default: false. |
 | `--help / -h` | Print help |
 | `--version / -V` | Print version |
 
@@ -1611,7 +1609,7 @@ Ensure tracked Task Work and its worktree without launching a Flow
 
 ## lf task run
 
-Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
 
 | Argument | What it does |
 |---|---|
@@ -1882,17 +1880,6 @@ Launch the immutable provider request retained for a captured input
 | Argument | What it does |
 |---|---|
 | `<run>` | Captured input identity or an unambiguous displayed prefix |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf run
-
-Run a definition, preferring a flow over a same-named skill
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<args>` | args |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

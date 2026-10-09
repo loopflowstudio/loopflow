@@ -188,7 +188,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
             if current.get_name() == "help"
                 && output
                     .last()
-                    .is_some_and(|owner| matches!(owner.as_str(), "run" | "skill" | "flow"))
+                    .is_some_and(|owner| matches!(owner.as_str(), "skill" | "flow"))
             {
                 output.push("--".to_string());
             }
@@ -226,7 +226,6 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                 path.extend(expansion);
                 if current.get_subcommands().next().is_none()
                     && !current.is_allow_external_subcommands_set()
-                    && current.get_name() != "run"
                 {
                     boundary = true;
                 }
@@ -339,7 +338,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
     let tree = command_tree();
     if path.is_empty() {
         if all {
-            let mut output = String::from("Usage: lf <command> | run <name> [message]\n\n");
+            let mut output = String::from("Usage: lf <command> | <name> [message]\n\n");
             render_tree(&tree, &[], &mut output);
             return Ok(output);
         }
@@ -348,7 +347,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             .filter(|cmd| !cmd.is_hide_set())
             .map(Command::get_name)
             .collect::<Vec<_>>();
-        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf run <name> [message]    select a flow, otherwise a skill\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
+        let mut output = String::from("Usage: lf <name> [message] | <command>\n\nRun\n  lf pursue [message]        build a change through to a published PR\n  lf flow <name> [message]   select a flow explicitly\n  lf skill <name> [message]  select a skill explicitly\n\nDiscover\n  lf list                   commands, skills, and flows\n  lf help <path>             explain a command or definition\n  lf help --all              show the complete command tree\n\nCommands\n");
         for row in names.chunks(5) {
             output.push_str(&format!(
                 "  {}\n",
@@ -359,7 +358,7 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
             ));
         }
         output.push_str("\nSelect: --machine <label-or-id>, --task <task>, --wt <name>, --wave <wave>\n--machine runs the command in the saved remote repository.\nWith --machine: --forward-agent\n");
-        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf run NAME always selects a definition.\n");
+        output.push_str("\nOmit owners when a command is unique: lf land → lf pr land.\nCommands take precedence; lf skill NAME and lf flow NAME select definitions.\n");
         return Ok(output);
     }
     let definition = match path {
@@ -368,13 +367,13 @@ pub fn render_help(path: &[String], repo: &Path, all: bool) -> Result<String> {
         _ => None,
     };
     if let Some((owner, name, escaped)) =
-        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "run" | "skill" | "flow"))
+        definition.filter(|(owner, _, _)| matches!(owner.as_str(), "skill" | "flow"))
     {
         let command = tree
             .find_subcommand(owner)
             .expect("definition collection exists");
-        // Collection verbs win unless explicitly escaped; `run` always selects a definition.
-        if escaped || owner == "run" || resolve_child(command, name, &path[..1])?.is_none() {
+        // Collection verbs win unless explicitly escaped.
+        if escaped || resolve_child(command, name, &path[..1])?.is_none() {
             let kind = match owner.as_str() {
                 "skill" => Some(DefinitionKind::Skill),
                 "flow" => Some(DefinitionKind::Flow),
@@ -514,7 +513,6 @@ fn definition_help(
             output.push_str("\nUntyped lookup selects the same-named flow.\n");
         }
         _ => {
-            output.push_str(&format!("  lf run {name} [message]\n"));
             if matches!(resolve_child(tree, name, &[]), Ok(None)) {
                 output.push_str(&format!("  lf {name} [message]\n"));
             }

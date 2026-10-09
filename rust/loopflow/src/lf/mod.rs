@@ -113,10 +113,6 @@ pub struct Cli {
     #[arg(long, value_enum)]
     pub diff: Option<DiffContext>,
 
-    /// Maximum agent turns for this invocation
-    #[arg(long = "max-turns")]
-    pub max_turns: Option<u32>,
-
     /// Run the command on this saved machine in its repository
     #[arg(long, value_name = "LABEL_OR_ID")]
     pub machine: Option<String>,
@@ -148,10 +144,6 @@ pub struct Cli {
     /// Keep a Work-bound internal launch in this exact checkout.
     #[arg(long = "__cwd", value_name = "PATH", hide = true)]
     pub bound_cwd: Option<PathBuf>,
-
-    /// Exclude loopflow operating guidance
-    #[arg(long = "no-loopflow")]
-    pub no_loopflow: bool,
 
     /// The conversation `lf -b session resume ID MESSAGE` continues.
     #[arg(skip)]
@@ -192,7 +184,6 @@ impl Cli {
             ("--interactive", self.interactive),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
-            ("--no-loopflow", self.no_loopflow),
             ("--isolate", self.isolate),
             ("--shared", self.shared),
             ("--verbose", self.verbose),
@@ -233,9 +224,6 @@ impl Cli {
                 input.to_string_lossy().into_owned(),
             ]);
         }
-        if let Some(turns) = self.max_turns {
-            args.extend(["--max-turns".to_string(), turns.to_string()]);
-        }
         if let Some(steer) = self.steers_after {
             args.extend(["--steers-after".to_string(), steer.to_string()]);
         }
@@ -262,7 +250,6 @@ impl Cli {
             verbose: self.verbose,
             chrome: self.chrome,
             diff: self.diff,
-            max_turns: self.max_turns,
             machine: self.machine.clone(),
             repository: self.repository.clone(),
             forward_agent: self.forward_agent,
@@ -271,7 +258,6 @@ impl Cli {
             steers_after: self.steers_after,
             wt: self.wt.clone(),
             bound_cwd: self.bound_cwd.clone(),
-            no_loopflow: self.no_loopflow,
             resume: self.resume.clone(),
         }
     }
@@ -485,12 +471,6 @@ pub enum Commands {
     Replay {
         /// Captured input identity or an unambiguous displayed prefix
         run: String,
-    },
-    /// Run a definition, preferring a flow over a same-named skill
-    Run {
-        name: String,
-        #[arg(trailing_var_arg = true)]
-        args: Vec<String>,
     },
     /// Run or inspect authored flows
     Flow {
@@ -2865,7 +2845,7 @@ mod tests {
     #[test]
     fn flow_children_keep_the_selected_agent() {
         for flag in ["--agent", "-a"] {
-            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "run", "code"])
+            let cli = Cli::try_parse_from(["lf", flag, "claude:opus", "flow", "code"])
                 .expect("parse agent selection");
             let args = std::iter::once("lf".to_owned())
                 .chain(cli.process_options().step_args())

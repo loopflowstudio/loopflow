@@ -216,7 +216,7 @@ workflow takes only an edge leaving its current node. Bare
 `lf task run <issue>` takes the only one or names the choices,
 `lf task run <issue> <flow>` picks one, and `lf task run <issue> end` takes an
 edge that runs nothing. A Task with no workflow takes up its Project's; naming one
-(`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> run <flow>` runs any Flow
+(`code`, `feature`, `research`) takes that up from its start. `lf --task <issue> flow <flow>` runs any Flow
 without moving the Task.
 
 Use the workflow or Flow the user selected; otherwise the current Linear
@@ -306,7 +306,7 @@ attributes a skill, inline prompt, or Flow. Attribution resolves this command's
 Process ancestry supplies no Work attribution. Every attributed contribution
 is equally the Task's work; none claims exclusive ownership. `task run` places
 the Task, records the workflow edge it takes when the Task has one, then is
-the same command as `lf --task <issue> run <flow>`.
+the same command as `lf --task <issue> flow <flow>`.
 
 Task scratch Markdown enters each contribution at launch. Give independent
 contributions distinct paths, wait for the artifacts needed, and inspect their

@@ -589,7 +589,7 @@ fn saved_task_checkout_works_offline_with_and_without_linear() {
         let output = unbound_command(
             Path::new(env!("CARGO_BIN_EXE_lf")),
             worktree,
-            &["-b", "--task", task.id.as_str(), "run", "offline"],
+            &["-b", "--task", task.id.as_str(), "flow", "offline"],
         )
         .env("LF_HOME", home.path())
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))

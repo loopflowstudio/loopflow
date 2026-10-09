@@ -300,7 +300,7 @@ lf wave status product
 ```
 
 `task run` places the Task, then runs a fresh Flow in its checkout exactly as
-`lf --task ISSUE run FLOW` does, returning when the Flow ends; it never
+`lf --task ISSUE flow FLOW` does, returning when the Flow ends; it never
 continues an earlier one. Repository rotation converges every Wave on the
 requested Project name, preserving active Task identity and execution. Direct
 questions and helpers use attributed AgentSessions without gaining Flow

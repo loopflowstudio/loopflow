@@ -66,7 +66,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "debug"],
             vec!["debug", "--help"],
-            vec!["run", "debug", "--help"],
+            vec!["skill", "debug", "--help"],
         ],
         vec![vec!["help", "flow", "list"], vec!["flow", "list", "--help"]],
         vec![vec!["help", "wt", "create"], vec!["wt", "create", "--help"]],
@@ -96,7 +96,7 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
         vec![
             vec!["help", "paired"],
             vec!["paired", "--help"],
-            vec!["run", "paired", "-a", "unused", "--help"],
+            vec!["flow", "paired", "-a", "unused", "--help"],
         ],
     ] {
         let expected = success(run(repo.path(), home.path(), &forms[0]));
@@ -139,6 +139,40 @@ fn inspection_is_identical_across_spellings_and_has_no_launch_side_effects() {
 }
 
 #[test]
+fn retired_launch_flags_are_not_forwarded_and_steer_cursor_is_preserved() {
+    for args in [
+        vec!["lf", "--max-turns", "2", "skill", "debug"],
+        vec!["lf", "--no-loopflow", "skill", "debug"],
+    ] {
+        assert!(Cli::try_parse_from(args).is_err());
+    }
+    let cli = Cli::try_parse_from(["lf", "--steers-after", "42", "flow", "proof"]).unwrap();
+    let child_args = std::iter::once("lf".to_owned())
+        .chain(cli.process_options().step_args())
+        .chain(["skill".to_owned(), "debug".to_owned()]);
+    let child = Cli::try_parse_from(child_args).unwrap();
+    assert_eq!(child.steers_after, Some(42));
+}
+
+#[test]
+fn removed_run_dispatch_reports_owners_without_launching() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    for args in [["run", "paired"], ["run", "--help"], ["help", "run"]] {
+        let result = run(repo.path(), home.path(), &args);
+        assert_eq!(result.status.code(), Some(2));
+        let error = String::from_utf8_lossy(&result.stderr);
+        assert!(error.contains("ambiguous command 'run'"), "{error}");
+        assert!(error.contains("lf task run"), "{error}");
+        assert!(result.stdout.is_empty());
+    }
+    let overview = String::from_utf8(success(run(repo.path(), home.path(), &["help"]))).unwrap();
+    assert!(overview.contains("lf flow <name>"), "{overview}");
+    assert!(!overview.contains("lf run "), "{overview}");
+    assert!(!home.path().join(".lf").exists());
+}
+
+#[test]
 fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
@@ -153,7 +187,7 @@ fn skill_help_does_not_offer_untyped_execution_when_the_flow_is_invalid() {
     );
     assert!(!help.contains("lf run paired"), "{help}");
     assert!(!help.contains("lf paired [message]"), "{help}");
-    let untyped = run(repo.path(), home.path(), &["run", "paired", "--help"]);
+    let untyped = run(repo.path(), home.path(), &["paired", "--help"]);
     assert_eq!(untyped.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&untyped.stderr).contains("invalid flow"));
 }
@@ -198,15 +232,13 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     let skill = String::from_utf8(skill).unwrap();
     assert!(skill.contains("Reserved skill body."), "{skill}");
     assert!(skill.contains("lf skill list"), "{skill}");
-    for owner in ["flow", "run"] {
-        let flow = success(run(
-            repo.path(),
-            home.path(),
-            &["help", owner, "--", "list"],
-        ));
-        let flow = String::from_utf8(flow).unwrap();
-        assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
-    }
+    let flow = success(run(
+        repo.path(),
+        home.path(),
+        &["help", "flow", "--", "list"],
+    ));
+    let flow = String::from_utf8(flow).unwrap();
+    assert!(flow.contains("flow (.lf/flows/list.yaml)"), "{flow}");
     for args in [["help", "skill", "list"], ["skill", "list", "--help"]] {
         assert_eq!(
             success(run(repo.path(), home.path(), &args)),
@@ -269,8 +301,8 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
         ],
         &["account", "route", "--json", "set", "codex", "work@"],
         &["wt", "rm", "unused"],
-        &["-M", "unused", "run", "solo"],
-        &["-C", "run", "solo"],
+        &["-M", "unused", "skill", "solo"],
+        &["-C", "skill", "solo"],
     ] {
         let result = run(repo.path(), home.path(), args);
         assert_eq!(result.status.code(), Some(2), "{args:?}");
@@ -357,7 +389,11 @@ fn ambiguous_commands_never_fall_back_to_installed_definitions() {
         assert!(message.contains("lf session rename"), "{message}");
         assert!(message.contains("lf wave rename"), "{message}");
     }
-    let selected = success(run(repo.path(), home.path(), &["run", "rename", "--help"]));
+    let selected = success(run(
+        repo.path(),
+        home.path(),
+        &["skill", "rename", "--help"],
+    ));
     assert!(String::from_utf8_lossy(&selected).contains("Skill rename body."));
     assert!(!home.path().join(".lf").exists());
 }
@@ -470,8 +506,8 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         ["lf", "task", "comment", "status"]
     );
     assert_eq!(
-        normalized(&["lf", "run", "land", "--", "--help"]),
-        ["lf", "run", "land", "--", "--help"]
+        normalized(&["lf", "flow", "land", "--", "--help"]),
+        ["lf", "flow", "land", "--", "--help"]
     );
     let parsed = Cli::try_parse_from(normalized(&["lf", "flow", "--", "list"])).unwrap();
     assert!(

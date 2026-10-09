@@ -1,24 +1,24 @@
 # LOO-442: provider conversation identity
 
-Jack Heart requested AgentSession on 2026-10-09, stacked on LOO-441. The Task
-brief is accepted scope; this implementation selects the permitted typed-id path.
+Jack Heart requested AgentSession on 2026-10-09, stacked on LOO-441 / PR #1516.
+The Task brief is accepted scope; the implementation selects its permitted
+opaque typed-id path, without a table or migration. Jack's parallel-work steer
+leaves engine/driver columns and Process ownership exclusively with LOO-443.
 
-AgentSessionId is the provider-issued opaque conversation id, not a UUID generated
-by Loopflow. No table: current connections belong to the LfSession row, native references and historical
-selections to immutable turn/capture events, account routing to existing mappings.
-A provider announcing a replacement changes the current selection; earlier turn
-keys and captured references remain in history. No new replacement event is needed.
-Engine/driver columns and Process ownership belong exclusively to LOO-443.
+## Implemented boundary
 
-## Delete — do not maintain
+`AgentSessionId` preserves provider-issued strings, including non-UUID ids.
+Rust resume configuration, harnesses, native turn keys, capture evidence and
+account routing now carry it; Swift mirrors SessionEvent and native history
+references. The former `provider_thread` / `provider_session_id` code fields
+and accessors are gone, as are Codex's duplicate getter and OpenCode's
+intermediate string parser. Provider protocol names remain vendor-owned.
 
-- Rust `provider_thread` / `provider_session_id` fields, parameters and accessors;
-  replace with `agent_session` and AgentSessionId end to end, including resume,
-  captured evidence, turn keys and account routing. No string alias or parallel owner.
-- Swift `providerThread: String?`; replace with typed `agentSession`.
-- Codex’s duplicate `thread_id()` getter and OpenCode’s intermediate string parser.
-
-These cuts are complete; retained wire/column names below are not deletion targets.
+The LfSession row holds the current connection; a provider announcing a new
+conversation replaces that selection. Immutable turn/capture events retain
+earlier native ids and recorded account attribution. Current selection and
+per-input history are different facts, not reasons for another table or a new
+replacement event. No engine/driver column changed.
 
 ## Deliberate persistence boundary (PR notes)
 
@@ -29,30 +29,30 @@ These cuts are complete; retained wire/column names below are not deletion targe
   and the Rust/Swift DTO retain one existing encoding, not dual-read aliases.
 - Released migration SQL and historical schema fixtures remain immutable.
 
-## Remaining
+## Remaining acceptance
 
-The typed cut is implemented across harnesses, resume configuration, account
-routing, captured evidence and native turn keys. Swift mirrors both SessionEvent
-and native history references without changing their wire strings. No engine or
-driver column changed. The residual-name audit matches only retained SQL/JSON.
+Gate/CI still own the Rust suites, current Clippy, account attribution,
+Rust/Swift DTO fixtures and the repaired fresh-process resume fixture.
+`agent_session_resumes_on_a_fresh_process` uses two stand-in Claude processes
+and checks remembered content through the typed id; it is not a live-provider
+proof. Its first version emitted only a final result, which the reader correctly
+did not treat as streamed answer text. The text-delta repair remains unrun after
+verification stopped below the repository's disk reserve.
 
-Gate still owns Rust suites, Rust/Swift DTO fixtures, account attribution and
-the repaired fresh-process resume fixture. Compression also leaves Clippy and
-focused harness/history checks there: supported recovery reports 30.5 GiB free,
-below the 32 GiB reserve, retaining active/recent builds.
-The first fixture emitted only Claude's final result; the reader correctly did
-not treat that as streamed answer text. It now emits a text delta before the
-result. That repaired fixture has not run. No installed store or other active
-work was changed.
-Publication, parent-first landing and Task completion remain outside implementation.
+The affected account checks include `session_resume_is_pinned_by_account_only`
+and `usage_follows_the_switch_log_only_where_a_running_agent_does`. Existing
+native-identity ordering and replacement-history checks remain relevant; a new
+current selection must not rewrite old usage. Swift's prior build remains
+applicable, but compilation alone does not establish DTO round trips.
 
-Compression keeps comparisons typed, reuses one native id in the OpenCode
-fixture and removes the duplicate Codex getter; provider protocols are unchanged.
-Review found that typing Swift's native history reference changed string
-interpolation of its identity; the projection now explicitly uses rawValue to
-preserve existing row ids. Current connection evidence and per-input native
-references remain distinct facts, not a second conversation table.
-Release child memory retains the same source-versus-installed evidence boundary;
-no release or schedule direction changed.
+Review found that typing Swift's native history reference changed interpolated
+row ids; the projection explicitly uses `rawValue` to preserve them. The code
+and docs agree on this boundary. The 2026-10-09 realign inspection found no
+further implementation mismatch. Release's child goal and complete memory were
+read; their distinction between source proof and installed acceptance remains
+applicable, with no new release or schedule direction.
 
-Checks: `cargo fmt --check` and `git diff --check` pass; current Clippy/build/focused tests defer to gate/CI below disk reserve after `uv run python scripts/resource_envelope.py --recover`; prior Swift build remains applicable; `33317fcd3` records prior Rust Clippy and 3 passing agent_session tests, with the repaired resume test still unrun.
+Publication, parent-first landing and Task completion are separate delivery
+work. No installed acceptance is claimed; no new product decision is needed.
+
+Checks: `git diff --check` and the `rg 'provider_session_id|provider_thread' rust/loopflow/src` audit pass (only retained SQL/JSON); prior `cargo fmt --check` and Swift build apply; `33317fcd3` records Clippy and 3 passing agent_session tests, while current Clippy, repaired resume, Rust/account and Rust/Swift DTO suites remain with gate/CI after the disk-reserve stop.

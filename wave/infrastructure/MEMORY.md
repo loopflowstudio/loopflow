@@ -233,9 +233,9 @@ mapping, placement and proofs:
 ## Provider conversations (LOO-442, 2026-10-09)
 
 Jack Heart requested AgentSession atop LOO-441; LOO-443 owns engine/driver changes.
-AgentSessionId needs no table: provider identity types resume, turn keys
-and account routing. Replacement retains earlier ids/attribution in history.
-Wire/storage unchanged; installation unproved.
+Opaque ids type resume, turn keys and accounts; no table.
+History retains ids/attribution. Keep SQL/JSON bytes and Swift
+rawValue row ids. Installation unproved.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

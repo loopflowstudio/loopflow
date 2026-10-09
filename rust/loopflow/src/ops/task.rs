@@ -1547,13 +1547,35 @@ fn parse_pr_slug(value: &str) -> OpsResult<String> {
 }
 
 pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsResult<Option<Task>> {
-    let Some(branch) = current_branch(repo).map_err(OpsError::from)? else {
+    // Branch names are not checkout identity: another clone can use the same
+    // branch. Never probe a remote Machine's recorded path on this Machine.
+    let Ok(root) = crate::engine::git::worktree_root(repo) else {
         return Ok(None);
     };
-    store
-        .get_task_by_branch(&branch)
-        .await
-        .map_err(|error| task_error(format!("failed to resolve Task branch {branch:?}: {error}")))
+    let local = store.local_machine().await.map_err(task_error)?.id;
+    let mut id = None;
+    for checkout in store.task_checkouts().await.map_err(task_error)? {
+        if checkout.machine_id.as_ref() != Some(&local) {
+            if checkout.machine_id.is_none() && checkout.worktree == root {
+                return Err(task_error("Task checkout Machine is unknown"));
+            }
+            continue;
+        }
+        if crate::engine::git::worktree_root(&checkout.worktree)
+            .ok()
+            .as_ref()
+            == Some(&root)
+        {
+            if id.is_some() {
+                return Err(task_error("Multiple Tasks claim this checkout"));
+            }
+            id = Some(checkout.task_id);
+        }
+    }
+    match id {
+        Some(id) => store.get_task(&id).await.map_err(task_error),
+        None => Ok(None),
+    }
 }
 
 /// A managed Task worktree, or an explicit decision
@@ -1565,10 +1587,10 @@ pub(crate) async fn task_for_checkout(store: &SharedStore, repo: &Path) -> OpsRe
 /// registry or unresolved declaration reports the missing authority instead.
 #[derive(Debug)]
 enum ManagedTask {
-    /// This checkout is not on a Task branch. Task-specific bookkeeping is an
+    /// This checkout has no Task. Task-specific bookkeeping is an
     /// explicit no-op; the ordinary PR flow continues unchanged.
     Unmanaged,
-    /// The registry is healthy and the checkout is on a Task's current branch.
+    /// The registry is healthy and the checkout belongs to a Task.
     /// Boxed so the `Unmanaged` no-op variant stays small.
     Managed { store: SharedStore, task: Box<Task> },
 }
@@ -3445,8 +3467,7 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
-    let task = task_execution_status(repo, issue)?;
-    if let Some(task) = &task {
+    if let Some(task) = task_execution_status(repo, issue)? {
         let read = block_on_task(async {
             let store = task_store().await?;
             Ok(crate::ops::pm::TaskPlanningInspection {
@@ -3459,40 +3480,18 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             planning_state: read.observation.state,
             planning: read.observation.record,
             planning_error: read.refresh_error,
-            execution: Some(task_snapshot(task)?),
+            execution: Some(task_snapshot(&task)?),
         });
     }
-    let selector = task
-        .as_ref()
-        .and_then(|task| task.plan.linear_id.as_ref().map(|id| id.as_str()))
-        .or(issue)
-        .ok_or_else(|| task_error("this checkout has no Task"))?;
-    let read = match crate::ops::pm::inspect_task_planning(
-        repo,
-        selector,
-        crate::ops::pm::PmRefresh::Auto,
-    ) {
-        Ok(read) => read,
-        Err(error) if task.is_some() => crate::ops::pm::TaskPlanningInspection {
-            observation: crate::store::PmTaskObservation {
-                record: None,
-                state: crate::store::PlanningState::Unavailable,
-            },
-            refresh_error: Some(error.to_string()),
-        },
-        Err(error) => return Err(error),
-    };
-    let planning_stale = read.is_stale();
-    let planning_state = read.observation.state;
-    let planning = read.observation.record;
-    let planning_error = read.refresh_error;
-    let execution = task.as_ref().map(task_snapshot).transpose()?;
+    let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
+    let read =
+        crate::ops::pm::inspect_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto)?;
     Ok(TaskStatus {
-        planning,
-        planning_error,
-        planning_stale,
-        planning_state,
-        execution,
+        planning_stale: read.is_stale(),
+        planning_state: read.observation.state,
+        planning: read.observation.record,
+        planning_error: read.refresh_error,
+        execution: None,
     })
 }
 
@@ -6250,6 +6249,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(resolved.id, task.id);
+    }
+
+    #[tokio::test]
+    async fn checkout_resolution_respects_machine_identity() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let fixture = task_fixture_at("LOCATION-1", repo.path().canonicalize().unwrap()).await;
+        let peer = crate::durable::MachineId::new();
+        fixture
+            .store
+            .add_machine(&peer, "peer", "peer", "/repo")
+            .await
+            .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
+        conn.execute(
+            "UPDATE tasks SET checkout_machine_id=?2 WHERE id=?1",
+            rusqlite::params![fixture.task.id.as_str(), peer.as_str()],
+        )
+        .unwrap();
+        assert!(super::task_for_checkout(&fixture.store, repo.path())
+            .await
+            .unwrap()
+            .is_none());
+        conn.execute(
+            "UPDATE tasks SET checkout_machine_id=NULL WHERE id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
+        assert!(super::task_for_checkout(&fixture.store, repo.path())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Machine is unknown"));
     }
 
     #[tokio::test]

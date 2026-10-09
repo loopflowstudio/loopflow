@@ -114,35 +114,7 @@ pub(crate) async fn select_work(
     } else if selected_wave.is_some() {
         (None, crate::session::WorkSource::Declared)
     } else {
-        // Branch names are not checkout identity: another clone can use the same
-        // branch. Never probe a remote Machine's recorded path on this Machine.
-        let Ok(root) = crate::engine::git::worktree_root(cwd) else {
-            return Ok(None);
-        };
-        let local = store.local_machine().await.map_err(run_error)?.id;
-        let mut id = None;
-        for checkout in store.task_checkouts().await.map_err(run_error)? {
-            if checkout.machine_id.as_ref() != Some(&local) {
-                if checkout.machine_id.is_none() && checkout.worktree == root {
-                    return Err(run_error("Task checkout Machine is unknown"));
-                }
-                continue;
-            }
-            if crate::engine::git::worktree_root(&checkout.worktree)
-                .ok()
-                .as_ref()
-                == Some(&root)
-            {
-                if id.is_some() {
-                    return Err(run_error("Multiple Tasks claim this checkout"));
-                }
-                id = Some(checkout.task_id);
-            }
-        }
-        let task = match id {
-            Some(id) => store.get_task(&id).await.map_err(run_error)?,
-            None => None,
-        };
+        let task = super::task::task_for_checkout(store, cwd).await?;
         (task, crate::session::WorkSource::Checkout)
     };
     let wave = match &task {
@@ -201,6 +173,14 @@ pub async fn resolve_work_selection(
     let selected = select_work(store, repo, selection)
         .await?
         .ok_or_else(|| run_error("select a Task or Wave"))?;
+    bind_selected_work(store, repo, selected).await
+}
+
+async fn bind_selected_work(
+    store: &SharedStore,
+    repo: &Path,
+    selected: SelectedWork,
+) -> OpsResult<WorkBinding> {
     let wave = selected.wave;
     if let Some(task) = selected.task {
         let project = store
@@ -237,35 +217,33 @@ pub async fn resolve_work_selection(
         });
     }
 
+    let metric_context = crate::ops::metrics::metric_prompt_section(
+        "metric-portfolio",
+        crate::ops::metrics::stored_wave_metric_portfolio(
+            store,
+            &wave,
+            time::OffsetDateTime::now_utc(),
+        )
+        .await,
+    );
+    let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
+        .is_ok_and(|canonical| canonical.contains(repo))
     {
-        let metric_context = crate::ops::metrics::metric_prompt_section(
-            "metric-portfolio",
-            crate::ops::metrics::stored_wave_metric_portfolio(
-                store,
-                &wave,
-                time::OffsetDateTime::now_utc(),
-            )
-            .await,
-        );
-        let cwd = if crate::repository::CanonicalRepo::discover(Path::new(wave.repo()))
-            .is_ok_and(|canonical| canonical.contains(repo))
-        {
-            crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
-        } else {
-            PathBuf::from(wave.repo())
-        };
-        let context = render_wave_context(&cwd, wave.slug(), &metric_context);
-        Ok(WorkBinding {
-            source: selected.source,
-            subjects: vec![format!("wave:{}", wave.slug())],
-            work: WorkRef::Wave(wave.id().clone()),
-            wave_id: wave.id().clone(),
-            wave_name: wave.slug().to_string(),
-            cwd,
-            context,
-            agent: None,
-        })
-    }
+        crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
+    } else {
+        PathBuf::from(wave.repo())
+    };
+    let context = render_wave_context(&cwd, wave.slug(), &metric_context);
+    Ok(WorkBinding {
+        source: selected.source,
+        subjects: vec![format!("wave:{}", wave.slug())],
+        work: WorkRef::Wave(wave.id().clone()),
+        wave_id: wave.id().clone(),
+        wave_name: wave.slug().to_string(),
+        cwd,
+        context,
+        agent: None,
+    })
 }
 
 /// Resolve checkout ownership before an ancestor's explicit declaration.
@@ -298,20 +276,7 @@ pub async fn resolve_checkout_binding(
     let Some(selected) = select_work(store, repo, WorkSelection::default()).await? else {
         return Ok(None);
     };
-    let Some(task) = selected.task else {
-        return Ok(None);
-    };
-    let id = task.id.to_string();
-    let mut binding = resolve_work_selection(
-        store,
-        repo,
-        WorkSelection {
-            task: Some(&id),
-            wave: None,
-        },
-    )
-    .await?;
-    binding.source = crate::session::WorkSource::Checkout;
+    let mut binding = bind_selected_work(store, repo, selected).await?;
     binding.cwd = crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf());
     Ok(Some(binding))
 }
@@ -553,6 +518,32 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+        assert!(crate::ops::task::task_for_checkout(&store, other.path())
+            .await
+            .unwrap()
+            .is_none());
+        // Checkout identity survives branch changes, including detached HEAD.
+        assert!(std::process::Command::new("git")
+            .args(["checkout", "--detach"])
+            .current_dir(repo.path())
+            .status()
+            .unwrap()
+            .success());
+        let inferred_launch = super::resolve_checkout_binding(&store, repo.path())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(inferred_launch.work, launch.work);
+        assert_eq!(inferred_launch.source, crate::session::WorkSource::Checkout);
+        assert_eq!(inferred_launch.context, launch.context);
+        assert_eq!(
+            crate::ops::task::task_for_checkout(&store, repo.path())
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            task.id
+        );
         let unbound =
             explain_context(&store, other.path(), WorkSelection::default(), None, None).await;
         assert_eq!(unbound.task, ContextFact::Unbound);

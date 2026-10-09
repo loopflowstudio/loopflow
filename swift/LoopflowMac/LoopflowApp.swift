@@ -262,16 +262,7 @@ struct LoopflowApp: App {
         panel.allowsMultipleSelection = false
         panel.prompt = "Open Repo"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let mainRepo = portfolioService.addRepo(url) else {
-            let alert = NSAlert()
-            alert.messageText = "“\(url.lastPathComponent)” isn’t a Git repository"
-            alert.informativeText =
-                "Loopflow works inside a project that uses Git. "
-                + "Choose a folder that already does, or run “git init” in this one first."
-            alert.runModal()
-            return
-        }
-        requestRepository(mainRepo.path, nil)
+        requestRepository(url.path, nil)
     }
 }
 

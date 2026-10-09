@@ -252,13 +252,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([SessionHistory].self, from: stdout)
     }
 
-    /// Resolve stored Work identity without preparing its checkout or client.
-    public func explainContext(task: String?, cwd: String?) async throws -> ContextExplanation {
-        var args = ["context", "--explain", "--json"]
-        if let task { args += ["--task", task] }
-        return try Self.decode(ContextExplanation.self, from: await run(args, cwd))
-    }
-
     /// What each recorded step's submitted input was made of, oldest first,
     /// with Task totals. Read-only, from retained local captures.
     public func taskContext(task: String, cwd: String?) async throws -> ContextReport {

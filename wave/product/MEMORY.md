@@ -48,9 +48,8 @@ and terminal I/O belong in one LOO-427 diff, with internal slices; premature
 LOO-430/431/432 are folded back. Jack authorized implementation through demo
 review and approved the design October 8. Owned cmux probe: arrangement, output and retained draft; cleaned up. No Desktop parity proof.
 
-Shared Work replaces repository pairing; never rewrite a Machine default per
-request. Started Tasks stay on their Machine; inheritance remains unapproved.
-Exact targets do not protect unsent drafts; retain LOO-387's boundary.
+Shared Work replaces repository pairing. Exact targets do not protect unsent
+drafts; retain LOO-387's boundary.
 
 October 8: LOO-427's checkout cut (`f5f742058`) leaves unknown location unavailable.
 Prototypes through `92cafe61d` remove copied placements, preserve legacy overrides
@@ -62,10 +61,11 @@ One store's SQLite transaction cannot provide that guarantee; never synchronize
 runtime to solve it. Peer exchange, observation/admission, complete routing, Desktop
 control and composed proof remain.
 
-LOO-427 keys windows and serial link queues by plan; views own no pending delivery.
-Receiver replacement retains queued links, not proof of usable in-flight completion.
-Router smoke and Ghostty-disabled typecheck pass; configured SwiftPM, native
-retention/convergence and remote proof remain unverified.
+LOO-427 keys windows/queues by plan; canceled reads cannot clear replacement
+deliveries. Router smoke and Ghostty-disabled typecheck pass, not composed/native
+readiness. Context, launch, status and PR checkout inference now share recorded
+Machine/path identity, not branch names. Rust, configured SwiftPM and remote proof
+remain unverified.
 
 Jack selected execution-machine local operations and Git-ref Task sync: 406 owns
 writes/Linear, 412 exchange. Workflow, Sessions, Processes, checkouts and control

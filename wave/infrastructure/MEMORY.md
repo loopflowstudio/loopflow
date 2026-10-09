@@ -221,23 +221,28 @@ unpublished code retained, without deletion or delivery authorization.
 
 ## AgentProcess (LOO-443, 2026-10-09)
 
-Jack Heart requested AgentProcess records shared by top/monitor, gates, resume
-and orphan settlement, deleting Session process columns/counters and duplicate
-ownership models. #1512 is main's `3e1e6245c`; Jack authorized parallel work with
-LOO-441, integrating its rename before publication. The pre-exec lifeline is only
-an internal slice; migration, records, readers, DTOs and installed acceptance remain.
-Takeover must revoke the old attachment without changing AgentProcess identity or
-parent. Preserve native terminals and dash-compatible signals; fixtures signal
-only throwaway children.
+Jack Heart requested one process inventory for top/monitor, gates, resume and
+orphan settlement, deleting Session process columns/counters and duplicate owners.
+#1512 is main's `3e1e6245c`; Jack authorized parallel LOO-441 work, integrating
+its rename before publication. `cad03fe6d` is only a pre-exec lifeline slice;
+the record cutover and installed acceptance remain.
 
-## Process vocabulary (LOO-400, 2026-10-07)
+Takeover preserves AgentProcess identity/parent but revokes old attachment
+control. AgentProcess/LfProcess IDs alone repeat on A → B → A; the replacement
+fence remains unresolved. FIFO holders survive transfer until OS exit, so a
+lifeline is not current attachment authority. Prove both takeover death orders.
+CLOEXEC cannot protect a stalled pre-exec child; close its inherited writer first.
+Preserve native terminals and dash-compatible signals. Tests signal throwaway
+children only.
 
-Jack Heart approved Process, LFID/PID and PR #1483 landing
-(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). `process.lfid` is durable identity;
-optional `pid` is reusable. One draft preserves identities, parents, outcomes,
-unknown PIDs and historical JSON. Sequencer wire `process_id` still maps to Rust
-`process_lfid`. Fixtures establish no installed control authority; LOO-397 owns
-command placement. Exact evidence: `cbdb9a43b:wave/infrastructure/MEMORY.md`.
+## Process vocabulary (LOO-400, curated 2026-10-09)
+
+Jack Heart approved Process, LFID/PID and #1483 landing
+(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). LFID is durable; PID is reusable.
+Preserve identities, ancestry, outcomes and historical JSON. Sequencer
+`process_id` maps to Rust `process_lfid`. Exact migration/fixture limits:
+`cad03fe6d:wave/infrastructure/MEMORY.md`, this heading. LOO-397 owns placement;
+fixtures grant no installed control authority.
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 
@@ -347,19 +352,16 @@ before worker replacement. Retry failed provider reads only, never publisher wri
 Bound pipe collection and exit: descendants can retain stdout. Artifact attempts
 retain candidate identity in separate temporary directories.
 
-LOO-326 completed October 6 after v0.13.5. Jack accepted read-only Exec
-`5f239ead-89f9-49c4-92c4-4c2f8b97ca94`'s uncertainty; completion retained its
-unknown outcome and checkout. Session closure and missing receipts grant no control
-or cleanup authority. Receipts survive until successful terminal writes; pruning
-requires exact death and matching persisted outcome. This proves neither the loss
-cause nor recovered evidence. Cleanup independently reacquires its lease: terminal
-receipts can precede descriptor closure. Release owns re-entry leases,
-healthy-transfer deadlines and pending-version lessons.
+LOO-326 completed October 6 after v0.13.5. Jack accepted its read-only Exec's
+uncertainty, retaining the unknown outcome and checkout. Session closure and
+missing receipts grant no control or cleanup authority. Receipts survive terminal
+write failure; pruning requires exact death and matching persisted outcome.
+Cleanup independently reacquires its lease: terminal receipts can precede
+descriptor closure. This proves neither the loss cause nor recovered evidence.
+Release owns re-entry leases, transfer deadlines and pending-version lessons.
 
-#1459 repaired #1456's PR base using exact reflog evidence, preserving history;
-absent evidence and foreign ancestry refuse. It shipped in v0.13.5; #1456 merged
-October 6. Exact commits, proofs and counterevidence:
-`3e1e6245c:wave/infrastructure/MEMORY.md`, this heading and its references.
+#1459's exact-reflog PR-base repair shipped in v0.13.5; #1456 merged October 6.
+Absent evidence and foreign ancestry refuse. Evidence: `cad03fe6d:wave/infrastructure/MEMORY.md`, this heading and its references.
 
 ## Scheduled release accounting (LOO-285, source reconciliation October 2)
 

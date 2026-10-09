@@ -80,6 +80,9 @@ attribution survive.
   admission. Both use one parent-side pre-exec recording channel. Shared
   `open_owner` replaces three harness-local store-opening sequences without
   refreshing their attachment snapshots.
+- Native `spawn_native(None)`, capture launch without an attachment, and
+  `native_provider_driver`'s missing-provenance-as-client inference are removed.
+  Raw headless optional admission remains a deletion target.
 - Remaining provider-engine close names and messages (`close_engine` is removed).
   `bind_group_to_driver`, `prepare_lifeline` and the exposed prepare/retain
   lifeline type are deleted. Keep `engine/` as Loopflow machinery and the
@@ -106,7 +109,8 @@ Shared headless and owned native admission record argv and OS identity before
 exec, under the attachment lock. Native admission preserves foreground groups,
 TTY and stdio. Synchronous admission cannot lose an admitted child to cancellation
 before returning it. Admission consumes each reservation once; a duplicate cannot
-mark a running row spawn-failed. Optional paths still launch without records.
+mark a running row spawn-failed. Raw headless harness paths still permit missing
+attachments; captured native admission now requires one.
 
 Captured Claude and native retries reserve a fresh AgentProcess only after exact
 exit/spawn failure, advancing capture settlement and the next launch together.
@@ -117,7 +121,7 @@ Native setup cleanup records successful waits, retains failed-wait uncertainty,
 refuses stale cleanup and never settles a remote client's provider. Settlement
 holds the Session lock, not SQLite, across provider close.
 
-The current reduction removes Codex's write-only endpoint and replaces its
+`263b6adfb` removes Codex's write-only endpoint and replaces its
 unshared atomic group slot with an owned optional PID. It retains that slot
 through failed startup before the child handle is installed. OpenCode derives
 the group from its child instead of mirroring it. Native publication/opening
@@ -133,18 +137,38 @@ Earlier implementation/review detail and contrary evidence:
 
 ## Remaining implementation
 
-1. Eliminate the remaining optional attachment paths in every harness and
-   library/helper launch with invocation-owned admission and one row per actual
-   spawn. Distinguish a remote terminal client
-   from the provider it connects to. Keep the lock across admission/recording;
+**Admission counterexample (2026-10-09):** the existing
+`release_acceptance_recovers_from_a_revoked_selected_account` fixture now fails
+with `Saved conversation thread differs; reconnect with its recorded provider`.
+`run_agent` previously omitted attachments for this library path. With admission,
+Codex stop retains the live AgentProcess for capture settlement; account failover
+then requests a fresh native thread on that same attachment. The preserved
+Session thread check refuses it. The metadata-only `fail_and_begin_attempt` does
+not transition the AgentProcess or preserve a selected replacement thread.
+Dependent admission expansion stopped rather than bypassing that check.
+
+Revise the retry design before completing this slice: a selected account failover
+must end the exact old AgentProcess, retain its account/native history, reserve a
+new AgentProcess, and explicitly select fresh-thread versus same-thread resume.
+No old capture or delayed wait may settle the replacement. Same-account transient
+retry needs the corresponding reuse/replacement proof. This is unfinished lifecycle
+implementation, not authorization to remove the saved-thread check or resurrect
+unrecorded spawns. The working code remains a draft with this failing regression.
+
+
+1. Eliminate optional attachment paths in raw headless harness starts. `run_agent`
+   now enters the existing invocation runtime before creating its implicit capture;
+   nested calls reuse their parent. Native helpers also admit at entry, creating
+   a capture only when absent. Native spawn requires an attachment; missing
+   provenance no longer selects the remote-client path. Explicit remote endpoints
+   are checked against the saved AgentProcess, and client spawn holds its attachment
+   fence without recording provider exit. The library slice is not complete:
+   account failover below fails. Raw `Harness::start` also remains: its
+   optional config/open_owner/headless spawn still
+   permits unrecorded children. Admission belongs at the invocation entry, not in
+   a spawn callback inventing a parent. Keep the lock across admission/recording;
    failed spawn is non-start evidence and uncertain spawn remains unknown. Native
    foreground orphan handling must preserve TTY/process-group behavior.
-   `run_agent` already creates an implicit capture, but `claim_conversation_driver`
-   skips attachment for library callers without a recorded invocation; raw harness
-   config also permits None. `native_provider_driver` returns None for both missing
-   provenance and a genuine remote client. Admission belongs at the invocation
-   entry, not in a spawn callback inventing a parent; missing provenance alone
-   cannot establish the remote-client exception.
 2. Remove numeric provider generation from runtime caller/status fences in favor
    of AgentProcess identity. Request correlation already freezes Process, Work and
    capture before send in Claude, Codex and OpenCode history; `SessionTurnOrigin`
@@ -157,18 +181,26 @@ Earlier implementation/review detail and contrary evidence:
    Codex/OpenCode-only, noninteractive selection without applying headless group
    control to a foreground TTY. `HELD_LIFELINES` still retains superseded writers
    until lf exit. No current live attachment means orphan settlement, not invented exit;
-   unknown attachment liveness stays unknown. Native publication/opening cleanup
-   now records exact successful waits and preserves the original error. Resume
-   must consult the AgentProcess
+   unknown attachment liveness stays unknown. Resume must consult the AgentProcess
    before treating a detached attachment as replaceable. Unfinished rows with
-   unknown PID remain diagnosable. Reconcile zombie and unknown-OS readings across gate/top.
+   unknown PID remain diagnosable. Unify OS evidence across gate/top/reaper: top
+   excludes zombies in `OsProcess::matches_start`, while
+   `journal::process_identity_evidence` reads only elapsed time and can call the
+   same PID/birth live. This is a source-level discrepancy, not an observed
+   configured orphan or permission to infer successful exit.
 4. Replace remaining predecessor fixture assumptions and restore required
    active-Session, native-history and Task-membership coverage on records. Prove
    headless public top/Task-status/scheduled-entry agreement, not only reducers
-   or SQL. The old directory-watcher costs no longer describe this reader. The new
-   detached/replaced-record observation fixture covers rename, capture replacement,
-   provider snapshots, exact Task exclusion and observed death without payload files;
-   it still needs execution. CLI Waiting and work-watch fixtures now join process
+   or SQL. `execution_blockers` retains unfinished unknown-identity records, but
+   `collect_activity` omits missing PID/birth or unmatched OS samples. A shared
+   table therefore still permits an invisible blocker. Keep uncertainty visible
+   under the same LFID rather than weakening the gate; cover missing identity,
+   failed OS observation and zombies alongside live/dead cases. The old
+   directory-watcher costs no longer describe this reader. The
+   detached/replaced-record observation fixture now passes: rename, capture
+   replacement, provider snapshots, exact Task exclusion and observed death
+   without payload files. This does not exercise public commands or uncertain OS
+   identity. CLI Waiting and work-watch fixtures now join process
    rows rather than deleted Session columns; other fixture repairs remain.
 5. Integrate LOO-441's LfProcess/LfSession rename before publication. The current
    source still names `Process` and `AgentSession`; no dependency integration or
@@ -204,4 +236,20 @@ the group, so no second slot is needed. Combining native setup errors must not
 drop the published client guard before cleanup; it remains in the outer scope.
 No new signal authority, attachment refresh or lifecycle owner is introduced.
 
-Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test -p loopflow --lib --no-run` pass; network-isolated lib filters `native_launch_setup_errors`, `native_cleanup`, `failed_startup_retains_the_group_until_stop`, `stop_clears_the_child_and_its_group`, `saved_thread_rejection_precedes_spawn` pass (7 tests). Full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.
+October 9 realignment rechecked Release's objective and its completion/operation-entry
+lessons; other child sections were not reread in this pass. The supplied #1512
+base remains; LOO-441 is not integrated. Raw headless admission remains unfinished.
+Reader agreement needs behavior changes, not merely more tests. These gaps require
+no new product decision and do not relax the requested demo.
+
+Review caught two boundary errors and repaired them: native clients must hold the
+attachment fence at spawn, and a helper-created capture must finish with the
+actual command result rather than its drop fallback. Native helper fixtures now
+select the same test ledger as their Session, preserving FK ownership.
+The network runner clears `LF_BIN`; initial library probes consequently reached
+installed Claude in a fresh fixture provider home and got login failure, with
+external networking denied. No configured-provider acceptance is claimed.
+Integration EnvGuard now pins the compiled CLI inside the boundary. Source review
+also removed the eager cwd lookup when an explicit working directory is supplied.
+
+Check: `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and lib/agent_tests builds pass; network-isolated `agent_tests` has 13 passes and the retained account-failover failure above; native remote/setup/replacement/OpenCode/name/move/signal and helper-admission filters pass (9 tests); pre-exec PID recording survives failed exec; full Rust/Swift/DTO/materialized and Linux matrix remain gate/CI-owned.

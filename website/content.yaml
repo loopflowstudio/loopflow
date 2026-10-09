@@ -110,6 +110,8 @@ cli:
       $ lf usage                               # tokens and cost per Session
       $ lf task create --wave exports --title "Add CSV export"
       $ lf task run EXP-12                     # its own worktree, then its Flow
+      $ lf session ensure --task EXP-12        # that Task's conversation
+      $ lf session ensure -w exports           # or the Wave's
       $ lf usage --task EXP-12                 # what that Task cost
       $ lf land                                # merge when checks pass
     items:
@@ -136,7 +138,8 @@ cli:
         and can filter by Task or Wave.'
     - name: Waves and Tasks
       text: '`lf` is also a project manager. It organizes your work into Waves (long-lived streams)
-        and Tasks (concrete outcomes, i.e. PRs).'
+        and Tasks (concrete outcomes, i.e. PRs). Each has one ongoing conversation; `lf session
+        ensure` finds it or starts it.'
     - name: Task = worktree = branch
       text: Each Task gets its own working copy, its own branch, and one pull request. Agents on
         different Tasks never share a checkout.

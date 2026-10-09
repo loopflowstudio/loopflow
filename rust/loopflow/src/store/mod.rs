@@ -1228,6 +1228,22 @@ pub async fn open_ephemeral_store(cfg: &StorageConfig) -> StoreResult<Store> {
     })
 }
 
+/// Observe existing records without initializing, migrating, or claiming them.
+/// Missing and unreadable registries remain different outcomes.
+pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
+    let path =
+        database_path_from_env().map_err(|error| StoreError::InvalidData(error.to_string()))?;
+    if !path
+        .try_exists()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?
+    {
+        return Ok(None);
+    }
+    Ok(Some(Store {
+        sqlite: sqlite::SqliteStore::open_read_only(&path)?,
+    }))
+}
+
 /// Open the machine's shared registry store only if one already exists.
 /// Returns `None` if the registry is absent or incompatible; never creates it.
 pub async fn open_existing_store() -> Option<Store> {

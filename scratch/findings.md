@@ -6,20 +6,11 @@ storage coupling locally.
 
 ## Earlier identity and storage findings
 
-October 7 source at `7e852defe`/`7ee1247e8` exposed path-only repository identity,
-creation-time copied placement, checkout reads joined to that mutable placement,
-and a single pending Desktop URL with unrelated-window fallback. These were
-source observations, not native trials. The implemented cuts below supersede them.
-Their full owner table and October 8 planning-source comments are preserved at
-`/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-command-review-tlvcs9jk/scratch/findings.md`.
-
-Surviving constraints: shared Work identity is not a clone name or remote URL;
-Machine defaults cannot be rewritten per command; historical placement provenance
-stays unknown. RegistryQuery, SessionsWorkspaceRegistry, MultiplexerStore and
-GhosttySurfacePool retain their roles. LOO-406 owns local planning/Linear,
-LOO-412 Git exchange, and runtime remains local. Imported completion never advances
-Workflow or cleans execution. Callback-planner proposals are superseded by Jack's
-October 8 local-operation decision, not reopened by missing implementation.
+October 7's path-only identity, copied placement, mutable checkout joins and
+single pending Desktop URL are superseded locally. Owner constraints and dated
+observations: `f48d84511:scratch/findings.md`, this heading. Shared identity remains
+independent of clone names/remotes; historical assignment provenance stays unknown.
+LOO-406 owns local planning/Linear and LOO-412 exchange; runtime stays local.
 
 ## Decisions these findings do not establish
 
@@ -54,28 +45,13 @@ and a nonexistent PR branch); both fixtures were corrected. Gate still owns
 materialized/installation migration and complete Session lifecycle verification.
 This is slice-1 evidence, not shared-source or native Desktop proof.
 
-Comparison/Session-reader compression evidence: `f8d3386da`, preserved in the
-pre-input snapshot noted below.
-
 ## Integration boundary — October 8
 
-The earlier dependency inspection (`eccb65253`, retained in
-`940e0e078:scratch/findings.md`) found unfinished writer/exchange boundaries in
-LOO-406 `b3cd894f3` and LOO-412 `2bb5ce5c4`. No dirty dependency code was copied
-or owner checkout changed. The separate Linear reopening race is not itself a
-prerequisite for Git transport.
-
-LOO-406 through `b6f34a6f8` was integrated at this boundary. The local branch has removed copied
-placements and the single pending URL/unrelated-window fallback. LOO-412 exchange,
-shared repository identity/delegation composition and peer start admission remain;
-the plan owns that remaining work. Do not restore a split writer or build another
-Git engine. These local cuts establish no native or cross-machine acceptance.
-
-Prior integration checks (`16fe238b3`, `50cd28f10`) stalled in build helpers;
-no documented-command or DTO tests ran. The October 8 local attempts did not execute LOO-406's foreground-sync/reconnect
-fixtures; subsequent dependency evidence below supersedes that evidence gap. Seeded shared IDs
-prove routing, not exchange or exclusive first start. Full dated evidence is
-preserved in `/tmp/loo427-input-skDK4w/scratch/findings.md`.
+No dirty dependency code or owner checkout was changed. LOO-406 through
+`cbf0a174a` is integrated; LOO-412 exchange, delegation composition and peer start
+admission remain. Seeded IDs prove routing, not exchange or exclusive first start.
+Earlier stalled checks and the `b6f34a6f8` integration account:
+`f48d84511:scratch/findings.md`, this heading. Updated dependency evidence follows.
 
 ### Integrated writer evidence — October 9
 
@@ -206,3 +182,15 @@ not the single-PR acceptance boundary or Q2/Q3.
 synchronous MainActor validation. It removes the fabricated-empty router fixture;
 empty-output coverage is DTO shape plus the Linux formatter, not native extraction.
 The missing-surface fixture covers each region without allocating a view. The related Infrastructure planning/peer sections were read, not its unrelated history.
+
+## Scoped dispatch and preview — October 9
+
+Repository validation had discarded its resolved ID, and command dispatch reparsed
+raw argv, losing any correction. Both paths are replaced by carrying the selected
+ID. The launch and explanation readers now share checkout-before-declaration
+selection. Preview also exposed two hidden writes: opening an “existing” store can
+migrate it, and bounding input wrote full-source files. Preview uses the shared
+read-only registry; prompt assembly returns complete sources for launch to persist.
+The oversized-message fixture proves exact system-input parity with a fake provider,
+not a real provider account or remote preview. `--explain` is local identity reading,
+not a complete action plan. The plan owns remaining work and the check-result line.

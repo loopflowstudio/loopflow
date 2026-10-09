@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::store::SharedStore;
 
-use super::run::{select_work, WorkSelection};
+use super::run::{select_execution_work, select_work, WorkSelection};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -224,6 +224,12 @@ async fn read_context(
     // because their retained cwd happens to be a Task checkout.
     let selected = if session.is_some() && selection.task.is_none() && selection.wave.is_none() {
         None
+    } else if session.is_none()
+        && process.is_none()
+        && selection.task.is_none()
+        && selection.wave.is_none()
+    {
+        select_execution_work(store, &directory).await?
     } else {
         select_work(store, &directory, selection).await?
     };
@@ -232,6 +238,8 @@ async fn read_context(
             "explicit"
         } else if session_task.is_some() || session_wave.is_some() {
             "session_membership"
+        } else if selected.source == crate::session::WorkSource::Declared {
+            "inherited_declaration"
         } else {
             source
         };

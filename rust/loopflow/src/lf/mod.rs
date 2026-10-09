@@ -33,6 +33,18 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
 
+    /// Preview assembled agent input without launching or changing Work
+    #[arg(long)]
+    pub context: bool,
+
+    /// Explain this invocation's Work selection without executing it
+    #[arg(long)]
+    pub explain: bool,
+
+    /// Emit invocation previews as JSON
+    #[arg(long)]
+    pub json: bool,
+
     /// Docs paths, globs, or directories to include in context
     #[arg(long = "docs", value_delimiter = ',')]
     pub docs: Vec<String>,
@@ -158,6 +170,10 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(self) -> Result<Self, clap::Error> {
+        if self.json && !self.context && !self.explain {
+            return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
+                "root --json requires --context or --explain; use the command's own --json when available\n"));
+        }
         if let Some(Commands::Account {
             cmd,
             provider,
@@ -239,6 +255,9 @@ impl Cli {
             cron_receipt: self.cron_receipt.clone(),
             cron_lock_fd: self.cron_lock_fd,
             command: None,
+            context: self.context,
+            explain: self.explain,
+            json: self.json,
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
@@ -410,17 +429,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: TaskCommand,
     },
-    /// Show context budgets, or explain selected Work without launching it
+    /// Show context budgets from local sources
     Context {
-        /// Explain identity and selection provenance instead of prompt budgets
-        #[arg(long)]
-        explain: bool,
-        /// Inspect a recorded Session without acquiring its client
-        #[arg(long, requires = "explain", conflicts_with_all = ["process", "task", "wave"])]
-        session: Option<String>,
-        /// Inspect a recorded Process without granting control
-        #[arg(long, requires = "explain", conflicts_with_all = ["task", "wave"])]
-        process: Option<String>,
         #[arg(long)]
         json: bool,
         /// Inspect a Wave's local authored context
@@ -1032,7 +1042,7 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE run FLOW`
+    /// Place a Task's worktree, then run a Flow there like `lf --task ISSUE flow FLOW`
     Run {
         issue: String,
         /// The edge's Flow, or a workflow to take up; the Task's only edge or its
@@ -1218,6 +1228,37 @@ impl TaskCommand {
             } => Some(issue),
             Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_deref(),
+            Self::Checkout { issue, .. }
+            | Self::Sync { issue, .. }
+            | Self::Run { issue, .. }
+            | Self::Move { issue, .. }
+            | Self::Diff { issue, .. }
+            | Self::Files { issue, .. }
+            | Self::File { issue, .. }
+            | Self::Save { issue, .. }
+            | Self::Delete { issue }
+            | Self::Edit { issue, .. }
+            | Self::Refile { issue, .. }
+            | Self::Comment { issue, .. }
+            | Self::Interrupt { issue, .. }
+            | Self::Wait { issue, .. }
+            | Self::FollowUp { issue, .. } => Some(issue),
+        }
+    }
+
+    pub fn selector_mut(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Create { .. }
+            | Self::Sweep { .. }
+            | Self::Reconcile { .. }
+            | Self::Repair { .. }
+            | Self::Automation { .. } => None,
+            Self::Workflow {
+                cmd:
+                    TaskWorkflowCommand::Show { issue, .. } | TaskWorkflowCommand::Restart { issue },
+            } => Some(issue),
+            Self::Automate { issue, .. } => Some(issue),
+            Self::Status { issue, .. } | Self::Abandon { issue, .. } => issue.as_mut(),
             Self::Checkout { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Run { issue, .. }

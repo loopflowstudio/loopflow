@@ -44,6 +44,7 @@ pub struct ProcessPromptInput {
 #[derive(Debug, Clone)]
 pub struct PreparedProcessPrompt {
     pub budget_report: crate::engine::context_budget::ContextBudgetReport,
+    pub sources: Vec<crate::engine::context_budget::ContextSource>,
     pub config: AgentConfig,
     pub components: PromptComponents,
     pub deduplication_decisions: Vec<crate::trace::ContextDecision>,
@@ -57,6 +58,9 @@ pub fn prepare_process_prompt(
 ) -> Result<PreparedProcessPrompt, CoreError> {
     let prepared = preview_process_prompt(config, input)?;
     prepared.budget_report.check_input()?;
+    for source in &prepared.sources {
+        source.persist()?;
+    }
     Ok(prepared)
 }
 
@@ -128,7 +132,8 @@ pub(crate) fn preview_process_prompt(
     }
 
     let original_system = format_prompt(&components);
-    let mut budget_report = crate::engine::context_budget::bound_context(&mut components, budgets)?;
+    let (mut budget_report, sources) =
+        crate::engine::context_budget::bound_context(&mut components, budgets)?;
     // Plain installed skills need no instructions for maintaining absent Work
     // context. Keep enforcing budgets and disclose any managed context or excerpts.
     if !components.is_standalone_skill()
@@ -223,6 +228,7 @@ pub(crate) fn preview_process_prompt(
 
     Ok(PreparedProcessPrompt {
         budget_report,
+        sources,
         config: launch,
         components,
         deduplication_decisions,

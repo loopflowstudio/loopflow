@@ -470,7 +470,7 @@ fn execute_target(
     use loopflow::engine::target::Target;
 
     match target {
-        Target::Command(command) => execute_command(&command, cli, args, binding),
+        Target::Command(_) => execute_command(cli, args, binding),
         Target::Skill(skill) => {
             let repo_root = loopflow::repo::working_directory()?;
             let name = skill.name.as_str();
@@ -1377,6 +1377,26 @@ fn run() -> anyhow::Result<()> {
             loopflow::process::CommandExit(code)
         })?
     {
+        let preview_args = reorder_args(
+            std::iter::once("lf".to_string())
+                .chain(command.clone())
+                .collect(),
+        );
+        let preview = match Cli::try_parse_from(&preview_args) {
+            Ok(cli) => cli.context || cli.explain,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+                ) =>
+            {
+                false
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if preview {
+            anyhow::bail!("remote invocation preview is unavailable without an effect-free identity transport; no remote command was sent. Run the preview directly on the selected Machine");
+        }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         loopflow::installation::dispatch_default_cli()?;
@@ -1404,7 +1424,7 @@ fn run() -> anyhow::Result<()> {
     })?;
     let args = reorder_args(normalized);
 
-    let cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
+    let mut cli = match Cli::try_parse_from(args.clone()).and_then(Cli::checked) {
         Ok(cli) => cli,
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
@@ -1421,7 +1441,15 @@ fn run() -> anyhow::Result<()> {
         .as_deref()
         .map(|selection| CwdGuard::enter(&loopflow::repo::resolve_selection(selection)?))
         .transpose()?;
-    loopflow::lf::commands::work_route::validate_repository_selection(&cli)?;
+    let _repository_cwd = cli
+        .repository
+        .as_ref()
+        .map(|id| CwdGuard::enter(&loopflow::lf::commands::work_route::repository_path(id)?))
+        .transpose()?;
+    loopflow::lf::commands::work_route::resolve_repository_selection(&mut cli)?;
+    if cli.context || cli.explain {
+        return preview_invocation(&cli, &args);
+    }
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
             return finish_command(result);
@@ -1511,12 +1539,6 @@ fn run() -> anyhow::Result<()> {
         };
     }
 
-    let _repository_cwd = cli
-        .repository
-        .as_ref()
-        .map(|id| CwdGuard::enter(&loopflow::lf::commands::work_route::repository_path(id)?))
-        .transpose()?;
-
     // Process admission records this process's cwd. Each operation resolves the
     // repository it needs after dispatch; machine inspection needs no Git.
     let directory = std::env::current_dir()?;
@@ -1547,6 +1569,123 @@ fn run() -> anyhow::Result<()> {
     }
 }
 
+/// Preview stops before process admission, installation dispatch, Work preparation,
+/// automatic routing or provider discovery. Unsupported shapes never fall through.
+fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
+    let _cwd = cli
+        .wt
+        .as_deref()
+        .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+        .transpose()?;
+    let mut matches = loopflow::lf::navigation::command_tree().try_get_matches_from(args)?;
+    let mut json = cli.json;
+    loop {
+        json |= matches
+            .try_get_one::<bool>("json")
+            .ok()
+            .flatten()
+            .copied()
+            .unwrap_or(false);
+        match matches.remove_subcommand() {
+            Some((_, child)) => matches = child,
+            None => break,
+        }
+    }
+    let mut task = cli.task.as_deref();
+    let wave = cli.wave.as_deref();
+    let mut session = None;
+    let mut process = None;
+    let mut skill = None;
+    let mut kind = None;
+    let mut message = None;
+    let mut agent_invocation = false;
+    match &cli.command {
+        Some(Commands::Task { cmd }) => {
+            if let (Some(global), Some(subject)) = (task, cmd.selector()) {
+                anyhow::ensure!(
+                    global == subject,
+                    "conflicting Task selections: {global} and {subject}"
+                );
+            }
+            task = cmd.selector().or(task);
+        }
+        Some(Commands::Desktop {
+            cmd: loopflow::lf::DesktopCommand::Open,
+        })
+        | None => {}
+        Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::Open { id, .. },
+        }) => session = Some(id.as_str()),
+        Some(Commands::History {
+            cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
+            ..
+        }) => process = Some(id.as_str()),
+        Some(Commands::Inline { prompt }) => {
+            agent_invocation = true;
+            message = Some(prompt.join(" "));
+        }
+        Some(Commands::Skill {
+            cmd: SkillCommand::External(rest),
+        })
+        | Some(Commands::Flow {
+            cmd: FlowCommand::External(rest),
+        })
+        | Some(Commands::External(rest)) => {
+            agent_invocation = true;
+            let (name, messages) = rest.split_first().context("no skill specified")?;
+            skill = Some(name.strip_suffix(':').unwrap_or(name));
+            message = join_args(messages);
+            kind = match &cli.command {
+                Some(Commands::Skill { .. }) => Some(DefinitionKind::Skill),
+                Some(Commands::Flow { .. }) => Some(DefinitionKind::Flow),
+                _ => None,
+            };
+        }
+        _ => anyhow::bail!(
+            "invocation preview is not supported for this command (nothing was executed)"
+        ),
+    }
+    anyhow::ensure!(!cli.context || agent_invocation,
+        "--context requires a skill or inline agent request; use --explain to inspect Work without launch");
+    let explanation = cli
+        .explain
+        .then(|| loopflow::lf::commands::context::explain(wave, task, session, process))
+        .transpose()?;
+    let input = cli
+        .context
+        .then(|| {
+            loopflow::lf::commands::run::preview(
+                &std::env::current_dir()?,
+                skill,
+                kind,
+                message.as_deref(),
+                cli,
+            )
+        })
+        .transpose()?;
+    if json {
+        match (&explanation, &input) {
+            (Some(resolution), Some(input)) => println!(
+                "{}",
+                serde_json::to_string_pretty(
+                    &serde_json::json!({"resolution": resolution, "input": input})
+                )?
+            ),
+            (Some(resolution), None) => println!("{}", serde_json::to_string_pretty(resolution)?),
+            (None, Some(input)) => println!("{}", serde_json::to_string_pretty(input)?),
+            (None, None) => unreachable!("preview flag selected"),
+        }
+    } else {
+        if let Some(explanation) = explanation {
+            println!("{}", explanation.render());
+        }
+        if let Some(input) = input {
+            println!("{}", input.render());
+        }
+    }
+    Ok(())
+}
+
 fn selected_task_repository(
     cli: &Cli,
     directory: &Path,
@@ -1574,26 +1713,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         if !matches!(cmd, loopflow::lf::DesktopCommand::Open) {
             return loopflow::lf::commands::desktop::run(cmd);
         }
-    }
-    // Explanation reads the selected local records, including remote checkout
-    // evidence. It must not route, bind a launch, or require a PR/checkout.
-    if let Some(Commands::Context {
-        explain: true,
-        json,
-        wave,
-        task,
-        session,
-        process,
-        ..
-    }) = &cli.command
-    {
-        return loopflow::lf::commands::context::explain(
-            *json,
-            wave.as_deref().or(cli.wave.as_deref()),
-            task.as_deref().or(cli.task.as_deref()),
-            session.as_deref(),
-            process.as_deref(),
-        );
     }
     if loopflow::lf::commands::work_route::dispatch(&cli, args)? {
         return Ok(());
@@ -1651,7 +1770,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         // still on the edge.
         loopflow::lf::commands::flow::run_for_task(
             &cli,
-            &task.plan.identifier,
+            task.id.as_str(),
             &flow,
             task.worktree()?,
         )?;
@@ -1736,13 +1855,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
 }
 
 fn execute_command(
-    command: &loopflow::engine::Command,
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
-    let parsed = Cli::try_parse_from(command.argv())?;
-    match &parsed.command {
+    match &cli.command {
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {

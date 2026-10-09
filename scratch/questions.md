@@ -9,17 +9,11 @@ remain unfinished.
 
 ## Q1 — Selected: local operations and custom Git-ref Task sync (October 8)
 
-Jack Heart superseded the designated-planning-machine experiment: everything in
-an invocation runs against the execution Machine's ordinary local store. A custom
-Git planning ref synchronizes Task planning between machines. LOO-406 owns the
-common local writer/Linear sync; LOO-412 owns exchange/merge and active sync scope.
-No planning callbacks or centralized Workflow writes remain in this plan.
-
-`lf task run` stays local, including Workflow take-up, edge selection and arrival.
-Only portable planning changes synchronize. Imported completion changes planning
-presentation, never the receiving Machine's Workflow, Processes or checkout.
-Unavailable Git retains local work and visible pending sync. Q1 is resolved;
-protocol/hosting proof is LOO-412 implementation work, not a renewed transport vote.
+Jack Heart selected execution-Machine-local operations and portable planning
+exchange: LOO-406 owns the writer/Linear, LOO-412 Git-ref merge/scope. Workflow,
+Processes and cleanup stay local; imported completion changes planning only.
+Disconnect retains local work and pending sync. Q1 is resolved; protocol/composition
+proof remains implementation, not a renewed transport vote.
 
 ## Q2 — Delegation inheritance
 
@@ -112,14 +106,24 @@ Names contain no slash; paths use `/`, `./`, `../` or `~/`. `repo_root` must be
 absolute or home-relative, avoiding caller-cwd-dependent configuration. Explicit
 remote relative paths start at the remote login directory, not its saved repo.
 These are reversible lookup choices, not shared Work identity or publication.
-Global Task lookup can still reject an abbreviated ID that is unique only within
-the selected repository; propagating its scoped identity remains implementation work.
+Primary and stack-parent Task selectors now carry repository-scoped full IDs through
+dispatch; an unscoped ambiguous prefix still fails.
 
-The October 9 realign query measured 22684/16000 generated goal tokens (6684 over).
-The complete source contains repeated provider definition steers plus generated
-file inventory. Local note curation cannot reduce that source without changing
-recorded direction or its producer; neither was edited and no limit was raised.
-The earlier index recovery is preserved at `fc87e09c1:scratch/questions.md`.
+The October 9 implementation query measured generated goal input at 22891/16000
+tokens (6891 over), including provider direction and the generated change inventory.
+The complete supplied source was read; it has no additional steer hidden in that
+inventory. Editing the recorded direction or context producer is outside this cut.
+No limit was raised. Earlier index recovery: `fc87e09c1:scratch/questions.md`.
+
+## Reversible preview limits — October 9
+
+Local skill/inline `--context` uses the stored snapshot; real launch may refresh Task
+comments first. Flow-wide context remains undefined. Bare-agent/new operator-checkout
+previews cannot create their future checkout to manufacture input. Remote transport
+currently probes identity and prepares credentials, so remote preview fails before
+transport rather than pretending those effects are reads. These gaps remain in the
+one-PR scope, not deferred deliverables. Explanation currently reports Work selection;
+complete action/impediment explanation still needs composition.
 
 ## Reversible exact-input choices — October 8
 

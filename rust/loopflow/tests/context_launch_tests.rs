@@ -185,3 +185,79 @@ while read -r line; do :; done
         serde_json::from_slice(&fs::read(home.path().join("turn-request")).unwrap()).unwrap();
     assert_eq!(turn["params"]["input"][0]["text"], INITIAL_TURN_PROMPT);
 }
+
+#[test]
+fn context_preview_matches_launched_input_without_writing_or_running_provider() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/skills/probe.md", "Read this exact preview marker.");
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  goal_tokens: 300\n",
+    );
+    let bin = home.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let provider = bin.join("claude");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+printf 'called\n' >> "$HOME/provider-calls"
+if [ "$1" = --version ]; then echo fixture; exit 0; fi
+if [ "$1" = --dangerously-bypass-hook-trust ] && [ "$2" = --model ]; then
+    echo "error: a value is required for '--model <MODEL>' but none was supplied" >&2
+    exit 2
+fi
+for arg in "$@"; do
+    if [ "$next" = yes ]; then cp "$arg" "$HOME/received-context"; next=no; fi
+    [ "$arg" = --append-system-prompt-file ] && next=yes
+done
+printf 'fixture finished\n' >&2
+exit 23
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
+    let message = "Exact supplied direction. ".repeat(500);
+    let invoke = |preview: bool| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        command
+            .env_clear()
+            .env("HOME", home.path())
+            .env("LF_HOME", home.path().join("machine"))
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("NO_COLOR", "1")
+            .current_dir(repo.path())
+            .args(["-i", "-a", "claude", "skill", "probe", &message]);
+        if preview {
+            command.args(["--context", "--json"]);
+        }
+        command.output().unwrap()
+    };
+    let preview = invoke(true);
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let input: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(input["task_prompt"], INITIAL_TURN_PROMPT);
+    assert!(!home.path().join("provider-calls").exists());
+    assert!(!home.path().join("machine").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+    let sources = input["unwritten_sources"].as_array().unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["content"], message);
+    let launch = invoke(false);
+    assert!(!launch.status.success());
+    assert!(String::from_utf8_lossy(&launch.stderr).contains("fixture finished"));
+    assert_eq!(
+        fs::read_to_string(home.path().join("received-context")).unwrap(),
+        input["system_prompt"].as_str().unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(sources[0]["path"].as_str().unwrap()).unwrap(),
+        message
+    );
+}

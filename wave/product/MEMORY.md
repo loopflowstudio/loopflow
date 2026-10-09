@@ -1,7 +1,7 @@
 # product wave memory
 
-Renamed from `concerto` July 8, 2026. Product owns shared API/CLI, Mac,
-iOS, agent and worker surfaces. “Concerto” meant Mac.
+Renamed from `concerto` July 8, 2026. Product owns API/CLI, Mac,
+iOS, agent and worker surfaces.
 
 ## Current direction after the October 7 Tasks
 
@@ -37,8 +37,7 @@ LOO-389's brief was read; comments failed on an unbound Initiative.
 - LOO-428 retains argument delivery in its launch/output repair. LOO-429's later
   decision puts all assembled context in the system file: no split, fallback or
   lf-side interactive error wording. LOO-420 uses native invocation for native
-  skills, translated ports across harnesses, builtins inlined. Their later
-  comments supersede their briefs' earlier options.
+  skills, translated ports across harnesses, builtins inlined. Later comments supersede the briefs.
 
 [LOO-427's comparison](../../docs/reviews/terminal-command-comparison.md) records
 command dispositions. Jack folded LOO-430/431/432 into LOO-427: identity, window
@@ -62,12 +61,16 @@ Jack's October 8 API: `--context` previews input without launch; `--explain`
 is broader; `--chrome` controls execution. Root `run`, `--max-turns` and
 `--no-loopflow` are removed; Task skill/Flow selection survives. History owns
 activity, Process pages, show/replay and usage. Desktop owns open/list; root
-`open` is ambiguous with PR opening; Sessions use `connect`. Composed opening,
-Wave planning and previews remain. Discord is unchanged; `--steers-after`
-filters repeated nodes, not restarts.
+`open` is ambiguous with PR opening; Sessions use `connect`. Composed opening and
+Wave planning remain. Local skill/inline previews and
+Work explanation now bypass admission; remote/Flow-wide input and full action
+explanation remain. Discord is unchanged; `--steers-after` filters nodes, not restarts.
 Lookup uses Machine-local `repo_root` (default `~/src`) or explicit paths,
-expanded on the selected Machine, never portable identity. Remembered names are open; scoped Task prefixes remain incomplete.
-Read-only routing never initializes SQLite; unreadable is not absent.
+expanded on the selected Machine, never portable identity. Remembered names are
+open. Scoped Task IDs survive dispatch, without reparsing
+raw argv. Preview/routing use read-only SQLite; unreadable is not absent. Prompt
+assembly returns excerpt sources; only launch persists them. Fake-provider input
+parity supplies no remote or native acceptance.
 
 Jack selected local planning/Git sync: 406 owns writes/Linear, 412 exchange.
 Imported completion cannot move Workflow or clean execution. Preserve pending
@@ -118,9 +121,9 @@ preserve evidence and limits. No external-progress proof.
 
 ## Live Home reconciliation (2026-10-05)
 
-LOO-367 handoff, Intelligence's backlog, test Waves and LOO-343's dead claim remain
-unverified. Jack Heart's LOO-380 receipts and parent #1439:
-`fc87e09c1:wave/product/MEMORY.md`, this heading; no rendered proof.
+LOO-367, Intelligence's backlog, test Waves and LOO-343 remain unverified.
+Jack Heart's LOO-380/#1439 receipts: `fc87e09c1:wave/product/MEMORY.md`, this
+heading; no rendered proof.
 
 ## Reactive workspace (2026-10-05)
 
@@ -525,9 +528,8 @@ clipboard input. 5whys remains explicit systemic investigation; reduce and polis
 remain optional surveys, with no accepted removal. Research includes conversational
 codebase questions. Realign reconciles memory; pr-message owns PR authorship.
 
-The September 28 Flow recipes and consolidation detail are historical at
-`c7359a7415f29c181b8e5bf2383cb5ba683d0586:wave/product/MEMORY.md`, this heading.
-October 6–7's Workflow decisions above supersede those endpoint descriptions.
+Historical recipes/consolidation: `c7359a7415f29c181b8e5bf2383cb5ba683d0586:wave/product/MEMORY.md`,
+this heading; superseded by October 6–7's Workflow decisions.
 The consolidation retired duplicate memory skills (PR #1319), expand, and older
 Task/governance report pipelines. QA repairs authorized defects while independent
 audits stay read-only. Delivery retains distinct publication, reviewer merge,
@@ -586,12 +588,9 @@ issue read. No Task was filed or changed by these records.
 
 ## PR authorship and retired UX research (2026-09-25)
 
-PRs explain the experienced change; Try it is an action and visible result,
-Checks the automated evidence. Drafts, cached copies and refreshed text must agree.
-Chapter display adopts live state only after a complete successful read (empty
-included); failed reads retain visibly stale authored content and history.
-
-Earlier evidence: `b092e8f92:wave/product/MEMORY.md`, this heading.
+PRs explain experienced change: Try it gives an action/result; Checks gives evidence.
+Failed chapter reads retain visibly stale content and history. Earlier decisions and
+research: `f48d84511:wave/product/MEMORY.md`, this heading.
 
 ## Workspace redesign decisions (2026-09-26)
 

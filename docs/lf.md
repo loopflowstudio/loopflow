@@ -462,13 +462,34 @@ Help and catalog reads launch no agent. The [command reference](lf-reference.md)
 names canonical owners and arguments. [Authoring](authoring.md) explains workflows;
 [configuration](config.md) covers inherited launch defaults.
 
+## Preview without launching
+
+```sh
+lf implement --context --json
+lf implement --context --explain
+lf task run LOO-427 --explain --json
+```
+
+`--context` assembles a skill or inline request's input from local sources using
+ordinary launch settings. JSON includes system/task prompts, native skill arguments,
+budget accounting and complete bytes for excerpt sources that were **not written**.
+It never prepares a checkout, refreshes planning, writes storage or runs a provider.
+A real launch refreshes Task direction, so parity applies to the same snapshot.
+
+`--explain` reads selected Work without executing the invocation. Task commands,
+Desktop opening, Session connection and exact Process history lookup are supported;
+other command shapes fail before effects. Combine both flags for identity plus input.
+Flow-wide input and remote previews are unavailable; preview a skill directly on its
+execution Machine. Bare-agent and new operator-checkout input is not predicted by
+creating Work. `lf context` remains the standalone budget report.
+
 ## Desktop navigation
 
 ```sh
-lf context --explain --task LOO-427 --json
-lf context --explain                         # resolve the current checkout
-lf context --explain --session SESSION_ID
-lf context --explain --process PROCESS_LFID
+lf task run LOO-427 --explain --json
+lf --explain                                # resolve the current checkout
+lf session connect SESSION_ID --explain
+lf history show PROCESS_LFID --explain
 lf desktop open                             # open or focus the Mac app
 lf desktop list --json                       # read an already-running Mac app
 ```

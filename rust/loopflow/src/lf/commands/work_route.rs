@@ -32,23 +32,28 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
 /// Routing observes existing records; initialization and schema upgrades belong
 /// to the operation that takes up Work, not destination lookup.
 fn read_registry() -> Result<Option<SqliteStore>> {
-    let path = crate::store::database_path_from_env()?;
-    if !path.try_exists()? {
-        return Ok(None);
-    }
-    Ok(Some(SqliteStore::open_read_only(&path)?))
+    Ok(crate::store::read_existing_registry()?.map(|store| store.sqlite))
 }
 
-/// Explicit path selection narrows Task lookup before routing or preparation.
-/// Unknown Tasks remain with the ordinary repository-scoped planning acquisition.
-pub fn validate_repository_selection(cli: &Cli) -> Result<()> {
-    if cli.repo.is_none() {
+/// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
+/// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
+pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
+    if cli.repo.is_none() && cli.repository.is_none() {
         return Ok(());
     }
-    let command_task = match &cli.command {
-        Some(Commands::Task { cmd }) => cmd.selector(),
-        Some(Commands::Context { task, .. }) => task.as_deref(),
-        _ => None,
+    let (command_task, parent_task) = match &mut cli.command {
+        Some(Commands::Task {
+            cmd:
+                TaskCommand::Run {
+                    issue, stack_on, ..
+                }
+                | TaskCommand::Checkout {
+                    issue, stack_on, ..
+                },
+        }) => (Some(issue), stack_on.as_mut()),
+        Some(Commands::Task { cmd }) => (cmd.selector_mut(), None),
+        Some(Commands::Context { task, .. }) => (task.as_mut(), None),
+        _ => (None, None),
     };
     if cli.task.is_none() && command_task.is_none() {
         return Ok(());
@@ -58,9 +63,16 @@ pub fn validate_repository_selection(cli: &Cli) -> Result<()> {
     let Some(store) = read_registry()? else {
         return Ok(());
     };
-    for selector in cli.task.as_deref().into_iter().chain(command_task) {
-        let scoped = store.resolve_task_id(selector, Some(&repo.to_string()))?;
-        if scoped.is_none() && store.resolve_task_id(selector, None)?.is_some() {
+    for selector in cli
+        .task
+        .as_mut()
+        .into_iter()
+        .chain(command_task)
+        .chain(parent_task)
+    {
+        if let Some(id) = store.resolve_task_id(selector, Some(&repo.to_string()))? {
+            *selector = id.to_string();
+        } else if store.resolve_task_id(selector, None)?.is_some() {
             return Err(anyhow!(
                 "Task {selector} does not belong to selected repository {repo}"
             ));
@@ -74,7 +86,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Desktop {
             cmd: crate::lf::DesktopCommand::Open,
         }) => cli.task.as_deref(),
-        Some(Commands::Context { explain: true, .. } | Commands::Desktop { .. }) => None,
+        Some(Commands::Desktop { .. }) => None,
         Some(Commands::Task {
             cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => Some(issue),

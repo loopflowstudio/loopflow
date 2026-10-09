@@ -168,12 +168,14 @@ impl ContextBudgetReport {
         tokens: BudgetKey,
         bytes: BudgetKey,
         repo_root: &Path,
+        sources: &mut Vec<ContextSource>,
     ) -> Result<String, CoreError> {
         let bounded = bound_source(
             original,
             self.budgets.limit(tokens),
             self.budgets.limit(bytes),
             repo_root,
+            sources,
         )?;
         self.usage.push(ContextUsage {
             source: source.into(),
@@ -265,14 +267,17 @@ fn bound_source(
     tokens: usize,
     bytes: usize,
     repo_root: &Path,
+    sources: &mut Vec<ContextSource>,
 ) -> Result<String, CoreError> {
     if text.len() <= bytes && count_tokens(text) <= tokens {
         return Ok(text.to_string());
     }
-    let source = preserve_source(text, repo_root)?;
+    let source = ContextSource::new(text, repo_root);
+    let path = source.path.clone();
+    sources.push(source);
     let notice = format!(
         "\n\n[Context budget: excerpt only. Original: {}/{} tokens, {}/{} bytes. Full text: {}. Read the relevant omitted sections before acting; this excerpt is not the complete instruction.]\n\n",
-        count_tokens(text), tokens, text.len(), bytes, source.display(),
+        count_tokens(text), tokens, text.len(), bytes, path.display(),
     );
     // Include both ends: definitions usually lead, recent direction usually trails.
     let mut keep = bytes.saturating_sub(notice.len()).min(text.len()) / 2;
@@ -290,7 +295,7 @@ fn bound_source(
             return Ok(result);
         }
         if keep == 0 {
-            return Err(CoreError::ExecutionFailed(format!("context budget {tokens} tokens / {bytes} bytes cannot fit the source pointer to {}; increase the limit", source.display())));
+            return Err(CoreError::ExecutionFailed(format!("context budget {tokens} tokens / {bytes} bytes cannot fit the source pointer to {}; increase the limit", path.display())));
         }
         keep = keep * 3 / 4;
     }
@@ -299,7 +304,8 @@ fn bound_source(
 pub(crate) fn bound_context(
     components: &mut PromptComponents,
     budgets: ContextBudgets,
-) -> Result<ContextBudgetReport, CoreError> {
+) -> Result<(ContextBudgetReport, Vec<ContextSource>), CoreError> {
+    let mut sources = Vec::new();
     let mut report = ContextBudgetReport {
         budgets,
         usage: Vec::new(),
@@ -318,6 +324,7 @@ pub(crate) fn bound_context(
         repo_root,
         &mut components.budget_decisions,
         &mut report,
+        &mut sources,
     )?;
     let scratch_docs: Vec<_> = components
         .docs
@@ -347,6 +354,7 @@ pub(crate) fn bound_context(
         BudgetKey::ScratchTokens,
         BudgetKey::ScratchBytes,
         repo_root,
+        &mut sources,
     )?;
     if bounded != scratch {
         record_reduction(
@@ -385,6 +393,7 @@ pub(crate) fn bound_context(
         BudgetKey::GoalTokens,
         BudgetKey::GoalBytes,
         repo_root,
+        &mut sources,
     )?;
     if let Some(message) = &mut components.message {
         record_reduction(
@@ -397,7 +406,7 @@ pub(crate) fn bound_context(
         );
         *message = bounded;
     }
-    Ok(report)
+    Ok((report, sources))
 }
 
 fn bound_memories(
@@ -405,6 +414,7 @@ fn bound_memories(
     repo_root: &Path,
     decisions: &mut Vec<ContextDecision>,
     report: &mut ContextBudgetReport,
+    sources: &mut Vec<ContextSource>,
 ) -> Result<(), CoreError> {
     let token_limit = report.budgets.limit(BudgetKey::MemoryTokens);
     let byte_limit = report.budgets.limit(BudgetKey::MemoryBytes);
@@ -422,7 +432,7 @@ fn bound_memories(
     for memory in memories {
         let tokens = count_tokens(&memory.content) * token_limit / memory_tokens;
         let bytes = memory.content.len() * byte_limit / memory_bytes;
-        let bounded = bound_source(&memory.content, tokens, bytes, repo_root)?;
+        let bounded = bound_source(&memory.content, tokens, bytes, repo_root, sources)?;
         report.usage.push(ContextUsage {
             source: memory.path.clone(),
             original_tokens: tokens_in(&memory.content),
@@ -479,22 +489,44 @@ pub(crate) fn bound_message(
     repo_root: &Path,
     budgets: &ContextBudgets,
 ) -> Result<String, CoreError> {
-    bound_source(
+    let mut sources = Vec::new();
+    let bounded = bound_source(
         message,
         budgets.limit(BudgetKey::GoalTokens),
         budgets.limit(BudgetKey::GoalBytes),
         repo_root,
-    )
+        &mut sources,
+    )?;
+    for source in sources {
+        source.persist()?;
+    }
+    Ok(bounded)
 }
 
-fn preserve_source(text: &str, repo_root: &Path) -> Result<PathBuf, CoreError> {
-    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
-    let path = repo_root
-        .join(".lf/tmp/context")
-        .join(format!("{digest}.md"));
-    std::fs::create_dir_all(path.parent().expect("context file has a parent"))?;
-    std::fs::write(&path, text.as_bytes())?;
-    Ok(path)
+/// Complete bytes behind an excerpt. Assembly names the destination; only a
+/// launch persists it. Preview can report the same input without writing files.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextSource {
+    pub path: PathBuf,
+    pub content: String,
+}
+
+impl ContextSource {
+    fn new(text: &str, repo_root: &Path) -> Self {
+        let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
+        Self {
+            path: repo_root
+                .join(".lf/tmp/context")
+                .join(format!("{digest}.md")),
+            content: text.to_string(),
+        }
+    }
+
+    pub(crate) fn persist(&self) -> Result<(), CoreError> {
+        std::fs::create_dir_all(self.path.parent().expect("context file has a parent"))?;
+        std::fs::write(&self.path, self.content.as_bytes())?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -520,7 +552,9 @@ mod tests {
                 }],
                 ..Default::default()
             };
-            let report = bound_context(&mut components, budgets.clone()).unwrap();
+            let (report, sources) = bound_context(&mut components, budgets.clone()).unwrap();
+            assert_eq!(sources.len(), usize::from(excerpted));
+            assert!(!repo.path().join(".lf/tmp/context").exists());
             let submitted = &components.docs[0].content;
             assert_eq!(submitted != &memory, excerpted);
             assert_eq!(budgets.limit(BudgetKey::MemoryTokens), 16_000);
@@ -625,7 +659,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let report = bound_context(&mut components, budgets.clone()).unwrap();
+        let (report, sources) = bound_context(&mut components, budgets.clone()).unwrap();
         assert!(report.usage[0].original_tokens > 400);
         assert!(report.usage[0].submitted_tokens <= 400);
         assert!(report.usage[1].original_bytes > 1800);
@@ -634,16 +668,16 @@ mod tests {
             .render()
             .contains("next memory- or scratch-writing step"));
         assert_eq!(components.budget_decisions.len(), 2);
-        assert_eq!(
-            fs::read_dir(repo.path().join(".lf/tmp/context"))
-                .unwrap()
-                .count(),
-            2
-        );
+        assert_eq!(sources.len(), 2);
+        assert!(!repo.path().join(".lf/tmp/context").exists());
+        for source in sources {
+            source.persist().unwrap();
+            assert_eq!(fs::read_to_string(source.path).unwrap(), source.content);
+        }
 
         components.docs[0].content = "Live decision retained; old evidence in git.".into();
         components.docs[1].content = "Unresolved work retained.".into();
-        let report = bound_context(&mut components, budgets).unwrap();
+        let (report, _) = bound_context(&mut components, budgets).unwrap();
         assert!(report
             .usage
             .iter()

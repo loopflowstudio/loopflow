@@ -546,7 +546,7 @@ supplies `flow_processes`, using the same execution details as CLI inspection.
 
 ```sh
 lf desktop list --json
-lf context --explain --task LOO-427 --json
+lf task run LOO-427 --explain --json
 ```
 
 Inspection reads the open repository windows through macOS automation without

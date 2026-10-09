@@ -49,9 +49,13 @@ Open Loopflow or run its CLI
 
 | Argument | What it does |
 |---|---|
+| `--context` | Preview assembled agent input without launching or changing Work Default: false. |
+| `--explain` | Explain this invocation's Work selection without executing it Default: false. |
+| `--json` | Emit invocation previews as JSON Default: false. |
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Agent to use (harness or harness:model) |
+| `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -66,6 +70,7 @@ Open Loopflow or run its CLI
 | `--diff` | Select changed-code context; omission inherits configuration |
 | `--machine` | Run the command on this saved machine in its repository |
 | `--repo` | Select a repository by name under repo_root (default ~/src), or by explicit path |
+| `--repository` | Select a registered repository plan on this Machine, not a clone name |
 | `--forward-agent` | Forward the SSH agent to the selected machine Default: false. |
 | `--wave` | Add Wave context and identity without changing the working directory |
 | `--task` | Execute in this Task's checkout |
@@ -312,40 +317,6 @@ Show waiting, blocked, active, and finished work with next actions
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf history list
-
-List a bounded page of recorded commands, newest first
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--all` | Include all repositories Default: false. |
-| `--limit` | limit Default: 100. |
-| `--after` | Continue with the previous page's next object, encoded as JSON |
-| `--parent` | Direct children of an exact or unambiguous parent Process |
-| `--caller` | Commands issued by this AgentSession |
-| `--search` | Literal command text, ignoring ASCII case |
-| `--outcome` | outcome |
-| `--task` | Recorded work for a Task, including completed Tasks |
-| `--wave` | Recorded work for a Wave |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf history show
-
-Inspect a process or Session by identity
-
-| Argument | What it does |
-|---|---|
-| `<id>` | id |
-| `--json` | json Default: false. |
-| `--events` | Print a Session's retained raw input events Default: false. |
-| `--final` | Print a Session's last recorded provider conclusion Default: false. |
-| `--input` | Inspect an exact retained input belonging to this Session |
-| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
 ## lf monitor active
 
 Observe active conversations and missing process evidence
@@ -366,24 +337,6 @@ Stream planning and activity for the selected Work, each part again only when it
 |---|---|
 | `--json` | json Default: false. |
 | `--watch` | Stream NDJSON until stdin closes Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf history usage
-
-Show direct provider-authored usage from recorded Session inputs
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit Session usage evidence as JSON Default: false. |
-| `--days` | Observation window, in days (zero means all time) Default: 30. |
-| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
-| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
-| `--parent` | Inputs issued by this Session or retained capture |
-| `--wave` | Limit to Session inputs attributed to one Wave |
-| `--project` | Limit to Session inputs attributed to one Project |
-| `--task` | Limit to Session inputs attributed to one Task |
-| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -418,21 +371,6 @@ Reap registered orphan providers and remove dead process receipts
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
-## lf history
-
-Read durable Work history, recorded commands and provider usage
-
-| Argument | What it does |
-|---|---|
-| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
-| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
-| `--wave` | Scope to one Wave by name |
-| `--project` | Scope to one Project by slug |
-| `--task` | Scope to one Task by Linear identifier |
-| `--json` | Emit the typed activity snapshot as JSON Default: false. |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
 ## lf :
 
 Run an inline prompt
@@ -451,6 +389,18 @@ Internal command; invoked by the owning operation.
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf __session-title
+
+Native provider naming callback
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -708,6 +658,16 @@ Repository releases, source measurement, CI evidence, and provider administratio
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf repo identity
+
+Establish or print this repository's selected planning identity
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1034,12 +994,189 @@ Print the configured participant display name
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf desktop
+
+Open, inspect and control Loopflow Desktop (macOS only)
+
+| Argument | What it does |
+|---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf desktop open
 
 Open or focus Loopflow.app
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop text
+
+Insert literal text at an exact surface's cursor; never submits or clears a draft
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--surface` | surface |
+| `<text>` | Unicode text without control characters (use key for Enter/Tab) |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop key
+
+Send one explicit key to an exact retained surface, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--surface` | surface |
+| `<key>` | key |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop read
+
+Read bounded text from an exact retained surface, without following focus
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--surface` | Native surface incarnation from desktop list |
+| `--region` | region |
+| `--max-bytes` | max bytes Default: 65536. |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop hide
+
+Hide an exact retained pane without closing its Session or process
+
+| Argument | What it does |
+|---|---|
+| `--target` | JSON object with repository, window, machine_id, worktree, pane and incarnation |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop restore
+
+Restore an exact hidden pane without selecting Work or acquiring a client
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop focus
+
+Focus an exact pane in its retained workspace (does not select Work)
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop shell
+
+Add a local shell beside an exact pane without changing selection
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop files
+
+Show the recorded Task's files beside an exact pane, retaining drafts
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--task` | task |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop flow-log
+
+Show the recorded Task's Flow processes beside an exact pane
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--task` | task |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop split
+
+Add an empty split beside an exact pane, retaining selection and clients
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--axis` | axis |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop move
+
+Move a retained pane after another pane in the same workspace
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--destination` | destination |
+| `--axis` | axis |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop resize
+
+Resize the divider between two exact panes; ratio is the target side's share
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--toward` | toward |
+| `--ratio` | ratio |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop zoom
+
+Zoom an exact retained pane without changing selection; --off unzooms it
+
+| Argument | What it does |
+|---|---|
+| `--target` | target |
+| `--off` | off Default: false. |
+| `--json` | json Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf desktop list
+
+Read actual windows and panes without launching, focusing, or acquiring clients
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1062,6 +1199,7 @@ Install a separate login on an added machine using this laptop's browser
 | `<provider>` | provider |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials
@@ -1070,6 +1208,7 @@ Inspect or receive a machine credential (credential bytes use stdin only)
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials inspect
@@ -1080,6 +1219,7 @@ Report whether this account is installed, without logging in
 |---|---|
 | `<provider>` | provider |
 | `<login>` | login |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials receive
@@ -1088,6 +1228,7 @@ Receive a fresh login as JSON on stdin; preserve existing accounts
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine id
@@ -1816,7 +1957,7 @@ Wait without polling an LM
 
 ## lf context
 
-Show effective context budgets, their sources, and current source usage
+Show context budgets from local sources
 
 | Argument | What it does |
 |---|---|
@@ -1871,6 +2012,73 @@ Show the current repository's roadmap: every open Task across the repo's Waves, 
 | `--task` | Find an exact issue identifier, including retained historical Tasks |
 | `--json` | Emit the roadmap snapshot as JSON Default: false. |
 | `--all` | Span every repository on this machine, not just the current one Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf history
+
+Read durable Work history, recorded commands and provider usage
+
+| Argument | What it does |
+|---|---|
+| `--since` | Relative window (7d, 24h, 30m) or RFC3339 start Default: 7d. |
+| `--limit` | Maximum rows after Work filters (1-200) Default: 50. |
+| `--wave` | Scope to one Wave by name |
+| `--project` | Scope to one Project by slug |
+| `--task` | Scope to one Task by Linear identifier |
+| `--json` | Emit the typed activity snapshot as JSON Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf history list
+
+List a bounded page of recorded commands, newest first
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
+| `--all` | Include all repositories Default: false. |
+| `--limit` | limit Default: 100. |
+| `--after` | Continue with the previous page's next object, encoded as JSON |
+| `--parent` | Direct children of an exact or unambiguous parent Process |
+| `--caller` | Commands issued by this AgentSession |
+| `--search` | Literal command text, ignoring ASCII case |
+| `--outcome` | outcome |
+| `--task` | Recorded work for a Task, including completed Tasks |
+| `--wave` | Recorded work for a Wave |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf history show
+
+Inspect a process or Session by identity
+
+| Argument | What it does |
+|---|---|
+| `<id>` | id |
+| `--json` | json Default: false. |
+| `--events` | Print a Session's retained raw input events Default: false. |
+| `--final` | Print a Session's last recorded provider conclusion Default: false. |
+| `--input` | Inspect an exact retained input belonging to this Session |
+| `--context` | Print only what the step's submitted input was made of, by source Default: false. |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf history usage
+
+Show direct provider-authored usage from recorded Session inputs
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit Session usage evidence as JSON Default: false. |
+| `--days` | Observation window, in days (zero means all time) Default: 30. |
+| `--weekly` | Report context cost and turn time by week since 2026-09-30 Default: false. |
+| `--binds` | Compare Task and Wave usage under prospective and post-hoc bind attribution Default: false. |
+| `--parent` | Inputs issued by this Session or retained capture |
+| `--wave` | Limit to Session inputs attributed to one Wave |
+| `--project` | Limit to Session inputs attributed to one Project |
+| `--task` | Limit to Session inputs attributed to one Task |
+| `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

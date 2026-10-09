@@ -166,9 +166,11 @@ Work transport's identity selector, distinct from filesystem lookup.
 
 Known Task selectors are checked against canonical repository scope before
 routing/preparation; retained branch lookup is also checked before execution.
-Exact Task IDs now obey the store's repository filter. Ambiguous abbreviated
-Task IDs can still fail in downstream global lookup despite a scoped match;
-carrying the resolved identity through those consumers remains. Remote execution remains unproved; argument tests cover transport only.
+Exact and abbreviated Task IDs now resolve within the selected path or repository
+plan once, before dispatch; primary and stack-parent selectors carry full IDs.
+Dispatch no longer reparses the original argv and loses that selection. Task Flow
+launches retain the full ID rather than returning to a display alias. Remote
+execution remains unproved; argument tests cover transport only.
 
 `lf list` now handles an absent registry without registering; unreadable stores
 remain errors. Focused CLI fixtures cover default/overridden roots, explicit paths,
@@ -176,10 +178,10 @@ no registration, missing/non-Git paths and another Task's ID refusing edit,
 checkout and launch.
 ### Cutover and acceptance
 
-Invocation preview reuses WorkSelection, ContextFact, prompt assembly and Clap
-navigation, not a second resolver. A resolved invocation must carry repository-
-scoped Task identity through all consumers; previews and broader explanation
-remain unimplemented.
+Local `--context` now reuses launch prompt assembly for skills and inline requests;
+`--explain` uses WorkSelection/ContextFact before admission or preparation. JSON
+combines both on request. Primary scoped identity survives dispatch. Broader action
+explanation, remote preview and complete-path composition remain unfinished.
 
 Headless gate separates command discovery (`documented_commands`), wire shape
 (`dto_fixtures`) and behavioral routing/preview tests. The latter must establish
@@ -209,9 +211,10 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
-Remaining removals are `Commands::Project`, `Commands::Roadmap` and the
-`Context { explain }` dispatch in `lf/mod.rs` and `bin/lf.rs`, together with
-consumer cutover to Wave planning and invocation preview. Their underlying
+Remaining removals are `Commands::Project` and `Commands::Roadmap`, with consumer
+cutover to Wave planning. `Context { explain }`, validation-only scope checks and
+`execute_command`'s raw-argv reparse are removed. The standalone budget reader remains;
+its final home is open. Prompt excerpts now defer persistence until launch. Their underlying
 planning/history/prompt owners survive. LOO-412 owns exchange replacement;
 no second planning writer or callback planner is introduced.
 
@@ -262,10 +265,37 @@ not yet deliver a selected Task/Session into its repository window or report
 rendered readiness. Exact pane controls still bypass Work preparation. Inspection
 capabilities now advertise `list`, not the removed `inspect` CLI name.
 
-Remaining API work: Wave-owned planning, composed Work opening, context preview/explain
-and carrying repository-scoped Task identity through remaining global lookups.
+Remaining API work: Wave-owned planning, composed Work opening, broader invocation
+explanation and remote preview.
 Q2, shared-plan composition, native extraction and input proof, and complete-path acceptance
 remain required. This internal cut neither completes LOO-427 nor splits its PR.
+
+### Local invocation previews — October 9
+
+`--context` assembles skill/inline input with ordinary launch settings and stored
+Task direction, without refreshing Linear, preparing Work, admitting a Process or
+starting a provider. JSON includes native skill arguments, budgets and complete
+unwritten excerpt sources. Launch persists those same source paths after budget
+validation. Explicit/implicit selection uses the existing Work owner; checkout
+identity wins over inherited declarations. Missing and unreadable stores differ.
+
+`--explain` reads local Work for Task commands, Desktop opening, Session connection
+and exact Process history lookup. It reports identity/provenance, not a reservation,
+legal-action verdict or complete action plan. Combined JSON contains `resolution`
+and `input`. Unsupported command shapes fail before effects. The former Context
+explanation flags and dispatch are deleted; `context` still reports budgets.
+
+Flow-wide context semantics stay open. Bare-agent/new operator-checkout input and
+remote previews are explicitly unavailable. The existing remote identity probe and
+credential preparation are effectful, so they are not reused as preview transport.
+Remote Tasks require a preview on their execution Machine. These are incomplete
+composition, not permission to drop the accepted outcome.
+
+Focused fixtures cover cross-repository prefix ambiguity through status/edit,
+checkout and Task input; absent storage and unwritten oversized sources; unchanged
+Task storage across explanation/input; inherited declaration provenance; and exact
+preview-to-fake-provider system-input parity. Native artifacts and connected exchange
+remain outside this proof.
 
 ### 1. Separate recorded checkout location from delegation — Implemented locally
 
@@ -359,27 +389,15 @@ Git unavailability does not make ordinary planning writes depend on a laptop:
 local saves succeed with pending sync, rather than unconfirmed host callbacks.
 Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
-and completion propagate semi-live through the active sync owner. LOO-406 keeps
-Desktop foreground Linear sync scoped to the repository
-(`29777b8cb`), independent of selected Task/Wave. Its integrated lineage now
-includes reconnect/adoption fixture repairs and observed-reopening regressions.
-Infrastructure records Linux migration/Flow/work-watch reconnect passes at
-`078a6642e` and a 54-test planning run including reopening at `2bab3fbd5`; these are dependency evidence,
-not LOO-427 mixed-exchange or Desktop-selection proof. Linear updates remain
-unconditional: observed reopening preserves both values, but an unseen reopen
-between acquisition and delivery can be overwritten. Readback does not prove
-atomicity. Git exchange remains unintegrated. LOO-412's newer source has
-taskless foreground/post-save exchange, but refuses Git exchange in connected
-Linear repositories. The newer `270019c8d` cut acquires provider evidence before
-projecting fields,
-rolls rejected objects back to savepoints and retains membership/provider conflicts
-outside that rollback. Malformed input aborts import; valid contradictory observations
-do not discard independent objects. Those regressions remain unexecuted. `7262b6b20` shares field-winner/baseline
-normalization; `a388ed425` routes peer Task completion/reopening/cancellation
-through common state-delivery receipts with stable mutation IDs, causal baselines
-and no local Workflow move. Reimports retain uncertain attempts. This source
-cut has SQL checks, not executed Rust or composed proof. Other grouped receipts,
-alternate acquisition and legacy association still need composition.
+and completion propagate semi-live through the active sync owner. LOO-406 keeps repository-scoped foreground Linear sync (`29777b8cb`); integrated
+`cbf0a174a` includes reconnect and observed-reopening regressions. Readback cannot
+exclude an unseen concurrent Linear reopen. LOO-412 through `a388ed425` was inspected,
+not integrated: acquisition precedes projection, rejected objects roll back, typed
+conflicts survive, and Task dispositions use common causal receipts. Mixed Linear/Git
+is still disabled; grouped receipts, alternate acquisition, legacy association and
+Desktop composition remain. SQL checks establish no Rust or composed proof.
+[Findings](findings.md) and `f48d84511:scratch/compare-cmux-s-command-line.md` retain
+commit-by-commit dependency evidence and the earlier projection-order failure.
 LOO-427 consumes the repaired common path rather than bypassing its
 limitation or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
@@ -399,8 +417,9 @@ Workflow write, remote arrival acknowledgement or host-failure gate remains.
 ### 3. One repository window and command explanation
 
 **Local mechanics implemented; public API reconciliation remains.** `desktop open/list`
-own app launch and retained-window reading; root `open` and `inspect` are removed. `context --explain`
-still awaits the broader invocation API. Cross-machine composition depends on 2. Startup,
+own app launch and retained-window reading; root `open` and `inspect` are removed.
+Invocation `--explain` replaces `context --explain` for local Work selection; action
+impediments and broader command coverage remain. Cross-machine composition depends on 2. Startup,
 restoration, menu opening and Task links use repository-keyed windows. Per-repository
 queues and delivery tokens preserve cold-open destinations and fence canceled
 completions. Utility windows and retained surfaces keep their own lifetimes.
@@ -565,8 +584,7 @@ original input target and draft survive. Review native usability separately from
 headless gate. Preserve comparison dispositions and evidence limits; no real
 provider accounts or live user terminals.
 
-Prior failed attempts, Swift compile/model evidence and Linux extraction checks
-remain in [findings](findings.md), Git blob `6046145dcdd3d334bb2ad3560130de60dce82ca5`
-and `/tmp/loo427-compress-msMFvo/current-scratch/`.
+Earlier failed attempts and check archives: [findings](findings.md) and
+`f48d84511:scratch/compare-cmux-s-command-line.md`.
 
-Check (October 9 realign): `git diff --check` PASS; prose-only, no test rerun. Focused post-sync repository lookup PASS retained at `26d8ce4e3:scratch/compare-cmux-s-command-line.md`; affected suites remain with gate/CI, native/composed usability with demo.
+Check (October 9 implement): focused scoped-selection/preview/explanation/parity/budget checks via `scripts/test_network.py` (17 tests), `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` PASS. Gate/CI own affected suites; demo owns native/composed usability.

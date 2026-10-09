@@ -49,6 +49,168 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
     run_prompt(&built, cli).map(|_| ())
 }
 
+/// Assemble the launch's ordinary input from existing local evidence only.
+pub fn preview(
+    repo: &Path,
+    skill: Option<&str>,
+    kind: Option<crate::engine::target::DefinitionKind>,
+    message: Option<&str>,
+    cli: &Cli,
+) -> Result<PromptPreview> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let binding = runtime.block_on(async {
+        let Some(store) = crate::store::read_existing_registry()? else {
+            anyhow::ensure!(
+                cli.task.is_none() && cli.wave.is_none(),
+                "Work input unavailable: no local registry"
+            );
+            return Ok::<_, anyhow::Error>(None);
+        };
+        let store = std::sync::Arc::new(store);
+        let binding = if let Some(task) = &cli.task {
+            Some(
+                crate::ops::resolve_work_selection(
+                    &store,
+                    repo,
+                    crate::ops::WorkSelection {
+                        task: Some(task),
+                        wave: cli.wave.as_deref(),
+                    },
+                )
+                .await?,
+            )
+        } else {
+            crate::ops::resolve_execution_binding(&store, repo).await?
+        };
+        if let Some(wave) = cli.wave.as_deref() {
+            let selected = crate::ops::resolve_work_selection(
+                &store,
+                repo,
+                crate::ops::WorkSelection {
+                    task: cli.task.as_deref(),
+                    wave: Some(wave),
+                },
+            )
+            .await?;
+            if let Some(binding) = &binding {
+                anyhow::ensure!(
+                    binding.wave_id == selected.wave_id,
+                    "selected Wave conflicts with checkout Work"
+                );
+            }
+        };
+
+        if let Some(crate::ops::WorkBinding {
+            work: crate::durable::WorkRef::Task(id),
+            ..
+        }) = &binding
+        {
+            let route = store.sqlite.task_execution_route(id)?;
+            anyhow::ensure!(
+                route.machine_id == store.local_machine().await?.id,
+                "Task input is on Machine {}; run the preview directly there",
+                route.machine_id
+            );
+        }
+        Ok(binding)
+    })?;
+    let mut launch = cli.process_options();
+    launch.context = true;
+    let mut cwd = repo.to_path_buf();
+    let mut context_message = message.map(str::to_string);
+    if let Some(binding) = &binding {
+        cwd = binding.cwd.clone();
+        launch.wave = Some(binding.wave_name.clone());
+        if launch.agent.is_none() {
+            launch.agent = binding.agent.clone();
+        }
+        if let crate::durable::WorkRef::Task(id) = &binding.work {
+            launch.task = Some(id.to_string());
+        } else {
+            context_message = Some(bound_message(binding, message));
+        }
+    }
+    anyhow::ensure!(
+        !matches!(skill, Some("repo/operate" | "wave/operate"))
+            || cli.bound_cwd.is_some() || cli.task.is_some() || cli.wt.is_some()
+            || crate::repository::CanonicalRepo::discover(&cwd)?.as_path() != cwd.canonicalize()?,
+        "context unavailable before the operator's scope checkout is prepared; preview from its existing checkout"
+    );
+    if let Some(path) = &cli.bound_cwd {
+        cwd = path.clone();
+    }
+    if let Some(name) = skill {
+        let invocation = if let Some(path) = &cli.skill_input {
+            let invocation = crate::engine::skill_invocation::SkillInvocation::read(path)?;
+            anyhow::ensure!(
+                invocation.skill.name == name,
+                "captured skill does not match {name}"
+            );
+            invocation
+        } else {
+            let crate::engine::target::Target::Skill(skill) =
+                crate::engine::target::resolve_definition(&cwd, name, kind)?
+            else {
+                anyhow::bail!("Flow context preview is not defined; preview an individual skill instead (no steps ran)");
+            };
+            crate::engine::skill_invocation::SkillInvocation {
+                skill,
+                arguments: message.unwrap_or_default().into(),
+            }
+        };
+        launch.resolved_invocation = Some(invocation);
+    }
+    let built = build_prompt_at(
+        skill,
+        context_message.as_deref(),
+        message.unwrap_or_default(),
+        &launch,
+        cwd,
+        binding.as_ref().map(|_| {
+            (
+                crate::trace::ContextAssetKind::Goal,
+                crate::trace::ContextScope::Task,
+            )
+        }),
+    )?;
+    Ok(PromptPreview {
+        checkout: built.repo_root,
+        system_prompt: crate::engine::agent::system_prompt_with_structured_replies(
+            &built.agent_config,
+        ),
+        task_prompt: built.agent_config.task_prompt,
+        skill_invocation: built.agent_config.skill_invocation,
+        context: built.budget,
+        unwritten_sources: built.sources,
+    })
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct PromptPreview {
+    pub checkout: PathBuf,
+    pub system_prompt: String,
+    pub task_prompt: String,
+    pub skill_invocation: Option<crate::engine::skill_invocation::SkillInvocation>,
+    pub context: crate::engine::context_budget::ContextBudgetReport,
+    pub unwritten_sources: Vec<crate::engine::context_budget::ContextSource>,
+}
+
+impl PromptPreview {
+    pub fn render(&self) -> String {
+        let mut text = format!("{}\n\n{}", self.system_prompt, self.task_prompt);
+        if let Some(invocation) = &self.skill_invocation {
+            text.push_str(&format!(
+                "\n\nNative skill: {}\nArguments: {}",
+                invocation.skill.name, invocation.arguments
+            ));
+        }
+        if !self.unwritten_sources.is_empty() {
+            text.push_str(&format!("\n\nPreview only: {} excerpt sources were not written; JSON includes their complete bytes.", self.unwritten_sources.len()));
+        }
+        text
+    }
+}
+
 /// `lf -b session resume ID MESSAGE`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
@@ -207,6 +369,8 @@ struct PromptBuild {
     log_name: String,
     subjects: Vec<String>,
     work: Option<crate::session::SessionWork>,
+    budget: crate::engine::context_budget::ContextBudgetReport,
+    sources: Vec<crate::engine::context_budget::ContextSource>,
 }
 
 fn build_prompt(
@@ -275,9 +439,12 @@ fn prepare_task_input(
     let Some(id) = &cli.task else { return Ok(None) };
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
-        );
+        let store = std::sync::Arc::new(if cli.context {
+            crate::store::read_existing_registry()?
+                .ok_or_else(|| anyhow!("Task input unavailable: no local registry"))?
+        } else {
+            crate::store::open_store(&crate::store::storage_config_from_env()?).await?
+        });
         let task = store
             .get_task_by_issue(id)
             .await?
@@ -286,8 +453,10 @@ fn prepare_task_input(
             .get_wave(&task.wave_id)
             .await?
             .ok_or_else(|| anyhow!("Task Wave is missing"))?;
-        if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
-            tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
+        if !cli.context {
+            if let Err(error) = crate::ops::linear_observe::refresh_task_comments(&store, &task).await {
+                tracing::warn!(%error, "Linear comment refresh failed; retaining confirmed Task direction");
+            }
         }
         let seed = crate::ops::task_input::read_seed(
             &store,
@@ -376,7 +545,12 @@ fn build_prompt_at(
                 source.dialect != crate::engine::skill_catalog::SkillDialect::Loopflow
             })
         });
-    let prepared = prepare_process_prompt(
+    let prepare = if cli.context {
+        crate::engine::process_prompt::preview_process_prompt
+    } else {
+        prepare_process_prompt
+    };
+    let prepared = prepare(
         &config,
         ProcessPromptInput {
             repo_root: repo_root.clone(),
@@ -434,7 +608,7 @@ fn build_prompt_at(
     };
 
     let mut agent_config = prepared.config;
-    if confine {
+    if confine && !cli.context {
         agent_config.write_scope = crate::engine::agent::AgentWriteScope::Worktree;
         agent_config.execution_boundary = Some(crate::engine::agent::checkout_execution_boundary(
             &repo_root,
@@ -478,6 +652,8 @@ fn build_prompt_at(
         log_name,
         subjects: Vec::new(),
         work: None,
+        budget: prepared.budget_report,
+        sources: prepared.sources,
     })
 }
 
@@ -1308,6 +1484,16 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             log_name: "generic-run-proof".to_string(),
             subjects: vec!["task:LOO-265".to_string()],
             work: None,
+            budget: crate::engine::context_budget::ContextBudgetReport {
+                budgets: crate::engine::context_budget::ContextBudgets::resolve(
+                    &crate::engine::config::Config::default(),
+                    home.path(),
+                    None,
+                )
+                .unwrap(),
+                usage: Vec::new(),
+            },
+            sources: Vec::new(),
         };
         let capture = begin_capture(&built, "headless", &built.agent_config, None).unwrap();
         let artifact_key = capture.artifact_key();
@@ -1421,6 +1607,16 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
                 log_name: log_name.to_string(),
                 subjects: vec!["task:LOO-267".to_string()],
                 work: None,
+                budget: crate::engine::context_budget::ContextBudgetReport {
+                    budgets: crate::engine::context_budget::ContextBudgets::resolve(
+                        &crate::engine::config::Config::default(),
+                        repo,
+                        None,
+                    )
+                    .unwrap(),
+                    usage: Vec::new(),
+                },
+                sources: Vec::new(),
             }
         }
 

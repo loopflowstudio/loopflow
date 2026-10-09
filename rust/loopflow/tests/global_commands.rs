@@ -452,17 +452,14 @@ fn scheduled_install_is_independent_of_the_invoking_checkout_and_reusable() {
 fn context_explanation_works_outside_git_and_preserves_unavailable_registry() {
     let home = tempfile::tempdir().unwrap();
     let output = success(
-        command(
-            home.path(),
-            home.path(),
-            &["context", "--explain", "--json"],
-        )
-        .output()
-        .unwrap(),
+        command(home.path(), home.path(), &["--explain", "--json"])
+            .output()
+            .unwrap(),
     );
     let report: serde_json::Value = serde_json::from_str(&output).unwrap();
     assert_eq!(report["machine"]["state"], "unavailable");
     assert_eq!(report["task"]["state"], "unavailable");
+    assert!(!home.path().join(".lf").exists());
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -660,4 +657,253 @@ fn repo_selection_rejects_another_tasks_identity_before_edit_or_checkout() {
     );
     assert!(status.contains("Keep original"));
     assert!(!status.contains("Wrong repository"));
+}
+
+#[test]
+fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
+    let home = tempfile::tempdir().unwrap();
+    let selected = TestRepo::new();
+    let other = TestRepo::new();
+    let first = "task_abcd1234400080000000000000000001";
+    let second = "task_abcd1235400080000000000000000002";
+    for (repo, id, title) in [
+        (selected.path(), first, "Selected"),
+        (other.path(), second, "Other"),
+    ] {
+        success(
+            command(home.path(), repo, &["wave", "ensure", "inbox", "--json"])
+                .output()
+                .unwrap(),
+        );
+        let path = home.path().join(".lf/loopflow.db");
+        let store = SqliteStore::new(&path).unwrap();
+        let conn = rusqlite::Connection::open(path).unwrap();
+        let project: String = conn
+            .query_row(
+                "SELECT current_project_id FROM waves WHERE repo=?1 AND name='inbox'",
+                [repo.canonicalize().unwrap().to_str().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        store
+            .create_task(&loopflow::planning::NewTask {
+                id: loopflow::durable::TaskId::parse(id).unwrap(),
+                project_id: loopflow::durable::ProjectId::parse(&project).unwrap(),
+                title: title.into(),
+                description: String::new(),
+            })
+            .unwrap();
+    }
+    let unscoped = command(
+        home.path(),
+        selected.path(),
+        &["task", "status", "abcd", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(!unscoped.status.success());
+    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("multiple stable Tasks"));
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let repository = store
+        .ensure_repository(selected.path().canonicalize().unwrap().to_str().unwrap())
+        .unwrap();
+    for (flag, value) in [
+        ("--repo", selected.path().to_str().unwrap()),
+        ("--repository", repository.as_str()),
+    ] {
+        let status: serde_json::Value = serde_json::from_str(&success(
+            command(
+                home.path(),
+                other.path(),
+                &[flag, value, "task", "status", "abcd", "--json"],
+            )
+            .output()
+            .unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(status["execution"]["task_id"], first);
+        success(
+            command(
+                home.path(),
+                other.path(),
+                &[
+                    flag,
+                    value,
+                    "task",
+                    "edit",
+                    "abcd",
+                    "--title",
+                    "Changed selected",
+                ],
+            )
+            .output()
+            .unwrap(),
+        );
+        // The launch front door must resolve the same ID before discovering the
+        // missing checkout/PR, rather than failing global prefix resolution.
+        let launch = command(
+            home.path(),
+            other.path(),
+            &[flag, value, "--task", "abcd", ":", "Do not launch"],
+        )
+        .output()
+        .unwrap();
+        assert!(!launch.status.success());
+        let error = String::from_utf8_lossy(&launch.stderr);
+        assert!(error.contains("no recorded PR"), "{error}");
+        assert!(!error.contains("multiple stable Tasks"), "{error}");
+    }
+    assert_eq!(
+        store.task_by_issue(first).unwrap().unwrap().plan.title,
+        "Changed selected"
+    );
+    let untouched = store.task_by_issue(second).unwrap().unwrap();
+    assert_eq!(untouched.plan.title, "Other");
+    assert!(untouched.worktree.is_none());
+    success(
+        command(
+            home.path(),
+            other.path(),
+            &[
+                "--repo",
+                selected.path().to_str().unwrap(),
+                "task",
+                "checkout",
+                "abcd",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    let path = home.path().join(".lf/loopflow.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    let before = fs::read(&path).unwrap();
+    let output = success(
+        command(
+            home.path(),
+            other.path(),
+            &[
+                "--repo",
+                selected.path().to_str().unwrap(),
+                "--task",
+                "abcd",
+                "--context",
+                "--explain",
+                "--json",
+                ":",
+                "Preview seed only",
+            ],
+        )
+        .output()
+        .unwrap(),
+    );
+    let preview: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(preview["resolution"]["task"]["value"], first);
+    assert!(preview["input"]["system_prompt"]
+        .as_str()
+        .unwrap()
+        .contains("Changed selected"));
+    assert_eq!(fs::read(path).unwrap(), before);
+}
+
+#[test]
+fn invocation_previews_preserve_absent_storage_and_reject_unsupported_commands() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    repo.create_file(".lf/skills/probe.md", "Inspect preview marker.");
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\ncontext_budgets:\n  goal_tokens: 300\n",
+    );
+    let message = "Long supplied direction. ".repeat(500);
+    let output = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["skill", "probe", &message, "--context", "--json"],
+        )
+        .output()
+        .unwrap(),
+    );
+    let input: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert!(input["system_prompt"]
+        .as_str()
+        .unwrap()
+        .contains("Inspect preview marker."));
+    assert_eq!(input["unwritten_sources"][0]["content"], message);
+    assert!(!repo.path().join(".lf/tmp").exists());
+    assert!(!home.path().join(".lf").exists());
+    for args in [
+        vec!["--context", "task", "create", "--title", "Never created"],
+        vec!["--context", "flow", "pursue"],
+        vec!["--explain", "commit", "-m", "Never committed"],
+        vec![
+            "--machine",
+            "unconfigured",
+            "--explain",
+            "task",
+            "run",
+            "abcd",
+        ],
+    ] {
+        let result = command(home.path(), repo.path(), &args).output().unwrap();
+        assert!(!result.status.success(), "{args:?}");
+    }
+    assert!(!home.path().join(".lf").exists());
+    assert!(!repo.path().join(".lf/tmp").exists());
+}
+
+#[test]
+fn task_run_explanation_reads_unstarted_work_without_preparing_it() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = TestRepo::new();
+    let created: serde_json::Value = serde_json::from_str(&success(
+        command(
+            home.path(),
+            repo.path(),
+            &[
+                "task",
+                "create",
+                "--title",
+                "Explain without starting",
+                "--json",
+            ],
+        )
+        .output()
+        .unwrap(),
+    ))
+    .unwrap();
+    let id = created["id"].as_str().unwrap();
+    let path = home.path().join(".lf/loopflow.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+        .unwrap();
+    drop(conn);
+    let before = fs::read(&path).unwrap();
+    let output = success(
+        command(
+            home.path(),
+            repo.path(),
+            &["task", "run", id, "--explain", "--json"],
+        )
+        .output()
+        .unwrap(),
+    );
+    let report: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(report["task"]["value"], id);
+    let inherited: serde_json::Value = serde_json::from_str(&success(
+        command(home.path(), repo.path(), &["--explain", "--json"])
+            .env("LF_AS", format!("task:{id}"))
+            .output()
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(inherited["task"]["value"], id);
+    assert_eq!(inherited["task"]["source"], "inherited_declaration");
+    assert_eq!(fs::read(path).unwrap(), before);
+    let store = SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    assert!(store.task_by_issue(id).unwrap().unwrap().worktree.is_none());
 }

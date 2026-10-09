@@ -76,6 +76,29 @@ pub struct WorkSelection<'a> {
     pub wave: Option<&'a str>,
 }
 
+impl<'a> WorkSelection<'a> {
+    fn parse(selector: &'a str) -> OpsResult<Self> {
+        let (kind, value) = selector.split_once(':').ok_or_else(|| {
+            run_error(format!(
+                "invalid Work selector {selector:?}; expected task:<selector> or wave:<selector>"
+            ))
+        })?;
+        match kind {
+            "task" => Ok(Self {
+                task: Some(value),
+                wave: None,
+            }),
+            "wave" => Ok(Self {
+                task: None,
+                wave: Some(value),
+            }),
+            _ => Err(run_error(format!(
+                "invalid Work selector kind {kind:?}; expected task or wave"
+            ))),
+        }
+    }
+}
+
 /// Planning identity is readable before a Task has a checkout, PR, or Workflow.
 /// Launch binding adds those requirements only after selecting the same records.
 #[derive(Debug)]
@@ -142,26 +165,7 @@ pub async fn resolve_work_binding(
     repo: &Path,
     selector: &str,
 ) -> OpsResult<WorkBinding> {
-    let (kind, value) = selector.split_once(':').ok_or_else(|| {
-        run_error(format!(
-            "invalid Work selector {selector:?}; expected task:<selector> or wave:<selector>"
-        ))
-    })?;
-    let selection = match kind {
-        "task" => WorkSelection {
-            task: Some(value),
-            ..WorkSelection::default()
-        },
-        "wave" => WorkSelection {
-            wave: Some(value),
-            ..WorkSelection::default()
-        },
-        _ => {
-            return Err(run_error(format!(
-                "invalid Work selector kind {kind:?}; expected task or wave"
-            )))
-        }
-    };
+    let selection = WorkSelection::parse(selector)?;
     resolve_work_selection(store, repo, selection).await
 }
 
@@ -252,20 +256,36 @@ pub async fn resolve_execution_binding(
     store: &SharedStore,
     cwd: &Path,
 ) -> OpsResult<Option<WorkBinding>> {
+    let Some(selected) = select_execution_work(store, cwd).await? else {
+        return Ok(None);
+    };
+    let checkout = selected.source == crate::session::WorkSource::Checkout;
+    let mut binding = bind_selected_work(store, cwd, selected).await?;
+    binding.cwd = if checkout {
+        crate::engine::git::worktree_root(cwd).unwrap_or_else(|_| cwd.to_path_buf())
+    } else {
+        cwd.to_path_buf()
+    };
+    Ok(Some(binding))
+}
+
+/// Shared implicit selection for launch and explanation; neither prepares Work.
+pub(crate) async fn select_execution_work(
+    store: &SharedStore,
+    cwd: &Path,
+) -> OpsResult<Option<SelectedWork>> {
     if crate::repo::discover_repo_root(cwd)
         .map_err(run_error)?
         .is_some()
     {
-        if let Some(binding) = resolve_checkout_binding(store, cwd).await? {
-            return Ok(Some(binding));
+        if let Some(selected) = select_work(store, cwd, WorkSelection::default()).await? {
+            return Ok(Some(selected));
         }
     }
-    if let Ok(selector) = std::env::var(crate::lf::WORK_DECLARATION_ENV) {
-        let mut binding = resolve_work_binding(store, cwd, &selector).await?;
-        binding.cwd = cwd.to_path_buf();
-        return Ok(Some(binding));
+    match std::env::var(crate::lf::WORK_DECLARATION_ENV) {
+        Ok(selector) => select_work(store, cwd, WorkSelection::parse(&selector)?).await,
+        Err(_) => Ok(None),
     }
-    Ok(None)
 }
 
 /// Resolve checkout attribution independently of Task or PR execution eligibility.

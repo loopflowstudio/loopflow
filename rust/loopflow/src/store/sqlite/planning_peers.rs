@@ -32,11 +32,12 @@ struct ObjectChanges<'a> {
     observations: Vec<&'a LinearObservation>,
     creation: Vec<&'a Value>,
     deletions: BTreeMap<&'a str, Vec<&'a Value>>,
-    orders: BTreeMap<&'a str, OrderHistory<'a>>,
+    orders: BTreeMap<&'a str, FieldHistory<'a>>,
+    evidence: BTreeMap<&'a str, FieldHistory<'a>>,
 }
 
 #[derive(Default)]
-struct OrderHistory<'a> {
+struct FieldHistory<'a> {
     values: Vec<&'a Value>,
     heads: Vec<&'a Value>,
 }
@@ -77,6 +78,7 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             || change.linear.is_some()
             || change.deletion_receipt().is_some()
             || change.order_receipt().is_some()
+            || change.provider_evidence()
     }) {
         let object = objects
             .get_mut(&change.object)
@@ -95,6 +97,14 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
             object
                 .orders
                 .entry(receipt)
+                .or_default()
+                .values
+                .push(&change.value);
+        }
+        if change.provider_evidence() {
+            object
+                .evidence
+                .entry(change.field.as_str())
                 .or_default()
                 .values
                 .push(&change.value);
@@ -120,6 +130,16 @@ fn changes_by_object(snapshot: &PlanningSnapshot) -> BTreeMap<&PlanningObject, O
         }
     }
     for (_, change) in snapshot.heads() {
+        if change.provider_evidence() {
+            objects
+                .get_mut(&change.object)
+                .expect("retained provider object")
+                .evidence
+                .entry(change.field.as_str())
+                .or_default()
+                .heads
+                .push(&change.value);
+        }
         if let Some(receipt) = change.order_receipt() {
             objects
                 .get_mut(&change.object)
@@ -647,8 +667,24 @@ impl SqliteStore {
             // projected in this pass may replace an earlier missing-parent error.
             let mut conflicts = BTreeSet::new();
             for (object, changes) in pending {
+                let mut acquired = Ok(());
+                for (field, history) in &changes.evidence {
+                    let evidence = tx.savepoint()?;
+                    match acquire_provider_evidence(
+                        &evidence, repo, object, changes, field, history,
+                    ) {
+                        Ok(()) => evidence.commit()?,
+                        Err(error) if projection_conflict(&error) => {
+                            evidence.finish()?;
+                            acquired = Err(error);
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
                 let savepoint = tx.savepoint()?;
-                match insert_and_project(&savepoint, object, repo, changes, &merged) {
+                match acquired
+                    .and_then(|()| insert_and_project(&savepoint, object, repo, changes, &merged))
+                {
                     Ok(()) => {
                         savepoint.commit()?;
                     }
@@ -1184,6 +1220,9 @@ fn insert_and_project(
             )?;
         }
     }
+    if let Some(history) = changes.evidence.get("provider_teams") {
+        project_confirmed_teams(conn, object, history)?;
+    }
     let previous = delivery_fields(conn, object)?;
     acquire_linear_frontier(conn, object, changes, repo)?;
     let deletion_receipts = object.kind == PlanningKind::Task && !changes.deletions.is_empty();
@@ -1206,6 +1245,9 @@ fn insert_and_project(
                 !(change.field == "creation"
                     || change.deletion_receipt().is_some()
                     || change.order_receipt().is_some()
+                    || change.provider_evidence()
+                    || change.field == "planning_teams"
+                        && changes.evidence.contains_key("provider_teams")
                     || pending_order && change.field == "planning_rank"
                     || deletion_receipts && change.field == "planning_deleted_at"
                     || object.kind == PlanningKind::Wave && change.field == "current_project_id"
@@ -1302,6 +1344,221 @@ fn latest_observations<'a>(
     Ok(retained)
 }
 
+/// Acquire independent evidence before scalar projection. A stale entity may be
+/// rejected without rolling back an accepted removal, archive or Team readback.
+fn acquire_provider_evidence(
+    conn: &Connection,
+    repo: &str,
+    object: &PlanningObject,
+    changes: &ObjectChanges<'_>,
+    field: &str,
+    history: &FieldHistory<'_>,
+) -> StoreResult<()> {
+    use super::planning::ProviderEvidence;
+
+    let mapping = if object.kind == PlanningKind::Task {
+        "external_issue_id"
+    } else {
+        "external_project_id"
+    };
+    let provider_id = changes.winners[mapping].1.value.as_str();
+    let mut evidence = Vec::new();
+    for value in &history.values {
+        let fact = ProviderEvidence::validate(object.kind, field, value)?;
+        if Some(fact.id()) != provider_id {
+            return Err(StoreError::ProviderObservationConflict {
+                entity: "planning mapping",
+                id: object.id.clone(),
+            });
+        }
+        evidence.push(fact);
+    }
+    // A remote mapping may not redirect evidence for an existing local object.
+    let local: Option<Option<String>> = conn
+        .query_row(
+            &format!("SELECT {mapping} FROM {} WHERE id=?1", table(object.kind)),
+            [&object.id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if local
+        .flatten()
+        .as_deref()
+        .is_some_and(|id| Some(id) != provider_id)
+    {
+        return Err(StoreError::ProviderObservationConflict {
+            entity: "planning mapping",
+            id: object.id.clone(),
+        });
+    }
+    let foreign: bool = conn.query_row(
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE {mapping}=?1 AND id!=?2)",
+            table(object.kind)
+        ),
+        params![provider_id, object.id],
+        |row| row.get(0),
+    )?;
+    if foreign {
+        return Err(StoreError::ProviderObservationConflict {
+            entity: "planning mapping",
+            id: object.id.clone(),
+        });
+    }
+    match field {
+        "provider_removal" => {
+            // Retain the first known acquisition age on an unmarked Task,
+            // independent of random journal-ID traversal order.
+            evidence.sort_by_key(|fact| match fact {
+                ProviderEvidence::IssueChange { observed_at, .. } => *observed_at,
+                _ => None,
+            });
+            for fact in &evidence {
+                super::planning::observe_issue_change_in(conn, fact)?;
+            }
+        }
+        "provider_archive" => {
+            for fact in &evidence {
+                super::planning::confirm_project_archival_in(conn, repo, "linear", fact)?;
+            }
+        }
+        "provider_teams" => {
+            let heads = history
+                .heads
+                .iter()
+                .map(|value| ProviderEvidence::validate(object.kind, field, value))
+                .collect::<StoreResult<Vec<_>>>()?;
+            let Some(ProviderEvidence::Teams { project, .. }) = heads.first() else {
+                return Ok(());
+            };
+            let conflict = || StoreError::ProjectMembershipConflict {
+                project_id: project.id.clone(),
+            };
+            for head in &heads {
+                let ProviderEvidence::Teams { project: other, .. } = head else {
+                    unreachable!("validated Team evidence")
+                };
+                if !super::planning::same_ids(&project.team_ids, &other.team_ids)
+                    || !super::planning::same_ids(&project.initiative_ids, &other.initiative_ids)
+                {
+                    return Err(conflict());
+                }
+            }
+            let unresolved: bool = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pm_projects WHERE repo=?1 AND provider='linear' AND id=?2 AND membership_unresolved=1)",
+                    params![repo,project.id], |row| row.get(0),
+                )?;
+            if unresolved {
+                return Err(conflict());
+            }
+            let retained: Option<String> = conn
+                .query_row(
+                    "SELECT body FROM pm_projects WHERE repo=?1 AND provider='linear' AND id=?2",
+                    params![repo, project.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(body) = retained {
+                let retained: crate::pm::PmProject = serde_json::from_str(&body)?;
+                if !super::planning::same_ids(&retained.initiative_ids, &project.initiative_ids)
+                    || !team_history_contains(&evidence, &retained.team_ids)
+                {
+                    return Err(conflict());
+                }
+            }
+            // Apply only the causal heads. Older entity bodies remain history.
+            for head in &heads {
+                super::planning::reconcile_project_teams_in(conn, repo, "linear", head)?;
+            }
+            project_confirmed_teams(conn, object, history)?;
+        }
+        _ => unreachable!("validated provider evidence"),
+    }
+    Ok(())
+}
+
+fn project_confirmed_teams(
+    conn: &Connection,
+    object: &PlanningObject,
+    history: &FieldHistory<'_>,
+) -> StoreResult<()> {
+    let Some(value) = history.heads.first() else {
+        return Ok(());
+    };
+    let super::planning::ProviderEvidence::Teams { project, .. } =
+        super::planning::ProviderEvidence::validate(
+            PlanningKind::Project,
+            "provider_teams",
+            value,
+        )?
+    else {
+        unreachable!("validated Team evidence")
+    };
+    conn.execute(
+        "UPDATE projects SET planning_teams=?2 WHERE id=?1 AND planning_teams IS NOT ?2",
+        params![object.id, serde_json::to_string(&project.team_ids)?],
+    )?;
+    Ok(())
+}
+
+fn team_history_contains(evidence: &[super::planning::ProviderEvidence], teams: &[String]) -> bool {
+    evidence.iter().any(|fact| match fact {
+        super::planning::ProviderEvidence::Teams {
+            project, previous, ..
+        } => {
+            super::planning::same_ids(&project.team_ids, teams)
+                || previous
+                    .as_ref()
+                    .is_some_and(|before| super::planning::same_ids(before, teams))
+        }
+        _ => false,
+    })
+}
+
+fn retain_confirmed_teams(
+    changes: &ObjectChanges<'_>,
+    project: &mut crate::pm::PmProject,
+) -> StoreResult<()> {
+    let Some(history) = changes.evidence.get("provider_teams") else {
+        return Ok(());
+    };
+    let evidence = history
+        .values
+        .iter()
+        .map(|value| {
+            super::planning::ProviderEvidence::validate(
+                PlanningKind::Project,
+                "provider_teams",
+                value,
+            )
+        })
+        .collect::<StoreResult<Vec<_>>>()?;
+    if !team_history_contains(&evidence, &project.team_ids) {
+        return Err(StoreError::ProjectMembershipConflict {
+            project_id: project.id.clone(),
+        });
+    }
+    if let Some(value) = history.heads.first() {
+        let super::planning::ProviderEvidence::Teams {
+            project: confirmed, ..
+        } = super::planning::ProviderEvidence::validate(
+            PlanningKind::Project,
+            "provider_teams",
+            value,
+        )?
+        else {
+            unreachable!("validated Team evidence")
+        };
+        if !super::planning::same_ids(&project.initiative_ids, &confirmed.initiative_ids) {
+            return Err(StoreError::ProjectMembershipConflict {
+                project_id: project.id.clone(),
+            });
+        }
+        project.team_ids = confirmed.team_ids;
+    }
+    Ok(())
+}
+
 /// Reuse provider acquisition's revision and equal-revision checks, rather than
 /// treating peer receipt time as a fresh read. This is inside the object's
 /// projection savepoint: rejected ownership never advances its provider cache.
@@ -1344,7 +1601,8 @@ fn acquire_linear_frontier(
                 accepted
             }
             PlanningKind::Project => {
-                let project = serde_json::from_value(observation.body.clone())?;
+                let mut project = serde_json::from_value(observation.body.clone())?;
+                retain_confirmed_teams(changes, &mut project)?;
                 super::planning::validate_project_membership(conn, repo, "linear", &project)?;
                 super::planning::put_project(conn, repo, "linear", observed_at, &project)?
             }
@@ -1398,6 +1656,7 @@ fn acquire_linear_frontier(
                         .as_str()
                         .expect("validated relationship JSON"),
                 )?;
+                retain_confirmed_teams(changes, &mut project)?;
                 super::planning::validate_project_membership(conn, repo, "linear", &project)?;
             }
         }
@@ -4204,6 +4463,303 @@ mod tests {
     }
 
     #[test]
+    fn peer_provider_removal_and_archive_precede_stale_detail_without_losing_work() {
+        for (archive, unknown_age) in [(false, false), (false, true), (true, false)] {
+            let (_source_home, source) = store();
+            let (_target_home, target) = store();
+            let (wave, row, task) = linear_seed(&source);
+            let base = export(&source, "/source");
+            import(&target, "/target", "base", &base);
+            preserve_execution(&target, &wave, &task);
+            edit_title(&target, &task, "Retain unsent title");
+            let project = target.task(&task).unwrap().unwrap().project_id;
+            target
+                .edit_project(&project, Some("Retain unsent Project"), None)
+                .unwrap();
+            let execution = execution_rows(&target);
+            let receipts = target.pending_task_changes(&task).unwrap();
+            let project_receipts = target.pending_project_changes(&project).unwrap();
+            if archive {
+                source
+                    .confirm_pm_project_archival("/source", "linear", &row.snapshot.projects[0], 61)
+                    .unwrap();
+            } else {
+                source
+                    .observe_pm_issue_change(
+                        &row.snapshot.items[0].id,
+                        Some("2026-10-08T13:00:00Z"),
+                        true,
+                    )
+                    .unwrap();
+            }
+            let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+            source.create_wave(&independent).unwrap();
+            source
+                .select_peer_waves(
+                    "/source",
+                    &destination(),
+                    std::slice::from_ref(independent.id()),
+                )
+                .unwrap();
+            let mut incoming = export(&source, "/source");
+            if unknown_age {
+                // Released-frontier removal has no acquisition age to invent.
+                incoming
+                    .changes
+                    .values_mut()
+                    .find(|c| c.provider_evidence())
+                    .unwrap()
+                    .value["observed_at"] = json!(null);
+            }
+            let evidence = incoming
+                .changes
+                .values()
+                .find(|c| c.provider_evidence())
+                .unwrap();
+            assert_eq!(evidence.value["observed_at"].is_null(), unknown_age);
+            assert!(incoming
+                .changes
+                .values()
+                .all(|c| c.deletion_receipt().is_none()));
+            import(&target, "/target", "negative", &incoming);
+            assert!(target.get_wave(independent.id()).unwrap().is_some());
+            assert_eq!(
+                target.task(&task).unwrap().unwrap().plan.title,
+                "Retain unsent title"
+            );
+            assert_eq!(
+                target.project(&project).unwrap().unwrap().plan.name,
+                "Retain unsent Project"
+            );
+            assert_eq!(target.pending_task_changes(&task).unwrap(), receipts);
+            assert_eq!(
+                target.pending_project_changes(&project).unwrap(),
+                project_receipts
+            );
+            if archive {
+                let conn = target.conn.lock().unwrap();
+                let (archived, age): (bool, i64) = conn.query_row("SELECT archived,observed_at FROM pm_projects WHERE repo='/target' AND id=?1", [&row.snapshot.projects[0].id], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+                assert!(archived);
+                assert_eq!(age, 42); // entity acquisition was not made fresh by archive
+            } else {
+                assert_eq!(
+                    target.planning_task(&task).unwrap().state,
+                    crate::store::PlanningState::Removed
+                );
+            }
+            let retained = export(&target, "/target");
+            import(&target, "/target", "stale", &base);
+            import(&target, "/target", "negative", &incoming);
+            assert_eq!(export(&target, "/target"), retained);
+            let revisions = target.revisions().unwrap();
+            import(&target, "/target", "negative", &incoming);
+            assert_eq!(target.revisions().unwrap(), revisions);
+            assert_eq!(execution_rows(&target), execution);
+            assert_eq!(
+                target.task(&task).unwrap().unwrap().worktree.as_deref(),
+                Some(std::path::Path::new("/retained/work"))
+            );
+        }
+    }
+
+    #[test]
+    fn peer_confirmed_teams_preserve_newer_entity_and_uncertain_order() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let project = target.task(&task).unwrap().unwrap().project_id;
+        let mut newer = row.snapshot.projects[0].clone();
+        newer.name = "Newer entity".into();
+        newer.revision = Some("2099-01-01T00:00:00Z".into());
+        target
+            .put_pm_project(&wave, "linear", "initiative", &newer, 90)
+            .unwrap();
+        // A captured uncertain order requires a complete list, never Team or entity evidence.
+        let effects = json!([{"before":[task],"after":[task],"issue":row.snapshot.items[0].id,
+            "input":{"prioritySortOrder":1.0},"settled":false}]);
+        {
+            let conn = target.conn.lock().unwrap();
+            super::PlanningChanges::Project(&project)
+                .record_value(
+                    &conn,
+                    "task_order",
+                    "uncertain-order",
+                    json!([task]),
+                    Some(json!({"value":[task],"revision":null})),
+                )
+                .unwrap();
+            conn.execute("UPDATE project_changes SET attempted=1,order_effects_json=?1,error='lost reply' WHERE id='uncertain-order'", [effects.to_string()]).unwrap();
+        }
+        let order = target.pending_project_changes(&project).unwrap();
+        let execution = execution_rows(&target);
+        let mut changed = row.snapshot.projects[0].clone();
+        changed.team_ids = vec!["other-team".into()];
+        source
+            .reconcile_pm_project_teams(&wave, "linear", "initiative", &changed, 63)
+            .unwrap();
+        let incoming = export(&source, "/source");
+        assert!(incoming
+            .changes
+            .values()
+            .any(|c| c.field == "provider_teams"));
+        import(&target, "/target", "teams", &incoming);
+        let conflicts = target.peer_projection_conflicts("/target").unwrap();
+        assert!(conflicts.is_empty(), "{conflicts:?}");
+        let conn = target.conn.lock().unwrap();
+        let (body, age): (String, i64) = conn
+            .query_row(
+                "SELECT body,observed_at FROM pm_projects WHERE repo='/target' AND id=?1",
+                [&changed.id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let accepted: crate::pm::PmProject = serde_json::from_str(&body).unwrap();
+        assert_eq!(accepted.name, "Newer entity");
+        assert_eq!(accepted.revision, newer.revision);
+        assert_eq!(accepted.team_ids, changed.team_ids);
+        assert_eq!(accepted.initiative_ids, newer.initiative_ids);
+        assert_eq!(age, 90);
+        let teams: String = conn
+            .query_row(
+                "SELECT planning_teams FROM projects WHERE id=?1",
+                [project.as_str()],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<String>>(&teams).unwrap(),
+            changed.team_ids
+        );
+        drop(conn);
+        assert_eq!(target.pending_project_changes(&project).unwrap(), order);
+        let retained = export(&target, "/target");
+        assert!(retained
+            .changes
+            .values()
+            .any(|c| c.field == "provider_teams" && c.value["observed_at"] == 63));
+        let revisions = target.revisions().unwrap();
+        import(&target, "/target", "teams", &incoming);
+        assert_eq!(target.revisions().unwrap(), revisions);
+        assert_eq!(export(&target, "/target"), retained);
+        assert_eq!(execution_rows(&target), execution);
+    }
+
+    #[test]
+    fn peer_concurrent_team_confirmations_retain_both_and_isolate_projection() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        let execution = execution_rows(&target);
+        for (store, team) in [(&source, "source-team"), (&target, "target-team")] {
+            let mut project = row.snapshot.projects[0].clone();
+            project.team_ids = vec![team.into()];
+            store
+                .reconcile_pm_project_teams(&wave, "linear", "initiative", &project, 66)
+                .unwrap();
+        }
+        let project = target.task(&task).unwrap().unwrap().project_id;
+        let retained = target.project(&project).unwrap().unwrap();
+        let journal = export(&target, "/target");
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        source.create_wave(&independent).unwrap();
+        source
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "conflicting-teams", &incoming);
+        assert!(target.get_wave(independent.id()).unwrap().is_some());
+        assert_eq!(target.project(&project).unwrap().unwrap(), retained);
+        assert!(target
+            .peer_projection_conflicts("/target")
+            .unwrap()
+            .iter()
+            .any(|c| c.object.id == project.as_str()));
+        assert_eq!(
+            export(&target, "/target"),
+            journal.merge(&incoming).unwrap()
+        );
+        assert_eq!(execution_rows(&target), execution);
+        // Contrary Team evidence cannot erase an independently confirmed archive.
+        source
+            .confirm_pm_project_archival("/source", "linear", &row.snapshot.projects[0], 77)
+            .unwrap();
+        import(
+            &target,
+            "/target",
+            "archived-despite-team-conflict",
+            &export(&source, "/source"),
+        );
+        let archived: bool = target
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT archived FROM pm_projects WHERE repo='/target' AND id=?1",
+                [&row.snapshot.projects[0].id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(archived);
+        assert_eq!(target.project(&project).unwrap().unwrap(), retained);
+        assert_eq!(execution_rows(&target), execution);
+    }
+
+    #[test]
+    fn peer_malformed_provider_evidence_rolls_back_every_object() {
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        import(&target, "/target", "base", &export(&source, "/source"));
+        preserve_execution(&target, &wave, &task);
+        source
+            .confirm_pm_project_archival("/source", "linear", &row.snapshot.projects[0], 60)
+            .unwrap();
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        source.create_wave(&independent).unwrap();
+        source
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = export(&source, "/source");
+        let before = export(&target, "/target");
+        let execution = execution_rows(&target);
+        for invalid in ["age", "execution"] {
+            let mut malformed = incoming.clone();
+            let fact = malformed
+                .changes
+                .values_mut()
+                .find(|c| c.provider_evidence())
+                .unwrap();
+            if invalid == "age" {
+                fact.value["observed_at"] = json!(-1);
+            } else {
+                fact.value["project"]["worktree"] = json!("/not-planning");
+            }
+            assert!(target
+                .import_peer_planning("/target", &destination(), "malformed", &malformed)
+                .is_err());
+            assert!(target.get_wave(independent.id()).unwrap().is_none());
+            assert_eq!(export(&target, "/target"), before);
+            assert_eq!(
+                import_revision(&target, "/target", &destination()).as_deref(),
+                Some("base")
+            );
+            assert_eq!(execution_rows(&target), execution);
+        }
+    }
+
+    #[test]
     fn peer_rejection_preserves_removed_tasks_and_archived_projects() {
         for (archived, new_frontier) in [(false, false), (false, true), (true, false), (true, true)]
         {
@@ -4314,83 +4870,73 @@ mod tests {
 
     #[test]
     fn peer_membership_conflict_survives_projection_rollback_and_independent_import() {
-        // Neither a newer entity revision nor an unproven relationship-only edit
-        // supplies the separately ordered membership evidence.
-        for provider_observation in [false, true] {
-            let (_source_home, source) = store();
-            let (_target_home, target) = store();
-            let (wave, row, task) = linear_seed(&source);
-            let base = export(&source, "/source");
-            import(&target, "/target", "base", &base);
-            let project = target.task(&task).unwrap().unwrap().project_id;
-            preserve_execution(&target, &wave, &task);
-            let retained = target.project(&project).unwrap().unwrap();
-            let retained_task = target.task(&task).unwrap().unwrap();
-            let execution = target.revisions().unwrap();
-            let workflow = target.workflow(&task).unwrap();
-            if provider_observation {
-                let mut changed = row.snapshot.projects[0].clone();
-                changed.team_ids = vec!["other-team".into()];
-                changed.name = "Newer entity with unordered membership".into();
-                changed.revision = Some("2099-01-01T00:00:00Z".into());
-                source
-                    .reconcile_pm_project_teams(&wave, "linear", "initiative", &changed, 70)
-                    .unwrap();
-            } else {
-                source
-                    .conn
-                    .lock()
-                    .unwrap()
-                    .execute(
-                        "UPDATE projects SET planning_teams='[\"other-team\"]' WHERE id=?1",
-                        [project.as_str()],
-                    )
-                    .unwrap();
-            }
-            let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
-            source.create_wave(&independent).unwrap();
-            source
-                .select_peer_waves(
-                    "/source",
-                    &destination(),
-                    std::slice::from_ref(independent.id()),
-                )
-                .unwrap();
-            let incoming = export(&source, "/source");
-            import(&target, "/target", "disputed", &incoming);
-            assert!(target.get_wave(independent.id()).unwrap().is_some());
-            assert_eq!(target.project(&project).unwrap().unwrap(), retained);
-            assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
-            assert_eq!(target.workflow(&task).unwrap(), workflow);
-            let after = target.revisions().unwrap();
-            assert_eq!(
-                (after.sessions, after.processes, after.flows),
-                (execution.sessions, execution.processes, execution.flows)
-            );
-            let conn = target.conn.lock().unwrap();
-            let (body, unresolved): (String, bool) = conn.query_row(
+        // An unconfirmed scalar Team edit supplies no relationship ordering.
+        let (_source_home, source) = store();
+        let (_target_home, target) = store();
+        let (wave, row, task) = linear_seed(&source);
+        let base = export(&source, "/source");
+        import(&target, "/target", "base", &base);
+        let project = target.task(&task).unwrap().unwrap().project_id;
+        preserve_execution(&target, &wave, &task);
+        let retained = target.project(&project).unwrap().unwrap();
+        let retained_task = target.task(&task).unwrap().unwrap();
+        let execution = target.revisions().unwrap();
+        let workflow = target.workflow(&task).unwrap();
+        source
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE projects SET planning_teams='[\"other-team\"]' WHERE id=?1",
+                [project.as_str()],
+            )
+            .unwrap();
+        let independent = Wave::new(WaveId::new(), "independent".into(), "/source".into());
+        source.create_wave(&independent).unwrap();
+        source
+            .select_peer_waves(
+                "/source",
+                &destination(),
+                std::slice::from_ref(independent.id()),
+            )
+            .unwrap();
+        let incoming = export(&source, "/source");
+        import(&target, "/target", "disputed", &incoming);
+        assert!(target.get_wave(independent.id()).unwrap().is_some());
+        assert_eq!(target.project(&project).unwrap().unwrap(), retained);
+        assert_eq!(target.task(&task).unwrap().unwrap(), retained_task);
+        assert_eq!(target.workflow(&task).unwrap(), workflow);
+        let after = target.revisions().unwrap();
+        assert_eq!(
+            (after.sessions, after.processes, after.flows),
+            (execution.sessions, execution.processes, execution.flows)
+        );
+        let conn = target.conn.lock().unwrap();
+        let (body, unresolved): (String, bool) = conn
+            .query_row(
                 "SELECT body,membership_unresolved FROM pm_projects WHERE repo='/target' AND id=?1",
-                [&row.snapshot.projects[0].id], |row| Ok((row.get(0)?, row.get(1)?)),
-            ).unwrap();
-            assert!(unresolved);
-            assert_eq!(
-                serde_json::from_str::<crate::pm::PmProject>(&body).unwrap(),
-                row.snapshot.projects[0]
-            );
-            drop(conn);
-            assert_eq!(export(&target, "/target"), incoming);
-            let conflicts = target.peer_projection_conflicts("/target").unwrap();
-            assert!(conflicts
-                .iter()
-                .any(|conflict| conflict.object.id == project.as_str()
-                    && conflict.reason.contains("relationship ordering evidence")));
-            import(&target, "/target", "disputed", &incoming);
-            assert_eq!(target.revisions().unwrap(), after);
-            assert_eq!(
-                target.peer_projection_conflicts("/target").unwrap(),
-                conflicts
-            );
-        }
+                [&row.snapshot.projects[0].id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(unresolved);
+        assert_eq!(
+            serde_json::from_str::<crate::pm::PmProject>(&body).unwrap(),
+            row.snapshot.projects[0]
+        );
+        drop(conn);
+        assert_eq!(export(&target, "/target"), incoming);
+        let conflicts = target.peer_projection_conflicts("/target").unwrap();
+        assert!(conflicts
+            .iter()
+            .any(|conflict| conflict.object.id == project.as_str()
+                && conflict.reason.contains("relationship ordering evidence")));
+        import(&target, "/target", "disputed", &incoming);
+        assert_eq!(target.revisions().unwrap(), after);
+        assert_eq!(
+            target.peer_projection_conflicts("/target").unwrap(),
+            conflicts
+        );
     }
 
     fn preserve_execution(store: &SqliteStore, wave: &WaveId, task: &TaskId) {
@@ -5441,9 +5987,48 @@ mod tests {
         conn.execute("INSERT INTO project_changes(id,project_id,field,value_json,base_json,order_effects_json,attempted,error)
             VALUES('retained-order','project','task_order','[\"other\",\"task\"]','{\"value\":[\"task\",\"other\"]}',?1,1,'lost order reply')",[effects.to_string()]).unwrap();
         conn.execute("INSERT INTO project_changes(id,project_id,field,value_json) VALUES('later-order','project','task_order','[\"task\",\"other\"]')",[]).unwrap();
+        let fixture: crate::pm::PmSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/fixtures/dto/task_history_planning.json"
+        ))
+        .unwrap();
+        conn.execute(
+            "UPDATE tasks SET external_issue_id='removed-provider-id' WHERE id='task'",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES('removed-provider-id',NULL,1)", []).unwrap();
+        conn.execute(
+            "UPDATE projects SET external_project_id=?1 WHERE id='project'",
+            [&fixture.projects[0].id],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO pm_projects(repo,provider,id,observed_at,body,archived) VALUES('/fixture','linear',?1,42,?2,1)", params![fixture.projects[0].id,serde_json::to_string(&fixture.projects[0]).unwrap()]).unwrap();
         conn.execute_batch(&upgrade.expect("peer draft or materialized migration"))
             .unwrap();
         super::super::project_content::seed_peer_content(&conn).unwrap();
+        super::super::planning::seed_peer_evidence(&conn).unwrap();
+        for (kind, field) in [
+            (
+                crate::engine::planning_exchange::PlanningKind::Task,
+                "provider_removal",
+            ),
+            (
+                crate::engine::planning_exchange::PlanningKind::Project,
+                "provider_archive",
+            ),
+        ] {
+            let value: String = conn
+                .query_row(
+                    "SELECT value FROM planning_peer_changes WHERE field=?1",
+                    [field],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_str(&value).unwrap();
+            assert!(value["observed_at"].is_null());
+            super::super::planning::ProviderEvidence::validate(kind, field, &value).unwrap();
+        }
+
         let (body, attempted, linked, error): (String,bool,bool,String) = conn.query_row(
             "SELECT export_json,export_attempted,export_link_attempted,export_error FROM projects WHERE id=?1", [created.as_str()],
             |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();

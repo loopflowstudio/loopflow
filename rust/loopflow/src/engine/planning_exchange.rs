@@ -184,6 +184,14 @@ pub struct PlanningSnapshot {
 }
 
 impl PlanningMutation {
+    pub(crate) fn provider_evidence(&self) -> bool {
+        matches!(
+            (self.object.kind, self.field.as_str()),
+            (PlanningKind::Task, "provider_removal")
+                | (PlanningKind::Project, "provider_archive" | "provider_teams")
+        )
+    }
+
     pub(crate) fn order_receipt(&self) -> Option<&str> {
         (self.object.kind == PlanningKind::Project)
             .then(|| {
@@ -282,7 +290,8 @@ impl PlanningSnapshot {
                         PlanningKind::Task | PlanningKind::Project
                     ) && change.field == "creation")
                     || change.deletion_receipt().is_some()
-                    || change.order_receipt().is_some())
+                    || change.order_receipt().is_some()
+                    || change.provider_evidence())
             {
                 return Err(PlanningExchangeError::Invalid("invalid planning mutation"));
             }
@@ -333,6 +342,15 @@ impl PlanningSnapshot {
 
 fn validate_value(change: &PlanningMutation) -> Result<(), PlanningExchangeError> {
     let value = &change.value;
+    if change.provider_evidence() {
+        return crate::store::sqlite::planning::ProviderEvidence::validate(
+            change.object.kind,
+            &change.field,
+            value,
+        )
+        .map(|_| ())
+        .map_err(|_| PlanningExchangeError::Invalid("invalid provider evidence"));
+    }
     if change.deletion_receipt().is_some() {
         return crate::store::sqlite::planning_changes::validate_peer_deletion(value)
             .map_err(|_| PlanningExchangeError::Invalid("invalid planning deletion receipt"));

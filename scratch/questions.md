@@ -194,3 +194,18 @@ remain separate. No new product decision is selected.
   clocks select intentions; effect updates cannot promote losers. No new product
   policy or mixed-provider activation. Detailed rationale and the settled-partial
   and cold-inventory counterexamples: `fcd64901f:scratch/questions.md`, final entry.
+
+- October 9 alternate-acquisition choice: common removal/archive evidence commits
+  before scalar projection, so rejecting a stale body cannot erase the negative
+  fact. Team confirmation keeps its causal heads and prior Team set; concurrent
+  contradictory confirmations or unrelated retained membership block projection,
+  never choose by entity revision or receiving time. Legacy negative evidence has
+  unknown acquisition age; no Team evidence is fabricated by migration. This is
+  an implementation choice, not a new product decision. Mixed-provider exchange
+  remains disabled; full-list acquisition is still an independent boundary.
+  Non-removal invalidations are excluded: replaying an old unversioned invalidation
+  could invalidate later successful detail forever. Replay-safe invalidation
+  transport remains unresolved before mixed activation, not deliberately dropped.
+  Unknown legacy ages never
+  rewrite a Task's removal timestamp. Each independent fact gets its own savepoint,
+  so Team contradictions cannot roll back an accepted archive.

@@ -366,6 +366,16 @@ last-good facts, and blocks managed readers. Replaying a list or detail does not
 clear that uncertainty. Explicit reteam reconciles the exact confirmed Team set
 under acquisition ownership; it cannot reconcile a changed Initiative.
 
+Peer transport retains confirmed removal, archive and Team observations as optional
+fields in the same mutation journal. The common acquisition owners apply each
+independent fact before scalar projection: rejecting a stale entity cannot erase
+an accepted removal or archive. Team confirmations retain their prior set and
+acquisition time. Contradictory concurrent confirmations isolate projection;
+entity revisions never choose a Team set or settle an order effect. Replaying old
+confirmation cannot clear retained membership uncertainty. Migration preserves
+negative evidence with unknown age and fabricates no historical Team confirmation.
+These storage boundaries do not enable mixed-provider foreground exchange.
+
 Chapter rollover transfers started work and retains unreviewed backlog in its
 predecessor Project. The same local transaction marks the predecessor completed,
 selects the successor and retains each pending provider field change. It changes

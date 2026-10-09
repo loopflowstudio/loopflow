@@ -621,31 +621,35 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-09)
 
-Jack Heart selected custom-ref sync. Review-only; no landing or public-remote export. Joining publishes nothing; invalid
-input aborts import and contradictions isolate objects. Execution stays local and imports stay unplaced.
+Jack Heart selected custom-ref sync: review-only, no landing/public export.
+Joining publishes nothing; execution stays local and imports unplaced.
+Malformed input aborts import; contradictions isolate objects.
 
-Common receipts preserve saves, parents, baselines and effects without transitions. Readback acknowledges effects, never mappings or late errors.
-Creation readback never settles removal. Explicit active evidence retains losing
-removals. Creation excludes populated Processes; deletion compares seven execution
-tables, not live controls.
+Common receipts retain saves, baselines, uncertainty and losers, never transitions.
+Readback acknowledges effects, not mappings or errors; creation cannot settle removal.
+Explicit active evidence retains losing removals. Fixtures prove no live controls.
 
-**Retained uncertainty constrains effects.** `08a285872` defers attempts when
-rejected/skipped projection retains receipts only in journals. Saves/acquisition
-stay independent; selection cannot release effects before import. `30b476328`'s changed public fixture awaits gate; mixed transport/live controls remain unproved.
+`08a285872` defers effects when rejected/skipped projection retains receipts only
+in journals. Saves/acquisition stay independent; selection cannot release effects
+before import. `30b476328`'s public fixture awaits gate. `fcd64901f` transports order
+receipts; `357090d4b` preserves primary-only moves. Only complete lists settle
+progress; effect updates cannot promote losers.
 
-Order receipts preserve save priority, baselines, uncertain effects and losing lists.
-Only complete lists settle progress; effect updates never promote losing intentions.
-Transport: `fcd64901f`; primary-only repair: `357090d4b`.
-Main #1510 integrated; combined gate remains open.
+**Independent facts need independent rollback.** Peer removal/archive evidence must
+survive rejected scalar projection or conflicting Teams. Common acquisition owns
+those facts and confirmed Team baselines; original ages remain in the journal.
+Legacy negative evidence has unknown age. Entity revisions
+never order relationships. Replayed confirmation cannot clear retained membership
+uncertainty. Missing inventory proves neither deletion nor negative membership.
+Storage checks pass; composition unproved.
 
-Provider age survives; entity revisions never order relationships. Missing inventory
-proves neither negative membership nor deletion. Archive/membership contradictions
-block. Acquisition and saves bypass effect locks; broken journals mean unknown pending.
-Private histories/dependents, including order lists and Git documents, stay held until
-explicit selection. Omission is not convergence. Alternate acquisition, legacy association
-and unplaced-Wave/Desktop recovery UX remain before mixed activation.
-Design: `scratch/work-on-another-machine-name.md`; earlier proofs:
-`225b8c95f:wave/infrastructure/MEMORY.md`, this heading.
+Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
+Private histories/dependents, including order lists and Git documents, remain held
+until explicit selection. Omission is not convergence. Legacy association,
+unplaced-Wave/Desktop recovery and combined/public verification remain.
+Mixed-provider exchange stays disabled.
+Design: `scratch/work-on-another-machine-name.md`. History:
+`5624151a3:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

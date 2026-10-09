@@ -194,6 +194,10 @@ this heading. Keep these replacements deleted:
   Provider/work-watch lifetimes drive exchange; each worker holds its effect lock
   through readback/status. Short saves commit and release planning locks first.
 
+- Standalone autocommit archive SQL and duplicated issue invalidation/reteam
+  bodies. Their common transaction helpers now also acquire peer evidence;
+  the existing journal retains original ages, negative facts and Team baselines.
+  Scalar projection never turns these facts into list-order or execution authority.
 - Parallel order-history/head maps and the second next-delivery selection query.
   Each receipt owns its history and heads together; the common delivery view already
   excludes superseded settled intentions. Projection reuses one membership read.
@@ -236,12 +240,12 @@ ordering error: the independent visibility scalar could outrank that removal's
 receipt. Receipts now capture the original save time in `task_changes`; where
 receipts exist, their common reconciler alone projects visibility. The regression
 forces the contrary scalar clock rather than relying on timing. Provider-only
-removal still needs its separate acquisition cut. Reimport changes no revision.
+removal now uses the common acquisition cut in item 3. Reimport changes no revision.
 Focused regressions cover these cases, migration, late errors and full-row equality
 for seven execution tables (including populated Sessions, Processes and Workflows),
 plus the retained checkout. They do not prove running-provider controls or public
-mixed-provider lifetime behavior. Ordering's later cut is below; alternate-provider
-composition remains unfinished and mixed-provider exchange stays disabled.
+mixed-provider lifetime behavior. Ordering and alternate acquisition are below; composed verification remains
+unfinished and mixed-provider exchange stays disabled.
 
 The latest sync includes issue-scoped comments and child-readiness repair.
 TESTING.md requires comment acquisition in a different order from Task creation.
@@ -286,7 +290,8 @@ Executable feedback exposed two distinct presentation/execution boundaries:
 
 Remaining composition, reconciled October 9 against `5bed3a211`:
 
-Ordering is implemented at `fcd64901f` and `357090d4b`; item 3 remains unimplemented. Retained-effect
+Ordering is implemented at `fcd64901f` and `357090d4b`; item 3 now carries
+alternate acquisition. Retained-effect
 eligibility already exists at `08a285872`; `30b476328` shares its fixture reader.
 `5bed3a211` integrates main `3a0aa5ca4` (#1510), after the common writer's
 `d20c56daf`. Main adds chat Flow recipes and hierarchical names, not provider
@@ -325,18 +330,30 @@ combined launch/Flow candidate. The writer is integrated.
    on export before repair and exercises peer readback without another write.
    Migration, selection and competing-effect proofs remain distinct from public
    mixed-provider acceptance.
-3. **Alternate acquisition is the remaining provider composition cut.**
-   `planning.rs::observe_pm_issue_change`, `confirm_pm_project_archival` and
-   `reconcile_pm_project_teams` own removal, archive and confirmed Team changes.
-   Their accepted evidence is not covered by entity-field provenance or saved
-   deletion receipts. `LinearObservation::fields` deliberately excludes Project
-   relationships and list order; importing an entity cannot settle those frontiers.
-   Transport these observations through their common owners with original ages,
-   retaining independent Initiative/Team/list evidence. Counterexamples must include
-   provider-only removal before a stale peer detail, archive without a local delete,
-   reteam beside a newer entity, and incomplete lists beside uncertain order effects.
-   Independent objects must still import; execution and losing evidence must survive.
-   Missing inventory proves no removal; entity revisions never order relationships.
+3. **Alternate removal/archive/Team acquisition is implemented.**
+   Optional provider-evidence fields use the existing peer journal, separate from
+   entity provenance and saved delivery receipts. Removal/archive evidence commits
+   independently of rejected stale scalar projection; confirmed Teams retain their
+   baseline and original acquisition age, without ordering Initiatives or complete
+   lists. Concurrent contradictory Team confirmations isolate the object. Retained
+   membership uncertainty still needs a fresh common confirmation, not an old
+   imported receipt. Migration seeds retained negative evidence with unknown age;
+   it does not invent historical Team confirmations. Non-removal invalidation is
+   not transported as a durable negative fact; replay-safe invalidation transport
+   remains a composition question before mixed activation, not a retired requirement.
+   Each fact has its own savepoint:
+   conflicting Teams cannot roll back an independently confirmed archive.
+   Review/tests repaired unchanged removal writes and reteam's stale unversioned
+   entity conflict; newer entity values and their age survive confirmed Teams.
+   Repeat-import checks use the same Git revision: changing the import checkpoint
+   legitimately notifies planning readers and is not projection churn.
+   Focused fixtures cover source-only removal against stale detail, archive without
+   a delete receipt, reteam beside newer entity facts, conflicting confirmations,
+   malformed evidence, migration and populated execution. Complete-list evidence
+   remains independent; the incomplete-list case retains uncertain ordering effects.
+   This proves neither public acquisition nor mixed-provider lifetime behavior.
+   Mixed-provider exchange stays off; legacy association/presentation and combined
+   verification below remain before activation.
 4. **Legacy association and presentation remain implementation work.** Divergent
    existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
    presentation, not placement on read. Desktop still needs selected-plan,
@@ -382,8 +399,9 @@ without another commit. Uncertainty is saved before push; later local edits are
 compared with the attempted snapshot digest. Fetched, imported and publication
 revisions remain separate. The public work-watch case passes in isolated Linux;
 other composed cases remain gate acceptance.
-Linear-connected repositories still do not exchange: alternate provider frontiers
-remain uncomposed. The provenance diagnostic is temporary, not product policy.
+Linear-connected repositories still do not exchange: the removal/archive/Team
+storage cut exists, but replay-safe invalidation, legacy association, presentation
+and combined public acceptance remain. The diagnostic is temporary, not product policy.
 
 1. Public `lf planning key/connect/use/select/status` now provisions/recover keys,
    pins an empty binding, selects exact Wave IDs and displays retained imports/holds.
@@ -439,122 +457,19 @@ remain uncomposed. The provenance diagnostic is temporary, not product policy.
    causal Linear predecessor now supplies both value and provider revision; imported
    winners retain losing values, attempted flags and errors without acknowledgement.
 
-   October 8 source cut replaces the boolean Linear-origin flag with a retained
-   observation (provider body/identity/revision and original acquisition time).
-   Common acquisition's accepted facts feed one field map; only matching projected
-   values get provider provenance. Pending local values are not relabeled. Equal-value
-   observations, including first acquisition of migration baselines, enter the journal
-   when no head carries that provider frontier. Concurrent Linear heads order by
-   provider revision before local clock; causal successors remain successors.
-   Peer projection reuses `put_item`/`put_project` and membership validation inside
-   its savepoint, advancing existing provider tables rather than adding a frontier
-   owner. Repeated acquisition emits no mutation. Payload validation rejects extra
-   execution fields and a field disagreeing with its claimed observation.
+   Common scalar, state, comment, content, creation/link, deletion and order
+   receipt composition is implemented. Provider entity observations retain their
+   original bodies, revisions and ages; same-revision contradictions isolate an
+   object while malformed input aborts import. Readback does not acknowledge a
+   mapping or execution. Full implementation/proof details remain at
+   `5624151a3:scratch/work-on-another-machine-name.md`, this item. The earlier
+   checks are storage evidence, not connected Git/Linear lifetime acceptance.
 
-   Authored Task coverage imports a newer/equal-value frontier, then reads older,
-   equal-value and contradictory same-revision provider responses, retaining an
-   uncertain title receipt, losing value, Session and checkout without echo. Project
-   coverage imports an equal-value frontier and rejects an older detail response;
-   it does not yet cover the Task test's full receipt/contradiction matrix. A separate
-   Task test preserves a pending local value on an unchanged provider baseline.
-   The focused storage suite passes; connected-provider composition remains unproved.
-
-   Creation/link receipts and foreground discovery/readback now share their common
-   owner; deletion and ordering receipts now use their common owners. Alternate
-   removal/frontier acquisition remains uncomposed. Comments use the common owners
-   described below. Task disposition now uses the common receipt owner;
-   authored regressions cover lost replies, later reopening, late readback exclusion,
-   unchanged-state provider conflict, idempotence and transaction-wide receipt failure.
-   Cancellation passes in that storage test. Common accepted Task/Project acquisition captures
-   observations; other provider writers still need coverage. Comment payloads now retain the raw provider observation and use common
-   acquisition/delivery; public mixed-provider lifetime acceptance remains. Project
-   relationships and list ordering have independent frontiers; entity updatedAt
-   cannot order them. Raw observations are immutable evidence in field receipts,
-   not permission to invoke execution or acknowledge complete-list acquisition.
-   October 8 source repair moves common acquisition before field/delivery projection.
-   `put_project` now returns acceptance, like `put_item`; a rejected final frontier
-   rolls back that object's savepoint while its journal and conflict remain.
-   Removal/archive checks also apply to local winners and identical cached bodies;
-   the old equality shortcut is deleted. Common cache upserts omit unchanged writes.
-   Only the newest entity-revision group is acquired; equal-revision observations
-   still undergo common conflict checks. Older unversioned history stays in the
-   journal rather than being replayed against a newer accepted frontier.
-
-   Membership rejection is typed. After rolling back the object, import reasserts
-   the existing `membership_unresolved` marker outside its savepoint, in the import
-   transaction; no second evidence store is added. Projected relationship fields
-   must also match accepted membership even when authored without provider provenance.
-   A preexisting unresolved marker cannot be cleared by entity acquisition. Neither
-   a newer entity revision nor a peer clock orders Initiative/Team relationships.
-
-   Authored regressions cover local/provider winners against retained removal and
-   archive, relationship-only and newer-entity membership conflicts, independent
-   Wave import, full journal retention, unchanged Task/Project/Session/Process/
-   Workflow/checkout state and idempotent readback. A repeated newer-Project import
-   covers retained unversioned history. These storage regressions pass; no composed
-   CLI/Desktop acceptance is established.
-   October 8 implementation replaces those acquisition owners' ordinary
-   `InvalidData` for valid but unordered/contradictory observations with typed
-   `ProviderObservationConflict`. Peer import retains it through the existing
-   per-object savepoint/conflict path; malformed input and unexpected SQL still
-   abort the complete import. No second frontier or exception-string matching is
-   added. Direct provider acquisition still rejects the contradictory observation.
-   New Task/Project peer-import regressions construct independently accepted bodies
-   at the same revision. They require both journals, accepted body/age, uncertain
-   receipt identity/value/baseline/attempt/error, Task/Project/Workflow and execution
-   to survive while an independent Wave and checkpoint commit. Repeated import
-   must be idempotent. Malformed revision, extra execution payload and mismatched
-   observation/value fixtures require whole-import rollback. These storage tests
-   pass; they do not establish composed behavior.
-
-   Grouped receipt transport exists through these common owners, not the scalar
-   field loop. These are implemented boundaries with remaining composed acceptance:
-   - `planning_export.rs` owns creation/link attempts and discovery as described above;
-     mappings alone cannot acknowledge an effect.
-   - Peer comments now reuse `task_comments.rs::ingest_task_comment` and
-     `insert_authored_comment`. Comment ID remains delivery identity; reimport
-     retains errors/acknowledgement/conflicts, and acquired comments create no
-     delivery. The common reader adopts provider edits, retains losing receipts,
-     rejects same-revision contradictions and returns stale rejection to both peer
-     projection and foreground direction ingestion. Peer import never appends steers.
-     Raw `IssueComment` replaces reconstructed display-only provenance; the shared
-     conversion retains body, displayed author and creation time. Equal-value
-     revision acquisition captures missing facts, while readback emits no new mutation.
-     Migration omits acquired comments from the journal until a real acquisition
-     supplies their provenance; authored pending comments retain identity. Omitting
-     only content was rejected during review: incomplete objects abort import.
-     The frontier test covers later capture of that retained row. The SQL proof
-     also caught JSON key ordering preventing content provenance; trigger groups now
-     match the field map's canonical order. New Rust regressions cover authored and
-     provider-only comments, lost replies, later edits, retained losers, isolated
-     contradictions, malformed input and unchanged execution; the storage suite passes.
-     Public reconnect and foreground direction regressions remain gate acceptance.
-   - `task_state_delivery.rs::queue_in` now shares `record_in` with peer projection.
-     Peer receipts retain the mutation ID, causal baseline and projected completion
-     time; `move_seq` stays null. Reimport retains attempts/errors; a later save
-     supersedes without deleting uncertainty. Common reconciliation distinguishes
-     acquisition from a selected concurrent Linear winner: the latter retires a
-     losing intention even at its unchanged baseline. Neither moves a Workflow.
-     Non-lifecycle cached states (for example started/backlog) project without
-     inventing a local state intention. Imported completion-time preservation passes;
-     alternate-provider-path coverage remains.
-   - Project content now travels as semantic workflow/KR/target fields, not raw
-     `project_prompt_context`. `project_content.rs` owns parsing and combined
-     persistence; peer receipt projection uses its common field-delivery owner.
-     Each KR list and target list is one existing semantic field, not a new
-     per-item identity model. Acquisition records original provider provenance
-     only on equal values. Populated migration and runtime writers use the same
-     capture owner; import suppresses echo. Storage tests pass; composed acceptance remains.
-   - `planning_order.rs` now transports captured moves, using the two-store cut
-     above. Its `observe_in` still requires complete-list evidence, never detail
-     revisions or scalar ranks. Alternate removal/archive acquisition remains separate.
-
-   Cover alternate accepted provider writers, including reteam, archive/removal,
-   complete-list order and public comment acquisition, not only Task/Project detail reads.
-   Existing local writers are evidence for reuse, not proof of peer composition.
-   Then finish legacy association and Desktop
-   status before enabling mixed-provider foreground exchange and replacing its
-   temporary diagnostic. This cut cannot repair LOO-406's unseen provider-write
+   Removal/archive/reteam now use common acquisition with the focused storage
+   proof in item 3. Gate still owns public alternate acquisition, complete-list
+   ordering and comment composition, not only Task/Project detail reads. Finish
+   legacy association and Desktop status before mixed-provider foreground exchange
+   and removal of its temporary diagnostic. This cut cannot repair LOO-406's unseen provider-write
    race or supply Linear compare-and-swap semantics.
 
 5. Execute the public cold-worker regression: an absent issue selector must acquire
@@ -652,7 +567,7 @@ and limitations: `9b59e9b71:scratch/work-on-another-machine-name.md`,
 **Acceptance for review**. They do not establish this ordering cut, public
 combined behavior or Desktop acceptance.
 
-Check (October 9 realign): `git diff --check` and `lf context --skill realign --json` pass. Recorded pre-merge build, 15 isolated ordering/peer/migration tests, Clippy/fmt pass; combined/public/Desktop: gate. No tests rerun.
+Check (October 9 implement): `cargo test -p loopflow --lib --no-run` passes; seven provider-evidence/preservation/migration filters through `scripts/test_network.py` pass (including the final unknown-age replay case); `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` pass. Combined/public/Desktop: gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

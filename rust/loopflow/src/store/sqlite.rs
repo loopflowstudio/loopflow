@@ -27,7 +27,7 @@ mod durable;
 mod flow_inventory;
 mod metrics;
 mod plan_read;
-mod planning;
+pub(crate) mod planning;
 pub(crate) mod planning_changes;
 pub(crate) mod planning_export;
 pub(crate) mod planning_order;

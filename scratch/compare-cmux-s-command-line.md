@@ -3,17 +3,17 @@
 **Status (reconciled October 9, 2026):** Jack Heart authorized implementation through demo
 review, in one PR. Recorded checkout location, prototype delegation/routing,
 repository-keyed windows, exact retained-pane arrangement and text/key input are
-implemented locally. Passive reads validate exact pane/surface identity but pinned
-lf2 cannot extract bounded text; the verified native artifact remains required.
+implemented locally. Passive reads use the published, checksum-verified lf3
+fixed-buffer reader with exact pane/surface validation; native proof remains.
 Focused local Rust and model evidence establish neither native acceptance nor delivery.
 
 LOO-406 is integrated through main’s `d20c56daf` (#1503). LOO-412 through
-`03742af66` was inspected, not integrated: common receipts, alternate acquisition
-and replay-safe invalidation exist with focused proof.
+`7260e4602` was inspected, not integrated: common receipts, unplaced-Wave reads
+and destination-level Desktop status exist; legacy association remains.
 Mixed Linear/Git stays disabled pending the remaining composition.
 Local Task/Session-plus-Changes opening follows request-scoped readiness; native proof remains.
 Remaining implementation: broader explanation, shared identity/exchange and first-start
-admission, and verified native bounded extraction. Full-path proof remains.
+admission, and remote opening. Native I/O and full-path proof remain.
 [Findings](findings.md), [questions](questions.md) and the
 [comparison](../docs/reviews/terminal-command-comparison.md) retain evidence and open choices.
 
@@ -205,6 +205,14 @@ These boundaries are integration constraints, not separate replacement projects.
 
 ## Delete — do not maintain
 
+Replaced lf2's `boundedReaderUnavailable` placeholder and DTO variant with the
+verified fixed-buffer reader. Removed the native input fixture's unbounded observer;
+it now observes through the exact-target router. Clipboard/Quick Look stay unchanged.
+The bounded-read fixture also owns exited-surface retention and replacement; the
+separate native setup is removed, preserving read and input rejection assertions.
+Apple-event handlers share MainActor/error reply handling; screenshot paths remain
+plain strings while Desktop readings remain JSON.
+
 Removed the blanket Flow-context refusal and preview orchestration/types from
 `run.rs` and `flow.rs`; `context/preview.rs` owns effect-free presentation, using
 existing prompt/graph owners. Removed raw-name checkout guards: preview and launch
@@ -262,9 +270,6 @@ native/artifact evidence and the plan below retains incomplete composition.
 
 ## Implementation sequence — one PR
 
-Checkout migration evidence: `0625dfb60:scratch/compare-cmux-s-command-line.md`;
-installed proof stays with gate.
-
 ### Wave planning and invocation explanation — October 9
 
 `575bde5bc`/`367ce31a9` implement Wave-owned current/historical planning through
@@ -279,8 +284,8 @@ the hidden-write regressions. A proposed URL proves no native readiness.
 
 `31dbb3a68`/`942dab5d8` implement explicit `--machine` previews through SSH, Work
 routing and the receiving preview.
-No probes, credential preparation or Process writes; names/paths resolve on the
-selected Machine. Identity/transport failure has no fallback, missing Work stays
+Preview omits probes, credential preparation and Process writes; repository
+lookup belongs to the selected Machine. Identity/transport failure has no fallback, missing Work stays
 unavailable in text/JSON. Authentication is outside preview preparation.
 Two real CLIs with simulated SSH cover this, not configured SSH or exclusive start.
 Entry-level identity validation also protects ordinary commands and early reads.
@@ -294,10 +299,6 @@ and unavailable evidence. It admits nothing, prepares no workspace, probes no
 socket and acquires/signals no client. JSON preparation stays distinct from takeover.
 Checkpointed-store, owned-client and listening-socket fixtures prove these boundaries;
 Rust/Swift fixtures preserve wire shape. Native use remains with demo.
-
-Completed Flow-preview mechanism and evidence: `c106dc719`, this file,
-**Flow context preview**. Initial inputs only; no command execution or invented
-future/repeat inputs. Shared definition, graph and prompt owners remain.
 
 ### Local composed opening — October 9
 
@@ -406,23 +407,27 @@ Pending data is not remotely durable until published. Existing execution keeps
 its own lifecycle; no automatic turn/Flow retry is introduced. Online comments
 and completion propagate semi-live through the active sync owner. Main's LOO-406
 `d20c56daf` is integrated, retaining repository-scoped foreground Linear sync.
-Readback cannot exclude unseen Linear reopening. LOO-412 through `03742af66` is
-inspected, not integrated. `08a285872` repairs the previously observed source gap:
-common attempt transactions defer effects while rejected or sharing-held projections
-retain receipts only in journals. Saves and independent acquisition continue;
-selection alone cannot release the hold before successful import.
-`fcd64901f` transports common ordering receipts; save clocks select intentions,
-unresolved losing effects hold delivery, and complete-list acquisition alone settles
-progress. `357090d4b` accepts valid primary-only moves. Earlier mechanism/evidence:
-`942dab5d8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
+Readback cannot exclude unseen Linear reopening. LOO-412 through `7260e4602` is
+inspected, not integrated. Its receipt ordering, independent evidence rollback and
+causal invalidation replace no local owner; prior mechanisms and contrary evidence:
+`2c23acbb8:scratch/compare-cmux-s-command-line.md`, **Mixed command**.
 
-The dependency's independent rollback and causal invalidation mechanisms, failed
-attempts and focused evidence are retained at
-`6c1bc2029:scratch/compare-cmux-s-command-line.md`, **Mixed command** and
-[findings](findings.md#committed-exchange-update--october-9). Legacy association,
-unplaced-Wave/Desktop, partial-list/public composition and live-control preservation
-remain unproved; connected Linear exchange stays disabled. Seeded execution and
-routing fixtures do not prove peer-exclusive start.
+The dependency now reads imported Waves with nullable Machine placement
+(`60d113a70`), without allocating it on acquisition. `c20e4ad13` adds repository-scoped
+Git destination receipts/holds through the existing Work stream, retaining last-good
+readings and fencing stale scope/Machine frames. Reuse those readers when composing
+Wave-owned planning and repository-keyed windows; do not add another poller or infer
+repository identity from a destination. Per-Work sharing/authorship/assignee and
+losing-edit recovery presentation remain, distinct from implemented destination status.
+
+`7260e4602` also protects provider mappings before scalar and evidence projection.
+Clearing a legacy mapping would make retained Work eligible for provider creation;
+the former raw-SQL fixture was not association recovery. Explicit association must
+preserve IDs, issue lookup, uncertain effects and execution. Mixed Linear/Git remains
+disabled; combined partial-list/public acquisition, live controls and peer-exclusive
+start remain unproved. Main `3e1e6245c` is integrated: live connect hands off an engine,
+whereas dead-driver resume starts a fresh engine on the saved thread. Combined peer
+proof must distinguish legitimate local resume from a provider launch caused by import.
 LOO-427 consumes the repaired common path rather than rebuilding its
 receipt machinery or narrowing acceptance to disconnected repositories. Import uses the
 common local writer, preserves causal reopening and conflicts, and avoids echoes
@@ -492,48 +497,36 @@ Missing surfaces remain unavailable without allocating. The token comes from
 `ProgramStatusSurface`, not pane occurrence or a parallel generation store. A
 released view cannot create a second native surface with its old lifetime.
 
-**Bounded extraction patch implemented locally; artifact and composition remain.**
-`0004-bounded-text.patch` extends the embedded reader with caller-owned byte
-storage. `ScreenFormatter` writes directly into a fixed destination, stopping on
-capacity and checking only the final UTF-8 scalar for truncation; no full string or pin map
-is allocated. Explicit selections cover viewport/scrollback; a null selection
-reads the current text or command block, with empty distinguished from failure.
-Review removed stale command-block pin cleanup from its getter; selection changes,
-reset and teardown retain that ownership. Clipboard/Quick Look keep their existing
-unbounded APIs and viewport metadata, not a fallback for this read.
+**Bounded extraction composed October 9; native acceptance remains.**
+`Package.swift` selects published `a60e9e2-lf3`. Public download and SwiftPM match
+`dfa0e65b216cccbee132b1d579bc2bd646fda34b2822fe8e00b0306b70bada7f`.
+Jack Heart's October 6 authorization covers this artifact workflow, not planning-data
+publication. The prior ReleaseFast build exported both architectures and passed
+270 primitive tests (four skipped), after repairing reset-pin cleanup. Earlier
+build failures and native limits: `aade49b61:scratch/findings.md`, **Terminal identity
+and extraction boundary**.
 
-The artifact remains `a60e9e2-lf3`; `Package.swift` still pins verified lf2.
-`f3dce9aaf` records a successful ReleaseFast framework build for arm64/x86_64
-and 270 primitive tests passing (four skipped), after a reset-pin regression
-was repaired. It is unpublished and uncomposed; native-surface proof remains.
-[Findings](findings.md) retain the build output and earlier pre-main stalls.
-Jack Heart's October 6 authorization covers future artifacts after relevant checks
-and download checksum verification, not real planning-data publication.
+`desktop read` uses the existing Apple event, registry and passive surface lookup.
+Synchronous window/pane/surface validation never allocates a terminal, cleans up
+an exited child, acquires a client or follows focus. The renderer-locked formatter
+writes directly into fixed caller storage; Swift copies only the written UTF-8
+prefix. `screen` selects viewport, `scrollback` full retained screen, and `selection`
+current text/command block. Empty succeeds; invalid regions fail without an
+unbounded fallback. Selection/reset/teardown retain command-block pin ownership.
+Clipboard/Quick Look keep their independent APIs.
 
-**Exact-target read boundary implemented locally.** `lf desktop read` sends the
-pane target, required surface incarnation, region and byte bound through the
-existing Apple event transport. Window and pane validation share arrangement's
-owners; passive pool lookup validates the surface lifetime without `view(for:)`
-or `hasSurface`. The reply echoes the request with observation time, pane-local
-collapse/zoom visibility and a tagged available/unavailable result. Empty text
-cannot stand for unavailable. Stale windows/content/surfaces fail without fallback;
-focus does not select the read target. Limits are 1–1048576 bytes (default 65536).
+Replies echo exact target, time and pane-local collapse/zoom visibility, not
+compositor visibility. Bounds remain 1–1048576 bytes (default 65536). Inspection
+advertises `read`; missing surfaces and companions remain explicitly unavailable.
+The lf2 placeholder result and wire variant are removed, not maintained beside it.
 
-The pinned lf2 reader returns `bounded_reader_unavailable` for an existing exact
-surface, `missing_surface` for absence and `not_terminal` for companion panes.
-This is not native extraction or a complete read capability; inspection does not
-advertise it as supported. No new symbol, dynamic lookup or unbounded fallback was
-added. Remaining native composition is lf3 publication/download verification via
-[the patch workflow](../swift/GhosttyKitPatches/README.md), manifest/checksum
-selection, then fixed-buffer C extraction and bounded Swift copying at this
-existing boundary. The unpublished framework alone supplies no native acceptance; importing an
-unavailable symbol or using unbounded reads does not complete it.
-
-Fixtures cover the wire contract, missing/nonterminal surfaces, limits, stale
-window/content and focus-independent targeting. A display-gated fixture covers
-real exited-surface retention and replacement rejection; it has not run. Empty
-native selections, extraction/copy limits and retained terminal drafts still need
-the bounded C reader composed and executed, not inference from DTO examples.
+Headless fixtures cover stale targets, missing/nonterminal surfaces, limits and
+focus-independent routing; patch checks cover bounded formatting. Native fixtures
+now observe input through the router and cover empty selection, each UTF-8 prefix,
+viewport versus scrollback, retained selection and exited/replaced surfaces. They
+compile but remain display-gated and unexecuted. No installed app or user terminal
+was changed. Remaining proof: mounted extraction, input/draft retention, complete
+CLI-to-pane path and remote composition in this one PR's demo.
 
 **Exact input implemented locally (October 8).** `desktop text/key` extend the
 existing pane action/event; no input router, socket, layout store or clipboard
@@ -581,4 +574,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check (October 9 compress): `cargo build -p loopflow --bin lf`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` PASS; network-isolated `cargo test -p loopflow --test global_commands session_connect_explain` (4) and `--test session_cli_tests session_cli_uses_one_truthful_resolution_contract` (1) PASS; unchanged DTO/Swift proof: `d9840c81b`; affected suites: gate, native usability: demo. Sync: `cargo test -p loopflow --lib task_decision_preserves_unknown_history_and_live_process_protection -- --test-threads=1` PASS (1).
+Check (October 9 realign): `git diff --check` PASS (prose only); retained compress result: `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --filter DesktopPaneControlTests` PASS (build; 15 headless tests, two native skips); native extraction/input remains with demo. Prior Rust/Swift bounded-reader checks: `feb512076` and `/tmp/loo427-compress-reader/scratch/compare-cmux-s-command-line.md`; affected suites: gate.

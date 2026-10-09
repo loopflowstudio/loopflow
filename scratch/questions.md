@@ -52,7 +52,7 @@ authorizes native input. Q2 remains open.
 CLI companions preserve focus, zoom and Work selection. An empty exact target is
 filled; occupied content is never replaced. Files/Flow-log reuse and unhide the
 named Task's pane only in its recorded/prepared checkout. Shell always allocates
-and remains local-only until remote opening is composed. This does not decide Q2 or grant native-input authority. The pinned Ghostty reader now has a local bounded-extraction patch. A verified artifact and native extraction composition remain; full-buffer reads followed by truncation are not a fallback.
+and remains local-only until remote opening is composed. This does not decide Q2 or grant native-input authority. The verified lf3 artifact now supplies fixed-buffer extraction; native pane acceptance remains. Full-buffer reads followed by truncation are not a fallback.
 
 ## Reversible bounded-read choice — October 8
 
@@ -62,10 +62,10 @@ unavailable surface. Current selection includes a selected shell command block.
 This supplies no input authority or semantic completion inference.
 
 The read request uses a 64 KiB default and a 1 MiB maximum; the reply echoes its
-exact target and distinguishes missing/nonterminal/unavailable-reader from empty
+exact target and distinguishes missing/nonterminal surfaces from empty
 text. `hidden` describes pane collapse or zoom within its retained workspace,
-not compositor visibility. Existing lf2 surfaces report unavailable, with no
-unbounded fallback.
+not compositor visibility. The composed lf3 reader uses viewport/full-screen
+selection bounds without changing the terminal's selection; no unbounded fallback.
 
 ## Command-map review — October 8
 
@@ -107,16 +107,16 @@ These are reversible lookup choices, not shared Work identity or publication.
 Primary and stack-parent Task selectors now carry repository-scoped full IDs through
 dispatch; an unscoped ambiguous prefix still fails.
 
-October 9 `lf context --skill compress --json`: generated goal 27,735/16,000 tokens
-(11,735 over). The full launch source was read; its generated changed-file inventory
-cannot be removed by authored-note curation. This remains a context-producer gap;
-no limit was raised.
+October 9 `lf context --skill realign --json`: generated goal 27,854/16,000 tokens
+(11,854 over; generated inventory sizes vary). The complete launch source was read: Task/steer history plus 211
+changed-file records. Authored-note curation cannot remove that generated payload;
+the context-producer gap remains. No limit was raised.
 
 ## Reversible preview limits — October 9
 
 Skill/inline context uses stored planning; launch may refresh Task comments.
 Flow context uses the fresh-start snapshot choice below. Bare-agent/new operator-checkout previews
-cannot prepare future checkouts. Remote previews observe only the selected Machine;
+cannot prepare future checkouts. Remote previews are scoped to the selected Machine;
 identity failure precedes assembly. Authentication is outside preparation; local
 absence grants no first-start admission.
 

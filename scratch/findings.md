@@ -45,38 +45,39 @@ proof remains.
 
 ### Committed exchange update — October 9
 
-LOO-412 through `03742af66` was inspected through Git, not integrated.
-Creation/deletion, retained-effect eligibility and ordering receipt evidence remains
-at `942dab5d8:scratch/findings.md`, this heading. `08a285872` defers effects while
-projection conflicts retain journals; `fcd64901f` orders intentions by save clocks,
-and `357090d4b` accepts valid primary-only moves. Complete lists alone settle order
-progress. Those mechanisms remain dependency code, not mixed-provider acceptance.
+LOO-412 through `7260e4602` was inspected through Git, not integrated.
+Receipt ordering, independent removal/archive/Team rollback, original acquisition
+ages and causal invalidation findings remain at
+`2c23acbb8:scratch/findings.md`, this heading. Complete lists alone settle order;
+scalar/list replay cannot clear freshness. Earlier 63 peer-storage passes and four
+focused invalidation checks are bounded evidence, not combined acceptance.
 
-`358f7fa08` adds removal/archive/Team evidence to the existing journal and common
-acquisition helpers. `25cbc0a09` prepares typed histories before projection retries.
-Source inspection confirms one savepoint per independent fact before scalar
-projection: contradictory Teams cannot roll back an archive. Original acquisition
-ages and Team baselines survive; migration leaves legacy ages unknown.
-`4acd37ec8`/`6ccbbabe3` subsequently transport non-removal notices and detail
-acknowledgements through causal journal heads. Replay cannot revive observed notices;
-unseen concurrent notices still invalidate. Known revision floors survive lower or
-unversioned heads. `reconcile_task_freshness` requires an accepted entity frontier:
-a cache-only acknowledgement cannot refresh an older body. Scalar/list replay no
-longer clears freshness. Source and fixtures were inspected, not integrated.
+New source cuts: `60d113a70` makes Wave Machine placement nullable in Rust/Swift
+and displays imported Waves without allocating placement. `c20e4ad13` adds Git
+destination receipts/holds to the repository Work stream and Desktop, independent
+of roadmap availability. Scope/Machine fencing and last-good readings preserve
+unavailable state; there is no second poller or setup action. The dependency records
+focused headless proof, not per-Work sharing/recovery UX or native acceptance.
 
-The dependency records 63 earlier peer-storage passes plus four focused invalidation/negative-evidence checks. Inspected Team coverage preserves
-newer entity facts, original ages, populated execution and an uncertain order,
-but never acquires a list. Cold empty-list rejection is separate; combined partial
-list acquisition and public paths remain unproved. `ops/planning_peer.rs` still
-refuses connected Linear exchange. Legacy association and unplaced-Wave/Desktop
-remain; no peer admission or live-control proof follows. Dependency plan/memory:
-`03742af66`, **Remaining integration** and **Tasks across machines**. Public
-invalidation verification remains with its combined gate.
+`7260e4602` moves provider-mapping validation ahead of both scalar projection and
+independent evidence. A new fixture retains mapping, uncertain effects and execution
+when peers remove/replace a mapping, while independent objects import. The earlier
+raw-SQL unmapping recovery was removed: it could turn legacy Work into a duplicate
+provider-creation candidate without reconciling issue lookup or effects. Explicit
+legacy association remains unfinished. This newest fixture was inspected, not run.
 
-October 9: no Product child directories/memories found. Infrastructure
-planning/Machine sections, LOO-412’s committed peer memory
-and Intelligence context/check-ownership sections were read; unrelated sibling
-history was not re-audited. Main remains `3a0aa5ca4`, already integrated.
+`ops/planning_peer.rs` still refuses connected Linear exchange. Partial-list/public
+composition, foreground provider lifetime/native reconnect and peer-exclusive start
+remain unproved. Imported unrun records and populated storage fixtures cannot prove
+live control preservation. Dependency plan/memory: `7260e4602`, **Remaining integration**
+and **Tasks across machines**; no mixed-provider activation follows from these reads.
+
+October 9: filesystem inspection found no Product child directories/memories.
+Infrastructure planning/Machine/Task-decision sections, LOO-412's committed plan and
+peer memory, and Intelligence context/check-ownership sections were read; unrelated
+sibling history was not re-audited. Main `3e1e6245c` (#1512) is already integrated.
+Its dead-driver resume uses a fresh engine on native history; live connect still
+hands off. Neither mechanism gives planning imports process-control authority.
 
 ## Arrangement evidence — October 8
 
@@ -104,8 +105,12 @@ composition proof. The later build below supersedes only framework availability.
 October 9: pinned Zig 0.16 runs again (default 0.15 failed). Reset now releases
 its command-block pin: 270 native tests pass, four skip; one failed before the fix.
 The ReleaseFast lf3 framework builds and exports the bounded reader on arm64/x86_64.
-Zip/checksum in `result.json`; unpublished, with no native-surface proof:
+Zip/checksum and build receipts in `result.json`; native-surface proof remains:
 `/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo427-native-build-pu4xqwri/`.
+The later October 9 composition published lf3 immutably to the authorized artifact
+bucket and verified its public download before selecting it in SwiftPM. Removed
+the placeholder read result and the native input fixture's full-buffer observer;
+that fixture now uses exact-target reads. Native fixtures remain unexecuted.
 
 ### Exact-target read boundary — October 8
 

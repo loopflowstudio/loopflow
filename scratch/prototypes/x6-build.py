@@ -53,14 +53,14 @@ main = f'''
 <section class="reading">
   <ul class="plain">
 {items([
-("Every Task ends shipped", "A Task is one outcome, and it is done when its pull request has merged: designed before it was built, checked before you saw it, and tried by you before it went in."),
-("The work, not the chats", "Loopflow for Mac is laid out around your work. Waves are long-lived streams, Tasks are concrete outcomes (i.e. PRs), and every Session is kept under the Task it was for, so you follow the work and not a trail of chats."),
-("A workflow for every Task", "Loopflow encodes the stages a Task goes through to become a shipped and validated PR. Flows carry it from one stage to the next, and it stops where your judgment is needed."),
-("You choose where you step in", "Stay in one Session and steer as you go, come in at design and demo, or let it run. Set it project by project, and spend your time on the stages that matter most to you."),
-("What needs you is on screen", "A Task that is waiting on you is marked. The rest keeps running."),
-("A Wave is a goal you can check", "A Wave holds a goal, the key results that show whether you are getting there, and the Tasks that move them. It keeps its plan and its memory, so later Sessions start from what earlier ones learned."),
-("Many at once", "Each Task works in its own copy of the code, so several can move side by side without colliding."),
-("A native Mac terminal underneath", "Every pane is a real terminal running Claude Code, Codex, or OpenCode, with <code>lf</code> included."),
+("It starts with a goal", "A Wave is a goal that outlasts any one conversation, like getting people’s data out of your app. It keeps its key results, its plan, and its memory."),
+("One Task, one outcome", "“Add CSV export” is a Task. It ends in one pull request, and it is done when that merges."),
+("Your agent plans, you review the design", "The Task’s workflow starts its first Flow. Your agent drafts a plan and stops. This stop is yours."),
+("It gets built without you", "The next Flow implements the plan, tidies it, catches up with the rest of the code, and opens the pull request. Each step is a Session of its own."),
+("You try it", "The Task waits at demo, marked, until you have tried the change. Send it back as often as it takes."),
+("It ships", "Checks run, then it merges. Every Session that got it there is kept under the Task, whichever agent ran it."),
+("You choose the stops", "The workflow is a file. Steer every step, come in at design and demo, or let it run, project by project."),
+("Underneath", "A native Mac terminal, running Claude Code, Codex, or OpenCode on your own account, with <code>lf</code> included."),
 ])}
   </ul>
   <p class="more"><a href="/cli">Underneath, it is all <code>lf</code> ↗</a><a href="/docs/waves">Tasks and Waves ↗</a></p>

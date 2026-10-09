@@ -383,3 +383,12 @@ Jack Heart: "maybe worth studying superlogical, herdr, cmux, devin, replit,
 cursor here", then "as well as linear, workday". A study of how those eight
 pages handle the text after the hero is running; it is for structure and
 emphasis only, and no wording is taken from them.
+
+The study came back (read through a summarizer, so its quotes are unchecked;
+Devin's product page and Workday's deeper pages were not read). Its finding:
+the pages that explain a work model well (Linear, Cursor, herdr) do not define
+their nouns; they follow one concrete thing through its states, order sections
+by the life of the work, show the person's part as a visible state, and keep
+mechanism to one line. cmux is a feature list with outcomes left to quotes.
+The `x6` list now follows one Task, "Add CSV export" from the mock, from goal
+to merge in eight items, with the terminal last.

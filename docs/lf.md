@@ -114,7 +114,7 @@ its start. See [workflows](authoring.md#workflows).
 ```bash
 lf project workflow list                 # Workflow definitions and validity
 lf project workflow set PROJECT code     # selection for future Tasks
-lf project workflow customize feature    # print its local source path
+lf project workflow source PROJECT feature # read the definition
 lf task workflow show EXP-12             # captured graph, position and history
 lf task workflow restart EXP-12          # move to start; retain graph and history
 lf flow list                             # autonomous Flow definitions
@@ -144,6 +144,69 @@ Known invalidation, removal, terminal state or ownership changes still block.
 `--reason` requires successful Linear publication before the launch. Status
 retains the planning observation's original age.
 
+## Plan locally
+
+```bash
+lf task create --title "Fix the parser" --json
+lf task edit <id> --notes "Preserve quoted input"
+lf task comment <id> "Keep escaped quotes intact"
+lf task checkout <id>
+lf task run <id> research
+```
+
+Without a selected Wave, explicit creation uses `inbox`. A Task gets its
+identity before placement; creation starts no agent and requires no Linear login.
+Goals, memory, Projects and comments stay in SQLite. Reads create nothing.
+
+```bash
+lf wave ensure parser
+lf wave edit parser --goal /tmp/goal.md --memory /tmp/memory.md
+lf task create --wave parser --title "Retain escaped quotes"
+```
+
+Creation generates and saves a Task, then prints its ID. Every invocation creates
+a distinct Task, even with the same title. Use the saved ID to inspect or edit it.
+Task references accept unique UUID prefixes of at least four hex digits, bare or
+prefixed with `lf-` or `task_` (for example, `abcd`, `lf-abcd`, `task_abcd`).
+Hex digits are case-insensitive. Ambiguous prefixes list matching Task IDs;
+add digits to select one. Full IDs and exact Linear ticket aliases still work.
+Displayed local selectors start at seven digits and extend when needed; retain
+full IDs in automation.
+
+```bash
+lf task edit <id> --rank 0 --assignee <person-id>
+lf task edit <id> --unassign
+lf project edit <project-id> --name "Parser" --summary "Retain quoted input"
+lf project workflow set <project-id> review --file /tmp/review.yaml
+lf project workflow list --project <project-id> --json
+lf project workflow source <project-id> review
+lf wave update-plan --wave parser --plan /tmp/plan.json
+```
+
+Project names, summaries, Workflow selections and complete plan replacements save
+locally, including during a Linear outage. Connected repositories report pending sync;
+`lf project workflow show <project-id> --json` includes `sync`: pending changes,
+uncertain attempts, errors and retained losing values. Task edits and status use
+the same receipt-backed presentation as Desktop.
+Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
+Linear edits, retaining losing intentions in delivery history. An active Task Session
+or Desktop connection exports saved Projects and delivers their fields. Lost creation
+or Initiative-attachment replies retain uncertainty until exact readback.
+Readback cannot protect against unseen concurrent provider writes.
+
+Ranks are zero-based within a Project. Selected workflow definitions stay in SQLite
+for every Wave; Desktop’s Customize and Edit controls use the same editor. Stored
+definitions are imported by `lf wave ensure`; builtin definitions remain available.
+Nested Waves use names such as `parser/tokenizer`; renaming retains their IDs,
+descendants and saved documents. `lf wave ensure` imports existing Markdown and
+Workflow sources without changing them. Repeating it preserves stored edits.
+`lf wave edit` saves to SQLite in both connection modes.
+
+Placement, native Sessions, workflow skills and GitHub delivery use the same Task
+identity. `lf land -c` requests completion after a verified merge; `lf pr reconcile`
+settles it. A repository without a code remote supports local work and refuses
+hosted landing. Local planning does not require Linear at any of these boundaries.
+
 ## Connect planning and create work
 
 ```bash
@@ -151,8 +214,8 @@ lf list wave                       # authored goals, including unconnected Waves
 lf account connect linear
 lf repo connect --all --team-key EXP # connect goals and choose the Task prefix
 lf task create --wave exports --title "Add CSV export"
-lf checkout EXP-12                  # prepare its checkout without execution
-lf task run EXP-12
+lf checkout <task-id>               # use the ID printed at creation
+lf task run <task-id>
 lf roadmap --json                   # plans and Tasks across Waves
 lf wave status exports --json       # one Wave's detailed evidence
 ```
@@ -161,10 +224,27 @@ Connected planning needs a Linear login and repository Team. Connection names
 missing access and the command to obtain it. Authored Waves remain discoverable
 before connection. Planning setup is separate from direct local execution.
 
-After Linear accepts a Task creation or update, Loopflow confirms that issue
-directly without another Wave-wide snapshot. If Linear commits but issue
-confirmation fails, the error names the retained issue. Retry the same command
-with the original creation options to reuse it without filing a duplicate.
+Task creation and edits save locally, including during a Linear outage. Creation
+generates the Task ID; later edits, Project rotation and synchronization preserve it.
+Connected repositories report pending sync. Field receipts retain titles, notes, assignment and ordering
+with their provider baselines; observed conflicts adopt Linear and retire the losing
+intention. An active Task connection delivers mapped titles, notes, assignment,
+membership, deletion, Project fields and Task ordering after recovery. Reordering
+saves one Project-wide intention; partial delivery and lost replies retain that identity. Deletion retains execution
+and checkout history. Missing provider evidence keeps deletion pending; newer
+observed Linear edits retire removal and restore planning visibility. The active
+connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies
+never allocate replacement identities. Later local edits survive creation readback.
+The local ID works before a Linear alias arrives.
+
+```bash
+lf task refile <task-id> --wave exports
+```
+
+Move unplaced work to the Wave's selected Project. Membership saves locally during
+an outage and retains pending sync; recorded work keeps its owner. An active Task
+Session or Desktop connection delivers the move when both Task and destination
+Project have Linear mappings. The same active connection exports unmapped records.
 
 ## Inspect and continue
 
@@ -180,7 +260,7 @@ lf mon show SESSION --context       # one step: instructions, memory, scratch, g
 lf session ensure                   # this repository's one ongoing conversation
 lf session ensure -w growth         # a Wave's one ongoing conversation
 lf session ensure --task EXP-12     # a Task's primary conversation
-lf --task EXP-12 skill task/session # another conversation about that Task
+lf --task EXP-12 skill task-session # another conversation about that Task
 lf session connect SESSION         # continue a conversation
 lf session replace SESSION         # fresh conversation for the same scope
 lf context --task EXP-12 --json     # effective context limits, sources and usage
@@ -209,8 +289,8 @@ inspection and replay; they do not select these Session actions.
 | Scope | One finite pass | Ongoing conversation |
 | --- | --- | --- |
 | Repository | `lf operate` | `lf session ensure` |
-| Wave | `lf --wave growth wave/operate` | `lf session ensure -w growth` |
-| Task | `lf task/operate EXP-12` | `lf session ensure --task EXP-12` |
+| Wave | `lf --wave growth wave-operate` | `lf session ensure -w growth` |
+| Task | `lf task-operate EXP-12` | `lf session ensure --task EXP-12` |
 
 Each conversation is its scope's operator and carries the matching operate
 procedure. It leaves running Flows alone, reads a stopped or failed Flow before
@@ -269,8 +349,29 @@ requests without a stated outcome surface for an explicit scope decision.
 `lf task move EXP-12 end` records an explicit completion. Old Session turns,
 reserved inputs and unknown process exits cannot veto it. Execution history and
 live process controls remain intact; uncertain or occupied checkouts are retained.
-Cancellation follows the same separation. Open PRs and additional committed work
-still need delivery or explicit abandonment.
+`lf task abandon EXP-12` saves cancellation locally, including while Linear is
+unavailable. Retry retains its decision and delivery identity. An active connection
+delivers cancellation from that saved receipt; unavailable Linear states remain
+pending. Open PRs and additional committed work still need delivery or explicit
+abandonment.
+
+Completing an uncached Linear issue first retains its Task locally, without a
+checkout. The completion reason stays in Task history; retries reuse that identity
+and preserve the recorded outcome while provider writeback is pending.
+
+Completion, reopening and cancellation save locally before contacting Linear.
+An active Task Session or Desktop connection delivers pending decisions independently
+of comments and incoming planning. Status and Desktop retain pending synchronization feedback.
+
+```bash
+lf task sync EXP-12                     # attempt pending delivery once
+```
+
+Observed conflicts adopt Linear automatically. The losing local state or comment
+remains in delivery history, and its delivery stops. An unchanged Linear baseline
+preserves pending local saves. Comment threads display Linear's current text beside
+the saved local body. Planning synchronization never moves the local Workflow.
+The separate provider read and write cannot prevent an unseen concurrent edit.
 
 ## Check authorized deliveries in the background
 

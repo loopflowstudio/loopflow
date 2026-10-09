@@ -16,7 +16,7 @@ Run review-chapter when needed. Obtain explicit acceptance of direction before
 scoped planning. Existing acceptance remains valid; headless work without it
 reports the missing decision and stops.
 
-Request bounded wave/start-chapter contributions for the participating Waves,
+Request bounded wave-start-chapter contributions for the participating Waves,
 including nested Waves. Supply accepted direction and prior evidence. Contributions
 return proposals, never mutate planning. Reconcile them into one retained
 `scratch/chapter-plan.json` with this shape:

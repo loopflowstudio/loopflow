@@ -243,18 +243,6 @@ impl SqliteStore {
         Ok(records)
     }
 
-    /// Resolve retained identity without loading plans, captures or launch eligibility.
-    pub(crate) fn resolve_task_id(
-        &self,
-        selector: &str,
-        repo: Option<&str>,
-    ) -> StoreResult<Option<crate::durable::TaskId>> {
-        self.resolve_work_id("SELECT t.id FROM tasks t JOIN projects p ON p.id=t.project_id JOIN waves w ON w.id=p.wave_id
-            WHERE t.id=?1 OR ((t.issue_identifier=?1 OR t.external_issue_id=?1) AND (?2 IS NULL OR w.repo=?2))
-            ORDER BY (t.id=?1) DESC,t.id LIMIT 2", selector, repo)
-            .map(|id| id.map(crate::durable::TaskId::from_raw))
-    }
-
     pub(crate) fn resolve_wave_id(
         &self,
         selector: &str,

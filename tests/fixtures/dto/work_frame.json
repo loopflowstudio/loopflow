@@ -137,7 +137,14 @@
         "workflow": null,
         "flow_processes": []
       },
-      "flow_processes": []
+      "flow_processes": [],
+      "comments": {
+        "identifier": "LOO-1",
+        "comments": [],
+        "pending_sync": [],
+        "refresh_error": null,
+        "conflicts": {}
+      }
     }
   }
 ]

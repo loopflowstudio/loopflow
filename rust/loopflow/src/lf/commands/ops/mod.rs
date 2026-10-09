@@ -724,8 +724,8 @@ fn pr_status() -> Result<()> {
     Ok(())
 }
 
-pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
-    if !yes {
+pub fn run_sync_skills(yes: bool, no_prune: bool, repo: bool) -> Result<()> {
+    if !yes && !repo {
         if !std::io::stdin().is_terminal() {
             return Err(anyhow!(
                 "skill sync writes under ~/.claude and ~/.agents; rerun with --yes to confirm"
@@ -742,11 +742,13 @@ pub fn run_sync_skills(yes: bool, no_prune: bool) -> Result<()> {
     let report = sync_skills(&SkillSyncOptions {
         prune: !no_prune,
         global_home: None,
+        repo: repo.then(find_repo_root).transpose()?,
     })?;
     println!(
-        "synced skills ({} written, {} pruned)",
+        "synced skills ({} written, {} pruned, {} skipped)",
         report.written.len(),
-        report.pruned.len()
+        report.pruned.len(),
+        report.skipped.len()
     );
     Ok(())
 }
@@ -1598,6 +1600,7 @@ mod cron_catalog_tests {
 
     #[test]
     fn declared_cron_flow_cannot_fall_back_to_builtin_skill() {
+        let machine = crate::journal::TestLedgerGuard::new();
         let repo = tempfile::tempdir().unwrap();
         fs::create_dir_all(repo.path().join("wave/infrastructure")).unwrap();
         fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
@@ -1619,6 +1622,10 @@ mod cron_catalog_tests {
             placed_machine: home,
             repo: repo.path().to_path_buf(),
         };
+        crate::store::sqlite::SqliteStore::new(&machine.home().join("loopflow.db"))
+            .unwrap()
+            .ensure_wave(repo.path().to_str().unwrap(), "infrastructure")
+            .unwrap();
         let specs = cron_specs(&authority, "infrastructure").unwrap();
         assert_eq!(specs.len(), 1);
         assert_eq!(specs[0].target_kind, CronTargetKind::Flow);
@@ -2329,7 +2336,7 @@ fn protected_worktree_paths() -> Result<HashSet<PathBuf>> {
                     status,
                     crate::durable::WorkStatus::Done | crate::durable::WorkStatus::Abandoned
                 ) {
-                    protected.insert(task.worktree);
+                    protected.extend(task.worktree);
                 }
             }
         }

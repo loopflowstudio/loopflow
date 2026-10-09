@@ -52,6 +52,7 @@ Open Loopflow or run its CLI
 | `--docs` | Docs paths, globs, or directories to include in context |
 | `--clipboard / -c` | Include clipboard content in prompt Default: false. |
 | `--agent / -a` | Agent to use (harness or harness:model) |
+| `--skill-input` | Captured skill and arguments supplied by the invoking Flow process Internal. |
 | `--account` | Prefer this managed provider login before the normal route. Repeat to select provider-qualified preferences such as `claude=jack@`. Logins spend; a profile is only the Chrome venue accounts log in through, so it is never a run-time selector |
 | `--only-account` | Restrict this invocation and its children to exactly these managed provider logins. Providers without a selection are unavailable |
 | `--isolate` | Run in the selected account's own provider home, unmoved by account switches. Applies to this invocation and its children Default: false. |
@@ -452,6 +453,18 @@ Internal command; invoked by the owning operation.
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf __session-title
+
+Native provider naming callback
+
+Internal command; invoked by the owning operation.
+
+| Argument | What it does |
+|---|---|
+| `<provider>` | provider |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1005,7 +1018,7 @@ Internal command; invoked by the owning operation.
 
 ## lf self sync-skills
 
-Compile loopflow skills into your home vendor Skills directories
+Export skills and Flows into native vendor Skills directories
 
 Internal command; invoked by the owning operation.
 
@@ -1013,6 +1026,7 @@ Internal command; invoked by the owning operation.
 |---|---|
 | `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
 | `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1063,6 +1077,7 @@ Install a separate login on an added machine using this laptop's browser
 | `<provider>` | provider |
 | `<email>` | email |
 | `--chrome-profile` | chrome profile |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials
@@ -1071,6 +1086,7 @@ Inspect or receive a machine credential (credential bytes use stdin only)
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials inspect
@@ -1081,6 +1097,7 @@ Report whether this account is installed, without logging in
 |---|---|
 | `<provider>` | provider |
 | `<login>` | login |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine credentials receive
@@ -1089,6 +1106,7 @@ Receive a fresh login as JSON on stdin; preserve existing accounts
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
 ## lf machine id
@@ -1182,6 +1200,18 @@ Manage Wave identity, placement and planning
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf wave edit
+
+Replace stored Wave documents without modifying repository files
+
+| Argument | What it does |
+|---|---|
+| `<wave>` | wave |
+| `--goal` | goal |
+| `--memory` | memory |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1410,6 +1440,18 @@ Project-owned planning configuration
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf project edit
+
+Update a Project's name or summary
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `--name` | name |
+| `--summary` | summary |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf project workflow
 
 Select and inspect reusable Workflows
@@ -1419,12 +1461,24 @@ Select and inspect reusable Workflows
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
+## lf project workflow source
+
+Read the authored definition without creating a repository file
+
+| Argument | What it does |
+|---|---|
+| `<project>` | project |
+| `<name>` | name |
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
 ## lf project workflow list
 
 List Workflow definitions, including unavailable local files
 
 | Argument | What it does |
 |---|---|
+| `--project` | Include this Project's stored Wave definitions |
 | `--json` | json Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
@@ -1448,16 +1502,7 @@ Select the Workflow future Tasks take up; captured Tasks stay unchanged
 |---|---|
 | `<project>` | project |
 | `<name>` | name |
-| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
-| `--help / -h` | Print help |
-
-## lf project workflow customize
-
-Copy a builtin Workflow when needed and print its local path
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
+| `--file` | Store this definition in the Wave |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1467,6 +1512,16 @@ Concrete work and Task lifecycle
 
 | Argument | What it does |
 |---|---|
+| `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
+| `--help / -h` | Print help |
+
+## lf task sync
+
+Synchronize a Task; observed planning conflicts adopt Linear
+
+| Argument | What it does |
+|---|---|
+| `<issue>` | issue |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 
@@ -1603,7 +1658,7 @@ Put a Task at a node of its workflow without running anything; `end` completes i
 
 ## lf task create
 
-File a Task in the current chapter
+Create a planning Task without allocating a checkout or starting work
 
 | Argument | What it does |
 |---|---|
@@ -1722,6 +1777,9 @@ Edit a Task's title or notes, before or after placement
 | `<issue>` | issue |
 | `--title` | title |
 | `--notes` | notes |
+| `--rank` | Zero-based position in the Project's Task order |
+| `--assignee` | Assignee identity; provider user ID in connected plans |
+| `--unassign` | unassign Default: false. |
 | `--wave / -w` | wave |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |

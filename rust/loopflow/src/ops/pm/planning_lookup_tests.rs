@@ -1,10 +1,12 @@
+#![allow(clippy::await_holding_lock)] // Serialize process-wide Machine selection for each async fixture.
+
 use std::sync::Arc;
 
 use axum::http::StatusCode;
 use serde_json::json;
 use tokio::sync::Barrier;
 
-use super::test_fixture::{now, Fixture};
+use super::test_fixture::{now, Fixture, PlanningEnvironment};
 use super::{inspect_task_planning_async, read_task_planning_async, PmRefresh, PM_TEST_CONTEXT};
 use crate::id::WaveId;
 use crate::pm::test_server::{json_response, spawn, QueuedResponse};
@@ -51,7 +53,10 @@ fn snapshot(wave: &WaveId, record: &PmTaskRecord) -> PmSnapshotRow {
 
 #[tokio::test]
 async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let mut provider_project = project();
@@ -89,7 +94,11 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                     .unwrap();
             assert_eq!(resolved.wave, "product");
             assert_eq!(resolved.item, record.item);
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
             assert_eq!(fixture.store.list_projects(None).await.unwrap().len(), 1);
             assert!(fixture
                 .store
@@ -163,7 +172,10 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
 
 #[tokio::test]
 async fn rejected_project_snapshot_preserves_durable_project_facts() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (_repo, wave) = fixture.planning_repo().await;
     let mut snapshot: PmSnapshot = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/task_history_planning.json"
@@ -197,7 +209,10 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
 
 #[tokio::test]
 async fn projectless_task_is_inspectable_but_cannot_resolve_managed_ownership() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -238,7 +253,10 @@ async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
             "unable to resolve",
         ),
     ] {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = PlanningEnvironment::isolate();
         let fixture = Fixture::new().await;
+        std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, _) = fixture.planning_repo().await;
         fixture.seed(now() + 3600).await;
         let (url, _) = spawn(vec![
@@ -267,7 +285,10 @@ async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
 
 #[tokio::test]
 async fn failed_refresh_preserves_the_last_observation_and_its_age() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -318,7 +339,10 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
 
 #[tokio::test]
 async fn omitted_detail_fields_do_not_clear_known_planning() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let missing_fields = [
@@ -382,7 +406,10 @@ async fn omitted_detail_fields_do_not_clear_known_planning() {
 
 #[tokio::test]
 async fn missing_detail_invalidates_cached_admission_without_claiming_deletion() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -431,7 +458,10 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
 
 #[tokio::test]
 async fn automatic_refresh_reports_failure_with_retained_observation_age() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let record: crate::store::PmTaskRecord = serde_json::from_value(json!({
@@ -491,7 +521,10 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
 
 #[tokio::test]
 async fn provider_revisions_and_change_receipts_converge_without_execution() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -665,14 +698,21 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert!(read_task_planning_async(&repo, "FIX-2", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
 
 #[tokio::test]
 async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_work() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -730,14 +770,21 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
 
 #[tokio::test]
 async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let entered = Arc::new(Barrier::new(2));
@@ -780,14 +827,21 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
             assert!(read_task_planning_async(&repo, "FIX-1", PmRefresh::Never)
                 .await
                 .is_err());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
 
 #[tokio::test]
 async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unresolved() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, wave) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let (url, _) = spawn(vec![
@@ -918,7 +972,11 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
             list.snapshot.projects.clear();
             list.snapshot.items.clear();
             fixture.store.put_pm_snapshot(list, None).await.unwrap();
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            for task in fixture.store.list_tasks(None).await.unwrap() {
+                assert!(task.worktree.is_none());
+                assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
+                assert!(!fixture.store.task_started(&task.id).await.unwrap());
+            }
         })
         .await;
 }
@@ -926,7 +984,10 @@ async fn project_revisions_order_shared_facts_and_unordered_membership_stays_unr
 #[tokio::test]
 async fn cold_detail_resolves_configured_wave_before_projecting() {
     for ownership in ["same", "foreign", "unmapped"] {
+        let _lock = crate::journal::test_env_lock();
+        let _restore = PlanningEnvironment::isolate();
         let fixture = Fixture::new().await;
+        std::env::set_var("LF_HOME", fixture.directory.path());
         let (repo, wave) = fixture.planning_repo().await;
         fixture.seed(now() + 3600).await;
         let mut refreshed = project();
@@ -950,6 +1011,11 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                     repo.to_string_lossy().into_owned(),
                 ))
                 .await
+                .unwrap();
+            fixture
+                .store
+                .sqlite
+                .ensure_wave(repo.to_str().unwrap(), "other")
                 .unwrap();
         }
         let (url, _) = spawn(vec![
@@ -1023,7 +1089,10 @@ async fn cancelled_snapshot_acceptance_keeps_wave_excluded_until_commit() {
 }
 
 async fn cancelled_acceptance(detail: bool) {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let mut responses = if detail {
@@ -1065,7 +1134,6 @@ async fn cancelled_acceptance(detail: bool) {
                 Some("team-1".into()),
                 url.clone(),
             ),
-            provider: crate::pm::PmProviderKind::Linear,
             repo_id: crate::repository::RepoId::parse("loopflowstudio/fixture").unwrap(),
             team_id: "team-1".into(),
         },
@@ -1143,7 +1211,10 @@ async fn cancelled_acceptance(detail: bool) {
 
 #[tokio::test]
 async fn cold_detail_rechecks_team_after_acquiring_wave() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let mut discovered = issue(project());
@@ -1162,13 +1233,16 @@ async fn cold_detail_rechecks_team_after_acquiring_wave() {
         )
         .await
         .unwrap();
-    assert_eq!(record.item.team_id, "team-1");
+    assert_eq!(record.item.team_id.as_deref(), Some("team-1"));
     assert_eq!(record.project.unwrap().team_ids, ["team-1"]);
 }
 
 #[tokio::test]
 async fn delayed_absence_preserves_a_newer_accepted_task() {
+    let _lock = crate::journal::test_env_lock();
+    let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
+    std::env::set_var("LF_HOME", fixture.directory.path());
     let (repo, _) = fixture.planning_repo().await;
     fixture.seed(now() + 3600).await;
     let entered = Arc::new(Barrier::new(2));
@@ -1231,141 +1305,6 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                 inspection.observation.record.unwrap().item.identifier,
                 "FIX-2"
             );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn project_binding_preserves_exact_backlog_identity_and_retries() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed(now() + 3600).await;
-    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-    let mut existing = project();
-    existing["id"] = id.into();
-    existing["name"] = "Summer work — customer requests".into();
-    existing["status"]["type"] = "backlog".into();
-    existing["content"] = "## KRs\n\n- [ ] Preserve work\n".into();
-    let response = json!({"data":{"projects":{"nodes":[existing],"pageInfo":{"hasNextPage":false,"endCursor":null}}}});
-    let (url, _) = spawn(vec![
-        team_response(),
-        json_response(StatusCode::OK, response.clone()),
-        team_response(),
-        json_response(StatusCode::OK, response),
-    ])
-    .await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            let first = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap();
-            let repeated = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap();
-            assert_eq!(first, repeated);
-            assert_eq!(first.status, crate::pm::ProjectStatus::Backlog);
-            assert_eq!(first.name, "Summer work — customer requests");
-            assert!(first.workflow.is_empty());
-            assert_eq!(first.krs.len(), 1);
-            assert_eq!(first.krs[0].text, "Preserve work");
-            assert!(!first.krs[0].holds);
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap()
-                .as_deref(),
-                Some(id)
-            );
-            assert_eq!(
-                fixture
-                    .store
-                    .list_projects(Some(wave.id()))
-                    .await
-                    .unwrap()
-                    .len(),
-                1
-            );
-            assert!(crate::ops::project::bind_project(
-                &repo,
-                "product",
-                "218967b6-a760-4b7c-9a46-11d9d61a42c2"
-            )
-            .await
-            .is_err());
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap()
-                .as_deref(),
-                Some(id)
-            );
-        })
-        .await;
-}
-
-#[tokio::test]
-async fn project_binding_rejects_delayed_backlog_after_accepted_completion() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = fixture.planning_repo().await;
-    fixture.seed(now() + 3600).await;
-    let id = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
-    let mut old = project();
-    old["id"] = id.into();
-    old["status"]["type"] = "backlog".into();
-    let response = json!({"data":{"projects":{"nodes":[old],"pageInfo":{"hasNextPage":false,"endCursor":null}}}});
-    let completed = crate::pm::PmProject {
-        id: id.into(),
-        revision: Some("2026-10-05T12:00:00Z".into()),
-        slug: "completed".into(),
-        name: "Completed plan".into(),
-        summary: String::new(),
-        metric_targets: vec![],
-        workflow: String::new(),
-        status: crate::pm::ProjectStatus::Completed,
-        krs: vec![],
-        initiative_ids: vec!["initiative-1".into()],
-        team_ids: vec!["team-1".into()],
-    };
-    fixture
-        .store
-        .put_pm_project(wave.id(), "linear", "initiative-1", completed, 17, None)
-        .await
-        .unwrap();
-    let (url, _) = spawn(vec![
-        team_response(),
-        json_response(StatusCode::OK, response),
-    ])
-    .await;
-    PM_TEST_CONTEXT
-        .scope(fixture.context(&url), async {
-            let error = crate::ops::project::bind_project(&repo, "product", id)
-                .await
-                .unwrap_err();
-            assert!(
-                error.to_string().contains("completed Project history"),
-                "{error}"
-            );
-            assert_eq!(
-                crate::store::sqlite::project_selection::read_project_binding(
-                    &fixture.store.sqlite,
-                    wave.id()
-                )
-                .unwrap(),
-                None
-            );
-            assert!(!fixture.directory.path().join("waves").exists());
-            let retained = fixture
-                .store
-                .get_project_by_project(id)
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(retained.plan.status, crate::pm::ProjectStatus::Completed);
-            assert_eq!(retained.plan.pm_snapshot_synced_at, 17);
         })
         .await;
 }

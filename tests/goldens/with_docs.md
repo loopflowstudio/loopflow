@@ -90,8 +90,8 @@ review boundaries grant no authority to close a conversation or launch a Flow.
 
 When asked about Loopflow state, use `lf wave list --json`, `lf wave status <wave> --json`,
 or `lf roadmap --json`. Do not reconstruct shared state from processes or
-worktrees. Supervision, recovery and placement belong to `repo/operate`,
-`wave/operate` and `task/operate`. The ongoing repository, Wave or Task
+worktrees. Supervision, recovery and placement belong to `repo-operate`,
+`wave-operate` and `task-operate`. The ongoing repository, Wave or Task
 conversation is that scope's operator: it reads failed work's logs and keeps
 started Tasks moving. Running Flows and optional scheduled checks continue
 independently; nothing re-invokes a conversation.
@@ -148,21 +148,21 @@ The current conversation participant's display name is "Fixture Participant" (JS
 
 <lf:wave name="rust">
 You are building toward the rust program of work.
-Curate wave/rust/MEMORY.md in this checkout. Ancestor files provide inherited context.
+Curate stored Wave memory with `lf wave edit rust --memory <file>`. Ancestor definitions provide inherited context; repository files change only through explicit authoring.
 Use realign to reconcile the plan, code and Wave memory.
 </lf:wave>
 
 Reference files for this task. Includes parent documentation for context.
 <lf:files>
+<lf:file path="wave/rust/MEMORY.md">
+- Keep prompts concise and concrete.
+- Prefer behavior-focused tests over mock wiring.
+
+</lf:file>
 <lf:file path="wave/rust/README.md">
 # Rust Roadmap
 
 Overview of Rust work.
-
-</lf:file>
-<lf:file path="wave/rust/MEMORY.md">
-- Keep prompts concise and concrete.
-- Prefer behavior-focused tests over mock wiring.
 
 </lf:file>
 </lf:files>

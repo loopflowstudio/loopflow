@@ -97,13 +97,14 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             id: ProjectId::new(),
             wave_id: wave.id().clone(),
             plan: ProjectPlan {
-                id: LinearProjectId::new("project-1").unwrap(),
+                summary: String::new(),
+                linear_id: Some(LinearProjectId::new("project-1").unwrap()),
                 slug: "chapter".into(),
                 name: "Chapter".into(),
                 workflow: "adoption".into(),
                 status: loopflow::pm::ProjectStatus::Started,
                 prompt_context: "Adopt existing work".into(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             iteration: 0,
             abandon_intent: None,
@@ -120,7 +121,7 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 "project":"chapter", "team_id":"team-1", "assignee":null}]
         }))
         .unwrap();
-        runtime.block_on(async {
+        let imported_id = runtime.block_on(async {
             store.create_wave(&wave).await.unwrap();
             store.create_project(&project).await.unwrap();
             rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -158,7 +159,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                 )
                 .await
                 .unwrap();
-            assert!(store.list_tasks(None).await.unwrap().is_empty());
+            let tasks = store.list_tasks(None).await.unwrap();
+            assert_eq!(tasks.len(), 1);
+            assert!(tasks[0].worktree.is_none());
+            assert!(store.task_prs(&tasks[0].id).await.unwrap().is_empty());
+            assert!(!store.task_started(&tasks[0].id).await.unwrap());
+            tasks[0].id.clone()
         });
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
@@ -211,10 +217,11 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             .block_on(store.get_task_by_issue("FIX-1"))
             .unwrap()
             .unwrap();
+        assert_eq!(task.id, imported_id);
         if !remote_only {
-            assert_eq!(task.worktree, checkout);
+            assert_eq!(task.worktree.as_ref(), Some(&checkout));
         }
-        checkout = task.worktree.clone();
+        checkout = task.worktree.as_ref().unwrap().clone();
         assert!(loopflow::engine::git::is_ancestor(&checkout, &head, "HEAD").unwrap());
         if operation == "checkout" {
             assert_eq!(
@@ -304,14 +311,21 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
             for (index, (condition, expected)) in [
                 ("canceled", "terminal"),
                 ("moved", "no longer matches"),
-                ("connection", "Team"),
-                ("removed", "Removed"),
+                ("team", "Team"),
+                ("removed", "was deleted"),
             ]
             .into_iter()
             .enumerate()
             {
+                // Each refusal has its own active baseline. An observation in a
+                // foreign Project cannot reopen the preceding canceled Task.
+                let mut restored = original.clone();
+                restored.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2));
+                runtime
+                    .block_on(store.put_pm_task(&scope, "linear", restored, None, None))
+                    .unwrap();
                 let mut observed = original.clone();
-                observed.item.revision = Some(format!("2026-09-30T12:00:0{index}Z"));
+                observed.item.revision = Some(format!("2026-09-30T12:00:{:02}Z", index * 2 + 1));
                 if condition == "canceled" {
                     observed.item.state = Some("canceled".into());
                 }
@@ -319,16 +333,12 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     observed.item.project_id = Some("project-2".into());
                     observed.project.as_mut().unwrap().id = "project-2".into();
                 }
+                if condition == "team" {
+                    observed.item.team_id = Some("another-team".into());
+                }
                 runtime
                     .block_on(store.put_pm_task(&scope, "linear", observed, None, None))
                     .unwrap();
-                if condition == "connection" {
-                    fs::write(
-                        checkout.join(".lf/config.yaml"),
-                        "agent: claude\npm:\n  provider: linear\n  linear_team: another-team\n",
-                    )
-                    .unwrap();
-                }
                 if condition == "removed" {
                     runtime
                         .block_on(store.observe_pm_issue_change("issue-1", None, true))
@@ -350,13 +360,6 @@ fn task_adopts_linear_checkout_and_preserves_flow_history() {
                     runtime.block_on(store.active_task_pr(&task.id)).unwrap(),
                     pr_before
                 );
-                if condition == "connection" {
-                    fs::write(
-                        checkout.join(".lf/config.yaml"),
-                        "agent: claude\npm:\n  provider: linear\n  linear_team: team-1\n",
-                    )
-                    .unwrap();
-                }
             }
         }
         fs::remove_dir_all(&checkout).unwrap();

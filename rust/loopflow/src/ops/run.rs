@@ -40,14 +40,14 @@ pub(crate) fn render_task_context(
         title = task.plan.title,
         description = task.plan.description,
         project = project.name,
-        project_id = project.id.as_str(),
+        project_id = project.linear_id.as_ref().map(|id| id.as_str()).unwrap_or("local"),
         project_context = project.prompt_context,
         direction = render_steers(steers),
-        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at,
-        project_snapshot_synced_at = project.pm_snapshot_synced_at,
+        task_snapshot_synced_at = task.plan.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
+        project_snapshot_synced_at = project.pm_snapshot_synced_at.map(|at| at.to_string()).unwrap_or_else(|| "not observed".into()),
         wave = wave_name,
         task_id = task.id,
-        worktree = task.worktree.display(),
+        worktree = task.worktree.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "unplaced".into()),
         pr_sequence = pr.sequence,
         pr_branch = pr.branch,
         base_commit = pr.base_commit,
@@ -165,7 +165,7 @@ pub async fn resolve_work_selection(
         {
             crate::engine::git::worktree_root(repo).unwrap_or_else(|_| repo.to_path_buf())
         } else {
-            task.worktree.clone()
+            task.worktree()?.clone()
         };
         return Ok(WorkBinding {
             source: crate::session::WorkSource::Declared,
@@ -319,13 +319,14 @@ mod tests {
         Project {
             id: ProjectId::new(),
             plan: ProjectPlan {
+                summary: String::new(),
                 workflow: "feature".into(),
                 status: crate::pm::ProjectStatus::Started,
-                id: LinearProjectId::new(planning_id).unwrap(),
+                linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
                 slug: slug.to_string(),
                 name: slug.to_string(),
                 prompt_context: "Ship the requested behavior.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             wave_id: wave.id().clone(),
             iteration: 0,
@@ -340,16 +341,17 @@ mod tests {
         let task = Task {
             id: TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new("runtime-research").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
                 identifier: "LOO-267".to_string(),
                 title: "Research the runtime".to_string(),
                 description: "Compare independent findings.".to_string(),
-                pm_snapshot_synced_at: now.unix_timestamp(),
+                pm_snapshot_synced_at: Some(now.unix_timestamp()),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: wave.id().clone(),
             project_id: project.id.clone(),
-            worktree,
+            worktree: Some(worktree),
             workspace_slug: "runtime-research".to_string(),
             agent: None,
             abandon_intent: None,
@@ -380,20 +382,35 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.plan.id.as_str(),
+            project.plan.linear_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
-        store.create_task(&task, &pr, None).await.unwrap();
+        store.seed_task(&task, &pr).await.unwrap();
         task
     }
 
     #[test]
     fn context_delivery_supplies_one_goal_for_direct_and_wave_launches() {
-        let tmp = tempfile::tempdir().unwrap();
+        let _lock = crate::journal::test_env_lock();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let store =
+            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("loopflow.db"))
+                .unwrap();
+        let tmp = loopflow_test_support::TestRepo::new();
         std::fs::create_dir_all(tmp.path().join("wave/release")).unwrap();
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join("wave/release/GOAL.md"), goal).unwrap();
+        store
+            .ensure_wave(
+                &crate::repository::CanonicalRepo::discover(tmp.path())
+                    .unwrap()
+                    .to_string(),
+                "release",
+            )
+            .unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
         for message in [None, Some(seed)] {
             let prepared = crate::engine::process_prompt::prepare_process_prompt(
@@ -449,8 +466,12 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Prompt assembly reads the selected fixture Machine.
     async fn release_task_prompt_follows_parent_rename_and_reparenting() {
-        let (_home, store) = test_store().await;
+        let _lock = crate::journal::test_env_lock();
+        let (home, store) = test_store().await;
+        let _home =
+            crate::lf::commands::flow::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
         let repo = loopflow_test_support::TestRepo::new();
         for (name, memory) in [
             ("infrastructure", "Parent memory"),
@@ -484,21 +505,30 @@ mod tests {
         let child_row = serde_json::to_value(&release).unwrap();
         for address in ["infrastructure/release", "infra/release", "product/release"] {
             if address == "infra/release" {
-                std::fs::rename(
-                    repo.path().join("wave/infrastructure"),
-                    repo.path().join("wave/infra"),
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    parent.id(),
+                    repo.path(),
+                    None,
+                    Some("infra"),
                 )
-                .unwrap();
-            } else if address == "product/release" {
-                std::fs::rename(
-                    repo.path().join("wave/infra/release"),
-                    repo.path().join("wave/product/release"),
-                )
-                .unwrap();
-            }
-            let discovered = crate::work::wave::ensure_wave_row(&store, repo.path(), address)
                 .await
                 .unwrap();
+            } else if address == "product/release" {
+                crate::work::wave::ensure_wave_row(&store, repo.path(), "product")
+                    .await
+                    .unwrap();
+                crate::work::wave::relocate::relocate_wave(
+                    &store,
+                    release.id(),
+                    repo.path(),
+                    None,
+                    Some(address),
+                )
+                .await
+                .unwrap();
+            }
+            let discovered = store.get_wave(release.id()).await.unwrap().unwrap();
             assert_eq!(discovered.id(), release.id());
             if address == "infra/release" {
                 assert_eq!(
@@ -543,13 +573,11 @@ mod tests {
                 "Parent memory"
             }));
         }
-        // A new Machine reconstructs the same identity from the authored files.
-        let (_fresh_home, fresh) = test_store().await;
-        let recovered = crate::work::wave::ensure_wave_row(&fresh, repo.path(), "product/release")
-            .await
-            .unwrap();
-        assert_eq!(recovered.id(), release.id());
-        assert_eq!(recovered.slug(), "product/release");
+        assert!(repo
+            .path()
+            .join("wave/infrastructure/release/GOAL.md")
+            .exists());
+        assert!(!repo.path().join("wave/infra").exists());
     }
 
     #[tokio::test]
@@ -594,11 +622,10 @@ mod tests {
         let task = task(&store, &wave, &project, worktree.clone()).await;
 
         store
-            .apply_linear_comment(
-                &task.id,
-                "comment-1".into(),
-                "ADVANCER ONLY".into(),
-                time::OffsetDateTime::now_utc(),
+            .append_steer(
+                &WorkRef::Task(task.id.clone()),
+                crate::durable::Author::User,
+                "ADVANCER ONLY",
             )
             .await
             .unwrap();
@@ -643,6 +670,7 @@ mod tests {
 
         // Context and attribution survive retirement and provider deletion.
         store.abandon(&work, "fixture retirement").await.unwrap();
+        let task = store.get_task(&task.id).await.unwrap().unwrap();
         assert!(super::resolve_checkout_binding(&store, repo.path())
             .await
             .unwrap()
@@ -651,13 +679,13 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.plan.id.as_str(), task.plan.identifier],
+                rusqlite::params![wave.id().as_str(), task.plan.linear_id.as_ref().unwrap().as_str(), task.plan.identifier],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
             &task.plan.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -821,7 +849,7 @@ mod tests {
         for selector in [
             task.plan.identifier.as_str(),
             task.id.as_str(),
-            task.plan.id.as_str(),
+            task.plan.linear_id.as_ref().unwrap().as_str(),
         ] {
             let rows = store
                 .sqlite

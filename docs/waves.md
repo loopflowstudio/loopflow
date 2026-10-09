@@ -10,7 +10,7 @@ run `lf wave bind-project product <project-uuid>` first. Ensure activates Backlo
 or Planned status without changing its name, content, Tasks or optional Flow.
 
 ```bash
-lf --wave shipper wave/operate "invoices first"
+lf --wave shipper wave-operate "invoices first"
 lf wave status shipper
 ```
 
@@ -25,7 +25,7 @@ Flow execution; each Machine retains command and conversation history.
 | `wave/<name>/metrics/*.md` | Metric meaning, window and freshness |
 
 In Loopflow on macOS, select a Wave to read its plan, Tasks and execution history. Start a
-Session for a conversation, or invoke `wave/operate` for one finite pass. The
+Session for a conversation, or invoke `wave-operate` for one finite pass. The
 Wave's ongoing conversation (`lf session ensure -w <name>`) applies that same
 pass each time you return.
 
@@ -66,12 +66,12 @@ post-landing operations.
 ## Operate manually
 
 ```bash
-lf --wave shipper wave/operate "Review delivery and the checkout dependency"
+lf --wave shipper wave-operate "Review delivery and the checkout dependency"
 lf vsm-operate
 lf --wave shipper s2 : "Investigate the repeated checkout conflict"
 ```
 
-`wave/operate` considers delivery, coordination, present capacity, adaptation
+`wave-operate` considers delivery, coordination, present capacity, adaptation
 and identity (S1–S5) within the selected Wave. `vsm-operate` applies those same
 questions across the current repository's Waves, including from a linked
 worktree or a Task-bound session. Its Flow runs `s1 → s2 → s3 → s4 → s5`,
@@ -79,7 +79,7 @@ with each skill reading earlier findings from one shared working note. Each is
 also directly invokable for a focused question, with no scan/assess split.
 An explicit scope request can narrow VSM to a Wave; otherwise it uses the repository.
 Neither pass requires Discord or a schedule. VSM makes five sequential skill
-invocations, without requiring five reports or five actions. `wave/operate`
+invocations, without requiring five reports or five actions. `wave-operate`
 remains a single skill; whether it should use the VSM Flow is still undecided.
 
 Each pass reads dated evidence and replies in the invoking conversation. It
@@ -128,7 +128,8 @@ Author and retain a [chapter plan](architecture/planning.md#rotate-the-plan-pres
 with exact Wave/destination IDs and nonempty KRs. Select `create: false` for an
 existing Project or allocate one UUID for creation. The repository operation
 rotates the listed Waves; `lf wave new-chapter` consumes one entry. Ordinary
-Project ensure needs neither a chapter nor KRs.
+Project ensure needs neither a chapter nor KRs. Creation and activation save locally
+in both connection modes, retaining identity and pending delivery during outages.
 
 The preview lists each successor and Task disposition. Started unfinished Tasks
 keep identity, checkout, PR and captured execution when moved. Unreviewed backlog
@@ -201,7 +202,7 @@ radius crosses storage, auth, or public APIs.
 ```
 
 Work placement records the owning Machine. Use `lf cron`
-for scheduled commands and `lf --wave <name> wave/operate` for an immediate pass.
+for scheduled commands and `lf --wave <name> wave-operate` for an immediate pass.
 
 Builtin goals resolve by name, including the five Viable System Model charters
 `s1`…`s5`. Goal authoring is covered in [Authoring → Goals](authoring.md#goals).
@@ -318,7 +319,7 @@ lf id
 lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave place <wave-id> <machine-id>
-lf --machine <machine-id> --wave shipper wave/operate
+lf --machine <machine-id> --wave shipper wave-operate
 lf --machine <machine-id> wave status shipper --json
 ```
 
@@ -347,7 +348,8 @@ See [Machines and processes](architecture/machines.md) and
 lf wave status infra --json
 lf update-plan --wave infra --plan plan.json
 lf project workflow set PROJECT research    # only the workflow
-lf project workflow customize research                     # .lf/workflows/research.yaml, written from the builtin
+lf project workflow source PROJECT research > /tmp/research.yaml
+lf project workflow set PROJECT research --file /tmp/research.yaml
 ```
 
 `plan.json` contains the complete current plan:

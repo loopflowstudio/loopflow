@@ -15,9 +15,19 @@ pub(crate) fn generated_session_title(
     task: Option<&str>,
     cwd: &Path,
 ) -> String {
-    let purpose = skill
-        .and_then(|skill| skill.rsplit('/').next())
-        .filter(|skill| !matches!(*skill, "session" | "operate"));
+    let purpose = skill.filter(|skill| {
+        !matches!(
+            *skill,
+            "session"
+                | "operate"
+                | "repo-session"
+                | "wave-session"
+                | "task-session"
+                | "repo-operate"
+                | "wave-operate"
+                | "task-operate"
+        )
+    });
     [
         context.and_then(session_request),
         purpose,
@@ -175,14 +185,14 @@ mod tests {
         assert_eq!(
             super::generated_session_title(
                 Some(&context),
-                Some("task/session"),
+                Some("task-session"),
                 Some("Repair cmux titles"),
                 cwd
             ),
             "Repair cmux titles"
         );
         assert_eq!(
-            super::generated_session_title(Some(&context), Some("wave/operate"), None, cwd),
+            super::generated_session_title(Some(&context), Some("wave-operate"), None, cwd),
             "terminal-titles"
         );
         let context = crate::trace::PreparedTurnContext::from_prompts(

@@ -27,16 +27,27 @@ mod durable;
 pub(crate) mod engine_orphans;
 mod flow_inventory;
 mod metrics;
+mod plan_read;
 mod planning;
+pub(crate) mod planning_changes;
+pub(crate) mod planning_export;
+pub(crate) mod planning_order;
+mod planning_sync;
 mod pr_landings;
 mod processes;
 mod program_status;
+mod project_content;
+mod project_rotation;
 pub(crate) mod project_selection;
 mod project_transitions;
 mod revisions;
 mod session_events;
 pub(crate) mod sessions;
+mod task_comments;
+mod task_content;
+pub(crate) mod task_state_delivery;
 mod task_work;
+pub(crate) mod wave_documents;
 
 #[cfg(test)]
 pub(crate) use durable::task_state_sql;
@@ -95,7 +106,6 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
 #[derive(Debug, Clone)]
 pub(crate) struct TaskCheckout {
     pub task_id: TaskId,
-    pub issue_id: String,
     pub issue_identifier: String,
     pub worktree: PathBuf,
     pub machine_id: Option<crate::durable::MachineId>,
@@ -118,20 +128,6 @@ fn deleted_task_issues_in(
     let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
     let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
     rows.map(|row| row.map_err(StoreError::from)).collect()
-}
-
-fn record_task_deletion_in(
-    conn: &Connection,
-    wave_id: &WaveId,
-    issue_id: &str,
-    identifier: &str,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at)
-         VALUES(?1,?2,?3,?4) ON CONFLICT(wave_id,issue_id) DO NOTHING",
-        params![wave_id.as_str(), issue_id, identifier, now_unix()],
-    )?;
-    Ok(())
 }
 
 pub(crate) fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -677,75 +673,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn retain_task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO task_issue_identities (wave_id,issue_id,identifier) VALUES (?1,?2,?3)
-             ON CONFLICT(issue_id) DO UPDATE SET
-               wave_id=excluded.wave_id, identifier=excluded.identifier",
-            params![wave_id.as_str(), issue_id, identifier],
-        )?;
-        Ok(())
-    }
-
-    pub(crate) fn task_issue_identity(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT issue_id,identifier FROM task_issue_identities
-                 WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
-                params![wave_id.as_str(), issue],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    pub(crate) fn task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue: &str,
-    ) -> StoreResult<Option<(String, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT issue_id,identifier FROM task_deletions
-             WHERE wave_id=?1 AND (issue_id=?2 OR identifier=?2)",
-                params![wave_id.as_str(), issue],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?)
-    }
-
-    /// Reconcile native removal while retaining terminal outcomes and delivery history.
-    pub(crate) fn confirm_task_deletion(
-        &self,
-        wave_id: &WaveId,
-        issue_id: &str,
-        identifier: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
-            &format!(
-                "UPDATE tasks AS t SET abandoned_at=?2 WHERE t.external_issue_id=?1 AND {}",
-                durable::task_open_sql("t")
-            ),
-            params![issue_id, now_unix()],
-        )?;
-        record_task_deletion_in(&tx, wave_id, issue_id, identifier)?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn deleted_task_issues(
         &self,
         wave_id: &WaveId,
@@ -820,6 +747,17 @@ impl SqliteStore {
             ],
         )?;
         durable::create_wave_work(&tx, wave.id(), created_at)?;
+        let slug: String = tx.query_row(
+            "SELECT slug FROM wave_addresses WHERE id=?1",
+            [wave.id()],
+            |row| row.get(0),
+        )?;
+        wave_documents::import_documents_on(
+            &tx,
+            wave.id().as_str(),
+            Path::new(wave.repo()),
+            &slug,
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -1908,28 +1846,6 @@ impl SqliteStore {
         Ok(waves)
     }
 
-    pub(crate) fn reconcile_wave_directory(
-        &self,
-        id: &WaveId,
-        name: &str,
-        parent: Option<&WaveId>,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let repo: String =
-            tx.query_row("SELECT repo FROM waves WHERE id=?1", params![id], |row| {
-                row.get(0)
-            })?;
-        validate_wave_parent(&tx, id, name, &repo, parent)?;
-        tx.execute(
-            "UPDATE waves SET name = ?2, parent_wave_id = ?3
-             WHERE id = ?1 AND (name != ?2 OR parent_wave_id IS NOT ?3)",
-            params![id, name, parent],
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     pub fn create_wave(&self, wave: &Wave) -> StoreResult<()> {
         self.upsert_wave(wave)
     }
@@ -1985,7 +1901,7 @@ impl SqliteStore {
                 )));
             }
             if let Some(collision) = &update.retire_collision {
-                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision, &update.wave_id)?;
                 if !blockers.is_empty() {
                     return Err(StoreError::InvalidData(format!(
                         "cannot retire destination Wave {collision}: {}",
@@ -2042,16 +1958,36 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
+    pub(crate) fn wave_retirement_blockers(
+        &self,
+        wave_id: &WaveId,
+        replacement: &WaveId,
+    ) -> StoreResult<Vec<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Self::wave_retirement_blockers_in(&conn, wave_id)
+        Self::wave_retirement_blockers_in(&conn, wave_id, replacement)
     }
 
     fn wave_retirement_blockers_in(
         conn: &Connection,
         wave_id: &WaveId,
+        replacement: &WaveId,
     ) -> StoreResult<Vec<String>> {
         let mut blockers = Vec::new();
+        // Identical imported definitions are safe shadows; independent edits survive.
+        for table in ["wave_documents", "wave_workflows"] {
+            let differs: bool = conn.query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT name,content FROM {table} WHERE wave_id=?1
+                    EXCEPT SELECT name,content FROM {table} WHERE wave_id=?2)"
+                ),
+                params![wave_id, replacement],
+                |row| row.get(0),
+            )?;
+            if differs {
+                blockers.push("stored definitions".to_string());
+                break;
+            }
+        }
         let projects: i64 = conn.query_row(
             "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
             params![wave_id],

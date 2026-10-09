@@ -1,6 +1,6 @@
-//! Durable state for one Linear Task.
+//! Durable state for one Task.
 //!
-//! A Task owns one durable worktree, serial PR chain, and Flow progression.
+//! Planning exists before optional checkout placement and serial PR history.
 //! Sessions, Flows and Processes record work against that state.
 
 use std::path::PathBuf;
@@ -573,6 +573,8 @@ impl TaskPr {
 #[non_exhaustive]
 pub enum PmWritebackOperation {
     CompleteTask,
+    ReopenTask,
+    CancelTask,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -611,7 +613,7 @@ pub enum Observation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// Current planning facts from the PM system.
+    /// Authored local planning or accepted Linear facts.
     pub plan: TaskPlan,
     pub pm_writeback: PmWritebackState,
     /// Root ownership. Wave name and checkout are resolved from this id.
@@ -619,7 +621,7 @@ pub struct Task {
     /// Required runtime parent. Every Task reports through one durable Project
     /// Work; its Wave retains root inspection and override authority.
     pub project_id: ProjectId,
-    pub worktree: PathBuf,
+    pub worktree: Option<PathBuf>,
     pub workspace_slug: String,
     /// Explicit choice for every Flow step; None uses the step/config defaults.
     pub agent: Option<String>,
@@ -634,8 +636,17 @@ pub struct Task {
 }
 
 impl Task {
+    pub fn worktree(&self) -> Result<&PathBuf, TaskDataError> {
+        self.worktree.as_ref().ok_or_else(|| {
+            TaskDataError::InvalidInvariant(format!(
+                "Task {} has no checkout; place it with `lf checkout {}`",
+                self.id, self.id
+            ))
+        })
+    }
+
     pub fn validate(&self) -> Result<(), TaskDataError> {
-        if self.workspace_slug.trim().is_empty() {
+        if self.worktree.is_some() && self.workspace_slug.trim().is_empty() {
             return Err(TaskDataError::InvalidInvariant(format!(
                 "Task {} requires a workspace slug",
                 self.id
@@ -783,36 +794,11 @@ pub struct TaskLinearObservation {
     pub updated_at: OffsetDateTime,
 }
 
-/// One Linear observation, ready to persist atomically as Task direction. The
-/// directive is applied only if the stored title/description still differ
-/// (compare-and-set), and each follow-up becomes a command only on its first
-/// entry into the ledger — so overlapping polls, restarts, and out-of-order
-/// responses never duplicate direction.
-#[derive(Debug, Clone)]
-pub struct LinearObservationApply {
-    pub task_id: TaskId,
-    pub revision: String,
-    pub title: String,
-    pub description: String,
-    pub observed_at: OffsetDateTime,
-    /// A title/description edit to persist as one authored Steer.
-    pub content_steer: Option<String>,
-    /// Participant comments observed this pass, oldest first.
-    pub follow_ups: Vec<LinearFollowUp>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LinearFollowUp {
-    pub comment_id: String,
-    pub text: String,
-}
-
-/// What one [`LinearObservationApply`] actually wrote — enough for the caller to
-/// report receipts without re-reading the store.
+/// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinearObservationOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
-    /// emitted no direction (existing comments are marked seen, not replayed).
+    /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,
     pub content_steer_applied: bool,
     /// Event ids of the steer comments this observation appended.
@@ -832,16 +818,17 @@ mod tests {
         Task {
             id: TaskId::new(),
             plan: TaskPlan {
-                id: LinearIssueId::new("issue-1").unwrap(),
+                revision: 0,
+                linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
                 identifier: "INF-123".to_string(),
                 title: "Ship it".to_string(),
                 description: String::new(),
-                pm_snapshot_synced_at: 1,
+                pm_snapshot_synced_at: Some(1),
             },
             pm_writeback: PmWritebackState::Current,
             wave_id: crate::id::WaveId::new(),
             project_id: crate::work::project::ProjectId::new(),
-            worktree: "/tmp/task".into(),
+            worktree: Some("/tmp/task".into()),
             workspace_slug: "ship-it".to_string(),
             agent: None,
             abandon_intent: None,

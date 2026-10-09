@@ -307,7 +307,7 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
 }
 
 #[test]
-fn skill_catalog_preserves_namespace_discovery() {
+fn skill_catalog_lists_literal_names_from_nested_sources() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills/team/nested")).unwrap();
@@ -320,10 +320,11 @@ fn skill_catalog_preserves_namespace_discovery() {
     }
 
     let catalog = json_entries(repo.path(), home.path(), &["list", "skill", "--json"]);
-    let namespace = catalog.iter().find(|row| row["name"] == "team").unwrap();
-    assert_eq!(namespace["kind"], "namespace");
-    assert_eq!(namespace["invocation"], "lf list skill team");
-    assert!(!catalog.iter().any(|row| row["kind"] == "flow"));
+    assert!(catalog
+        .iter()
+        .any(|row| row["name"] == "team/review" && row["kind"] == "skill"));
+    assert!(catalog.iter().any(|row| row["name"] == "team/nested/check"));
+    assert!(!catalog.iter().any(|row| row["kind"] == "namespace"));
     let scoped = json_entries(
         repo.path(),
         home.path(),
@@ -529,6 +530,9 @@ fn git_commands_keep_their_root_ownership() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["pr", "wt", "sync", "commit"] {
         assert!(tree.find_subcommand(name).is_some());
+        if name == "sync" {
+            continue;
+        } // Task planning sync is separate from Git sync.
         assert!(tree
             .find_subcommand("task")
             .unwrap()
@@ -732,7 +736,7 @@ fn flow_help_validates_expansion_and_review_boundaries_without_effects() {
 }
 
 #[test]
-fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
+fn wave_catalog_reads_imported_definitions_and_keeps_empty_goals() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join("wave/parent/child")).unwrap();
@@ -742,6 +746,16 @@ fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
     )
     .unwrap();
     std::fs::write(repo.path().join("wave/parent/child/GOAL.md"), "").unwrap();
+    assert!(json_entries(repo.path(), home.path(), &["list", "wave", "--json"]).is_empty());
+    assert!(!home.path().join(".lf").exists());
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    store
+        .ensure_wave(
+            repo.path().canonicalize().unwrap().to_str().unwrap(),
+            "parent/child",
+        )
+        .unwrap();
     let rows = json_entries(repo.path(), home.path(), &["list", "wave", "--json"]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0]["name"], "parent");
@@ -750,7 +764,6 @@ fn authored_wave_catalog_needs_no_registry_and_keeps_empty_goals() {
         .as_str()
         .unwrap()
         .contains("Empty goal"));
-    assert!(!home.path().join(".lf").exists());
 }
 
 #[test]
@@ -855,4 +868,30 @@ fn native_skill_help_and_flow_capture_keep_the_selected_source_and_declarations(
         step.skill.content.as_deref(),
         Some("Audit $ARGUMENTS using [rules](rules.md).\n")
     );
+}
+
+#[test]
+fn portable_help_describes_exact_kind_selection() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+    fs::write(repo.path().join(".lf/flows/team/check.yaml"), "- solo\n").unwrap();
+    fs::write(
+        repo.path().join(".lf/skills/team-check.md"),
+        "Explicit skill body",
+    )
+    .unwrap();
+    let help =
+        |args: &[&str]| String::from_utf8(success(run(repo.path(), home.path(), args))).unwrap();
+    let flow = help(&["help", "team/check"]);
+    assert!(flow.contains("team/check — flow"));
+    assert!(flow.contains("team-check"));
+    let skill = help(&["help", "team-check"]);
+    assert!(skill.contains("team-check — skill"));
+    assert!(!skill.contains("flow wins untyped lookup"));
+    assert!(!skill.contains("Untyped lookup selects"));
+    fs::write(repo.path().join(".lf/flows/team-check.yaml"), "- solo\n").unwrap();
+    assert!(help(&["help", "team-check"]).contains("team-check — flow"));
+    assert!(help(&["help", "skill", "team-check"])
+        .contains("Untyped lookup selects the same-named flow"));
 }

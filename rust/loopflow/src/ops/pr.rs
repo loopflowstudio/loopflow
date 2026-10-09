@@ -2524,7 +2524,7 @@ esac
             follow_up: None,
             title: "Make Task PR copy explain intent and lifecycle".to_string(),
             identifier: "LOO-249".to_string(),
-            url: "https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string(),
+            url: Some("https://linear.app/loopflow/issue/LOO-249/task-pr-copy".to_string()),
             sequence: 1,
             merge_request: None,
         }

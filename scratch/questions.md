@@ -179,22 +179,13 @@ remain separate. No new product decision is selected.
   snapshot is not the current Task membership. Source authoring inputs remain
   unchanged; foreground preparation now discovers unprepared local-born plans.
 
-- October 9 foreground choice: common receipts now retain explicit acknowledgement,
-  distinct from mapping and attempts. One derived SQL view serves acquisition and
-  status. An unprepared imported Task gains its ordinary intent only at preparation;
-  imported Projects need no local transition. Matching peer receipts union the
-  acknowledgement; late errors cannot reopen it. Provider acquisition's placement
-  inheritance was removed after the public fixture demonstrated an execution write.
-  The fixture also exposed unplaced Wave status rejection; nullable Rust/Swift
-  Machine presentation remains necessary, not permission to assign a Machine on read.
-
-- October 9 deletion representation: optional `deletion:<receipt-id>` fields use
-  the existing mutation journal and common `task_changes` rows, not a new receipt
-  table. Baselines may fill once before attempting; incompatible captured effects
-  isolate projection. Attempt/acknowledgement flags merge monotonically. Unordered
-  active/trash outcomes remain conflicts, not clock-selected authority. One
-  deterministic diagnostic is displayed while every original stays in the journal.
-  Review removed deletion's local-sequence selection and shared visibility
-  reconciliation with explicit active readback. Ordering and alternate removal/
-  relationship acquisition remain unfinished; no mixed-provider activation or
-  new product policy from Jack Heart is claimed.
+- October 9 foreground/deletion choices are implemented, not new product policy:
+  one common export view exposes unprepared plans and explicit acknowledgement;
+  acquisition never places work. Optional `deletion:<receipt-id>` journal fields
+  transport common receipts with original save times, baselines and monotonic
+  attempts/acknowledgements. Common visibility reconciliation replaces sequence
+  selection. Unordered active/trash evidence isolates projection; no inferred
+  deletion settlement. Full rationale and prior checks:
+  `225b8c95f:scratch/questions.md`, final two entries. The current design owns
+  remaining effect-eligibility, ordering, alternate-acquisition and presentation
+  work; mixed-provider exchange remains disabled.

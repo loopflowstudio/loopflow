@@ -622,33 +622,32 @@ acceptance remain at
 ## Tasks across machines (LOO-412, 2026-10-09)
 
 Jack Heart selected custom-ref sync. Review-only; no landing or public-remote
-planning export. Joining publishes nothing; malformed input aborts import,
-contradictions isolate objects, and execution stays local.
+planning export. Joining publishes nothing. Invalid input aborts import;
+contradictions isolate objects. Execution stays local and imports stay unplaced.
 
-Creation/link receipts keep captured saves, parents and attempts, never imported
-transitions. One view exposes unprepared plans/mapped uncertainty. Only readback
-acknowledges effects; late errors cannot reopen settlement.
-Earlier creation proofs exclude populated Processes; revised status assertions
-await gate. Acquisition no longer places work. Unplaced-Wave presentation, SSH
-and installation remain.
+Common receipts retain captured saves, parents, baselines and attempts; imports
+create no transitions. Readback acknowledges effects, never mappings or late errors.
+Creation readback may fill a deletion baseline, never settle removal. Explicit active
+evidence retains losing removals. Local sequence cannot order imported effects.
+Creation status awaits gate; its proof excludes populated Processes. Deletion
+compares seven execution tables including Processes, not live controls.
 
-Deletion receipts retain save times, baselines, attempts and acknowledgements.
-Explicit active evidence retains losing deletions; inventory absence proves nothing.
-Creation readback can fill an unattempted baseline, never acknowledge removal.
-Local sequence order cannot hide pending removals. Typed effect conflicts isolate
-projection. Imports write captured receipts directly; fixtures compare populated
-execution rows, not live controls.
+**Retained uncertainty must constrain effects, not only status.** Object rollback
+keeps the peer journal/conflict but can discard imported uncertain receipts.
+Delivery ignores that conflict. Mixed activation requires composition preventing
+new effects here; retained history grants no retry authority. This source gap is
+not an observed duplicate write.
 
 Provider age survives; entity revisions never order relationships. Missing inventory
-is not negative membership. Archive, unresolved membership and Initiative
-contradictions block; imports stay unplaced. Lookup and launch freshness differ.
-Fetch/import/publication stay separate; effect locks block neither saves nor
-acquisition. Broken journals mean unknown pending state. Private histories/dependents,
-including Git documents, stay held until explicit selection; omission is not convergence. Ordering receipts, alternate removal/archive
-and relationship acquisition, legacy association, recovery/losing-edit UX and
-Desktop remain before mixed-provider activation. Design:
-`scratch/work-on-another-machine-name.md`; earlier proofs:
-`2657d594a:wave/infrastructure/MEMORY.md`, this heading.
+proves neither negative membership nor deletion. Archive and membership/Initiative
+contradictions block. Fetch/import/publication stay separate; effect locks block
+neither saves nor acquisition. Broken journals mean unknown pending state. Private
+histories/dependents, including Git documents, stay held until explicit selection;
+omission is not convergence. Scalar ranks carry no ordering attempts or list proof.
+Ordering, alternate acquisition,
+legacy association and unplaced-Wave/Desktop recovery UX remain before mixed activation.
+Design: `scratch/work-on-another-machine-name.md`; earlier proofs:
+`225b8c95f:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Synced planning integration (LOO-334)
 

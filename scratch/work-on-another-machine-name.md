@@ -240,17 +240,12 @@ receipts (`7e56c01fd`), and semantic Project content (`a518b985b`) are integrate
 Their owners and preservation boundaries are described under **Delete — do not
 maintain** and item 4 below.
 
-Creation/link receipts remain owned by `planning_export.rs`: saved UUIDs, original
-input/parent, captured change IDs, attempts and acknowledgement travel together.
-Competing effects isolate projection; matching receipts retain attempts and union
-acknowledgement. One `planning_exports` view feeds foreground preparation,
-acquisition and status for unprepared peer plans and mapped uncertain creations.
-Preparation alone creates missing Task receipts; import fabricates no transition,
-selection, rotation, activation or execution. Readback acknowledges attempted UUIDs
-and, for Projects, the captured Initiative; mapping alone permits neither
-acknowledgement nor another write. Later accepted moves stay legal and late errors
-cannot reopen acknowledgement. Earlier detailed account:
-`95e81c688:scratch/work-on-another-machine-name.md`, **Remaining integration**.
+Creation/link transport and discovery use `planning_export.rs` and the shared
+`planning_exports` view. Captured UUIDs, original parent/input, change IDs, attempts
+and acknowledgement remain together; no imported transition or mapping supplies
+acknowledgement. Later accepted moves remain legal; late errors cannot reopen
+matching acknowledgement. Detailed proof: `95e81c688:scratch/work-on-another-machine-name.md`,
+**Remaining integration**.
 
 At `a002e4060`, the isolated Linux connected-provider fixture passed after importing
 unprepared plans before connecting Linear. It exercises public work-watch, Task
@@ -279,19 +274,43 @@ Executable feedback exposed two distinct presentation/execution boundaries:
   and absence. The public fixture retains the six-table comparison above that
   exposed this failure rather than relaxing it.
 
-Next: ordering receipts and alternate provider/relationship acquisition, including
-removal/archive frontiers. Deletion receipt transport is implemented above; stale
-entity-frontier rejection still isolates the whole object, even if an independent
-deletion receipt arrived. Projection conflicts retain local receipts unchanged;
-foreground delivery does not yet consult those conflicts, so an imported uncertain
-attempt isolated from projection cannot safely authorize another effect. Compose
-acquisition and delivery eligibility before mixed activation, then legacy
-association and unplaced-Wave/Desktop presentation.
-Mixed-provider exchange stays disabled until those owners compose. Existing mapping
-or an import checkpoint is never effect acknowledgement. These are implementation
-gaps, not a missing parent dependency or verification-only work. Publication still
-requires the acceptance below; landing remains excluded. Earlier cut-by-cut evidence:
-`3f7d9f2da:scratch/work-on-another-machine-name.md`, this heading.
+Remaining composition, reconciled October 9 against `225b8c95f`:
+
+1. **Retained effects must constrain delivery even when projection fails.**
+   `insert_and_project` imports creation/deletion receipts inside the object's
+   savepoint, before `acquire_linear_frontier`. Rejection of an older entity
+   frontier rolls back those receipts too; the journal and conflict still commit.
+   `planning_field_owners`, `pending` and `attempt_planning_field` read local receipts,
+   not that retained peer conflict. Thus retention alone cannot prevent a second
+   effect after an imported uncertain attempt was isolated. Common acquisition and
+   delivery eligibility must compose before activation. Acceptance includes a
+   rejected stale entity carrying an independent uncertain deletion, a subsequent
+   public delivery attempt that issues no duplicate mutation, continued independent
+   acquisition, and unchanged populated execution. This is an implementation gap,
+   not an observed production duplicate or a reason to discard rejected evidence.
+2. **Ordering still lacks receipt transport.** The peer field catalog and draft
+   capture `planning_rank`, not Project `task_order` or `order_effects_json`.
+   Replicating ranks cannot preserve one move's baseline, before/after lists,
+   attempted input, partial settlement and losing desired order. Composition belongs
+   to `planning_order.rs`, whose `observe_in` consumes complete-list evidence.
+   Detail reads, peer scalar winners and import checkpoints must not settle a move.
+   Lost-response and later-save proofs need both stores and common delivery, not
+   merely equal final ranks.
+3. **Alternate acquisition remains separate from deletion receipts.** Provider-only
+   removal/archive, reteam and independent Initiative/Team/list observations must
+   retain their own frontiers and original ages through common owners. The deletion
+   cut transports saved effects; it does not transport every provider observation.
+   Entity revisions cannot order relationships; missing inventory proves no removal.
+4. **Legacy association and presentation remain implementation work.** Divergent
+   existing IDs retain history; unplaced Waves need nullable Rust/Swift Machine
+   presentation, not placement on read. Desktop still needs selected-plan,
+   authorship/assignee, pending/conflict and losing-edit/recovery presentation.
+
+Mixed-provider exchange remains disabled until composition is complete. Local-only
+exchange and private-selection holds remain intact. Combined verification belongs
+to gate; publication still requires the acceptance below, with no landing authority.
+Earlier cut-by-cut evidence: `3f7d9f2da:scratch/work-on-another-machine-name.md`,
+**Remaining integration**.
 
 Executable feedback took priority over creation/link composition on October 8.
 The isolated Linux build exposed invalid registry-error conversion and SQLite
@@ -541,21 +560,15 @@ provenance gap; revise it with the completed composition, not as a product limit
 
 ## Committed integration boundary — 2026-10-09
 
-Jack Heart requested stacking on LOO-406 and continuing pursue. Current stack
-`7b5a12e2b` integrates parent `efc90abb1`; `eeb98aa89` integrated `a4678d242`
-and `ffbe0ad42` previously integrated
-`cbf0a174a`, and earlier `a6cb48664` integrated
-`7c626ca23`, preserving restored scratch checkpoint `1ad5e1267` and the retained
-stash. The October 9 sync changes no publication or landing authority. Earlier
-parent PR #1503's published base `b6f34a6f8b811d95f9fc843ac6592cc2262f2e26` is integrated,
-including `e68f2a423`'s creation receipts, `b1f175bbf`'s ordering,
-`6bb8b935a`/`086d3560c`'s common sync view and `29777b8cb`'s repository-scoped
-foreground lifetime. Reuse those owners; the earlier `e68f2a423` integration
-reference described the first writer cut, not the current stack frontier.
-Its common ownership cut `84664e661` removed `PlanningAuthority`, personal-plan storage and
-split writers. Source: `e68f2a423:scratch/explore-loopflow-s-own-store.md`.
-The missing-writer diagnosis at `4f9a8ea17` is superseded. LOO-412 owns remaining
-peer integration independently of unfinished Linear delivery; no second planner.
+Jack Heart requested stacking on LOO-406 and continuing pursue. `225b8c95f`
+integrates main's LOO-406 cut `d20c56daf` (#1503). Its tree is identical
+to `97bba1869`: this sync added ancestry, not another implementation or test change.
+Earlier parent integrations, restored scratch checkpoint `1ad5e1267` and retained
+stash provenance: `225b8c95f:scratch/work-on-another-machine-name.md`, this heading.
+The common cut `84664e661` removed `PlanningAuthority`, personal-plan storage and
+split writers. Creation/export, ordering, common sync presentation and foreground
+lifetime owners are integrated; LOO-412's remaining peer composition is independent
+work, not a missing parent dependency or permission to add another planner.
 
 Jack's destination policy uses a stable user key across machines, never Git display
 names or per-machine random users. Ref separation is not access control: private
@@ -633,7 +646,11 @@ Prior creation/export and Linux public recovery results: `a002e4060:scratch/work
 Compression's build, Project-content/migration and static-check evidence remains at
 `098de8033:scratch/work-on-another-machine-name.md`, **Acceptance for review**.
 
-Check (October 9 compress): `cargo test -p loopflow --lib peer_deletion --no-run`, network-isolated lib-test `store::sqlite::planning_peers::tests::` (55), all-target Clippy, fmt, `git diff --check` and `lf context --skill compress` pass; public/combined/Desktop acceptance remains with gate. Earlier deletion-cut checks: `95e81c688`, this heading.
+Deletion-cut check evidence at `97bba1869`, this heading: focused compile,
+network-isolated peer-storage (55), all-target Clippy and fmt passed. The subsequent
+ancestry-only merge preserves that tested tree, not public/combined acceptance.
+
+Check (October 9 realign): `git diff --check` and `lf context --skill realign` pass; prose-only reconciliation, with public/combined/Desktop checks deferred to gate.
 
 Earlier SQL proofs, macOS startup limitations and the retained historical Flow
 without a recorded exit remain at

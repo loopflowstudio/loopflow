@@ -607,9 +607,13 @@ against CI's materialized schema. Planning sync already creates the local Projec
 registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
-initialization and PR delivery fixtures alongside the new planning APIs. Seed
-stored definitions explicitly; writing a fixture file is not a planning mutation.
+initialization, Workflow completion/reopening and PR delivery fixtures alongside
+the new planning APIs. Seed stored definitions explicitly; writing a fixture file
+is not a planning mutation.
 An existing checkout fixture must settle initialization before testing delivery.
+Prompt fixtures nested in the source tree must fence Git discovery so the enclosing
+checkout cannot become their stored Wave owner. Verify them inside a Git checkout;
+a source archive alone does not exercise that boundary.
 Include the shared DTO fixtures and Desktop planning states in the affected gate.
 
 ```bash

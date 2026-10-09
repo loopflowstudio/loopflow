@@ -859,10 +859,6 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
                 wave.slug()
             )));
         }
-        store
-            .sqlite
-            .validate_task_planning(&task)
-            .map_err(task_error)?;
         match task_work_status(&store, &task).await? {
             WorkStatus::Done => {
                 return Err(task_error(format!(
@@ -878,6 +874,10 @@ fn prepare_task(repo: &Path, issue: &str, options: TaskProcessOptions) -> OpsRes
             }
             WorkStatus::Ready => {}
         }
+        store
+            .sqlite
+            .validate_task_planning(&task)
+            .map_err(task_error)?;
         if !acquired && options.directive.is_some() {
             return Err(task_error(format!(
                 "Task {} already exists; use `lf task comment {} <new-direction>`",

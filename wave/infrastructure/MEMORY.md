@@ -41,12 +41,12 @@ Foreground connections independently acquire and deliver planning. Matching
 observations settle captured attempts and advance later saves' unchanged baselines;
 retired receipts retain losing values. Effect locks block neither saves nor acquisition.
 `b1f175bbf` delivers Project ordering with captured moves; complete-list acquisition
-recognizes partial progress, while detail reads never set rank. Compression: `66da3fdf7`.
-`PlanningSyncStatus` now reads creation, fields/order, state and comments for CLI/Desktop,
-including unmapped creation, errors and losing values. Configuration, not mappings,
-selects pending Linear display. Creation receipts advance the planning revision.
-SQL preparation passes; bounded Rust/Swift retries still stall before tests.
-The native-runner reconnect fixture is authored, not executed; public Flow/work-watch
+recognizes partial progress, while detail reads never set rank.
+`6bb8b935a` adds common CLI/Desktop `PlanningSyncStatus`: creation, fields/order,
+state, comments, errors and losing values. Configuration selects pending display,
+not mappings; compression removes pending-only edit/Project projections, retaining
+baselines. Creation receipts advance planning revision. SQL prepares; Rust/Swift
+retries stall before tests. Native reconnect is unexecuted; public Flow/work-watch
 reconnect and installed acceptance remain unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.

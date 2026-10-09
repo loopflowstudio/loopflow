@@ -289,8 +289,6 @@ pub struct ProjectPlanning {
     pub sync: crate::planning::PlanningSyncStatus,
     #[serde(flatten)]
     pub project: PmProject,
-    pub sync_enabled: bool,
-    pub pending_changes: Vec<crate::planning::PlanningChange>,
 }
 
 fn planning(store: &Store, project: &Project) -> OpsResult<ProjectPlanning> {
@@ -298,16 +296,11 @@ fn planning(store: &Store, project: &Project) -> OpsResult<ProjectPlanning> {
         .sqlite
         .project_planning_sync(&project.id)
         .map_err(project_error)?;
-    let (project, pending_changes) = store
+    let project = store
         .sqlite
-        .project_with_changes(&project.id)
+        .planning_project(&project.id)
         .map_err(project_error)?;
-    Ok(ProjectPlanning {
-        project,
-        sync_enabled: sync.connected,
-        sync,
-        pending_changes,
-    })
+    Ok(ProjectPlanning { project, sync })
 }
 
 pub(crate) fn load_workflow(

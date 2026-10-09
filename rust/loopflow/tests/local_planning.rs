@@ -1357,7 +1357,11 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["summary"], "");
         assert_eq!(saved["workflow"], "review");
         assert_eq!(saved["krs"][0]["text"], "Retain the proof");
-        assert_eq!(saved["sync_enabled"], connected);
+        assert_eq!(saved["sync"]["connected"], connected);
+        assert_eq!(
+            saved["sync"]["changes"].as_array().unwrap().is_empty(),
+            !connected
+        );
         if mapped {
             assert_eq!(
                 lf(
@@ -1369,8 +1373,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
             );
         }
         assert_eq!(store.project(&shadow.id).unwrap().unwrap(), shadow);
-        assert_eq!(saved["pending_changes"].as_array().unwrap().len(), 3);
-        let changes = saved["pending_changes"].clone();
+        let changes = store.pending_project_changes(&id).unwrap();
+        assert_eq!(changes.len(), 3);
         lf(
             repo.path(),
             home.path(),
@@ -1388,10 +1392,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         drop(store);
         let store =
             loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-        assert_eq!(
-            serde_json::to_value(store.pending_project_changes(&id).unwrap()).unwrap(),
-            changes
-        );
+        assert_eq!(store.pending_project_changes(&id).unwrap(), changes);
         if mapped {
             let mut incoming = project.clone();
             incoming.name = "Remote name".into();
@@ -1410,10 +1411,16 @@ fn project_edits_save_offline_in_both_connection_modes() {
             assert_eq!(read["workflow"], "research");
             assert_eq!(read["krs"][0]["holds"], true);
             assert_eq!(read["revision"], "2026-10-08T11:00:00Z");
-            let pending = read["pending_changes"].as_array().unwrap();
+            let pending = store.pending_project_changes(&id).unwrap();
             assert!(pending
                 .iter()
-                .all(|change| change["field"] != "name" && change["field"] != "workflow"));
+                .all(|change| change.field != "name" && change.field != "workflow"));
+            let conflicts = read["sync"]["changes"].as_array().unwrap();
+            for field in ["name", "workflow"] {
+                assert!(conflicts
+                    .iter()
+                    .any(|change| change["field"] == field && change["state"] == "adopted_linear"));
+            }
             // Later provider edits advance; superseded intentions never become pending again.
             incoming.name = "Saved".into();
             incoming.workflow = "review".into();
@@ -1426,7 +1433,8 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 home.path(),
                 &["project", "workflow", "show", id.as_str(), "--json"],
             );
-            assert_eq!(read["pending_changes"], Value::Array(pending.clone()));
+            assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
+            assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
         }
         let plan_file = home.path().join("plan.json");
         let content = serde_json::json!({
@@ -1462,7 +1470,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["name"], "Saved");
         assert_eq!(saved["summary"], "");
         assert_eq!(
-            saved["pending_changes"].as_array().unwrap().len(),
+            store.pending_project_changes(&id).unwrap().len(),
             if mapped { 2 } else { 4 }
         );
         lf(repo.path(), home.path(), &args);
@@ -1485,11 +1493,16 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 &["project", "workflow", "show", id.as_str(), "--json"],
             );
             assert_eq!(read["krs"][0]["text"], "Keep the concurrent provider plan");
-            assert!(read["pending_changes"]
+            assert!(store
+                .pending_project_changes(&id)
+                .unwrap()
+                .iter()
+                .all(|change| change.field != "krs"));
+            assert!(read["sync"]["changes"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|change| change["field"] != "krs"));
+                .any(|change| change["field"] == "krs" && change["state"] == "adopted_linear"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join("wave").exists());
@@ -1707,6 +1720,13 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let sync = store.task_planning_sync(&second).unwrap();
         assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
+        assert_eq!(
+            String::from_utf8(output.stderr).unwrap(),
+            sync.lines()
+                .into_iter()
+                .map(|line| format!("{line}\n"))
+                .collect::<String>()
+        );
         assert_eq!(sync.changes.is_empty(), !connected);
         if connected {
             assert!(sync.changes.iter().any(|c| c.field == "task_order"));

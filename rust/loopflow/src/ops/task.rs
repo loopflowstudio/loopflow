@@ -3453,21 +3453,19 @@ pub struct TaskStatus {
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
-    let task = task_execution_status(repo, issue)?;
-    if let Some(task) = &task {
-        let read = block_on_task(async {
+    if let Some(task) = task_execution_status(repo, issue)? {
+        let (read, sync) = block_on_task(async {
             let store = task_store().await?;
-            Ok(crate::ops::pm::TaskPlanningInspection {
-                observation: store.sqlite.planning_task(&task.id).map_err(task_error)?,
-                refresh_error: None,
-            })
-        })?;
-        let sync = block_on_task(async {
-            let store = task_store().await?;
-            store
-                .sqlite
-                .task_planning_sync(&task.id)
-                .map_err(task_error)
+            Ok((
+                crate::ops::pm::TaskPlanningInspection {
+                    observation: store.sqlite.planning_task(&task.id).map_err(task_error)?,
+                    refresh_error: None,
+                },
+                store
+                    .sqlite
+                    .task_planning_sync(&task.id)
+                    .map_err(task_error)?,
+            ))
         })?;
         return Ok(TaskStatus {
             sync: Some(sync),
@@ -3475,41 +3473,23 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             planning_state: read.observation.state,
             planning: read.observation.record,
             planning_error: read.refresh_error,
-            execution: Some(task_snapshot(task)?),
+            execution: Some(task_snapshot(&task)?),
         });
     }
-    let selector = task
-        .as_ref()
-        .and_then(|task| task.plan.linear_id.as_ref().map(|id| id.as_str()))
-        .or(issue)
-        .ok_or_else(|| task_error("this checkout has no Task"))?;
-    let read = match crate::ops::pm::inspect_task_planning(
-        repo,
-        selector,
-        crate::ops::pm::PmRefresh::Auto,
-    ) {
-        Ok(read) => read,
-        Err(error) if task.is_some() => crate::ops::pm::TaskPlanningInspection {
-            observation: crate::store::PmTaskObservation {
-                record: None,
-                state: crate::store::PlanningState::Unavailable,
-            },
-            refresh_error: Some(error.to_string()),
-        },
-        Err(error) => return Err(error),
-    };
+    let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
+    let read =
+        crate::ops::pm::inspect_task_planning(repo, selector, crate::ops::pm::PmRefresh::Auto)?;
     let planning_stale = read.is_stale();
     let planning_state = read.observation.state;
     let planning = read.observation.record;
     let planning_error = read.refresh_error;
-    let execution = task.as_ref().map(task_snapshot).transpose()?;
     Ok(TaskStatus {
         sync: None,
         planning,
         planning_error,
         planning_stale,
         planning_state,
-        execution,
+        execution: None,
     })
 }
 
@@ -4780,8 +4760,7 @@ fn git_output_bytes(worktree: &Path, args: &[&str]) -> OpsResult<Vec<u8>> {
 pub struct TaskEdit {
     pub wave: String,
     pub id: String,
-    pub sync_enabled: bool,
-    pub pending_changes: Vec<crate::planning::PlanningChange>,
+    pub sync: crate::planning::PlanningSyncStatus,
 }
 
 pub fn task_edit(
@@ -4809,26 +4788,13 @@ pub fn task_edit(
             .await
             .map_err(task_error)?;
         let owner = owning_wave(&store, &edited).await?;
-        let mut pending_changes = store
-            .sqlite
-            .pending_task_changes(&edited.id)
-            .map_err(task_error)?;
-        pending_changes.extend(
-            store
-                .sqlite
-                .pending_project_changes(&edited.project_id)
-                .map_err(task_error)?
-                .into_iter()
-                .filter(|change| change.field == "task_order"),
-        );
         Ok(TaskEdit {
             wave: owner.slug().into(),
             id: edited.id.to_string(),
-            sync_enabled: crate::engine::config::load_config_or_default(Some(repo))
-                .pm
-                .and_then(|pm| pm.linear_team)
-                .is_some(),
-            pending_changes,
+            sync: store
+                .sqlite
+                .task_planning_sync(&edited.id)
+                .map_err(task_error)?,
         })
     })
 }

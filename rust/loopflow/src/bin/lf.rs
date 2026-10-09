@@ -851,7 +851,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                 wave.as_deref(),
                 serde_json::from_slice(&std::fs::read(plan)?)?,
             ))?;
-            print_project_sync(&saved);
+            print_planning_sync(&saved.sync);
             Ok(())
         }
     }
@@ -1252,12 +1252,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 },
             )?;
             println!("{}: updated task {}", result.wave, result.id);
-            if result.sync_enabled && !result.pending_changes.is_empty() {
-                eprintln!(
-                    "Saved locally; pending Linear sync ({} fields).",
-                    result.pending_changes.len()
-                );
-            }
+            print_planning_sync(&result.sync);
             Ok(())
         }
         TaskCommand::Refile { issue, wave } => {
@@ -1853,7 +1848,7 @@ fn execute_command(
                 name.as_deref(),
                 summary.as_deref(),
             ))?;
-            print_project_sync(&saved);
+            print_planning_sync(&saved.sync);
             Ok(())
         }
         Some(Commands::Project {
@@ -1899,7 +1894,7 @@ fn execute_command(
                             "{} · Workflow {}",
                             selected.project.name, selected.project.workflow
                         );
-                        print_project_sync(&selected);
+                        print_planning_sync(&selected.sync);
                     }
                     Ok(())
                 }
@@ -1917,7 +1912,7 @@ fn execute_command(
                         ),
                     )?;
                     println!("Project {project}: Workflow {name}");
-                    print_project_sync(&saved);
+                    print_planning_sync(&saved.sync);
                     Ok(())
                 }),
             }
@@ -2013,8 +2008,8 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_project_sync(saved: &loopflow::ops::project::ProjectPlanning) {
-    for line in saved.sync.lines() {
+fn print_planning_sync(sync: &loopflow::planning::PlanningSyncStatus) {
+    for line in sync.lines() {
         eprintln!("{line}");
     }
 }

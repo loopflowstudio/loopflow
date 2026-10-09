@@ -185,7 +185,9 @@ lf wave update-plan --wave parser --plan /tmp/plan.json
 
 Project names, summaries, Workflow selections and complete plan replacements save
 locally, including during a Linear outage. Connected repositories report pending sync;
-`lf project workflow show <project-id> --json` includes pending field changes.
+`lf project workflow show <project-id> --json` includes `sync`: pending changes,
+uncertain attempts, errors and retained losing values. Task edits and status use
+the same receipt-backed presentation as Desktop.
 Inbound refreshes preserve saves against unchanged baselines and adopt conflicting
 Linear edits, retaining losing intentions in delivery history. An active Task Session
 or Desktop connection exports saved Projects and delivers their fields. Lost creation
@@ -233,8 +235,8 @@ and checkout history. Missing provider evidence keeps deletion pending; newer
 observed Linear edits retire removal and restore planning visibility. The active
 connection exports unmapped Projects and Tasks using their saved UUIDs; lost replies
 never allocate replacement identities. Later local edits survive creation readback.
-The local ID works before a Linear alias arrives. Complete pending presentation and
-composed reconnect remain unfinished.
+The local ID works before a Linear alias arrives. Composed reconnect acceptance
+remains unfinished.
 
 ```bash
 lf task refile <task-id> --wave exports

@@ -19,26 +19,36 @@ signed in", yet a bare `codex` ran as `loopflow-eng@loopflow.studio`.
 
 ## Repair
 
-- Machine: `codex app-server daemon restart` with no thread loaded. The daemon
-  now reports `jack@loopflow.studio`.
-- Code, uncommitted and not yet compiled: `lf account codex use` asks the
-  daemon for its login after activating (also when the file was already
-  right) and restarts it on a mismatch. `daemon_login` / `restart_daemon` in
-  `provider_auth/codex.rs`, called from `use_account`.
+- Machine: `codex app-server daemon restart`. The daemon reports
+  `jack@loopflow.studio`, matching `auth.json`.
+- Code: `lf account codex use` asks the daemon for its login after activating
+  (also when the file was already right) and restarts it on a mismatch.
+  `daemon_login` / `restart_daemon` in `provider_auth/codex.rs`, called from
+  `use_account`.
 
-## Left to do
+## Verification (2026-10-09)
 
-- Build is blocked machine-wide: `syspolicyd` (pid 494) is at 100% CPU and
-  every newly compiled binary hangs in `_dyld_start`, including Cargo build
-  scripts. Needs `sudo killall syspolicyd` from Jack.
-- Then: `cargo test -p loopflow --lib provider_auth::codex`, clippy, and a
-  live replay: `lf account codex use loopflow-eng`, then `use jack@…`; each
-  should print the restart line and leave the daemon on the chosen login.
-- Unverified: whether a stale daemon writes its old tokens back to
-  `auth.json` on refresh. `auth.json` stayed on `jack@` for the hour observed.
+- `cargo test -p loopflow --lib provider_auth::codex`: 4 passed.
+  `cargo clippy -p loopflow --all-targets -- -D warnings`: clean.
+- Counterexample, installed 0.13.10: `use loopflow-eng` rewrote `auth.json`
+  and left the daemon on `jack@` (same pid).
+- Fixed build, run against a disposable `LF_HOME` holding copies of the Codex
+  account rows (a dev build otherwise forwards to the installed `lf`):
+  `use loopflow-eng` and `use jack@…` each printed the restart line and the
+  daemon answered with the chosen login under a new pid; a repeat `use jack@…`
+  left the pid alone.
+- That replay restarted the daemon while thread `01a11dc6` (cwd
+  `loopflow.flow-skills`) was mid-turn. It reloaded and is idle; its turn was cut.
+
+## Open
+
+- `use` restarts the daemon even with a turn running through it. Holding off
+  and printing the command instead is the alternative; Jack has not chosen.
 - Automatic switches during an lf launch (`SwitchCause::Exhaustion`) leave the
-  daemon alone, so a bare `codex` can lag after one. Restarting there would
-  interrupt interactive work nobody asked to interrupt; undecided.
-- Unrelated leak seen in passing: ~25 orphaned `codex app-server daemon
-  pid-update-loop` processes under `/private/tmp/lf-title-*/home`, started
-  Oct 8 13:19–15:19.
+  daemon alone, so a bare `codex` can lag after one.
+- Unverified: whether a stale daemon writes its old tokens back to
+  `auth.json` on refresh. Not observed over about an hour.
+- Unrelated: ~25 orphaned `codex app-server daemon pid-update-loop` processes
+  under `/private/tmp/lf-title-*/home`, started Oct 8 13:19–15:19.
+- Unrelated: `syspolicyd` wedged at 100% CPU and hung every new binary at
+  launch until Jack ran `sudo killall syspolicyd`.

@@ -278,7 +278,8 @@ fn follow_up_export_recovers_lost_issue_and_relation_responses_after_completion(
             let sync = || {
                 runtime
                     .block_on(crate::ops::planning_export::sync_repository_exports(
-                        &store, &task,
+                        &store,
+                        repo.path().to_str().unwrap(),
                     ))
                     .unwrap()
             };

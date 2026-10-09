@@ -64,7 +64,6 @@
     },
     "runtime": {
       "completion_pending": null,
-      "pending_sync": null,
       "provider": "codex",
       "reason": "No Task Flow has run; independent Sessions may still be active",
       "started": false,

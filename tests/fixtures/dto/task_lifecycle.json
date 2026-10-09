@@ -85,7 +85,6 @@
                     },
                     "runtime": {
                       "completion_pending": null,
-                      "pending_sync": null,
                       "provider": "codex",
                       "reason": "No Task Flow has run; independent Sessions may still be active",
                       "started": false,
@@ -110,7 +109,8 @@
                       "identifier": "lf-e1d59e9",
                       "name": "Verify installed release",
                       "rank": 1,
-                      "state": "unstarted"
+                      "state": "unstarted",
+                      "sync": null
                     },
                     "workflow_name": "feature"
                   },
@@ -316,7 +316,6 @@
                     },
                     "runtime": {
                       "completion_pending": null,
-                      "pending_sync": "Saved locally; pending Linear synchronization",
                       "provider": "codex",
                       "reason": "done",
                       "started": true,
@@ -336,7 +335,8 @@
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
                       "rank": 0,
-                      "state": "completed"
+                      "state": "completed",
+                      "sync": null
                     },
                     "workflow_name": "delivery"
                   }
@@ -607,7 +607,6 @@
       },
       "runtime": {
         "completion_pending": null,
-        "pending_sync": "Saved locally; pending Linear synchronization",
         "provider": "codex",
         "reason": "done",
         "started": true,
@@ -627,7 +626,8 @@
         "identifier": "FIX-1",
         "name": "Deliver the command",
         "rank": 0,
-        "state": "completed"
+        "state": "completed",
+        "sync": null
       },
       "workflow_name": "delivery"
     },
@@ -1121,7 +1121,8 @@
       },
       "planning_error": null,
       "planning_stale": false,
-      "planning_state": "available"
+      "planning_state": "available",
+      "sync": null
     },
     "task_frame": {
       "answers": 1,
@@ -1648,7 +1649,6 @@
                     },
                     "runtime": {
                       "completion_pending": null,
-                      "pending_sync": null,
                       "provider": "codex",
                       "reason": "No Task Flow has run; independent Sessions may still be active",
                       "started": false,
@@ -1673,7 +1673,8 @@
                       "identifier": "lf-e1d59e9",
                       "name": "Verify installed release",
                       "rank": 1,
-                      "state": "unstarted"
+                      "state": "unstarted",
+                      "sync": null
                     },
                     "workflow_name": "feature"
                   },
@@ -1864,7 +1865,6 @@
                     },
                     "runtime": {
                       "completion_pending": null,
-                      "pending_sync": "Saved locally; pending Linear synchronization",
                       "provider": "codex",
                       "reason": "done",
                       "started": true,
@@ -1884,7 +1884,8 @@
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
                       "rank": 0,
-                      "state": "completed"
+                      "state": "completed",
+                      "sync": null
                     },
                     "workflow_name": "delivery"
                   }
@@ -2140,7 +2141,6 @@
       },
       "runtime": {
         "completion_pending": null,
-        "pending_sync": "Saved locally; pending Linear synchronization",
         "provider": "codex",
         "reason": "done",
         "started": true,
@@ -2160,7 +2160,8 @@
         "identifier": "FIX-1",
         "name": "Deliver the command",
         "rank": 0,
-        "state": "completed"
+        "state": "completed",
+        "sync": null
       },
       "workflow_name": "delivery"
     },
@@ -2572,7 +2573,8 @@
       },
       "planning_error": null,
       "planning_stale": false,
-      "planning_state": "available"
+      "planning_state": "available",
+      "sync": null
     },
     "task_frame": {
       "answers": 1,
@@ -3119,7 +3121,6 @@
                     },
                     "runtime": {
                       "completion_pending": null,
-                      "pending_sync": null,
                       "provider": "codex",
                       "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
                       "started": true,
@@ -3139,7 +3140,8 @@
                       "identifier": "FIX-1",
                       "name": "Deliver the command",
                       "rank": 0,
-                      "state": "unstarted"
+                      "state": "unstarted",
+                      "sync": null
                     },
                     "workflow_name": "delivery"
                   }
@@ -3373,7 +3375,6 @@
       },
       "runtime": {
         "completion_pending": null,
-        "pending_sync": null,
         "provider": "codex",
         "reason": "Step Process 83496037-a550-44c9-9557-d3f451dc42d8 is running __telemetry-scorecard",
         "started": true,
@@ -3393,7 +3394,8 @@
         "identifier": "FIX-1",
         "name": "Deliver the command",
         "rank": 0,
-        "state": "unstarted"
+        "state": "unstarted",
+        "sync": null
       },
       "workflow_name": "delivery"
     },
@@ -3731,7 +3733,8 @@
       },
       "planning_error": null,
       "planning_stale": false,
-      "planning_state": "available"
+      "planning_state": "available",
+      "sync": null
     },
     "task_frame": {
       "answers": 1,

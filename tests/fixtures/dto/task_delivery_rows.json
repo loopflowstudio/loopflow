@@ -11,7 +11,8 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -31,12 +32,11 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged \u00b7 Follow-through pending"
+      "reason": "Merged · Follow-through pending"
     },
     "section": "waiting",
     "actions": {
@@ -45,7 +45,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged \u00b7 Follow-through pending",
+      "reason": "Merged · Follow-through pending",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {
@@ -427,7 +427,8 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -447,8 +448,7 @@
       "reason": "done",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
@@ -851,7 +851,8 @@
       "state": "completed",
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -871,8 +872,7 @@
       "reason": "done",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
@@ -1258,7 +1258,8 @@
           "issue_id": "source-issue",
           "identifier": "W2-SOURCE"
         }
-      ]
+      ],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1321,7 +1322,8 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": "2026-10-08",
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1384,7 +1386,8 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1404,12 +1407,11 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged \u00b7 Follow-through pending"
+      "reason": "Merged · Follow-through pending"
     },
     "section": "waiting",
     "actions": {
@@ -1418,7 +1420,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged \u00b7 Follow-through pending",
+      "reason": "Merged · Follow-through pending",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {
@@ -1802,7 +1804,8 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
-      "follow_up_sources": []
+      "follow_up_sources": [],
+      "sync": null
     },
     "reference": {
       "issue_url": null,
@@ -1822,12 +1825,11 @@
       "reason": "ready",
       "updated_at": "2026-07-14T22:00:00Z",
       "provider": "codex",
-      "started": true,
-      "pending_sync": null
+      "started": true
     },
     "next_move": {
       "owner": "wave",
-      "reason": "Merged \u00b7 Follow-through pending"
+      "reason": "Merged · Follow-through pending"
     },
     "section": "waiting",
     "actions": {
@@ -1836,7 +1838,7 @@
     },
     "condition": {
       "state": "waiting",
-      "reason": "Merged \u00b7 Follow-through pending",
+      "reason": "Merged · Follow-through pending",
       "observed_at": "2026-07-15T00:01:00Z",
       "evidence_age_secs": 7260,
       "local_progress": {

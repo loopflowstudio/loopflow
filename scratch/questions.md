@@ -178,10 +178,6 @@ remain separate. No new product decision is selected.
   mapping/creation claims through a derived view; it neither rewrites attempts
   nor changes private selection. Mixed-provider exchange remains disabled.
 
-- Receipt-origin representation and removal of synthetic creation requests:
-  `bf4c39b2e:scratch/questions.md`, final entry. The design owns the remaining
-  composition; one common receipt table retains every captured origin.
-
 - October 9 correspondence choice: explicit local `planning associate <incoming-id>
   --with <local-id> --linear <provider-id>` uses retained scalar mapping evidence,
   not names or creation inputs. Exact local rows retain execution ownership; an

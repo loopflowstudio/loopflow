@@ -1,9 +1,6 @@
 import CoreGraphics
 import Foundation
-
-public extension Notification.Name {
-    static let multiplexerStoreDidChange = Notification.Name("loopflow.multiplexerStoreDidChange")
-}
+import Observation
 
 public enum SpatialDirection: Equatable, Sendable {
     case left
@@ -12,9 +9,10 @@ public enum SpatialDirection: Equatable, Sendable {
     case down
 }
 
-/// Owns the immutable layout tree outside SwiftUI. Views receive snapshots via
-/// a notification and send every mutation back through this reference layer.
+/// Owns the retained layout. Views and opening receipts observe this same store;
+/// mutations finish on MainActor before either consumer reads the new state.
 @MainActor
+@Observable
 public final class MultiplexerStore {
     public private(set) var layout: LayoutNode
     public private(set) var focusedPaneId: String
@@ -60,7 +58,6 @@ public final class MultiplexerStore {
         if collapsed && focusedPaneId == paneId, let first = visibleLayout?.firstPane {
             focusedPaneId = first.id
         }
-        _notify()
     }
 
     public func reveal(sessionId: String) {
@@ -80,7 +77,6 @@ public final class MultiplexerStore {
         collapsedPaneIds.remove(paneId)
         focusedPaneId = paneId
         if zoomedPaneId != nil { zoomedPaneId = paneId }
-        _notify()
     }
 
     @discardableResult
@@ -96,7 +92,6 @@ public final class MultiplexerStore {
               let remaining = layout.removing([paneId]) else { return }
         layout = remaining.splitting(destination, axis: axis, newPane: pane)
         closedState = nil
-        _notify()
     }
 
     public func close(_ paneId: String) {
@@ -122,7 +117,6 @@ public final class MultiplexerStore {
             focusedPaneId = _nearestPane(to: paneId, in: closedState?.layout)
                 ?? layout.firstPane.id
         }
-        _notify()
     }
 
     public func undoClose() {
@@ -132,7 +126,6 @@ public final class MultiplexerStore {
         zoomedPaneId = closedState.zoomedPaneId
         collapsedPaneIds = closedState.collapsedPaneIds
         self.closedState = nil
-        _notify()
     }
 
     public func load(sessionId: String) {
@@ -146,7 +139,6 @@ public final class MultiplexerStore {
                     .replacingContent(of: openPane.id, with: previous)
                 collapsedPaneIds.remove(focusedPaneId)
                 closedState = nil
-                _notify()
                 return
             }
             setFocusedPane(openPane.id)
@@ -167,7 +159,6 @@ public final class MultiplexerStore {
         )
         collapsedPaneIds.remove(focusedPaneId)
         closedState = nil
-        _notify()
     }
 
     public func newShell(command: [String] = [], beside paneId: String? = nil, focus: Bool = true) {
@@ -185,8 +176,8 @@ public final class MultiplexerStore {
         }
     }
 
-    /// Fill empty targets unless an explicit split was requested. Publish only
-    /// after the new occurrence, launch command, focus and Undo state agree.
+    /// Fill empty targets unless an explicit split was requested. Update the
+    /// occurrence, launch command, focus and Undo together on MainActor.
     @discardableResult
     private func _insert(
         _ content: PaneContent,
@@ -213,9 +204,7 @@ public final class MultiplexerStore {
             zoomedPaneId = axis == nil && zoomedPaneId != nil ? insertedId : nil
         }
         closedState = nil
-        let inserted = layout.pane(for: insertedId)
-        _notify()
-        return inserted
+        return layout.pane(for: insertedId)
     }
 
     /// Explicit arrangement changes visibility without selecting another Session.
@@ -228,7 +217,6 @@ public final class MultiplexerStore {
             zoomedPaneId = nil
         } else { return }
         focusBeforeZoom = nil
-        _notify()
     }
 
     public func toggleZoom(_ paneId: String) {
@@ -244,7 +232,6 @@ public final class MultiplexerStore {
             zoomedPaneId = paneId
             focusedPaneId = paneId
         }
-        _notify()
     }
 
     public func updateRatio(
@@ -259,7 +246,6 @@ public final class MultiplexerStore {
         )
         guard updated != layout else { return }
         layout = updated
-        _notify()
     }
 
     public func focus(_ direction: SpatialDirection) {
@@ -284,7 +270,6 @@ public final class MultiplexerStore {
         if let candidate {
             focusedPaneId = candidate.key
             zoomedPaneId = nil
-            _notify()
         }
     }
 
@@ -309,11 +294,6 @@ public final class MultiplexerStore {
             focusedPaneId = layout.firstPane.id
         }
         closedState = nil
-        _notify()
-    }
-
-    private func _notify() {
-        NotificationCenter.default.post(name: .multiplexerStoreDidChange, object: self)
     }
 
     private func _nearestPane(to paneId: String, in previousLayout: LayoutNode?) -> String? {

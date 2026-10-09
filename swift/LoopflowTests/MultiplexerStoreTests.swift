@@ -1,30 +1,29 @@
 import Foundation
-import os
+import Observation
 import Loopflow
 import Testing
 
 @Suite("Multiplexer store")
 @MainActor
 struct MultiplexerStoreTests {
-    @Test("Published shell panes already carry their launch command")
-    func shellLaunchIsPublishedTogether() {
+    @Test("Observed shell panes carry their launch command")
+    func shellLaunchIsPublishedTogether() async throws {
         let store = MultiplexerStore()
-        let observer = NotificationCenter.default.addObserver(forName: .multiplexerStoreDidChange, object: nil, queue: nil) { notification in
-            let sender = notification.object as? MultiplexerStore
-            MainActor.assumeIsolated {
-                guard sender === store else { return }
-                for pane in store.layout.allPanes where pane.content == .shell {
-                    #expect(store.shellCommands[pane.id] == ["fixture"])
-                }
-            }
+        await confirmation("layout changes are observable") { changed in
+            withObservationTracking {
+                _ = store.layout
+            } onChange: { changed() }
+            store.newShell(command: ["fixture"])
         }
-        defer { NotificationCenter.default.removeObserver(observer) }
-        store.newShell(command: ["fixture"])
         store.newShell(command: ["fixture"])
         #expect(store.layout.allPanes.count == 2)
+        for pane in store.layout.allPanes {
+            #expect(pane.content == .shell)
+            #expect(store.shellCommands[pane.id] == ["fixture"])
+        }
     }
 
-    @Test("Companion publication cannot expose stale Undo or partial focus", arguments: [false, true], [
+    @Test("Companion insertion clears Undo and preserves the requested focus", arguments: [false, true], [
         PaneContent.shell, .files(taskId: "task"), .flowLog(taskId: "task"),
     ])
     func emptyCompanionPublishesCompleteState(focus: Bool, content: PaneContent) throws {
@@ -40,25 +39,15 @@ struct MultiplexerStoreTests {
         store.setCollapsed(paneId: empty.id, collapsed: true)
         #expect(store.canUndoClose)
 
-        let publications = OSAllocatedUnfairLock(initialState: 0)
-        let observer = NotificationCenter.default.addObserver(forName: .multiplexerStoreDidChange, object: nil, queue: nil) { notification in
-            let sender = notification.object as? MultiplexerStore
-            MainActor.assumeIsolated {
-                guard sender === store else { return }
-                publications.withLock { $0 += 1 }
-                #expect(!store.canUndoClose)
-                #expect(store.layout.pane(for: empty.id)?.content == content)
-                #expect(store.layout.pane(for: empty.id)?.incarnation != empty.incarnation)
-                #expect(!store.collapsedPaneIds.contains(empty.id))
-                #expect(store.focusedPaneId == (focus ? empty.id : selected.id))
-                #expect(store.zoomedPaneId == (focus ? empty.id : selected.id))
-                if content == .shell { #expect(store.shellCommands[empty.id] == ["fixture"]) }
-            }
-        }
-        defer { NotificationCenter.default.removeObserver(observer) }
         if content == .shell { store.newShell(command: ["fixture"], beside: empty.id, focus: focus) }
         else { store.show(content, beside: empty.id, focus: focus) }
-        #expect(publications.withLock { $0 } == 1)
+        #expect(!store.canUndoClose)
+        #expect(store.layout.pane(for: empty.id)?.content == content)
+        #expect(store.layout.pane(for: empty.id)?.incarnation != empty.incarnation)
+        #expect(!store.collapsedPaneIds.contains(empty.id))
+        #expect(store.focusedPaneId == (focus ? empty.id : selected.id))
+        #expect(store.zoomedPaneId == (focus ? empty.id : selected.id))
+        if content == .shell { #expect(store.shellCommands[empty.id] == ["fixture"]) }
         let published = store.layout
         store.undoClose()
         #expect(store.layout == published)

@@ -187,7 +187,7 @@ struct WorkDestinationTests {
         #expect(model.linkedSession == nil)
     }
 
-    @Test(arguments: ["usable", "connection", "surface", "comparison", "closed"])
+    @Test(arguments: ["usable", "connection", "surface", "comparison", "closed", "hidden", "zoomed", "replaced"])
     func composedOpeningWaitsForNativeSessionAndComparison(outcome: String) async throws {
         let (model, record, url, query) = try openingFixture(outcome: outcome)
         await model.openTaskLink(url)
@@ -200,28 +200,28 @@ struct WorkDestinationTests {
         let files = TaskFilesStore(issue: "LOO-427", cwd: "/fixture", query: query)
         files.selection = "retained-draft.rs"
         await model.connectLinkedOpening(request, store: store, workspace: workspace, files: files)
-        if outcome == "comparison" {
-            #expect(model.taskOpening?.reason == "Comparison unavailable")
-        } else {
-            if outcome == "connection" {
-                #expect(model.taskOpening?.reason == "Connection unavailable")
-            } else {
-                #expect(store.sessions.first?.state == .prepared)
-                #expect(model.taskOpening?.status == .opening)
-                if outcome == "closed" {
-                    workspace.multiplexer.close(workspace.multiplexer.focusedPaneId)
-                    store.recordPaneLive(record.id)
-                    #expect(model.taskOpening?.reason == "Opening panes were hidden, closed or replaced.")
-                } else if outcome == "surface" {
-                    store.recordPaneFailure(record.id, reason: "Native surface unavailable")
-                    #expect(model.taskOpening?.reason == "Native surface unavailable")
-                } else {
-                    // Exercise the native owner's callback, not a fabricated prepared=usable rule.
-                    store.recordPaneLive(record.id)
-                }
+        if outcome != "connection", outcome != "comparison" {
+            #expect(store.sessions.first?.state == .prepared)
+            #expect(model.taskOpening?.status == .opening)
+            let pane = workspace.multiplexer.focusedPane
+            switch outcome {
+            case "closed": workspace.multiplexer.close(pane.id)
+            case "hidden": workspace.multiplexer.setCollapsed(paneId: pane.id, collapsed: true)
+            case "zoomed": workspace.multiplexer.setZoom(pane.id, enabled: true)
+            case "replaced": workspace.multiplexer.load(sessionId: "replacement")
+            case "surface": store.recordPaneFailure(record.id, reason: "Native surface unavailable")
+            default:
+                // Exercise the native owner's callback, not a fabricated prepared=usable rule.
+                store.recordPaneLive(record.id)
             }
         }
+        try await waitForOpening(model)
+        let reasons = ["connection": "Connection unavailable", "surface": "Native surface unavailable",
+                       "comparison": "Comparison unavailable"]
         #expect(model.taskOpening?.status == (outcome == "usable" ? .usable : .failed))
+        if outcome != "usable" {
+            #expect(model.taskOpening?.reason == (reasons[outcome] ?? "Opening panes were hidden, closed or replaced."))
+        }
         #expect(model.taskOpening?.url == url.absoluteString)
         #expect(files.selection == "retained-draft.rs")
     }
@@ -252,6 +252,7 @@ struct WorkDestinationTests {
         await model.connectLinkedOpening(oldRequest, store: oldStore, workspace: workspace, files: nil)
         #expect(model.taskOpening == before)
         newStore.recordPaneLive(record.id)
+        try await waitForOpening(model)
         #expect(model.taskOpening?.status == (cancel ? .failed : .usable))
         #expect(model.taskOpening?.reason != "Late old failure")
     }
@@ -280,6 +281,14 @@ struct WorkDestinationTests {
         #expect(model.linkedSession == next)
         model.dismissTaskLink()
         #expect(model.taskOpening?.status == .failed)
+    }
+
+    private func waitForOpening(_ model: WorkModel) async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while model.taskOpening?.status == .opening {
+            guard ContinuousClock.now < deadline else { throw RegistryQueryError("Opening never settled") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     private func openingFixture(outcome: String, comparisonBarrier: LinkedDestinationBarrier? = nil) throws -> (WorkModel, SessionRecord, URL, RegistryQuery) {

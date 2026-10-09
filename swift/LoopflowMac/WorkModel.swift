@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import Loopflow
 import Observation
@@ -108,7 +107,6 @@ final class WorkModel {
     var linkedSession: LinkedSession?
     private(set) var taskOpening: DesktopOpening?
     @ObservationIgnored private var destinationGeneration = 0
-    @ObservationIgnored private var openingSessionObservation: AnyCancellable?
 
     @ObservationIgnored private var taskLinkExpectedID: String?
 
@@ -162,7 +160,6 @@ final class WorkModel {
         if let opening = taskOpening, opening.status == .opening {
             taskOpening = DesktopOpening(url: opening.url, status: .failed, reason: "Opening canceled by navigation or a newer request.")
         }
-        openingSessionObservation = nil
         destinationGeneration &+= 1
         if showsTaskLink { showsTaskLink = false }
         if linkedSession != nil { linkedSession = nil }
@@ -286,13 +283,6 @@ final class WorkModel {
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
         if let files { await files.refreshChanges() }
         guard !Task.isCancelled, destination.generation == destinationGeneration, taskOpening?.status == .opening else { return }
-        openingSessionObservation = store.$sessions.dropFirst().sink { [weak self, weak store, weak workspace, weak files] items in
-            // @Published emits before assignment; use that exact reading.
-            MainActor.assumeIsolated {
-                guard let self, let store, let workspace else { return }
-                self.updateLinkedOpening(destination, store: store, workspace: workspace, panes: panes, files: files, items: items)
-            }
-        }
         observeOpeningOwners(destination, store: store, workspace: workspace, panes: panes, files: files)
     }
 
@@ -308,10 +298,10 @@ final class WorkModel {
         }
     }
 
-    private func updateLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?, items: [SessionItem]? = nil) {
+    private func updateLinkedOpening(_ destination: LinkedSession, store: SessionsStore, workspace: SessionsWorkspace, panes: [PaneState], files: TaskFilesStore?) {
         guard destination.generation == destinationGeneration,
               let opening = taskOpening, opening.status == .opening else { return }
-        guard let item = (items ?? store.sessions).first(where: { $0.id == destination.record.id }) else { return }
+        guard let item = store.sessions.first(where: { $0.id == destination.record.id }) else { return }
         let layout = workspace.multiplexer
         let panesVisible = panes.allSatisfy { pane in
             layout.layout.pane(for: pane.id) == pane && !layout.collapsedPaneIds.contains(pane.id)
@@ -339,7 +329,6 @@ final class WorkModel {
                   destination.changesTask == nil || (files?.changes != nil && files?.isRefreshingChanges == false) {
             taskOpening = DesktopOpening(url: opening.url, status: .usable, reason: nil)
         }
-        if taskOpening?.status != .opening { openingSessionObservation = nil }
     }
 
     func openTaskDestination(wave: WaveRoadmap, task: RoadmapTask) {

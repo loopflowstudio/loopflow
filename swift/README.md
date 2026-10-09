@@ -567,8 +567,9 @@ window. `--diff` reveals the existing Changes browser beside the conversation,
 retaining file selection and drafts. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
 `usable` requires the Session's native-surface callback and a loaded Changes reading
-when requested. Connection, surface and comparison failures remain `failed` on that
-request. Navigation cancels an unfinished opening; late results cannot settle a newer
+when requested, with both original panes still visible. Closing, hiding, replacing or
+zooming away a requested pane fails the pending request, as do connection, surface and
+comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
 request, even for the same URL. This is endpoint readiness, not provider-turn completion
 or proof of compositor rendering. Plain-repository and remote opening remain separate.
 

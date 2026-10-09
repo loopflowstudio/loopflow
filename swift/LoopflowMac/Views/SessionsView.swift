@@ -281,15 +281,16 @@ struct SessionItem: Identifiable, Equatable {
 }
 
 @MainActor
-final class SessionsStore: ObservableObject {
-    @Published private(set) var sessions: [SessionItem] = []
+@Observable
+final class SessionsStore {
+    private(set) var sessions: [SessionItem] = []
 
     let surfaces: GhosttySurfacePool
 
     let repoPath: String
     let query: RegistryQuery
     private let metrics: SessionsLatencyMetrics
-    private var hasRecordedSessionsLoad = false
+    @ObservationIgnored private var hasRecordedSessionsLoad = false
 
     init(
         repoPath: String,
@@ -512,8 +513,7 @@ struct SessionsContentView: View {
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
     private let worktreeLayout: WorktreeLayoutStore
-    @ObservedObject private var store: SessionsStore
-    @State private var layoutRevision = 0
+    private let store: SessionsStore
     @State private var restorePaletteFocus = true
     @State private var launchError: String?
     /// Tasks this window already asked `lf session ensure --task` about.
@@ -547,7 +547,7 @@ struct SessionsContentView: View {
         self.query = query
         worktreeLayout = workspaces.layout(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath))
         let store = workspaces.workspace(for: WorkspaceIdentity(machineId: machineId, worktree: repoPath)).sessionStore(repoPath: repoPath, query: query)
-        _store = ObservedObject(wrappedValue: store)
+        self.store = store
     }
 
     private var navigation: WorkNavigation { model.navigation }
@@ -563,7 +563,6 @@ struct SessionsContentView: View {
     }
 
     var body: some View {
-        let _ = layoutRevision
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 WorkNavigator(model: model, onOpenSession: openSession, onConversation: { work in
@@ -683,10 +682,6 @@ struct SessionsContentView: View {
             case nil:
                 EmptyView()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            guard notification.object is MultiplexerStore else { return }
-            layoutRevision += 1
         }
         .onChange(of: multiplexer.focusedPaneId) { _, _ in
             guard terminalsVisible, model.repoPath?.normalizedFilePath == store.repoPath.normalizedFilePath else { return }
@@ -1087,7 +1082,7 @@ private struct WorktreeNodeView: View {
     /// Split worktrees name themselves on a strip; a single worktree is named
     /// by the toolbar chip and gets no chrome of its own.
     let showsStrips: Bool
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
 
     var body: some View { content }
 
@@ -1147,11 +1142,9 @@ private struct WorktreeTerminalsView: View {
     let workspace: SessionsWorkspace
     let path: String
     let isFocused: Bool
-    @ObservedObject var sessions: SessionsStore
-    @State private var revision = 0
+    let sessions: SessionsStore
 
     var body: some View {
-        let _ = revision
         let store = workspace.multiplexer
         Group {
         if let layout = store.zoomedPaneId == nil ? store.visibleLayout : store.layout {
@@ -1167,12 +1160,12 @@ private struct WorktreeTerminalsView: View {
         }
         }
         .environment(workspace)
-        .onReceive(NotificationCenter.default.publisher(for: .multiplexerStoreDidChange)) { notification in
-            if let source = notification.object as? MultiplexerStore, source === store {
-                revision += 1
-                Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
-            }
-        }
+        .onChange(of: store.zoomedPaneId) { _, _ in endWorkspaceAction() }
+        .onChange(of: store.collapsedPaneIds) { _, _ in endWorkspaceAction() }
+    }
+
+    private func endWorkspaceAction() {
+        Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
     }
 }
 
@@ -1181,7 +1174,7 @@ private struct MultiplexerView: View {
     let focusedPaneId: String
     let zoomedPaneId: String?
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
 
@@ -1217,7 +1210,7 @@ private struct MultiplexerNodeView: View {
     let node: LayoutNode
     let focusedPaneId: String
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
 
@@ -1336,7 +1329,7 @@ private struct SessionPaneView: View {
     let pane: PaneState
     let isFocused: Bool
     let workingDirectory: String
-    @ObservedObject var sessions: SessionsStore
+    let sessions: SessionsStore
     let store: MultiplexerStore
     let hover: PaneHover
     @State private var bellRinging = false

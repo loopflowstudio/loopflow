@@ -10,7 +10,7 @@ use time::{Duration, OffsetDateTime};
 
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
-use crate::process::Process;
+use crate::process::LfProcess;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -366,12 +366,12 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[Process]) -> Vec<Check> {
+pub fn audit(events: &[LfProcess]) -> Vec<Check> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     audit_at(events, &[], now)
 }
 
-fn audit_at(events: &[Process], obligations: &[CronObligation], now: i64) -> Vec<Check> {
+fn audit_at(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Vec<Check> {
     if events.is_empty() && obligations.is_empty() {
         return vec![Check::warn("continuity", "ledger is empty")];
     }
@@ -392,7 +392,7 @@ struct ExpectedInterval {
     end: i64,
 }
 
-fn check_continuity(events: &[Process], obligations: &[CronObligation], now: i64) -> Check {
+fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Check {
     let gaps = ledger_gap_days(events, now);
     if obligations.is_empty() {
         return Check::ok(
@@ -468,7 +468,7 @@ fn check_continuity(events: &[Process], obligations: &[CronObligation], now: i64
     )
 }
 
-fn ledger_gap_days(events: &[Process], now: i64) -> Vec<time::Date> {
+fn ledger_gap_days(events: &[LfProcess], now: i64) -> Vec<time::Date> {
     let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.started_at)).collect();
     let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
         return Vec::new();
@@ -571,7 +571,7 @@ fn format_local_timestamp(timestamp: i64) -> String {
 }
 
 /// A process may name only one command, and its terminal row names that work.
-fn check_attribution(events: &[Process]) -> Check {
+fn check_attribution(events: &[LfProcess]) -> Check {
     let unnamed = events
         .iter()
         .filter(|process| process.completed_at.is_some() && process.command.is_none())
@@ -587,7 +587,7 @@ fn check_attribution(events: &[Process]) -> Check {
 }
 
 /// Processes may be machine-scoped; recorded repositories must be absolute.
-fn check_identity(events: &[Process]) -> Check {
+fn check_identity(events: &[LfProcess]) -> Check {
     let repos: HashSet<&str> = events
         .iter()
         .filter_map(|event| event.repo.as_deref())
@@ -612,7 +612,7 @@ fn check_identity(events: &[Process]) -> Check {
     )
 }
 
-fn check_lineage(events: &[Process]) -> Check {
+fn check_lineage(events: &[LfProcess]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.lfid.as_str(), event.trace_id.as_str()))
@@ -689,7 +689,7 @@ mod tests {
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
     };
-    use crate::process::Process;
+    use crate::process::LfProcess;
 
     const DAY: i64 = 86_400;
 
@@ -719,8 +719,8 @@ mod tests {
         assert!(error.contains("latest known"), "{error}");
     }
 
-    fn row(ts: i64, event: &str) -> Process {
-        Process {
+    fn row(ts: i64, event: &str) -> LfProcess {
+        LfProcess {
             kind: crate::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,
@@ -743,12 +743,12 @@ mod tests {
         }
     }
 
-    fn named(mut row: Process, command: &str) -> Process {
+    fn named(mut row: LfProcess, command: &str) -> LfProcess {
         row.command = Some(command.to_string());
         row
     }
 
-    fn status_of(rows: &[Process], name: &str) -> Status {
+    fn status_of(rows: &[LfProcess], name: &str) -> Status {
         audit(rows)
             .into_iter()
             .find(|check| check.name == name)

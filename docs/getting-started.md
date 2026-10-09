@@ -51,7 +51,7 @@ clipboard        634 ▏
 
 The `-c` flag pastes your clipboard. `lf` assembles context—operating guidance,
 scratch notes, and clipboard—and passes it to the coding agent. Before the
-provider starts, Loopflow reserves the AgentSession and captures its input in
+provider starts, Loopflow reserves the LfSession and captures its input in
 this Machine. The store must be writable even for unbound work. Native history
 retains provider outcomes and usage; Process records the command result. Add repo
 docs explicitly with `--docs` and changed file bodies with `--diff files`.

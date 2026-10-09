@@ -9,7 +9,7 @@ use crate::id::ProcessLfid;
 use crate::ops::workflow::{
     Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
 };
-use crate::process::Process;
+use crate::process::LfProcess;
 use crate::store::StoreResult;
 use crate::task_work::{TaskSession, TaskWork};
 
@@ -72,7 +72,7 @@ pub(super) fn flows_of_task(
 
 /// The Task's workflow row: its definition, the node it waits at or left,
 /// and the edge it is on with the Process carrying it.
-type WorkflowRow = (WorkflowDefinition, String, Option<(u32, Process)>);
+type WorkflowRow = (WorkflowDefinition, String, Option<(u32, LfProcess)>);
 
 fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
     use rusqlite::OptionalExtension;
@@ -362,7 +362,7 @@ fn open_process_tasks() -> String {
 /// Unfinished Processes are few; a checkout's Process history grows without bound.
 #[derive(Debug)]
 pub(crate) struct OpenProcesses {
-    by_task: HashMap<String, Vec<Process>>,
+    by_task: HashMap<String, Vec<LfProcess>>,
 }
 
 fn members(
@@ -457,7 +457,7 @@ impl SqliteStore {
         drop(rows);
         drop(query);
         tx.commit()?;
-        let mut by_task: HashMap<String, Vec<Process>> = HashMap::new();
+        let mut by_task: HashMap<String, Vec<LfProcess>> = HashMap::new();
         // Each Task's Processes keep the newest-first order they were read in.
         for process in processes {
             for task in tasks.remove(&process.lfid).unwrap_or_default() {
@@ -492,7 +492,7 @@ impl SqliteStore {
 
     /// Whether a command with no recorded exit may still be running.
     /// Unknown is not stopped.
-    pub(crate) fn process_may_run(&self, process: &crate::process::Process) -> bool {
+    pub(crate) fn process_may_run(&self, process: &crate::process::LfProcess) -> bool {
         crate::journal::process_evidence(self, &process.lfid)
             != crate::journal::ProcessIdentityEvidence::Dead
     }
@@ -635,7 +635,7 @@ mod tests {
 
     use crate::durable::{FlowProcessFilter, ProjectId, TaskId};
     use crate::id::{ProcessLfid, TraceId, WaveId};
-    use crate::process::{ProcessFilter, ProcessWorkFilter};
+    use crate::process::{LfProcessFilter, LfProcessWorkFilter};
     use crate::session::SessionFilter;
     use crate::store::sqlite::SqliteStore;
     use crate::task_work::TaskWork;
@@ -1032,8 +1032,8 @@ mod tests {
         // The Flow's step is the only work performed in the checkout.
         let performed = store
             .processes(
-                &ProcessFilter {
-                    performed_work: Some(ProcessWorkFilter::Task(task.clone())),
+                &LfProcessFilter {
+                    performed_work: Some(LfProcessWorkFilter::Task(task.clone())),
                     ..Default::default()
                 },
                 None,

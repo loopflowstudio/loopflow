@@ -62,7 +62,7 @@ The **packaged source CLI under the launch sandbox** returned:
 - No successful completions in this snapshot. All completion dates remain
   unknown (`null`), because the captured provider data omitted them. No date
   was inferred from update or observation time.
-- Zero local Tasks, FlowSessions, AgentSessions and landing operations.
+- Zero local Tasks, FlowSessions, LfSessions and landing operations.
   A sandbox write probe against the production checkout failed with
   `Operation not permitted`; network access was also denied.
 

@@ -334,7 +334,7 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 #[test]
 fn process_page_retains_outcomes_unknowns_and_continuation() {
     let json = include_str!("../../../tests/fixtures/dto/process_page.json");
-    let page: loopflow::process::ProcessPage = serde_json::from_str(json).unwrap();
+    let page: loopflow::process::LfProcessPage = serde_json::from_str(json).unwrap();
     assert_eq!(page.entries[0].exit_code, Some(42));
     assert_eq!(page.entries[0].via_agent, None);
     assert_eq!(page.entries[0].pid, None);
@@ -355,7 +355,7 @@ fn process_page_retains_outcomes_unknowns_and_continuation() {
         serde_json::to_value(page).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-    assert!(serde_json::from_str::<loopflow::process::ProcessPage>("{}").is_err());
+    assert!(serde_json::from_str::<loopflow::process::LfProcessPage>("{}").is_err());
 }
 
 #[test]

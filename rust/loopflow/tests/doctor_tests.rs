@@ -6,7 +6,7 @@ use chrono::{Local, Timelike};
 use loopflow::durable::{CronReceiptId, MachineId};
 use loopflow::id::WaveId;
 use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
-use loopflow::process::Process;
+use loopflow::process::LfProcess;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::work::wave::Wave;
 use time::OffsetDateTime;
@@ -55,7 +55,7 @@ fn continuity_check(output: &Output) -> serde_json::Value {
 
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
-        .record_process(&Process {
+        .record_process(&LfProcess {
             kind: loopflow::process::ProcessKind::Lf,
             agent_session_id: None,
             os_started_at: None,

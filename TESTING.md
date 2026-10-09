@@ -482,9 +482,10 @@ cargo +stable fmt --all -- --check
 cargo +stable clippy --all-targets -- -D warnings
 ```
 
-The installation harness pulls `rust:bookworm` on each run to follow stable
-alongside CI's Rust jobs, and logs its compiler version. After adopting a newer
-standard-library API, run `uv run python scripts/test_task_installation.py` too;
+The installation harness pulls `public.ecr.aws/docker/library/rust:bookworm`
+from Docker's ECR Public mirror to avoid Docker Hub's shared-runner pull limits.
+It follows stable alongside CI's Rust jobs and logs its compiler version. After
+adopting a newer standard-library API, run `uv run python scripts/test_task_installation.py` too;
 a local lint pass does not prove that the disposable installation builds.
 
 CI installs stable on each run. An older local compiler can miss new Clippy
@@ -752,6 +753,8 @@ After adding, renaming or removing a public command owner or concept, run
 retained tables and subprocesses still need their actual owners in the map.
 For architecture/README documentation changes, run
 `cd website && uv run python dev.py test -k 'portable_architecture or readme_index_sync'`.
+Model renames also require this focused website check; generating matching HTML
+does not catch stale vocabulary in the website assertions.
 For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test documented_commands`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
@@ -852,7 +855,7 @@ responses, absence, and provider failure. Neither is configured live-provider pr
 The mechanical Flow proof uses that disposable account without an installation
 selection. A claim followed by admission failure/release leaves Started absent;
 the real worker records operation history and Started together. It retains the
-captured Flow after the template disappears and records an ordinary child Process without creating an AgentSession.
+captured Flow after the template disappears and records an ordinary child Process without creating an LfSession.
 The default-Machine proof sends two nested source CLI processes through a simulated
 installed executable and checks that both select the main Machine despite stale
 control pins. The explicit-Machine Flow proof runs locally in `one_machine_tests`. The declaration proof starts Task Y

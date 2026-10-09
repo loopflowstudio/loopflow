@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::engine::process::wait_for_exit;
 use crate::process::SessionAttachment;
-use crate::session::AgentSession;
+use crate::session::LfSession;
 use crate::store::{sqlite::SqliteStore, StoreResult};
 
 fn display_title(name: &str, task: Option<&str>) -> String {
@@ -156,7 +156,7 @@ impl TerminalTitle {
     }
 }
 
-fn session_title(store: &SqliteStore, session: &AgentSession) -> StoreResult<String> {
+fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<String> {
     let task = session
         .task_id
         .as_ref()

@@ -2581,7 +2581,7 @@ impl SessionCapture {
         dir: &Path,
         work: Option<crate::session::SessionWork>,
         context: Option<&crate::trace::PreparedTurnContext>,
-    ) -> StoreResult<Option<crate::session::AgentSession>> {
+    ) -> StoreResult<Option<crate::session::LfSession>> {
         let step = match &manifest.flow {
             Some(SessionFlowMembership::Step(step)) => Some(step),
             Some(SessionFlowMembership::Independent) | None => None,
@@ -2605,7 +2605,7 @@ impl SessionCapture {
             &manifest.cwd,
         );
         let session = store.create_session(
-            crate::session::AgentSession {
+            crate::session::LfSession {
                 captured: None,
                 caller_artifact_key: manifest.caller_artifact_key.clone(),
                 id: format!("session_{}", Uuid::new_v4().simple()),
@@ -3010,7 +3010,7 @@ pub(crate) fn capture_dir(key: &str) -> StoreResult<PathBuf> {
     resolve_capture(key).map(|(dir, _)| dir)
 }
 
-fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::AgentSession)> {
+fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession)> {
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;

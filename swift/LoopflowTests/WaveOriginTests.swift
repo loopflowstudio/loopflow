@@ -18,7 +18,7 @@ struct WaveOriginTests {
     }
 
     private func git(_ args: [String], at dir: URL) throws {
-        let process = Foundation.Process()
+        let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", dir.path] + args
         process.standardOutput = Pipe()

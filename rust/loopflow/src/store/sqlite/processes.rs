@@ -10,8 +10,8 @@ use sha2::{Digest, Sha256};
 
 use crate::id::{AttachmentToken, ProcessLfid};
 use crate::process::{
-    AgentCaller, Process, ProcessCursor, ProcessFilter, ProcessOutcomeFilter, ProcessPage,
-    ProcessWorkFilter, SessionAttachment,
+    AgentCaller, LfProcess, LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessPage,
+    LfProcessWorkFilter, SessionAttachment,
 };
 use crate::store::{StoreError, StoreResult};
 
@@ -22,8 +22,8 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_provider_generation,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
-pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<Process> {
-    Ok(Process {
+pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
+    Ok(LfProcess {
         lfid: row.get(0)?,
         pid: row.get(15)?,
         kind: match row.get::<_, String>(16)?.as_str() {
@@ -50,8 +50,8 @@ pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<Process>
 }
 
 fn process_query(
-    filter: &ProcessFilter,
-    after: Option<&ProcessCursor>,
+    filter: &LfProcessFilter,
+    after: Option<&LfProcessCursor>,
     limit: NonZeroU32,
 ) -> (String, Vec<Value>) {
     let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.lfid FROM processes e WHERE 1");
@@ -95,16 +95,16 @@ fn process_query(
     }
     if let Some(outcome) = filter.outcome {
         sql.push_str(match outcome {
-            ProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
-            ProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
-            ProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
-            ProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
+            LfProcessOutcomeFilter::Succeeded => " AND e.outcome='succeeded'",
+            LfProcessOutcomeFilter::Failed => " AND e.outcome='failed'",
+            LfProcessOutcomeFilter::Interrupted => " AND e.outcome='interrupted'",
+            LfProcessOutcomeFilter::Unknown => " AND e.outcome IS NULL",
         });
     }
     if let Some(work) = &filter.performed_work {
         let (column, value, tasks, close) = match work {
-            ProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
-            ProcessWorkFilter::Wave(id) => (
+            LfProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
+            LfProcessWorkFilter::Wave(id) => (
                 "wave_id",
                 id.as_str(),
                 "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
@@ -251,7 +251,7 @@ pub(super) fn attach_in(
 }
 
 impl SqliteStore {
-    pub fn processes_since(&self, since: i64) -> StoreResult<Vec<Process>> {
+    pub fn processes_since(&self, since: i64) -> StoreResult<Vec<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
             "{PROCESS_SELECT} WHERE e.started_at>=?1 ORDER BY e.started_at,e.lfid"
@@ -304,7 +304,7 @@ impl SqliteStore {
     }
 
     /// Read one command without decoding its event history or provider payloads.
-    pub fn process(&self, id: &ProcessLfid) -> StoreResult<Option<Process>> {
+    pub fn process(&self, id: &ProcessLfid) -> StoreResult<Option<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
@@ -316,7 +316,7 @@ impl SqliteStore {
     }
 
     /// Exact identity wins; otherwise require a unique literal, case-sensitive prefix.
-    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<Process>> {
+    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         if let Some(process) = conn
             .query_row(
@@ -354,10 +354,10 @@ impl SqliteStore {
     /// Missing payloads do not remove rows. No history body is read for discovery.
     pub fn processes(
         &self,
-        filter: &ProcessFilter,
-        after: Option<&ProcessCursor>,
+        filter: &LfProcessFilter,
+        after: Option<&LfProcessCursor>,
         limit: NonZeroU32,
-    ) -> StoreResult<ProcessPage> {
+    ) -> StoreResult<LfProcessPage> {
         let (sql, values) = process_query(filter, after, limit);
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&sql)?;
@@ -366,14 +366,14 @@ impl SqliteStore {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let next = if entries.len() > limit.get() as usize {
             entries.pop();
-            entries.last().map(|process| ProcessCursor {
+            entries.last().map(|process| LfProcessCursor {
                 started_at: process.started_at,
                 lfid: process.lfid.clone(),
             })
         } else {
             None
         };
-        Ok(ProcessPage { entries, next })
+        Ok(LfProcessPage { entries, next })
     }
 
     pub(crate) fn make_session_interactive(
@@ -825,7 +825,7 @@ mod discovery_tests {
 
     use crate::durable::{ProjectId, TaskId};
     use crate::id::{ProcessLfid, TraceId, WaveId};
-    use crate::process::{ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
+    use crate::process::{LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter};
     use crate::store::sqlite::SqliteStore;
     use crate::store::StoreError;
 
@@ -951,7 +951,7 @@ mod discovery_tests {
         }
         let page = store
             .processes(
-                &ProcessFilter::default(),
+                &LfProcessFilter::default(),
                 None,
                 NonZeroU32::new(10).unwrap(),
             )
@@ -984,12 +984,12 @@ mod discovery_tests {
         assert_eq!(success.via_agent, Some(true));
         assert_eq!(page.entries[0].signal, None);
         for (outcome, expected) in [
-            (ProcessOutcomeFilter::Unknown, &parent),
-            (ProcessOutcomeFilter::Failed, &direct),
-            (ProcessOutcomeFilter::Succeeded, &agent),
-            (ProcessOutcomeFilter::Interrupted, &interrupted),
+            (LfProcessOutcomeFilter::Unknown, &parent),
+            (LfProcessOutcomeFilter::Failed, &direct),
+            (LfProcessOutcomeFilter::Succeeded, &agent),
+            (LfProcessOutcomeFilter::Interrupted, &interrupted),
         ] {
-            let filter = ProcessFilter {
+            let filter = LfProcessFilter {
                 outcome: Some(outcome),
                 ..Default::default()
             };
@@ -1022,7 +1022,7 @@ mod discovery_tests {
                 ],
             )
             .unwrap();
-        let filter = ProcessFilter {
+        let filter = LfProcessFilter {
             repo: Some("/repo".into()),
             parent_process_lfid: Some(second.clone()),
             caller_session_id: Some("caller".into()),
@@ -1056,7 +1056,7 @@ mod discovery_tests {
         ));
         assert_eq!(store.resolve_process("%_").unwrap(), None);
         assert_eq!(store.process(&ProcessLfid::new()).unwrap(), None);
-        let miss = ProcessFilter {
+        let miss = LfProcessFilter {
             command_contains: Some("%_".into()),
             lfid: Some(second),
             ..Default::default()
@@ -1078,7 +1078,7 @@ mod discovery_tests {
                 .unwrap();
             let page = store
                 .processes(
-                    &ProcessFilter {
+                    &LfProcessFilter {
                         lfid: Some(first.clone()),
                         command_contains: Some("pr land".into()),
                         ..Default::default()
@@ -1114,7 +1114,7 @@ mod discovery_tests {
             }
         }
         expected.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
-        let filter = ProcessFilter {
+        let filter = LfProcessFilter {
             repo: Some("/repo".into()),
             ..Default::default()
         };
@@ -1221,8 +1221,8 @@ mod discovery_tests {
                 .unwrap();
             }
         }
-        let filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Task(first.clone())),
+        let filter = LfProcessFilter {
+            performed_work: Some(LfProcessWorkFilter::Task(first.clone())),
             ..Default::default()
         };
         let page = store
@@ -1237,8 +1237,8 @@ mod discovery_tests {
             .unwrap();
         assert_eq!(page.entries[0].lfid, mechanical);
         assert_eq!(page.next, None);
-        let second_filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Task(second)),
+        let second_filter = LfProcessFilter {
+            performed_work: Some(LfProcessWorkFilter::Task(second)),
             ..Default::default()
         };
         let page = store
@@ -1248,8 +1248,8 @@ mod discovery_tests {
             page.entries.iter().map(|e| &e.lfid).collect::<Vec<_>>(),
             vec![&shared]
         );
-        let wave_filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Wave(wave)),
+        let wave_filter = LfProcessFilter {
+            performed_work: Some(LfProcessWorkFilter::Wave(wave)),
             ..Default::default()
         };
         let page = store

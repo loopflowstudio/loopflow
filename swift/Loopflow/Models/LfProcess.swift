@@ -6,7 +6,7 @@ public enum ProcessKind: String, Codable, Sendable, Equatable {
 }
 
 /// One recorded process. Missing outcomes do not establish current liveness.
-public struct Process: Codable, Sendable, Equatable, Identifiable {
+public struct LfProcess: Codable, Sendable, Equatable, Identifiable {
     public let lfid: String
     public let pid: UInt32?
     public let kind: ProcessKind
@@ -44,7 +44,7 @@ public struct Process: Codable, Sendable, Equatable, Identifiable {
 }
 
 /// Continue with the same filters; refresh from page one to observe new writes.
-public struct ProcessCursor: Codable, Sendable, Equatable {
+public struct LfProcessCursor: Codable, Sendable, Equatable {
     public let startedAt: Int64
     public let lfid: String
 
@@ -54,7 +54,7 @@ public struct ProcessCursor: Codable, Sendable, Equatable {
     }
 }
 
-public struct ProcessPage: Codable, Sendable, Equatable {
-    public let entries: [Process]
-    public let next: ProcessCursor?
+public struct LfProcessPage: Codable, Sendable, Equatable {
+    public let entries: [LfProcess]
+    public let next: LfProcessCursor?
 }

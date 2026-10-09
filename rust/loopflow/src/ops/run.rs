@@ -794,7 +794,7 @@ mod tests {
         let task = task(&store, &wave, &project, directory.path().join("workspace")).await;
         let session = |task_id: Option<TaskId>, caller: Option<String>| {
             let inherited = caller.is_some();
-            crate::session::AgentSession {
+            crate::session::LfSession {
                 captured: None,
                 id: uuid::Uuid::new_v4().to_string(),
                 artifact_key: crate::session_record::new_artifact_key(),

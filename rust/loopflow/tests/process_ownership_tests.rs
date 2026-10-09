@@ -8,14 +8,14 @@ use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
 use loopflow::id::ProcessLfid;
-use loopflow::session::{AgentSession, TitleSource};
+use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
 async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
-    use loopflow::process::{Process, ProcessPage};
+    use loopflow::process::{LfProcess, LfProcessPage};
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -41,7 +41,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         assert!(result.status.success(), "{result:?}");
         result.stdout
     };
-    let first: ProcessPage = serde_json::from_slice(&invoke(&[
+    let first: LfProcessPage = serde_json::from_slice(&invoke(&[
         "monitor",
         "list",
         "--all",
@@ -61,7 +61,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     assert_eq!(first.entries[0].command.as_ref(), Some(&raw));
     assert_eq!(first.entries[0].outcome, None);
     let cursor = serde_json::to_string(first.next.as_ref().unwrap()).unwrap();
-    let second: ProcessPage = serde_json::from_slice(&invoke(&[
+    let second: LfProcessPage = serde_json::from_slice(&invoke(&[
         "monitor",
         "list",
         "--all",
@@ -84,7 +84,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         Some("caller-session")
     );
     assert_eq!(second.next, None);
-    let detail: Process = serde_json::from_slice(&invoke(&[
+    let detail: LfProcess = serde_json::from_slice(&invoke(&[
         "monitor",
         "show",
         &ids[1].as_str()[..20],
@@ -92,7 +92,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     ]))
     .unwrap();
     assert_eq!(detail, second.entries[0]);
-    let caller: ProcessPage = serde_json::from_slice(&invoke(&[
+    let caller: LfProcessPage = serde_json::from_slice(&invoke(&[
         "monitor",
         "list",
         "--all",
@@ -138,7 +138,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         ],
         vec!["monitor", "list", "--all", "--wave", "historical", "--json"],
     ] {
-        let page: ProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
+        let page: LfProcessPage = serde_json::from_slice(&invoke(&args)).unwrap();
         assert_eq!(
             page.entries
                 .iter()
@@ -195,7 +195,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .output()
         .unwrap();
         assert!(result.status.success(), "{result:?}");
-        let page: ProcessPage = serde_json::from_slice(&result.stdout).unwrap();
+        let page: LfProcessPage = serde_json::from_slice(&result.stdout).unwrap();
         assert_eq!(
             page.entries
                 .iter()
@@ -213,7 +213,7 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     .unwrap();
     assert!(!ambiguous.status.success());
     assert!(String::from_utf8_lossy(&ambiguous.stderr).contains("Ambiguous Work selector"));
-    let explicit: ProcessPage = serde_json::from_slice(&invoke(&[
+    let explicit: LfProcessPage = serde_json::from_slice(&invoke(&[
         "monitor",
         "list",
         "--all",
@@ -758,7 +758,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
     let run_id = uuid::Uuid::new_v4().simple().to_string();
     store
         .create_session(
-            AgentSession {
+            LfSession {
                 captured: None,
                 task_id: None,
                 wave_id: None,

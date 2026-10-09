@@ -238,14 +238,15 @@ Codex alone has FIFO handoff; reaping covers noninteractive Codex/OpenCode.
 Generations, foreground cleanup, death orders, public-entry agreement,
 two-second removal and installed settlement remain open.
 
-## Process vocabulary (LOO-400, curated 2026-10-09)
+## Execution ownership names (LOO-441, 2026-10-09)
 
-Jack Heart approved Process, LFID/PID and #1483 landing
-(`32c00054-4c60-4b96-bdf4-4d5f142ab881`). LFID is durable; PID is reusable.
-Preserve identities, ancestry, outcomes and historical JSON. Sequencer
-`process_id` maps to Rust `process_lfid`. Exact migration/fixture limits:
-`cad03fe6d:wave/infrastructure/MEMORY.md`, this heading. LOO-397 owns placement;
-fixtures grant no installed control authority.
+Jack Heart selected LfSession/LfProcess; provider names remain LOO-442. He approved
+#1516 landing. The rename preserves wire/storage/fixtures, ProcessLfid,
+variants and product Session/Process; SQL/profiling retain historical names.
+`2b183c547` implements Rust/Swift/docs. Gate: fmt/Clippy pass; disk-blocked suites
+defer to CI. Installation unproved.
+LFID durable; PID reusable. LOO-400 history, mapping, placement and proofs:
+`6130a4eed:wave/infrastructure/MEMORY.md`, “Process vocabulary.”
 
 ## Terminal conversation recovery (LOO-409, 2026-10-07)
 

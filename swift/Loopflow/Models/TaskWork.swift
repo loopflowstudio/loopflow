@@ -4,7 +4,7 @@ import Foundation
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let flowProcesses: [FlowProcessInventoryEntry]
-    public let processes: [Process]
+    public let processes: [LfProcess]
     /// The Task's Workflow; `nil` when it runs only ad hoc Flows.
     public let workflow: Workflow?
 

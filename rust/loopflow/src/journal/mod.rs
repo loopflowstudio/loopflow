@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 
 use crate::engine::worktrees::main_repo_root;
 use crate::id::{ProcessLfid, TraceId};
-use crate::process::{AgentCaller, Process, AGENT_CALLER_ENV};
+use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
 use crate::store::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
@@ -523,7 +523,7 @@ fn ledger_insert(
         LfEventType::Escalated => Some("interrupted"),
         _ => None,
     };
-    let record = Process {
+    let record = LfProcess {
         kind: crate::process::ProcessKind::Lf,
         agent_session_id: None,
         os_started_at: None,

@@ -107,7 +107,19 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let Some(store) = crate::store::open_existing_store().await else {
         return Ok(None);
     };
-    Ok(TaskSource::resolve(&store, selector).await?)
+    let source = TaskSource::resolve(&store, selector).await?;
+    // A source Task can select its repository outside Git; a target-only Task
+    // still resolves in the target's saved repository without a local checkout.
+    if let Ok(repo) =
+        crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(selector))
+    {
+        if let Err(error) =
+            crate::ops::planning_peer::publish_repository(&store, &repo.to_string_lossy()).await
+        {
+            tracing::warn!(%error, "planning publication pending; remote resolution uses retained planning");
+        }
+    }
+    Ok(source)
 }
 
 fn parse_remote_command(lf_args: &[String]) -> anyhow::Result<Cli> {

@@ -15,6 +15,7 @@ pub(crate) mod metrics;
 pub(crate) mod planning_delivery;
 mod planning_export;
 mod planning_order;
+pub(crate) mod planning_peer;
 pub mod pm;
 mod pr;
 pub mod pr_landing;

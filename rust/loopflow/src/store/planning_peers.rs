@@ -20,6 +20,12 @@ pub struct PeerPlanningStatus {
     pub active: bool,
     pub selected_records: u64,
     pub imported_revision: Option<String>,
+    pub fetched_revision: Option<String>,
+    pub acquisition_error: Option<String>,
+    pub publication_revision: Option<String>,
+    pub publication_state: Option<String>,
+    pub publication_error: Option<String>,
+    pub pending_local: bool,
 }
 
 impl Store {

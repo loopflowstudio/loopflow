@@ -95,6 +95,12 @@ impl PlanningSync {
                 let drive = async {
                     tokio::select! {
                         _ = stopped => {},
+                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
+                            super::planning_peer::acquire_repository(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
+                            super::planning_peer::publish_repository(&store, &repo)
+                        }) => {},
                         _ = repeat_sync("comment acquisition", Duration::from_secs(15), || {
                             refresh_repository_comments(&store, &repo)
                         }) => {},

@@ -5,6 +5,7 @@ use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::durable::{ProjectId, TaskId};
 use crate::engine::planning_exchange::{
@@ -44,23 +45,114 @@ impl SqliteStore {
 
     pub fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
+        let tx = conn.unchecked_transaction()?;
+        let mut query = tx.prepare(
             "SELECT d.id,d.reference,EXISTS(SELECT 1 FROM planning_active a
                 WHERE a.repo=d.repo AND a.destination=d.id),
                 (SELECT count(*) FROM planning_members m WHERE m.repo=d.repo AND m.destination=d.id),
-                (SELECT revision FROM planning_peer_imports i WHERE i.repo=d.repo AND i.destination=d.id)
+                (SELECT revision FROM planning_peer_imports i WHERE i.repo=d.repo AND i.destination=d.id),
+                d.fetched_revision,d.acquisition_error,d.publication_revision,
+                d.publication_state,d.publication_error,d.publication_digest
             FROM planning_destinations d WHERE d.repo=?1 ORDER BY d.id",
         )?;
-        let rows = query.query_map([repo], |row| {
-            Ok(PeerPlanningStatus {
-                id: row.get(0)?,
-                reference: row.get(1)?,
-                active: row.get(2)?,
-                selected_records: row.get(3)?,
-                imported_revision: row.get(4)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+        let rows = query
+            .query_map([repo], |row| {
+                Ok((
+                    PeerPlanningStatus {
+                        id: row.get(0)?,
+                        reference: row.get(1)?,
+                        active: row.get(2)?,
+                        selected_records: row.get(3)?,
+                        imported_revision: row.get(4)?,
+                        fetched_revision: row.get(5)?,
+                        acquisition_error: row.get(6)?,
+                        publication_revision: row.get(7)?,
+                        publication_state: row.get(8)?,
+                        publication_error: row.get(9)?,
+                        pending_local: false,
+                    },
+                    row.get::<_, Option<String>>(10)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(query);
+        let mut statuses = Vec::new();
+        for (mut status, digest) in rows {
+            let mut snapshot = export_in(&tx, repo, &status.id)?;
+            let held = selection_conflicts(&tx, repo, &status.id, &snapshot)?;
+            omit_held(&mut snapshot, &held);
+            status.pending_local = match digest {
+                Some(digest) => digest != planning_digest(&snapshot)?,
+                None => !snapshot.changes.is_empty(),
+            };
+            statuses.push(status);
+        }
+        tx.commit()?;
+        Ok(statuses)
+    }
+
+    pub(crate) fn record_peer_fetch(
+        &self,
+        repo: &str,
+        destination: &str,
+        revision: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE planning_destinations SET fetched_revision=?3
+            WHERE repo=?1 AND id=?2 AND fetched_revision IS NOT ?3",
+            params![repo, destination, revision],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn record_peer_error(
+        &self,
+        repo: &str,
+        destination: &str,
+        acquisition: bool,
+        error: Option<&str>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let column = if acquisition {
+            "acquisition_error"
+        } else {
+            "publication_error"
+        };
+        conn.execute(
+            &format!(
+                "UPDATE planning_destinations SET {column}=?3
+                WHERE repo=?1 AND id=?2 AND {column} IS NOT ?3"
+            ),
+            params![repo, destination, error],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn record_peer_publication(
+        &self,
+        repo: &str,
+        destination: &str,
+        revision: &str,
+        state: &str,
+        snapshot: &PlanningSnapshot,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE planning_destinations SET publication_revision=?3,publication_state=?4,
+                publication_digest=?5,publication_error=NULL
+            WHERE repo=?1 AND id=?2 AND (publication_revision IS NOT ?3
+                OR publication_state IS NOT ?4 OR publication_digest IS NOT ?5
+                OR publication_error IS NOT NULL)",
+            params![
+                repo,
+                destination,
+                revision,
+                state,
+                planning_digest(snapshot)?
+            ],
+        )?;
+        Ok(())
     }
 
     /// Provision once, or recover the same user key on another machine. Callers
@@ -340,6 +432,13 @@ impl SqliteStore {
         tx.commit()?;
         Ok(conflicts)
     }
+}
+
+fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(snapshot.to_bytes().map_err(invalid)?)
+    ))
 }
 
 fn require_destination(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {

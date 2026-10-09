@@ -626,25 +626,30 @@ storage/Linear. Plan ownership above governs sharing and execution exclusion.
 Review-only publication remains stacked on `e68f2a423`/`84664e661`; no landing
 or public-remote planning export.
 
-Copied planning/issue-derived IDs are removed; causal ordering retains losers. Checkpoints acknowledge retention, not convergence.
-Release's entry-point lesson requires separate fetch/import/publication outcomes.
-Scalar imports share receipts and causal baselines, but no provider revisions.
-Receipt retirement cannot fence older Linear reads; equal-value facts need provenance. This differs from the parent's unseen provider-write race.
-Grouped receipts and legacy association remain.
+Copied planning/issue-derived IDs are removed; causal ordering retains losers.
+Checkpoints acknowledge retention, not convergence. Scalar imports share common
+receipts and causal baselines, but no provider revisions. Receipt retirement cannot
+fence older Linear reads; equal-value facts need provenance. This differs from the
+parent's unseen provider-write race. Grouped receipts and legacy association remain.
 
-`repo planning key/connect/use/select/status` pins empty bindings; recovery retains
-keys. `use` routes future roots, children inherit selection; status hides endpoints.
-SQL routing/status passes; Rust/public execution is unproved.
-Parent `b6f34a6f8` supplies repository-scoped foreground lifetime and Linux-only
-public Linear reconnect fixtures, not Git exchange. Reuse that lifetime; local-only
-peer work need not wait for Linear delivery. Mixed-provider acceptance needs the
-frontier repair. No production peer-exchange caller exists.
+Planning setup pins empty bindings and retains keys. Future roots use selection;
+children inherit it. Joining publishes nothing. Repository-scoped `PlanningSync`
+now drives local-only Git exchange; cold resolution acquires first. Source dispatch
+checks pushed code before publishing planning; target-only dispatch needs no source
+repository. Rust/public proofs are unexecuted; SQL runs. Linear-connected exchange
+reports the provenance gap rather than activating it, not a final product limitation.
+
+Fetch, import and publication receipts remain separate. Confirmation covers captured
+changes, not later saves; uncertainty recovers by readback. Workers retain effect
+locks through cancellation/status; acquisition/saves stay independent. Release's
+entry-point lesson requires the authored public cold-dispatch/reconnect proofs.
+Short taskless lifetimes and Desktop peer status remain.
 
 Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
 moves/private journals and dependents. Moving back cannot release history; explicit
-selection can. Independent exchange/selection proceeds; omission retains peer values,
-not convergence. Recovery UX remains for review.
-Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
+selection can. Exchange excludes held local history even from retained Git documents. Independent
+exchange/selection proceeds; omission retains peer values, not convergence. Recovery UX remains for
+review. Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
 
 ## Synced planning integration (LOO-334)
 

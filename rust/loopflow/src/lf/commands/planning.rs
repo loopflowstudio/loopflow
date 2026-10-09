@@ -106,6 +106,32 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             "  Retained import: {}",
             destination.imported_revision.as_deref().unwrap_or("none")
         );
+        println!(
+            "  Fetched: {}",
+            destination.fetched_revision.as_deref().unwrap_or("none")
+        );
+        println!(
+            "  Publication: {} ({}){}",
+            destination
+                .publication_state
+                .as_deref()
+                .unwrap_or("not attempted"),
+            destination
+                .publication_revision
+                .as_deref()
+                .unwrap_or("none"),
+            if destination.pending_local {
+                "; local changes pending"
+            } else {
+                ""
+            }
+        );
+        for error in [destination.acquisition_error, destination.publication_error]
+            .into_iter()
+            .flatten()
+        {
+            println!("  {error}");
+        }
     }
     for conflict in conflicts {
         println!(
@@ -115,6 +141,6 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             conflict.reason
         );
     }
-    println!("Import retention is not publication or convergence. Foreground Git exchange is not connected yet.");
+    println!("Import retention is not publication or convergence. Linear delivery is separate.");
     Ok(())
 }

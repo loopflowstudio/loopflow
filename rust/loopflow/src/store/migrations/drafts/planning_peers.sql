@@ -40,6 +40,12 @@ CREATE TABLE planning_destinations (
     id TEXT NOT NULL,
     endpoint TEXT NOT NULL,
     reference TEXT NOT NULL,
+    fetched_revision TEXT,
+    acquisition_error TEXT,
+    publication_revision TEXT,
+    publication_state TEXT CHECK(publication_state IN ('pending','unconfirmed','confirmed')),
+    publication_digest TEXT,
+    publication_error TEXT,
     PRIMARY KEY(repo,id)
 );
 CREATE TABLE planning_active (

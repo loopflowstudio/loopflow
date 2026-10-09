@@ -233,9 +233,16 @@ lf planning select <destination-id> --wave <wave-uuid>
 lf planning status --json
 ```
 
-Setup is local. **Foreground Git exchange is not connected yet**; these commands
-neither fetch nor publish planning. Status reports selection, retained imports and
-held records, not convergence or confirmed publication.
+Setup is local: these commands neither fetch nor publish planning. In local-only
+repositories, foreground Task work and Desktop's work connection exchange selected
+planning. Machine dispatch publishes first; cold Task resolution acquires before
+placement. A disconnected remote leaves local saves intact.
+
+Status separates fetched revisions, retained imports, pending local edits and
+pending/unconfirmed/confirmed publication. Confirmation covers the recorded revision,
+not future edits or held records. Import retention is not convergence. Git exchange
+in Linear-connected repositories awaits provider-frontier and grouped-receipt
+integration; it reports that limitation without changing local plans.
 
 Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
 explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing

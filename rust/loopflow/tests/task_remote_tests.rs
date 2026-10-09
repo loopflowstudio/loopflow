@@ -33,9 +33,11 @@ fn source(branch: &str, commit: &str) -> String {
 }
 
 #[test]
-fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
+fn machine_selector_acquires_unknown_planning_and_reuses_the_pushed_checkout() {
     let repo = TestRepo::new();
-    support::bind_task_planning(&repo);
+    repo.create_file("wave/task-pr-tests/GOAL.md", "Keep work.\n");
+    repo.stage_all();
+    repo.commit("Author local-only planning intent");
     repo.push();
     let target = tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap();
     let origin = git(repo.path(), &["remote", "get-url", "origin"]);
@@ -65,8 +67,8 @@ fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
             target.path().join(".lf/loopflow.db"),
         )))
         .unwrap();
-    // Exercise the common-writer import, not copied provider bootstrap. Public
-    // destination synchronization remains unfinished; this proves placement only.
+    // Setup only. Source dispatch publishes; the cold target acquires before
+    // resolving the Task. No fixture import stands in for production exchange.
     let source_repo = repo.path().canonicalize().unwrap().display().to_string();
     let target_repo = target
         .path()
@@ -99,15 +101,6 @@ fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
             .unwrap();
         target_store
             .bind_peer_planning(&target_repo, &destination)
-            .await
-            .unwrap();
-        let planning = fixture
-            .store
-            .export_peer_planning(&source_repo, &destination_id)
-            .await
-            .unwrap();
-        target_store
-            .import_peer_planning(&target_repo, &destination_id, "fixture", &planning)
             .await
             .unwrap();
     });
@@ -218,8 +211,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"inspected"
             "inspect-code",
         ])
     };
-    for selector in ["fixture", machine["id"].as_str().unwrap()] {
-        let output = invoke(selector, fixture.task.id.as_str());
+    for (selector, task) in [
+        ("fixture", "INF-123"),
+        (machine["id"].as_str().unwrap(), fixture.task.id.as_str()),
+    ] {
+        let output = invoke(selector, task);
         assert!(
             output.status.success(),
             "stdout: {}\nstderr: {}",

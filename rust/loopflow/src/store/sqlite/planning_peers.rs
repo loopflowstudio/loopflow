@@ -1915,7 +1915,7 @@ mod tests {
         );
         assert!(target.attempt_task_state(&delivery).unwrap());
         target
-            .settle_task_state(&delivery, Some("lost reply"))
+            .task_state_error(&delivery, "lost reply")
             .unwrap();
         let revision = target.revisions().unwrap();
         target

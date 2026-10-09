@@ -42,15 +42,14 @@ saves nor acquisition. Matching observations settle captured attempts and advanc
 later saves' unchanged baselines; retired receipts retain losing values.
 `b1f175bbf` delivers Project ordering with captured moves; only complete-list
 acquisition recognizes partial progress, never detail reads.
-`6bb8b935a` supplies receipt-backed CLI/Desktop sync status; `086d3560c` deletes
-pending-only projections, retaining baselines. Configuration selects pending display;
-creation receipts advance revision. `29777b8cb` scopes sync to repositories;
+`6bb8b935a` adds CLI/Desktop sync status; `086d3560c` removes pending-only
+projections, retaining baselines. Configuration selects pending display; creation
+receipts advance revision. `29777b8cb` scopes sync to repositories;
 `b6f34a6f8` separates Linux reconnect and portable abandonment fixtures.
-`078a6642e` repairs gate fixtures, DTOs and ownership docs. LOO-406's Linux migration,
-native/public Flow/work-watch reconnect and adoption pass; Swift remains unavailable.
-These supersede its unexecuted-reconnect notes, not peer acceptance.
-Jack requires queue before landing, with no check waiver or landing authority here.
-PR #1503's scratch checkpoint skips product CI; installed acceptance is unproved.
+`078a6642e` repairs gate fixtures/DTOs/docs. LOO-406's Linux migration,
+native/public Flow/work-watch reconnect and adoption pass, not peer acceptance.
+Swift remains unavailable. Jack requires queue before landing; no waiver or
+landing authority here. #1503's scratch skips product CI; installation is unproved.
 
 Jack Heart's `8821db44-0480-4493-8609-953207663f1d` removes public creation tokens.
 Each create generates/saves/returns a distinct ID, even for identical titles;
@@ -626,7 +625,7 @@ Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
 storage/Linear; plan ownership above governs sharing/execution exclusion.
 Review-only publication; no landing or public-remote planning export.
 
-Common writers integrate parent `ffe986160`. Malformed input aborts import;
+Malformed input aborts import;
 valid contradictions isolate objects. Entity revisions cannot order relationships.
 `a388ed425` shares disposition receipts without Workflow moves: a selected Linear
 winner retires losing intention; ordinary unchanged acquisition preserves it.
@@ -640,7 +639,7 @@ association and Desktop remain. Design: `scratch/work-on-another-machine-name.md
 Prior proofs: `ae6f392c2:wave/infrastructure/MEMORY.md`, this heading.
 
 Parent `ffe986160` replaces synthetic state settlement with observations/errors;
-this sync integrates that owner. Peer fixtures must follow its error-only API.
+this sync integrates that owner and updates the peer lost-reply fixture.
 Joining publishes nothing; mixed Linear exchange stays disabled pending composition,
 not by policy. Fetch/import/publication stay separate; readback settles only the
 attempted save. Workers retain effect locks through cancellation without blocking

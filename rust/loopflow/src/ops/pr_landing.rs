@@ -1300,20 +1300,14 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .sqlite
         .lock_checkout(&landing.worktree)
         .map_err(repair_error)?;
-    let sessions = store
-        .sqlite
-        .sessions(&crate::session::SessionFilter {
-            interactive: None,
-            limit: 0,
-            ..Default::default()
-        })
-        .map_err(repair_error)?;
-    let has_conversation = sessions
-        .iter()
-        .any(|session| session.cwd == landing.worktree && session.completed_at.is_none());
-    let has_execution = !checkout_execution_blockers(store, &landing.worktree)?.is_empty();
-    if has_conversation || has_execution {
-        eprintln!("PR merged; retained its checkout for associated work. Use lf wt delete after that work finishes.");
+    // A conversation is history; only a running Process holds the checkout.
+    if let Some(reason) = checkout_execution_blockers(store, &landing.worktree)?
+        .into_iter()
+        .next()
+    {
+        eprintln!(
+            "PR merged; retained its checkout: {reason}. Use lf wt delete after it finishes."
+        );
         return Ok(());
     }
     let repo = crate::engine::worktrees::main_repo_root(&landing.worktree)?;

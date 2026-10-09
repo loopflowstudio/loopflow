@@ -68,13 +68,24 @@ impl SqliteStore {
             .collect()
     }
 
+    /// Sessions that still name a driver. A driver clears itself on exit, so
+    /// this is the few being driven now plus any whose driver was killed.
+    pub(crate) fn driven_sessions(&self) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT id FROM agent_sessions WHERE driver_process_lfid IS NOT NULL ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| row.get(0))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     /// Terminate one orphaned engine and record why it went away. `terminate`
     /// runs only while the row still names this exact engine and driver, and
     /// the Session is settled only when it succeeds. Returns false when the
     /// row changed since `engine` was read, leaving everything untouched.
     ///
-    /// The exit is recorded as the provider generation's `exited` receipt, the
-    /// same confirmed exit recovery already reads before replacing an engine.
+    /// The exit is recorded as the provider generation's `exited` receipt, so
+    /// history says why the engine went away.
     pub(crate) fn reap_session_engine(
         &self,
         engine: &RecordedEngine,

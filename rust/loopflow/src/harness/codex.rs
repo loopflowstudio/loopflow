@@ -1517,7 +1517,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn saved_thread_rejection_retains_pre_spawn_retry_evidence() {
+    fn saved_thread_rejection_precedes_spawn_and_leaves_the_conversation_resumable() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let _binary = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
@@ -1542,9 +1542,6 @@ mod tests {
         let driver = store
             .claim_session_driver("saved", Some(&old), &process, true)
             .unwrap();
-        store
-            .record_session_provider_launch("saved", &driver, false)
-            .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
         let config = AgentConfig {
@@ -1561,14 +1558,9 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
-        assert!(store.session_provider_unstarted("saved").unwrap());
-        assert!(!crate::session_record::conversation_engine_exited(&store, "saved").unwrap());
         let released = store.release_session_driver("saved", &driver).unwrap();
         let retry = store
             .claim_session_driver("saved", Some(&released), &process, true)
-            .unwrap();
-        store
-            .record_session_provider_launch("saved", &retry, false)
             .unwrap();
         harness.resume_provider_session_id = Some("saved-thread".into());
         let config = AgentConfig {
@@ -1582,7 +1574,6 @@ mod tests {
                 .contains("failed to spawn codex app-server"),
             "{error}"
         );
-        assert!(!store.session_provider_unstarted("saved").unwrap());
         assert_eq!(
             store.session_thread("saved").unwrap().as_deref(),
             Some("saved-thread")

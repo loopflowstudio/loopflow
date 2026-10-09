@@ -11,6 +11,9 @@
 //! the group Loopflow created for it, and every Session naming it is headless
 //! with a driver Process that is provably dead. Unknown evidence, a live
 //! driver, an interactive Session or a reused pid leaves the process alone.
+//!
+//! The same pass records the exit of any driver that was killed before it
+//! could: nothing else would, and the Session would read as driven forever.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::process::Command;
@@ -20,7 +23,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::process::terminate_process_group;
 use crate::id::ProcessLfid;
-use crate::journal::{process_evidence, process_started_at, ProcessIdentityEvidence};
+use crate::journal::{
+    process_evidence, process_identity_evidence, process_started_at, ProcessIdentityEvidence,
+};
 use crate::store::sqlite::engine_orphans::RecordedEngine;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{StoreError, StoreResult};
@@ -30,6 +35,8 @@ pub struct EngineReapReport {
     /// Process groups proven orphaned, whether or not they were then reaped.
     pub orphaned: Vec<u32>,
     pub reaped: u32,
+    /// Drivers that were killed before recording their own exit.
+    pub settled_drivers: u32,
     pub errors: Vec<String>,
 }
 
@@ -109,7 +116,45 @@ fn reap_orphaned_engines_in(
         }
         report.reaped += u32::from(terminated);
     }
+    if !dry_run {
+        settle_dead_drivers(store, &driver_evidence, &mut report)?;
+    }
     Ok(report)
+}
+
+/// Record the exit a killed driver never wrote, so its Session stops reading
+/// as driven: its open turn ends in history and it no longer counts as Waiting.
+/// A Session whose engine is still alive keeps its driver for the next reap.
+fn settle_dead_drivers(
+    store: &SqliteStore,
+    driver_evidence: impl Fn(&ProcessLfid) -> ProcessIdentityEvidence,
+    report: &mut EngineReapReport,
+) -> StoreResult<()> {
+    for session in store.driven_sessions()? {
+        let Some(driver) = store.session_driver(&session)? else {
+            continue;
+        };
+        let dead = driver
+            .process_lfid
+            .as_ref()
+            .is_some_and(|process| driver_evidence(process) == ProcessIdentityEvidence::Dead);
+        let engine_gone =
+            store
+                .session_provider_process(&session)?
+                .is_none_or(|(pid, started_at)| {
+                    process_identity_evidence(pid, started_at) == ProcessIdentityEvidence::Dead
+                });
+        if !dead || !engine_gone {
+            continue;
+        }
+        match store.finish_session_driver(&session, &driver, "interrupted", || Ok(false)) {
+            Ok(()) => report.settled_drivers += 1,
+            // Another driver claimed the conversation since it was read.
+            Err(StoreError::InvalidAuthority(_)) => {}
+            Err(error) => report.errors.push(format!("Session {session}: {error}")),
+        }
+    }
+    Ok(())
 }
 
 /// Whether `pid` is still the recorded engine: same start time, the
@@ -323,6 +368,10 @@ mod tests {
 
         assert_eq!(report.orphaned, vec![pid]);
         assert_eq!((report.reaped, report.errors.len()), (1, 0));
+        // The killed driver's exit is recorded once its engine is gone.
+        assert_eq!(report.settled_drivers, 1);
+        let driver = fixture.store.session_driver("orphan").unwrap().unwrap();
+        assert_eq!((driver.process_lfid, driver.generation), (None, 2));
         let deadline = Instant::now() + Duration::from_secs(5);
         while fixture.engine_alive() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -339,7 +388,6 @@ mod tests {
             .session_connection("orphan")
             .unwrap()
             .is_none());
-        assert!(fixture.store.native_provider_exited("orphan").unwrap());
         let payload: String = rusqlite::Connection::open(fixture.ledger.home().join("loopflow.db"))
             .unwrap()
             .query_row(
@@ -397,9 +445,13 @@ mod tests {
             "UPDATE agent_sessions SET provider_started_at={}",
             fixture.started_at - 600
         ));
+        // The recorded engine is gone, so only the dead driver is settled.
         assert_eq!(
             fixture.reap(ProcessIdentityEvidence::Dead),
-            EngineReapReport::default()
+            EngineReapReport {
+                settled_drivers: 1,
+                ..EngineReapReport::default()
+            }
         );
         assert!(fixture.engine_alive());
     }

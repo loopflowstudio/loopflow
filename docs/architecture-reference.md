@@ -254,10 +254,8 @@ queued native RPCs and approval replies, not only database claim updates.
 
 Headless admission records a provider-generation reservation in Session history.
 A launch records its spawn request under the exact driver fence before starting
-any provider process. An unconsumed reservation permits retry after pre-spawn
-failure; it is not engine-exit evidence. Once spawn is requested, a missing PID
-remains unknown. Saved native thread identity is loaded before account selection.
-Historical generations without this evidence retain their liveness protections.
+any provider process. These receipts are history; admission does not read them.
+Saved native thread identity is loaded before account selection.
 
 Native dispatch and driver claim, release, and exit share a Session-scoped OS
 lock beside the canonical database path. Driver validation releases the SQLite
@@ -268,15 +266,15 @@ would let two processes own different locks for the same Session.
 
 Connect transfers the driver while retaining the live conversation. Client
 replacement claims the driver before stopping the exact old clients; it leaves the engine and sibling
-conversations running. Session resume can retain the recorded native conversation on
-a new engine after confirmed engine exit. Missing process evidence remains unknown.
-For a released driver without a process identity or connection, failed admission
-records the current machine and boot identity against that exact generation and
-its originating host. A later admission after a restart of the same machine may
-replace the engine while preserving its unknown outcome and native thread. The
-observation must precede the restart; wall-clock age, a failed Process and a missing
-PID are insufficient. A changed driver invalidates the observation. This fallback
-does not restart the host, complete a turn, or settle a Flow.
+conversations running. Connecting is the only way an engine changes drivers.
+Session resume is admitted when the previous driver has finished or is provably
+dead, and refused while it may be alive. A resumed Session always starts a new
+engine and resumes the saved native thread on it; it never adopts the old one.
+A finished driver closed its engine as it exited. A dead driver may have left
+one, so its replacement first ends the recorded PID/start identity under the
+Session lock. A recorded process that is still running and cannot be ended, such
+as one outside its own process group or a Codex engine serving an unrelated
+conversation, refuses the resume and leaves the Session unchanged.
 PID/start identity and native endpoint are operational evidence; conversation
 identity, causality and elapsed time grant no signal authority.
 
@@ -623,8 +621,8 @@ Session/Process caller provenance supplies ancestry and mutation authority.
    provider launch. Claim its driver and record exact publication state.
 3. Publish immutable input atomically. An unpublished reservation is recoverable;
    uncertain publication/spawn evidence never permits a blind duplicate launch.
-4. Start or reconnect the native engine. Record its identity and endpoint, distinct
-   from the client's process and the conversation's driver.
+4. Start the native engine, or connect to the one a live driver holds. Record its
+   identity and endpoint, distinct from the client's process and the conversation's driver.
 5. Append correlated provider outcomes and usage; retain missingness. A Flow's
    driver reads a deciding or routing step's answer from the turn that step's
    Process captured.
@@ -881,10 +879,10 @@ read end of a lifeline; every driver holds a write end until it ends. Return, a
 signal, a panic and SIGKILL all close it, and the watchdog then terminates the
 group. A driver taking an engine over holds the same lifeline first, so handoff
 leaves the engine alive. A saved endpoint alone is not liveness; a missing
-endpoint alone is not engine death. Recovery reads surviving native history and
-preserves unknown command outcomes; Flow retry replaces an engine only after
-confirmed exit. Neither authorizes terminating a shared engine to recover one
-thread.
+endpoint alone is not engine death. A driver that replaces a dead one ends the
+engine it left by recorded PID and start time, then resumes the saved native
+thread on a new engine; the turn that was in flight is not recovered. Nothing
+authorizes terminating a shared engine to recover one thread.
 
 One exception to local-handle control exists. The scheduled repository check and
 `lf mon prune` terminate an engine that outlived its driver: the recorded PID and

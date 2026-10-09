@@ -63,6 +63,12 @@ fn golden_prompts_match() {
         let case: GoldenCase = serde_yaml_ng::from_str(&yaml).expect("parse golden yaml");
 
         let repo = root.join(&case.repo);
+        // These fixture folders are independent repositories for prompt purposes.
+        // Git must not discover the enclosing Loopflow checkout as their owner.
+        std::env::set_var(
+            "GIT_CEILING_DIRECTORIES",
+            repo.parent().unwrap().canonicalize().unwrap(),
+        );
         if let Some(wave) = &case.wave {
             loopflow::store::sqlite::SqliteStore::new(
                 &loopflow::store::database_path_from_env().unwrap(),

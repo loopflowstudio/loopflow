@@ -18,7 +18,8 @@ at `b040c7c8d:scratch/questions.md`.
 - Implementation choice: causality precedes a hybrid logical clock and stable
   change-ID tie-break. No initiating host has blanket preference over collaborators;
   positive Linear-origin observations win concurrent peer writes. Preserve losing
-  mutations. Stable user-key provisioning and safe joining remain unimplemented.
+  mutations. Store APIs now provision/recover an explicit user key and bind an
+  empty destination; public setup and active-plan selection remain unimplemented.
 - `new_migration.py` identified the inherited LOO-406 draft as this Task's draft.
   Git's explicit stack boundary establishes that it belongs to the parent;
   LOO-412 therefore has one separate `planning_peers.sql` draft depending on it.
@@ -32,3 +33,10 @@ at `b040c7c8d:scratch/questions.md`.
 The source/destination primitives remain unpublished. Current verification and
 remaining integration are in the existing design; previous adoption-only evidence
 is retained at `5d336868f:scratch/questions.md`.
+
+- October 8 selection choice: an explicit Wave selection includes its descendants;
+  new descendants inherit membership, but binding/joining selects no existing work.
+  A record belongs to one destination locally. Cross-plan moves or overlapping IDs
+  fail without changing either selection; no implicit sharing or renumbering.
+  Root-Wave creation and public setup still need active-plan routing. The endpoint
+  is pinned at binding, not re-resolved from a mutable remote alias on publication.

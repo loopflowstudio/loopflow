@@ -30,6 +30,54 @@ CREATE TRIGGER planning_peer_advance AFTER INSERT ON planning_peer_changes BEGIN
     INSERT INTO planning_peer_heads(id,kind,object_id,field)
         VALUES(NEW.id,NEW.kind,NEW.object_id,NEW.field);
 END;
+-- Selection is local routing, not a second planner or a replication payload.
+CREATE TABLE planning_user (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    user_key TEXT NOT NULL UNIQUE
+);
+CREATE TABLE planning_destinations (
+    repo TEXT NOT NULL,
+    id TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    reference TEXT NOT NULL,
+    PRIMARY KEY(repo,id)
+);
+CREATE TABLE planning_members (
+    kind TEXT NOT NULL CHECK(kind IN ('wave','project','task','comment')),
+    object_id TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    destination TEXT NOT NULL,
+    PRIMARY KEY(kind,object_id),
+    FOREIGN KEY(repo,destination) REFERENCES planning_destinations(repo,id)
+);
+CREATE INDEX planning_members_destination ON planning_members(repo,destination);
+-- Only new descendants inherit a selected plan. Binding never sweeps existing
+-- local records into a joined destination.
+CREATE TRIGGER peer_wave_membership AFTER INSERT ON waves BEGIN
+    INSERT INTO planning_members(kind,object_id,repo,destination)
+    SELECT 'wave',NEW.id,repo,destination FROM planning_members
+    WHERE kind='wave' AND object_id=NEW.parent_wave_id
+    AND (SELECT importing FROM planning_peer_context)=0;
+END;
+CREATE TRIGGER peer_project_membership AFTER INSERT ON projects BEGIN
+    INSERT INTO planning_members(kind,object_id,repo,destination)
+    SELECT 'project',NEW.id,repo,destination FROM planning_members
+    WHERE kind='wave' AND object_id=NEW.wave_id
+    AND (SELECT importing FROM planning_peer_context)=0;
+END;
+CREATE TRIGGER peer_task_membership AFTER INSERT ON tasks BEGIN
+    INSERT INTO planning_members(kind,object_id,repo,destination)
+    SELECT 'task',NEW.id,repo,destination FROM planning_members
+    WHERE kind='project' AND object_id=NEW.project_id
+    AND (SELECT importing FROM planning_peer_context)=0;
+END;
+CREATE TRIGGER peer_comment_membership AFTER INSERT ON task_comments BEGIN
+    INSERT INTO planning_members(kind,object_id,repo,destination)
+    SELECT 'comment',NEW.id,repo,destination FROM planning_members
+    WHERE kind='task' AND object_id=NEW.task_id
+    AND (SELECT importing FROM planning_peer_context)=0;
+END;
+
 CREATE TABLE planning_peer_imports (
     repo TEXT NOT NULL,
     destination TEXT NOT NULL,
@@ -170,3 +218,21 @@ INSERT INTO planning_peer_changes(id,kind,object_id,field,value,clock,linear,par
 SELECT lower(hex(randomblob(16))),'comment',r.id,j.key,
     CASE WHEN j.type IN ('object','array') THEN j.value ELSE json_quote(j.value) END,
     0,0,'[]' FROM task_comments r, json_each(json_object('task_id',r.task_id,'content',json_object('body',r.body,'author',r.author,'created_at',r.created_at))) j;
+
+CREATE TRIGGER store_revision_planning_destinations_insert AFTER INSERT ON planning_destinations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_destinations_update AFTER UPDATE ON planning_destinations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_destinations_delete AFTER DELETE ON planning_destinations
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_members_insert AFTER INSERT ON planning_members
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_members_update AFTER UPDATE ON planning_members
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_members_delete AFTER DELETE ON planning_members
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

@@ -2,7 +2,9 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::engine::planning_git::{PlanningGit, PlanningGitError, PlanningPublication};
+use loopflow::engine::planning_git::{
+    PlanningDestination, PlanningGit, PlanningGitError, PlanningPublication,
+};
 use loopflow_test_support::TestRepo;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -23,7 +25,11 @@ fn git(repo: &Path, args: &[&str]) -> String {
 const PLANNING_REF: &str = "refs/loopflow/planning/users/00000000-0000-4000-8000-000000000001";
 
 fn transport(repo: &Path) -> PlanningGit {
-    PlanningGit::new(repo, "origin", PLANNING_REF).unwrap()
+    PlanningGit::new(
+        repo,
+        &PlanningDestination::resolve(repo, "origin", PLANNING_REF).unwrap(),
+    )
+    .unwrap()
 }
 
 fn source_state(repo: &Path) -> Vec<Vec<u8>> {
@@ -225,8 +231,12 @@ fn source_commits_are_rejected_and_absence_does_not_delete_local_data() {
 fn selected_destinations_never_mix_retained_or_published_plans() {
     let repo = TestRepo::new();
     let personal = transport(repo.path());
-    let shared =
-        PlanningGit::new(repo.path(), "origin", "refs/loopflow/planning/shared/team").unwrap();
+    let shared = PlanningGit::new(
+        repo.path(),
+        &PlanningDestination::resolve(repo.path(), "origin", "refs/loopflow/planning/shared/team")
+            .unwrap(),
+    )
+    .unwrap();
     let private = personal.save(b"private fixture", None, None).unwrap();
     personal.publish(&private.revision).unwrap();
     assert_eq!(shared.local().unwrap(), None);
@@ -237,11 +247,58 @@ fn selected_destinations_never_mix_retained_or_published_plans() {
     assert_eq!(personal.fetch().unwrap(), Some(private.clone()));
     assert_eq!(personal.local().unwrap(), Some(private));
     assert_eq!(shared.fetch().unwrap(), Some(joined));
-    assert!(PlanningGit::new(repo.path(), "origin", "refs/loopflow/planning").is_err());
-    assert!(PlanningGit::new(
+    assert!(PlanningDestination::resolve(repo.path(), "origin", "refs/loopflow/planning").is_err());
+    assert!(PlanningDestination::resolve(
         repo.path(),
         "origin",
         "refs/loopflow/planning/users/display-name"
     )
     .is_err());
+}
+
+#[test]
+fn saved_binding_survives_alias_redirection_without_publishing_to_the_replacement() {
+    let repo = TestRepo::new();
+    let replacement = TestRepo::new();
+    let destination = PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).unwrap();
+    let saved_binding = serde_json::to_vec(&destination).unwrap();
+    let planning = PlanningGit::new(repo.path(), &destination).unwrap();
+    let saved = planning.save(b"private planning", None, None).unwrap();
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            replacement.bare_path().to_str().unwrap(),
+        ],
+    );
+    let restored = serde_json::from_slice(&saved_binding).unwrap();
+    let reopened = PlanningGit::new(repo.path(), &restored).unwrap();
+    assert_eq!(
+        reopened.publish(&saved.revision).unwrap(),
+        PlanningPublication::Confirmed
+    );
+    assert_eq!(reopened.fetch().unwrap(), Some(saved.clone()));
+    assert!(git(replacement.path(), &["ls-remote", "origin", PLANNING_REF]).is_empty());
+    let redirected = transport(repo.path());
+    assert_eq!(redirected.local().unwrap(), None);
+    assert!(redirected.publish(&saved.revision).is_err());
+}
+
+#[test]
+fn divergent_fetch_and_push_endpoints_cannot_be_bound() {
+    let repo = TestRepo::new();
+    let replacement = TestRepo::new();
+    git(
+        repo.path(),
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            replacement.bare_path().to_str().unwrap(),
+        ],
+    );
+    assert!(PlanningDestination::resolve(repo.path(), "origin", PLANNING_REF).is_err());
 }

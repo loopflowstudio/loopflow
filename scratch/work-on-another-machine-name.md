@@ -67,9 +67,11 @@ Export reads existing identities rather than minting edits. Import and projectio
 commit together; fetched Git history is not an import acknowledgement. Crashes before commit leave import retryable.
 Pending state distinguishes local save, Git publication and optional Linear delivery.
 
-`engine/planning_git.rs` requires an explicit user-keyed or shared ref under
-`refs/loopflow/planning/`. Retained/observed refs are scoped by remote/ref; changing
-the selected ref cannot reuse another plan's unpublished history. Publication checks
+`engine/planning_git.rs` resolves an explicitly chosen remote alias once into a
+pinned endpoint and user-keyed/shared ref under `refs/loopflow/planning/`. Separate
+fetch/push endpoints cannot supply a valid readback. Retained/observed refs are
+scoped by the saved endpoint/ref; changing an alias cannot redirect a saved binding
+or reuse another destination's unpublished history. Publication checks
 that the revision belongs to that destination, never forces or blindly retries,
 and distinguishes confirmed, competing and unconfirmed readback. Fetch preserves
 source branch, index, checkout and `FETCH_HEAD`. The 16 MiB document bound and
@@ -98,7 +100,15 @@ resolution. Invalid documents, reused IDs, cross-repository ownership and unexpe
 SQL failures still roll back the whole import. The common writer suppresses echo,
 advances Task optimistic revisions only on changed planning and calls no execution
 writer. Paths stay local. The single `planning_peers.sql` draft still depends on
-`local_planning`. These are source changes, not passing Rust proof.
+`local_planning`. Destination binding and membership now live in the same draft. Joining is empty;
+export joins the mutation journal to explicit selected-record membership, never to
+all repository rows. Selecting a Wave includes its descendants; new descendants
+inherit that membership. Imports reserve incoming identities transactionally and
+refuse overlap with unselected live records or retained journals. References cannot
+attach selected work to an unselected parent. Conflict settlement is destination
+scoped. An explicit canonical user UUID can be provisioned once or recovered on
+another store; connecting never invents a per-machine user. These are source
+changes, not passing Rust proof.
 
 ## Delete — do not maintain
 
@@ -123,18 +133,21 @@ explicit rather than inferred from a field's presence. Per-object savepoints and
 immediate foreign keys retain conflict isolation. Conflict revision triggers now
 use the store's table-based naming contract and cover deletion as well as saves.
 The missing-code fixture no longer installs unrelated Linear/Wave configuration.
+Repository-wide `export_peer_planning(repo)` and alias-addressed transport
+construction are removed; every export requires a saved destination and its selected
+records. No parallel store or implicit repository-wide publication remains.
 Automatic exchange remains unfinished.
 
 ## Remaining integration — October 8
 
-1. Bind an explicitly selected planning remote/ref locally, provision/recover one
-   stable user key across machines, and implement safe shared joining. A code remote
-   is never an implicit destination. Existing local plans must not be silently
-   exported or merged when joining. `export_peer_planning(repo)` currently selects
-   every planning object in that repository, not a selected destination. Separate Git
-   refs alone therefore do not implement safe joining. Binding must define the
-   selected records before publication and preserve unselected local work; a changed
-   remote alias must not silently redirect retained publication.
+1. Expose destination/key setup and active-plan selection through public commands.
+   Store APIs now pin endpoint/ref, provision/recover an explicit stable user key,
+   bind empty selections and select whole Waves. New descendants inherit selection;
+   root-Wave creation still needs explicit active-plan routing. No setup UX generates
+   or transfers a key yet. Shared joining must preserve existing unselected work,
+   including overlapping IDs and retained journals, without uploading it. Disposable
+   remote regressions are authored but Rust execution is unproved. No real plan
+   publication is authorized.
 2. Compose Git fetch, transactional import/export, retained publication and readback
    with foreground invocation lifetimes. Add selected-plan and pending/unconfirmed
    presentation, authorship and assignees. No production command currently calls
@@ -214,4 +227,4 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 realign): `git diff --check` and `lf context --skill realign --json` pass; prose-only reconciliation, no Rust rerun. Retained implementation evidence: `cargo fmt --all` and `git diff --check` pass; `uv run python` in-memory canonical/parent/peer SQL replay passes populated preservation and conflict revision insert/update/delete effects. `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` and `cargo clippy --all-targets -- -D warnings` each timed out during compilation at 180 s; both build scripts sampled at `_dyld_start`. Rust importer execution, `store_revisions_cover_every_table` and the reduced `task_remote_tests` fixture remain for gate/CI, alongside public acceptance. Earlier checks: `81fcf66e3:scratch/work-on-another-machine-name.md`.
+Check (October 8 implement): `cargo fmt --all` and `git diff --check` pass; `uv run python /tmp/loo412-selection-sql.py` passes canonical/parent/peer SQL replay, empty join, selected descendant/export isolation and import membership after repairing missing fixture identifiers. Focused `cargo test -p loopflow --lib store::sqlite::planning_peers::tests -- --test-threads=1` stopped after 191 s at build-script `_dyld_start`; `cargo clippy --all-targets -- -D warnings` timed out at 180 s at the same build-script entry. Rust importer/transport/remote fixtures, revision coverage and public acceptance remain for capable gate/CI; SQL is not Rust execution. Earlier evidence: `7af31f09f:scratch/work-on-another-machine-name.md`.

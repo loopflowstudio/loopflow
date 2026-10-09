@@ -6,6 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow::durable::TaskId;
+use loopflow::engine::planning_git::PlanningDestination;
 use loopflow::ops::resolve_work_binding;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
@@ -66,29 +67,50 @@ fn machine_selector_runs_a_skill_in_the_peer_imported_checkout_and_reuses_it() {
         .unwrap();
     // Exercise the common-writer import, not copied provider bootstrap. Public
     // destination synchronization remains unfinished; this proves placement only.
-    let planning = runtime
-        .block_on(
-            fixture
-                .store
-                .export_peer_planning(&repo.path().canonicalize().unwrap().display().to_string()),
-        )
-        .unwrap();
-    runtime
-        .block_on(
-            target_store.import_peer_planning(
-                &target
-                    .path()
-                    .join("repo")
-                    .canonicalize()
-                    .unwrap()
-                    .display()
-                    .to_string(),
-                "synthetic",
-                "fixture",
-                &planning,
-            ),
-        )
-        .unwrap();
+    let source_repo = repo.path().canonicalize().unwrap().display().to_string();
+    let target_repo = target
+        .path()
+        .join("repo")
+        .canonicalize()
+        .unwrap()
+        .display()
+        .to_string();
+    let destination = PlanningDestination::resolve(
+        repo.path(),
+        "origin",
+        "refs/loopflow/planning/shared/fixture",
+    )
+    .unwrap();
+    let destination_id = destination.id();
+    runtime.block_on(async {
+        fixture
+            .store
+            .bind_peer_planning(&source_repo, &destination)
+            .await
+            .unwrap();
+        fixture
+            .store
+            .select_peer_waves(
+                &source_repo,
+                &destination_id,
+                std::slice::from_ref(&fixture.task.wave_id),
+            )
+            .await
+            .unwrap();
+        target_store
+            .bind_peer_planning(&target_repo, &destination)
+            .await
+            .unwrap();
+        let planning = fixture
+            .store
+            .export_peer_planning(&source_repo, &destination_id)
+            .await
+            .unwrap();
+        target_store
+            .import_peer_planning(&target_repo, &destination_id, "fixture", &planning)
+            .await
+            .unwrap();
+    });
     let account_home = target.path().join(".lf/accounts/claude/fixture");
     fs::create_dir_all(&account_home).unwrap();
     let credential = json!({"claudeAiOauth": {

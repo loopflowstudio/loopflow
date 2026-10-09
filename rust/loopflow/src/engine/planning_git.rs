@@ -60,20 +60,18 @@ pub enum PlanningGitError {
 
 type Result<T> = std::result::Result<T, PlanningGitError>;
 
-/// One explicitly selected remote. Construction neither discovers nor publishes data.
-#[derive(Debug)]
-pub struct PlanningGit {
-    repo: PathBuf,
-    remote: String,
+/// A pinned endpoint and ref. Persist this value, not the remote alias used to
+/// select it. Ref separation is not access control.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PlanningDestination {
+    endpoint: String,
     reference: String,
-    local_ref: String,
-    observed_ref: String,
 }
 
-impl PlanningGit {
-    pub fn new(repo: &Path, remote: &str, reference: &str) -> Result<Self> {
-        if remote.is_empty() || remote.starts_with('-') {
-            return Err(PlanningGitError::Invalid("select a planning Git remote"));
+impl PlanningDestination {
+    pub fn new(endpoint: &str, reference: &str) -> Result<Self> {
+        if endpoint.is_empty() || endpoint.starts_with('-') || endpoint.contains(['\n', '\r']) {
+            return Err(PlanningGitError::Invalid("select a planning Git endpoint"));
         }
         let suffix =
             reference
@@ -96,14 +94,93 @@ impl PlanningGit {
                 "invalid user-keyed or shared planning ref",
             ));
         }
-        // Retained history belongs to this destination, never the code checkout.
-        let namespace = format!("{:x}", Sha256::digest(format!("{remote}\0{reference}")));
+
+        // Local destinations must not change meaning when another checkout opens.
+        if !endpoint.contains(':') && !Path::new(endpoint).is_absolute() {
+            return Err(PlanningGitError::Invalid(
+                "planning local endpoint must be absolute",
+            ));
+        }
         Ok(Self {
+            endpoint: endpoint.into(),
             reference: reference.into(),
+        })
+    }
+
+    /// Resolve an explicitly chosen alias once, without contacting its remote.
+    /// Separate fetch/push endpoints would make readback an invalid receipt.
+    pub fn resolve(repo: &Path, remote: &str, reference: &str) -> Result<Self> {
+        if remote.is_empty() || remote.starts_with('-') {
+            return Err(PlanningGitError::Invalid("select a planning Git remote"));
+        }
+        let read = |push: bool| -> Result<String> {
+            let mut args = vec!["remote", "get-url", "--all"];
+            if push {
+                args.push("--push");
+            }
+            args.push(remote);
+            let bytes =
+                git(repo, "resolve destination", &args, &[])?.success("resolve destination")?;
+            let text = String::from_utf8(bytes)
+                .map_err(|_| PlanningGitError::Invalid("invalid planning endpoint"))?;
+            let lines: Vec<_> = text.lines().collect();
+            if lines.len() != 1 {
+                return Err(PlanningGitError::Invalid(
+                    "select one planning fetch/push endpoint",
+                ));
+            }
+            Ok(lines[0].into())
+        };
+        let mut endpoint = read(false)?;
+        if endpoint != read(true)? {
+            return Err(PlanningGitError::Invalid(
+                "planning fetch and push endpoints differ",
+            ));
+        }
+        if !endpoint.contains(':') && !Path::new(&endpoint).is_absolute() {
+            endpoint = repo
+                .join(endpoint)
+                .canonicalize()?
+                .to_string_lossy()
+                .into_owned();
+        }
+        Self::new(&endpoint, reference)
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+    pub fn reference(&self) -> &str {
+        &self.reference
+    }
+    pub fn id(&self) -> String {
+        format!(
+            "{:x}",
+            Sha256::digest(format!("{}\0{}", self.endpoint, self.reference))
+        )
+    }
+}
+
+/// Construction uses only the saved binding, never the current remote alias.
+#[derive(Debug)]
+pub struct PlanningGit {
+    repo: PathBuf,
+    remote: String,
+    reference: String,
+    local_ref: String,
+    observed_ref: String,
+}
+
+impl PlanningGit {
+    pub fn new(repo: &Path, destination: &PlanningDestination) -> Result<Self> {
+        PlanningDestination::new(destination.endpoint(), destination.reference())?;
+        let namespace = destination.id();
+        Ok(Self {
+            reference: destination.reference().into(),
             local_ref: format!("refs/loopflow/planning-local/{namespace}"),
             observed_ref: format!("refs/loopflow/planning-observed/{namespace}"),
             repo: repo.to_path_buf(),
-            remote: remote.into(),
+            remote: destination.endpoint().into(),
         })
     }
 
@@ -322,65 +399,68 @@ impl PlanningGit {
     }
 
     fn git(&self, operation: &'static str, args: &[&str], input: &[u8]) -> Result<GitOutput> {
-        let mut stdin = tempfile::tempfile()?;
-        stdin.write_all(input)?;
-        stdin.rewind()?;
-        let mut stdout = tempfile::tempfile()?;
-        let mut command = Command::new("git");
-        command
-            .current_dir(&self.repo)
-            .args(["-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0"])
-            .args(args)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .env("GIT_AUTHOR_NAME", "Loopflow planning")
-            .env("GIT_AUTHOR_EMAIL", "planning@loopflow.invalid")
-            .env("GIT_COMMITTER_NAME", "Loopflow planning")
-            .env("GIT_COMMITTER_EMAIL", "planning@loopflow.invalid")
-            .stdin(stdin)
-            .stdout(stdout.try_clone()?)
-            .stderr(Stdio::null());
-        for name in [
-            "GIT_DIR",
-            "GIT_WORK_TREE",
-            "GIT_INDEX_FILE",
-            "GIT_COMMON_DIR",
-            "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        ] {
-            command.env_remove(name);
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = command.spawn()?;
-        let group = ProcessGroupGuard::new(child.id());
-        let deadline = Instant::now() + DEADLINE;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-                result => {
-                    group.terminate();
-                    thread::spawn(move || {
-                        let _ = child.wait();
-                    });
-                    return match result {
-                        Err(error) => Err(error.into()),
-                        _ => Err(PlanningGitError::Timeout(operation)),
-                    };
-                }
-            }
-        };
-        group.terminate();
-        Ok(GitOutput {
-            status,
-            stdout: read_output(&mut stdout)?,
-        })
+        git(&self.repo, operation, args, input)
     }
 }
 
+fn git(repo: &Path, operation: &'static str, args: &[&str], input: &[u8]) -> Result<GitOutput> {
+    let mut stdin = tempfile::tempfile()?;
+    stdin.write_all(input)?;
+    stdin.rewind()?;
+    let mut stdout = tempfile::tempfile()?;
+    let mut command = Command::new("git");
+    command
+        .current_dir(repo)
+        .args(["-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0"])
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_AUTHOR_NAME", "Loopflow planning")
+        .env("GIT_AUTHOR_EMAIL", "planning@loopflow.invalid")
+        .env("GIT_COMMITTER_NAME", "Loopflow planning")
+        .env("GIT_COMMITTER_EMAIL", "planning@loopflow.invalid")
+        .stdin(stdin)
+        .stdout(stdout.try_clone()?)
+        .stderr(Stdio::null());
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ] {
+        command.env_remove(name);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn()?;
+    let group = ProcessGroupGuard::new(child.id());
+    let deadline = Instant::now() + DEADLINE;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
+            result => {
+                group.terminate();
+                thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return match result {
+                    Err(error) => Err(error.into()),
+                    _ => Err(PlanningGitError::Timeout(operation)),
+                };
+            }
+        }
+    };
+    group.terminate();
+    Ok(GitOutput {
+        status,
+        stdout: read_output(&mut stdout)?,
+    })
+}
 struct GitOutput {
     status: ExitStatus,
     stdout: Vec<u8>,

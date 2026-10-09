@@ -639,12 +639,13 @@ Source removes copied planning/issue-derived IDs. Causality precedes Linear,
 then clock/ID; losers survive. Projection conflicts retain records without blocking
 independent objects; checkpoints acknowledge retention, not convergence. Release's
 entry-point lesson applies: fetch, import and publication need distinct outcomes.
-Destination-scoped Git refs cannot make repository-wide SQLite export safe to join.
-Peer projection does not reconcile Linear delivery receipts. Destination binding, joining, foreground exchange/status, legacy association
-and composed Linear/execution preservation remain unfinished. SQL replay proves
-neither Rust importer nor public/installed behavior. Ref-rejection fixtures must
-use the selected ref. Design: `scratch/work-on-another-machine-name.md`; compression
-and revision-trigger evidence: `9ae9c6a22`, this heading.
+Bindings now pin endpoint/ref; export uses explicit record membership, not repository
+ownership. Joining selects no local records; new descendants inherit selection.
+Key recovery exists; public setup/root selection remain unfinished.
+Peer projection does not reconcile Linear delivery receipts. Foreground exchange,
+legacy association and composed preservation remain unfinished. SQL replay proves no
+Rust/public acceptance. Ref-rejection fixtures must use the selected ref.
+Design: `scratch/work-on-another-machine-name.md`; prior gaps: `7af31f09f`, this heading.
 
 ## Synced planning integration (LOO-334)
 

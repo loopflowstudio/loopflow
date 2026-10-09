@@ -227,6 +227,37 @@ identity. `lf land -c` requests completion after a verified merge; `lf pr reconc
 settles it. A repository without a code remote supports local work and refuses
 hosted landing. Local planning does not require Linear at any of these boundaries.
 
+## Select Git planning
+
+```bash
+lf planning key --new               # once; prints the user key to recover elsewhere
+lf planning key --recover <uuid>    # on another machine, instead of --new
+lf planning connect --remote plans # pin an explicitly chosen, controlled Git remote
+lf planning use <destination-id>    # route future root Waves to the printed destination
+lf planning select <destination-id> --wave <wave-uuid>
+lf planning status --json
+```
+
+Setup is local. **Foreground Git exchange is not connected yet**; these commands
+neither fetch nor publish planning. Status reports selection, retained imports and
+held records, not convergence or confirmed publication.
+
+Connection defaults to `refs/loopflow/planning/users/<uuid>`; `--shared <name>`
+explicitly joins `refs/loopflow/planning/shared/<name>`. Joining selects no existing
+work and does not change the destination for new Waves. Select existing Waves
+explicitly; selection includes descendants and retained history. A private reference
+holds that record and its dependents out of exchange. Selecting its referenced Wave
+may release that history for sharing; moving back alone does not.
+
+`use` affects future root Waves only. Children inherit their parent's selection,
+not the currently active destination. `lf planning use local` leaves future roots
+unshared without withdrawing already selected work. Existing membership survives
+switches, reconnects and remote-alias edits. Selection is shared by this machine's
+checkouts of the repository; execution stays local.
+
+Ref separation is not privacy. Use a controlled remote; the code remote is never
+selected implicitly. Status omits endpoint URLs because they may contain credentials.
+
 ## Connect planning and create work
 
 ```bash

@@ -1424,7 +1424,45 @@ pub enum CiCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum PlanningCommand {
+    /// Show, explicitly create, or recover the same planning user key on another machine
+    Key {
+        #[arg(long, conflicts_with = "recover")]
+        new: bool,
+        #[arg(long, value_name = "UUID")]
+        recover: Option<String>,
+    },
+    /// Pin a remote and user-keyed ref; joining selects no existing work
+    Connect {
+        #[arg(long)]
+        remote: String,
+        /// Explicitly join a shared ref instead of the saved user's ref
+        #[arg(long, value_name = "NAME")]
+        shared: Option<String>,
+    },
+    /// Route future root Waves to a destination, or use 'local' for no sharing
+    Use { destination: String },
+    /// Include existing Waves and their descendants in a destination
+    Select {
+        destination: String,
+        /// Exact Wave IDs; this may make retained history eligible for sharing
+        #[arg(long = "wave", required = true, num_args = 1..)]
+        waves: Vec<String>,
+    },
+    /// Show selection, retained imports and held records without contacting Git
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum RepoCommand {
+    /// Configure Git planning synchronization without publishing existing work
+    Planning {
+        #[command(subcommand)]
+        cmd: PlanningCommand,
+    },
     /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)

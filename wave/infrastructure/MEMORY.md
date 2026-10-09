@@ -623,28 +623,28 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected bidirectional local planning sync through a custom Git ref,
-superseding host callbacks. LOO-412 owns transport/machine integration; LOO-406
-owns common storage and optional Linear. Share planning, never execution, paths,
-Workflow position or controls. Imported completion grants no execution authority.
-Jack authorized review-only publication and stacking on `e68f2a423`/`84664e661`,
-not public-remote planning export or landing. Plan ownership above governs sharing.
+Jack Heart selected custom-ref bidirectional planning sync, replacing host callbacks.
+LOO-412 owns transport/machine integration; LOO-406 owns common storage/Linear.
+Never share execution, paths, Workflow position or controls. Jack authorized
+review-only publication stacked on `e68f2a423`/`84664e661`, not public-remote
+planning export or landing. Plan ownership above governs sharing.
 
-Copied planning/issue-derived IDs are removed. Causality precedes Linear,
-then clock/ID; losers survive. Projection conflicts retain independent objects;
-checkpoints acknowledge retention, not convergence. Release's entry-point lesson
-applies: fetch, import and publication need distinct outcomes. Bindings pin
-endpoint/ref; export uses selected records, not repository ownership. Joining is
-empty; new descendants inherit selection. Key recovery exists; public setup,
-root selection, foreground exchange and legacy association remain unfinished.
-Peer projection still bypasses Linear delivery receipts.
+Copied planning/issue-derived IDs are removed. Causality precedes Linear, then
+clock/ID; losers survive. Checkpoints acknowledge retention, not convergence.
+Release's entry-point lesson requires separate fetch/import/publication outcomes.
+Peer projection still bypasses Linear receipts; legacy association remains unfinished.
 
-Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Exchange
-holds journals/dependents, preserving accepted moves and private history. Moving
-back cannot release a hold; explicit selection can. Independent selection proceeds.
-Omission retains peers' last values, not convergence; imports retain held mutations
-without projection. No exchange caller exists. Rust execution and public conflict/recovery remain unproved.
-Design: `scratch/work-on-another-machine-name.md`; prior limits: `fea5156eb`.
+Public `repo planning key/connect/use/select/status` now consumes pinned bindings
+and explicit selection. Joining is empty. Key creation/recovery retains user identity. `use` routes future root Waves only; children inherit their parent's
+selection, and existing work never changes destination implicitly. Status shows
+imports/holds without endpoint credentials. No foreground exchange caller exists.
+SQL routing/status checks pass; Rust/public execution remains unproved.
+
+Move counterexample: `a43f3e2ea`; repairs: `b5dafd918`/`7395cf3bb`. Holds retain
+accepted moves/private journals and dependents. Moving back cannot release history;
+explicit selection can. Independent exchange/selection proceeds; omission retains
+peers' last values, not convergence. Recovery UX remains for review.
+Design: `scratch/work-on-another-machine-name.md`; prior limits: `4d31254c3`.
 
 ## Synced planning integration (LOO-334)
 

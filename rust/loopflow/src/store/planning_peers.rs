@@ -5,13 +5,45 @@ use crate::id::WaveId;
 
 use super::{run_sqlite, Store, StoreResult};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PeerProjectionConflict {
     pub object: PlanningObject,
     pub reason: String,
 }
 
+/// Local routing and import evidence. Endpoints are deliberately not displayed:
+/// Git URLs can contain credentials. A checkpoint is not publication evidence.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PeerPlanningStatus {
+    pub id: String,
+    pub reference: String,
+    pub active: bool,
+    pub selected_records: u64,
+    pub imported_revision: Option<String>,
+}
+
 impl Store {
+    pub async fn use_peer_planning(
+        &self,
+        repo: &str,
+        destination: Option<&str>,
+    ) -> StoreResult<()> {
+        let repo = repo.to_string();
+        let destination = destination.map(str::to_string);
+        run_sqlite(&self.sqlite, move |sqlite| {
+            sqlite.use_peer_planning(&repo, destination.as_deref())
+        })
+        .await
+    }
+
+    pub async fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
+        let repo = repo.to_string();
+        run_sqlite(&self.sqlite, move |sqlite| {
+            sqlite.peer_planning_status(&repo)
+        })
+        .await
+    }
+
     pub async fn provision_planning_user_key(&self, key: &str) -> StoreResult<()> {
         let key = key.to_string();
         run_sqlite(&self.sqlite, move |sqlite| {

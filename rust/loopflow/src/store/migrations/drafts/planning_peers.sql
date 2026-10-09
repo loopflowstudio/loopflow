@@ -42,6 +42,11 @@ CREATE TABLE planning_destinations (
     reference TEXT NOT NULL,
     PRIMARY KEY(repo,id)
 );
+CREATE TABLE planning_active (
+    repo TEXT PRIMARY KEY,
+    destination TEXT NOT NULL,
+    FOREIGN KEY(repo,destination) REFERENCES planning_destinations(repo,id)
+);
 CREATE TABLE planning_members (
     kind TEXT NOT NULL CHECK(kind IN ('wave','project','task','comment')),
     object_id TEXT NOT NULL,
@@ -57,6 +62,10 @@ CREATE TRIGGER peer_wave_membership AFTER INSERT ON waves BEGIN
     INSERT INTO planning_members(kind,object_id,repo,destination)
     SELECT 'wave',NEW.id,repo,destination FROM planning_members
     WHERE kind='wave' AND object_id=NEW.parent_wave_id
+    AND (SELECT importing FROM planning_peer_context)=0;
+    INSERT INTO planning_members(kind,object_id,repo,destination)
+    SELECT 'wave',NEW.id,repo,destination FROM planning_active
+    WHERE repo=NEW.repo AND NEW.parent_wave_id IS NULL
     AND (SELECT importing FROM planning_peer_context)=0;
 END;
 CREATE TRIGGER peer_project_membership AFTER INSERT ON projects BEGIN
@@ -235,4 +244,22 @@ CREATE TRIGGER store_revision_planning_members_update AFTER UPDATE ON planning_m
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE TRIGGER store_revision_planning_members_delete AFTER DELETE ON planning_members
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_active_insert AFTER INSERT ON planning_active
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_active_update AFTER UPDATE ON planning_active
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_active_delete AFTER DELETE ON planning_active
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_peer_imports_insert AFTER INSERT ON planning_peer_imports
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_peer_imports_update AFTER UPDATE ON planning_peer_imports
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+CREATE TRIGGER store_revision_planning_peer_imports_delete AFTER DELETE ON planning_peer_imports
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

@@ -11,7 +11,7 @@ use crate::engine::planning_exchange::{
 };
 use crate::engine::planning_git::PlanningDestination;
 use crate::id::WaveId;
-use crate::store::{PeerProjectionConflict, StoreError, StoreResult};
+use crate::store::{PeerPlanningStatus, PeerProjectionConflict, StoreError, StoreResult};
 
 use super::SqliteStore;
 
@@ -20,6 +20,47 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 }
 
 impl SqliteStore {
+    /// Select routing for future root Waves only. Existing membership and all
+    /// descendant routing survive a switch, including a return to local-only.
+    pub fn use_peer_planning(&self, repo: &str, destination: Option<&str>) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(destination) = destination {
+            require_destination(&tx, repo, destination)?;
+            tx.execute(
+                "INSERT INTO planning_active(repo,destination) VALUES(?1,?2)
+                ON CONFLICT(repo) DO UPDATE SET destination=excluded.destination
+                WHERE planning_active.destination IS NOT excluded.destination",
+                params![repo, destination],
+            )?;
+        } else {
+            tx.execute("DELETE FROM planning_active WHERE repo=?1", [repo])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn peer_planning_status(&self, repo: &str) -> StoreResult<Vec<PeerPlanningStatus>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT d.id,d.reference,EXISTS(SELECT 1 FROM planning_active a
+                WHERE a.repo=d.repo AND a.destination=d.id),
+                (SELECT count(*) FROM planning_members m WHERE m.repo=d.repo AND m.destination=d.id),
+                (SELECT revision FROM planning_peer_imports i WHERE i.repo=d.repo AND i.destination=d.id)
+            FROM planning_destinations d WHERE d.repo=?1 ORDER BY d.id",
+        )?;
+        let rows = query.query_map([repo], |row| {
+            Ok(PeerPlanningStatus {
+                id: row.get(0)?,
+                reference: row.get(1)?,
+                active: row.get(2)?,
+                selected_records: row.get(3)?,
+                imported_revision: row.get(4)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Provision once, or recover the same user key on another machine. Callers
     /// generate a key only for an explicit new identity, never during connection.
     pub fn provision_planning_user_key(&self, key: &str) -> StoreResult<()> {
@@ -255,7 +296,8 @@ impl SqliteStore {
         tx.execute("UPDATE planning_peer_context SET importing=0", [])?;
         tx.execute(
             "INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3)
-            ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision",
+            ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision
+            WHERE planning_peer_imports.revision IS NOT excluded.revision",
             params![repo, destination, revision],
         )?;
         let mut portable = merged;
@@ -1579,6 +1621,94 @@ mod tests {
             .import_peer_planning("/target", &destination(), "retry", &Default::default())
             .unwrap();
         assert_eq!(target.peer_projection_conflicts("/target").unwrap(), both);
+    }
+
+    #[test]
+    fn active_selection_routes_only_future_roots_and_preserves_descendants_on_switch() {
+        let (home, store) = store();
+        let private = Wave::new(WaveId::new(), "private".into(), "/source".into());
+        store.create_wave(&private).unwrap();
+        store
+            .use_peer_planning("/source", Some(&destination()))
+            .unwrap();
+        let selected = Wave::new(WaveId::new(), "selected".into(), "/source".into());
+        store.create_wave(&selected).unwrap();
+        let private_child = Wave::new(WaveId::new(), "child".into(), "/source".into())
+            .with_parent(private.id().clone());
+        store.create_wave(&private_child).unwrap();
+        let foreign = Wave::new(WaveId::new(), "foreign".into(), "/other".into());
+        store.create_wave(&foreign).unwrap();
+        assert_eq!(
+            store.peer_planning_status("/source").unwrap()[0].selected_records,
+            1
+        );
+        let revisions = store.revisions().unwrap();
+        store
+            .use_peer_planning("/source", Some(&destination()))
+            .unwrap();
+        assert_eq!(store.revisions().unwrap(), revisions);
+        assert!(store.use_peer_planning("/source", Some("missing")).is_err());
+        assert!(store.peer_planning_status("/source").unwrap()[0].active);
+        drop(store);
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        assert!(store.peer_planning_status("/source").unwrap()[0].active);
+        store.use_peer_planning("/source", None).unwrap();
+        let child = Wave::new(WaveId::new(), "child".into(), "/source".into())
+            .with_parent(selected.id().clone());
+        store.create_wave(&child).unwrap();
+        let local = Wave::new(WaveId::new(), "local".into(), "/source".into());
+        store.create_wave(&local).unwrap();
+        let status = store.peer_planning_status("/source").unwrap();
+        assert!(!status[0].active);
+        assert_eq!(status[0].selected_records, 2);
+        let exported = store
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        assert_eq!(exported.objects().len(), 2);
+        assert!(exported
+            .objects()
+            .iter()
+            .all(|object| object.id == selected.id().as_str() || object.id == child.id().as_str()));
+    }
+
+    #[test]
+    fn importing_a_root_keeps_its_destination_even_when_another_plan_is_active() {
+        let (_source_home, source) = store();
+        seed(&source);
+        let incoming = source
+            .export_peer_planning("/source", &destination())
+            .unwrap();
+        let (_target_home, target) = store();
+        let other =
+            PlanningDestination::new("/synthetic/other", "refs/loopflow/planning/shared/other")
+                .unwrap();
+        let other_id = target.bind_peer_planning("/target", &other).unwrap();
+        target
+            .use_peer_planning("/target", Some(&other_id))
+            .unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "incoming", &incoming)
+            .unwrap();
+        assert!(target
+            .export_peer_planning("/target", &other_id)
+            .unwrap()
+            .changes
+            .is_empty());
+        assert_eq!(
+            target
+                .export_peer_planning("/target", &destination())
+                .unwrap(),
+            incoming
+        );
+        let revisions = target.revisions().unwrap();
+        target
+            .import_peer_planning("/target", &destination(), "incoming", &incoming)
+            .unwrap();
+        assert_eq!(target.revisions().unwrap(), revisions);
+        let statuses = target.peer_planning_status("/target").unwrap();
+        let imported = statuses.iter().find(|s| s.id == destination()).unwrap();
+        assert!(!imported.active);
+        assert_eq!(imported.imported_revision.as_deref(), Some("incoming"));
     }
 
     #[test]

@@ -244,7 +244,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 #[test]
 fn failed_placement_is_observed_without_starting_a_task() {
     let task = WorkflowTask::new();
-    let output = task.run(&["--task", "missing-task", "run", "proof"]);
+    let output = task.run(&["--task", "missing-task", "flow", "proof"]);
     assert!(!output.status.success());
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let (cwd, outcome): (String, String) = db
@@ -355,10 +355,10 @@ print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}
             rusqlite::params![parent, trace, caller.to_str().unwrap()]).unwrap();
         let (cwd, args): (&Path, &[&str]) = match launch {
             "task" => (&caller, &["-b", "task", "run", "INF-123", "proof"]),
-            "direct" => (&caller, &["-b", "--task", "INF-123", "run", "proof"]),
-            "wt" => (&caller, &["-b", "--wt", "launch-proof", "run", "proof"]),
-            "alias" => (&alias, &["-b", "run", "proof"]),
-            _ => (task.repo.path(), &["-b", "run", "proof"]),
+            "direct" => (&caller, &["-b", "--task", "INF-123", "flow", "proof"]),
+            "wt" => (&caller, &["-b", "--wt", "launch-proof", "flow", "proof"]),
+            "alias" => (&alias, &["-b", "flow", "proof"]),
+            _ => (task.repo.path(), &["-b", "flow", "proof"]),
         };
         let log_path = task.home.path().join("launch.log");
         let log = fs::File::create(&log_path).unwrap();
@@ -1423,12 +1423,12 @@ fn provider_completed_delivery_can_file_and_finish_without_reopening() {
     assert_eq!(task.state(), "done");
 
     // A normal edge or a misleadingly named local Flow cannot start new work.
-    let error = refusal(task.run(&["-b", "--task", "INF-123", "run", "proof"]));
+    let error = refusal(task.run(&["-b", "--task", "INF-123", "flow", "proof"]));
     assert!(error.contains("terminal"), "{error}");
     let override_path = task.repo.path().join(".lf/flows/finish-delivery.yaml");
     fs::write(&override_path, "- cmd: task sync --plan\n").unwrap();
     assert!(
-        refusal(task.run(&["-b", "--task", "INF-123", "run", "finish-delivery"]))
+        refusal(task.run(&["-b", "--task", "INF-123", "flow", "finish-delivery"]))
             .contains("terminal")
     );
     fs::remove_file(override_path).unwrap();
@@ -1465,7 +1465,7 @@ done
             "codex",
             "--task",
             "INF-123",
-            "run",
+            "flow",
             "finish-delivery",
         ],
     )
@@ -1583,7 +1583,7 @@ done
         .status
         .success());
     assert!(!task
-        .run(&["-b", "--task", "INF-123", "run", "finish-delivery"])
+        .run(&["-b", "--task", "INF-123", "flow", "finish-delivery"])
         .status
         .success());
     assert_eq!(task.workflow(), workflow);
@@ -1612,7 +1612,7 @@ fn provider_completion_without_merged_delivery_does_not_admit_first_filing() {
             .status
             .success());
         assert!(!task
-            .run(&["-b", "--task", "INF-123", "run", "finish-delivery"])
+            .run(&["-b", "--task", "INF-123", "flow", "finish-delivery"])
             .status
             .success());
         assert_eq!(task.state(), "done");

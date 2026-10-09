@@ -48,14 +48,13 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     let explicit_repository = cli.repo.is_some() || cli.repository.is_some();
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
-            cmd: TaskCommand::Run {
-                issue, stack_on, ..
-            },
-        }) => (issue.as_mut(), stack_on.as_mut()),
-        Some(Commands::Task {
-            cmd: TaskCommand::Checkout {
-                issue, stack_on, ..
-            },
+            cmd:
+                TaskCommand::Run {
+                    issue, stack_on, ..
+                }
+                | TaskCommand::Checkout {
+                    issue, stack_on, ..
+                },
         }) => (issue.as_mut(), stack_on.as_mut()),
         Some(Commands::Task { cmd }) => (cmd.selector_mut(), None),
         Some(Commands::Context { task, .. }) => (task.as_mut(), None),
@@ -99,10 +98,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Desktop { .. }) => None,
         Some(Commands::Task {
-            cmd: TaskCommand::Run { issue, .. },
-        }) => issue.as_deref().or(cli.task.as_deref()),
-        Some(Commands::Task {
-            cmd: TaskCommand::Checkout { issue, .. },
+            cmd: TaskCommand::Run { issue, .. } | TaskCommand::Checkout { issue, .. },
         }) => issue.as_deref().or(cli.task.as_deref()),
         _ => cli.task.as_deref(),
     }

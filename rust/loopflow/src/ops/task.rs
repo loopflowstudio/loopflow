@@ -961,11 +961,11 @@ async fn restore_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()
             "--no-track".into(),
             "-b".into(),
             task.branch.clone(),
-            task.worktree()?.display().to_string(),
+            worktree.display().to_string(),
             base,
         ]);
     } else {
-        args.extend([task.worktree()?.display().to_string(), task.branch.clone()]);
+        args.extend([worktree.display().to_string(), task.branch.clone()]);
     }
     git_output_bytes(&repo, &args.iter().map(String::as_str).collect::<Vec<_>>())?;
     finish_task_checkout(store, task).await

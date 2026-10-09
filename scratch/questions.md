@@ -39,7 +39,7 @@ authorizes native input.
 CLI companions preserve focus, zoom and Work selection. An empty exact target is
 filled; occupied content is never replaced. Files/Flow-log reuse and unhide the
 named Task's pane only in its recorded/prepared checkout. Shell always allocates
-and remains local-only until remote opening is composed. lf3 supplies fixed-buffer extraction; native acceptance remains. Full-buffer reads followed by truncation are not a fallback.
+and remains local-only until remote opening is composed. lf3 supplies fixed-buffer extraction; native acceptance remains.
 
 ## Reversible bounded-read choice — October 8
 
@@ -95,9 +95,9 @@ Primary and stack-parent Task selectors now carry repository-scoped full IDs thr
 dispatch; an unscoped ambiguous prefix still fails.
 
 October 9 context: complete launch source
-`.lf/tmp/context/b5b56963daca0b2b5aee3f8ed9b9ab63729d3acb4587956e1eb29c1bf3544e1e.md`
-was inspected. `lf context --skill implement` reports 32,686 generated Work-seed
-tokens (16,686 over), from the manifest/historical steers. Authored notes fit;
+`.lf/tmp/context/4af9d84cf4443dfe4f2aa9a3253951a06605c1da0f3f90806c6de2e56a4bbfa8.md`
+was inspected. `lf context --skill compress` reports 32,671 generated Work-seed
+tokens (16,671 over), from the manifest/historical steers. Authored notes fit;
 curation cannot change that producer gap without rewriting historical input or
 raising budgets. Neither is authorized.
 

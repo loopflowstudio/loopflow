@@ -2066,13 +2066,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
 
-    let mut _work_declaration = None;
-    let mut _bound_cwd = None;
-    if let Some(name) = &cli.wt {
-        _bound_cwd = Some(CwdGuard::enter(
-            &loopflow::lf::commands::ops::resolve_worktree(name)?,
-        )?);
-    }
+    let _worktree_cwd = cli
+        .wt
+        .as_deref()
+        .map(|name| CwdGuard::enter(&loopflow::lf::commands::ops::resolve_worktree(name)?))
+        .transpose()?;
     if matches!(
         &cli.command,
         Some(Commands::Task {
@@ -2133,39 +2131,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             print_task(&task, *json)
         });
     }
-    // Route and view-only dispatch precede preparation. Capture the resolved
-    // execution directory once, including on a failed preparation.
-    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
-        // Task run owns preparation and its options, including a first checkout.
-        // Direct skill/Flow launches bind only already prepared Work here.
-        let task = match &cli.command {
-            Some(Commands::Task {
-                cmd: TaskCommand::Run { .. },
-            }) => None,
-            _ => cli.task.as_ref(),
-        };
-        if let Some(task) = task {
-            let directory = loopflow::repo::working_directory()?;
-            let repo = selected_task_repository(&cli, &directory, Some(task))?;
-            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
-            if let Some(cwd) = cli.bound_cwd.clone() {
-                binding.cwd = cwd;
-            }
-            if cli.agent.is_none() {
-                cli.agent = binding.agent.clone();
-            }
-            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
-            _work_declaration = Some(EnvGuard::set(
-                loopflow::lf::WORK_DECLARATION_ENV,
-                format!("task:{}", binding.work.id()),
-            ));
-            binding.cwd = std::env::current_dir()?;
-            return Ok(Some(binding));
-        }
-        Ok(None)
-    })();
-    journal::admit_process(&std::env::current_dir()?, args);
-    let mut direct_binding = placement?;
     // `lf task run` places the Task and fills its defaults; from here it is
     // `lf --task ISSUE flow FLOW`.
     if let Some(Commands::Task {
@@ -2180,6 +2145,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
+        journal::admit_process(&std::env::current_dir()?, args);
         let issue = issue
             .as_deref()
             .or(cli.task.as_deref())
@@ -2218,6 +2184,33 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         )?;
         return Ok(loopflow::ops::task::workflow_arrive(&task)?);
     }
+    // Task run/checkout own preparation above; ordinary invocations bind existing
+    // Work. Admit this Process at the directory reached, even if binding fails.
+    let mut _work_declaration = None;
+    let mut _bound_cwd = None;
+    let placement = (|| -> anyhow::Result<Option<loopflow::ops::WorkBinding>> {
+        if let Some(task) = cli.task.as_ref() {
+            let directory = loopflow::repo::working_directory()?;
+            let repo = selected_task_repository(&cli, &directory, Some(task))?;
+            let mut binding = prepare_work_binding(&format!("task:{task}"), &repo)?;
+            if let Some(cwd) = cli.bound_cwd.clone() {
+                binding.cwd = cwd;
+            }
+            if cli.agent.is_none() {
+                cli.agent = binding.agent.clone();
+            }
+            _bound_cwd = Some(CwdGuard::enter(&binding.cwd)?);
+            _work_declaration = Some(EnvGuard::set(
+                loopflow::lf::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            ));
+            binding.cwd = std::env::current_dir()?;
+            return Ok(Some(binding));
+        }
+        Ok(None)
+    })();
+    journal::admit_process(&std::env::current_dir()?, args);
+    let mut direct_binding = placement?;
     let explicit_wave = cli
         .wave
         .as_deref()
@@ -2225,24 +2218,18 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         .transpose()?;
     if let Some(wave) = &explicit_wave {
         // Location wins: context may enrich a Task, never change its owner.
-        let binding = match direct_binding.as_ref() {
-            Some(binding) => Some(binding.clone()),
-            None if cli.task.is_none() => {
-                loopflow::lf::commands::run::implicit_binding(&Cli::default())?
-            }
-            None => None,
-        };
-        if let Some(binding) = binding {
-            if matches!(binding.work, loopflow::durable::WorkRef::Task(_)) {
-                anyhow::ensure!(
-                    wave.id() == &binding.wave_id,
-                    "--wave {} does not own Task {} (Wave {})",
-                    wave.slug(),
-                    binding.work.id(),
-                    binding.wave_name
-                );
-                direct_binding = Some(binding);
-            }
+        if direct_binding.is_none() && cli.task.is_none() {
+            direct_binding = loopflow::lf::commands::run::implicit_binding(&Cli::default())?
+                .filter(|binding| matches!(binding.work, loopflow::durable::WorkRef::Task(_)));
+        }
+        if let Some(binding) = &direct_binding {
+            anyhow::ensure!(
+                wave.id() == &binding.wave_id,
+                "--wave {} does not own Task {} (Wave {})",
+                wave.slug(),
+                binding.work.id(),
+                binding.wave_name
+            );
         }
         cli.wave = Some(wave.slug().to_string());
     } else if let Some(binding) = &direct_binding {

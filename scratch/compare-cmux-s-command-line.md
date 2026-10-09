@@ -214,7 +214,10 @@ path-only peer reading key with the existing Machine/repository reading key.
 LOO-418 integration removes preview's EndOptions/force and PR-required checkout
 lookup. Task placement owns branch/base; completion requests replace the older
 terminal-planning conflict. Keep scoped dispatch and read-only previews, deleting
-duplicate preparation before routing. Historical filing uses `planning_creations`,
+duplicate preparation before routing. Task run and checkout dispatch before ordinary
+Work binding; remove run's binding exception and copies used only for Wave validation.
+Retain repository checks for historical branch selectors resolved after entry.
+Historical filing uses `planning_creations`,
 not removed export columns on `task_creation_intents`. Original command, reader
 and callback deletions: `96b3217fe`, this section; surviving owners remain below.
 
@@ -537,4 +540,4 @@ identity/delegation, open them, add shell/Files panes, retain an unfinished draf
 change focus, target a harmless command, read output, hide/restore, and verify the
 original input target and draft survive. Demo owns native usability; preserve comparison evidence and use no real accounts or live user terminals.
 
-Check: `cargo test -p loopflow` focused global run/move/checkout previews, local first start, Desktop opening, handoff, historical filing and DTO checks PASS (14); fmt/Clippy PASS; `scripts/test_desktop.sh -Xswiftc -gnone --no-parallel --jobs 2 --filter taskMoveExplanationsPreservePositionsAndCompletionUncertainty` PASS (1). Broader suites/migrations: gate/CI; native: demo.
+Check: `cargo test -p loopflow` focused dispatch/checkout/routing/Wave fixtures PASS (13); `cargo fmt` and `cargo clippy --all-targets -- -D warnings` PASS. Broader suites/migrations: gate/CI; native: demo.

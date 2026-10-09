@@ -141,6 +141,8 @@ restoration, not launch refusal. LOO-418 integration removes move/run force and
 PR-required checkout reads: Task placement owns branch/base independently. Historical
 follow-up delivery uses common creation receipts, preserving uncertain original input.
 Abandon/delete/interrupt remain identity-only.
+Scoped alias resolution does not replace repository checks for historical branch
+selectors, which can resolve only later through retained placement.
 No preview endpoint probes, takeover or end-intent completion/cleanup; native proof remains.
 
 ## Task delivery boundary (LOO-418, reconciled 2026-10-09)

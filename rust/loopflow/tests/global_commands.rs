@@ -741,7 +741,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
             .unwrap(),
         );
         // The launch front door must resolve the same ID before discovering the
-        // missing checkout/PR, rather than failing global prefix resolution.
+        // missing checkout, rather than failing global prefix resolution.
         let launch = command(
             home.path(),
             other.path(),
@@ -751,7 +751,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         .unwrap();
         assert!(!launch.status.success());
         let error = String::from_utf8_lossy(&launch.stderr);
-        assert!(error.contains("no recorded PR"), "{error}");
+        assert!(error.contains("has no checkout"), "{error}");
         assert!(!error.contains("multiple stable Tasks"), "{error}");
     }
     assert_eq!(

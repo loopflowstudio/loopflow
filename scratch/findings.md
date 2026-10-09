@@ -193,18 +193,20 @@ This is no peer admission, synchronization or native acceptance proof.
 
 ## Task completion integration — October 9
 
-`96b3217fe` finished the inherited local sync of LOO-418/#1499. Its combined
-build failed on obsolete EndOptions, receipt fields and fixture APIs. Reconciliation
-removes force/terminal-planning conflicts, reads checkout branch from Task placement
-without a PR, and keeps arrival separate from completion settlement. Historical
-filing now uses `planning_creations`, retaining original input and unknown delivery.
-Review also found duplicated preparation before Work routing/Desktop dispatch;
-preparation now has one path, after routing, with resolved-directory Process admission.
-Focused checks then exposed missing historical receipt-ID lookup and handoff
-resolution collapsing the caller subdirectory. Receipt lookup now retains repository
-scope in the same snapshot; handoff keeps the exact caller directory. Direct
-binding cannot precede Task-run preparation: an unplaced Task has no checkout yet.
-The local-first-start fixture preserves explicit run options; its initial create
-syntax failed before exercising that path. Action refusal retains resolved identity. Preview labels
-handoff validation unperformed. Failure logs: `/tmp/loo427-integrated-*.log`. Mixed-provider,
+`7f7a2f03c:scratch/findings.md`, this heading, retains the LOO-418 sync failures
+and repairs: obsolete completion/receipt APIs, historical receipt-ID lookup,
+caller-subdirectory handoff and first-start options. Task-owned placement no longer
+requires a PR; completion requests remain separate from settlement. Historical
+filing uses common creation receipts without changing original input or unknown
+delivery. Failure logs: `/tmp/loo427-integrated-*.log`.
+
+Compression dispatches Task run beside checkout, before ordinary Work binding,
+removing its exception from that binding path. Process admission stays at the
+same boundary, including failed binding. Explicit Wave validation borrows the
+selected binding rather than cloning its assembled context. Scoped lookup cannot
+replace the retained-branch repository check: branch selectors may remain unknown
+at entry and resolve through historical placement later. That check stays.
+The focused scoped-prefix test still expected a missing PR; LOO-418 now requires
+only a checkout. Updated that assertion and inherited Flow fixtures' retired `run`
+spelling. Initial failure: `/tmp/loo427-compress-test.log`. Mixed-provider,
 first-start and native proof limits remain unchanged.

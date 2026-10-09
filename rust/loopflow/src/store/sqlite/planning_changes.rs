@@ -192,7 +192,12 @@ impl<'a> PlanningChanges<'a> {
             let Some(remote) = observed.get(&field) else {
                 continue;
             };
-            let remote = self.normalize(conn, &field, remote.clone())?;
+            let remote = self.comparison_value(conn, &field, remote.clone())?;
+            let value = self.comparison_value(conn, &field, value)?;
+            let base_value = base
+                .as_ref()
+                .map(|base| self.comparison_value(conn, &field, base["value"].clone()))
+                .transpose()?;
             if super::planning::revision_nanos(observed["revision"].as_str())?
                 < super::planning::revision_nanos(
                     base.as_ref().and_then(|b| b["revision"].as_str()),
@@ -203,27 +208,33 @@ impl<'a> PlanningChanges<'a> {
             if remote == value {
                 let baseline =
                     serde_json::json!({"revision": observed["revision"], "value": remote});
-                conn.execute(
-                    &format!(
-                        "UPDATE {owner}_changes SET base_json=?2 WHERE {owner}_id=?3 AND field=?4
-                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?1)
-                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL
-                     AND (base_json IS ?5 OR (base_json IS NOT NULL AND ?5 IS NOT NULL
-                         AND json_extract(base_json,'$.value') IS json_extract(?5,'$.value')))"
-                    ),
-                    params![
-                        receipt,
-                        baseline.to_string(),
-                        id,
-                        field,
-                        base.as_ref().map(Value::to_string)
-                    ],
-                )?;
+                let mut later = conn.prepare(&format!(
+                    "SELECT id,field,value_json,base_json FROM {owner}_changes
+                     WHERE {owner}_id=?1 AND field=?2
+                     AND seq>(SELECT seq FROM {owner}_changes WHERE id=?3)
+                     AND attempted=0 AND acknowledged=0 AND conflict_json IS NULL"
+                ))?;
+                let later = later
+                    .query_and_then(params![id, field, receipt], read_change)?
+                    .collect::<StoreResult<Vec<_>>>()?;
+                for change in later {
+                    let later_base = change
+                        .base
+                        .as_ref()
+                        .map(|base| self.comparison_value(conn, &field, base["value"].clone()))
+                        .transpose()?;
+                    if later_base == base_value {
+                        conn.execute(
+                            &format!("UPDATE {owner}_changes SET base_json=?2 WHERE id=?1"),
+                            params![change.id, baseline.to_string()],
+                        )?;
+                    }
+                }
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET acknowledged=1,acknowledged_revision=?2,error=NULL WHERE id=?1"),
                     params![receipt, observed["revision"].as_str()],
                 )?;
-            } else if base.as_ref().is_none_or(|base| base["value"] != remote) {
+            } else if base_value.as_ref() != Some(&remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2,error=NULL WHERE id=?1"),
                     params![
@@ -380,6 +391,16 @@ impl<'a> PlanningChanges<'a> {
         Ok(value)
     }
 
+    // Resolve references only for comparison/projection. The saved value and
+    // causal baseline retain the originating machine's captured identities.
+    fn comparison_value(self, conn: &Connection, field: &str, value: Value) -> StoreResult<Value> {
+        let value = self.normalize(conn, field, value)?;
+        if matches!(self, Self::Task(_)) && field == "project_id" {
+            return super::planning_peers::projected_value(conn, field, &value);
+        }
+        Ok(value)
+    }
+
     pub(super) fn pending(self, conn: &Connection) -> StoreResult<Vec<PlanningChange>> {
         let (owner, id) = self.owner();
         let mut query = conn.prepare(&format!(
@@ -406,19 +427,20 @@ impl<'a> PlanningChanges<'a> {
             let Some(value) = saved.get(&change.field) else {
                 continue;
             };
-            let remote = self.normalize(conn, &change.field, value.clone())?;
-            if remote != change.value
-                && change
-                    .base
-                    .as_ref()
-                    .is_none_or(|base| base["value"] != remote)
-            {
+            let remote = self.comparison_value(conn, &change.field, value.clone())?;
+            let desired = self.comparison_value(conn, &change.field, change.value.clone())?;
+            let base = change
+                .base
+                .as_ref()
+                .map(|base| self.comparison_value(conn, &change.field, base["value"].clone()))
+                .transpose()?;
+            if remote != desired && base.as_ref() != Some(&remote) {
                 conn.execute(
                     &format!("UPDATE {owner}_changes SET conflict_json=?2 WHERE id=?1 AND conflict_json IS NULL"),
                     params![change.id, serde_json::json!({"revision": saved["revision"], "value": remote}).to_string()],
                 )?;
             } else {
-                saved[&change.field] = change.value;
+                saved[&change.field] = desired;
             }
         }
         Ok(serde_json::from_value(saved)?)

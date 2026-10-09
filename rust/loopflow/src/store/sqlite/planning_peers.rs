@@ -2182,7 +2182,9 @@ fn project_delivery_fields(
                 change.value.clone(),
                 observation.revision(),
             )?;
-        } else if previous.get(&change.field) != Some(&change.value) {
+        } else if previous.get(&change.field)
+            != Some(&projected_value(conn, &change.field, &change.value)?)
+        {
             owner.record_value(
                 conn,
                 field,
@@ -2345,7 +2347,7 @@ fn validate_wave(
 
 /// Resolve a planning reference only at the local projection boundary. Journal
 /// values and captured delivery inputs keep their original identities.
-fn projected_value(conn: &Connection, field: &str, value: &Value) -> StoreResult<Value> {
+pub(super) fn projected_value(conn: &Connection, field: &str, value: &Value) -> StoreResult<Value> {
     let kind = match field {
         "project_id" | "current_project_id" => PlanningKind::Project,
         "task_id" => PlanningKind::Task,
@@ -7634,6 +7636,269 @@ mod tests {
                 }
             )
             .unwrap());
+        }
+    }
+
+    #[test]
+    fn associated_membership_retains_captured_ids_through_projection_and_readback() {
+        use crate::engine::planning_exchange::{PlanningKind, PlanningObject};
+
+        for reverse in [false, true] {
+            let (_source_home, source) = store();
+            let (wave, mut row, source_task) = linear_seed(&source);
+            let mut other = row.snapshot.projects[0].clone();
+            other.id = "destination".into();
+            other.slug = "destination".into();
+            other.name = "Destination".into();
+            row.snapshot.projects.push(other.clone());
+            other.id = "intermediate".into();
+            other.slug = "intermediate".into();
+            other.name = "Intermediate".into();
+            row.snapshot.projects.push(other);
+            source.put_pm_snapshot(&row).unwrap();
+            let source_project = source.task(&source_task).unwrap().unwrap().project_id;
+            let destination_project = source
+                .project_by_project("destination")
+                .unwrap()
+                .unwrap()
+                .id;
+            let before = export(&source, "/source");
+            let (_target_home, target) = store();
+            target
+                .create_wave(&Wave::new(
+                    wave.clone(),
+                    "planning".into(),
+                    "/target".into(),
+                ))
+                .unwrap();
+            target.put_pm_snapshot(&row).unwrap();
+            target
+                .select_peer_waves("/target", &destination(), std::slice::from_ref(&wave))
+                .unwrap();
+            let local = target
+                .task_by_issue(&row.snapshot.items[0].id)
+                .unwrap()
+                .unwrap();
+            let local_destination = target
+                .project_by_project("destination")
+                .unwrap()
+                .unwrap()
+                .id;
+            let intermediate = target
+                .project_by_project("intermediate")
+                .unwrap()
+                .unwrap()
+                .id;
+            let source_intermediate = source
+                .project_by_project("intermediate")
+                .unwrap()
+                .unwrap()
+                .id;
+            let associations = [
+                (
+                    PlanningKind::Task,
+                    source_task.as_str(),
+                    local.id.as_str(),
+                    row.snapshot.items[0].id.as_str(),
+                ),
+                (
+                    PlanningKind::Project,
+                    source_project.as_str(),
+                    local.project_id.as_str(),
+                    "current",
+                ),
+                (
+                    PlanningKind::Project,
+                    destination_project.as_str(),
+                    local_destination.as_str(),
+                    "destination",
+                ),
+                (
+                    PlanningKind::Project,
+                    source_intermediate.as_str(),
+                    intermediate.as_str(),
+                    "intermediate",
+                ),
+            ];
+            // Let the source observe both baseline identities before its save.
+            // Otherwise the receiver's unseen Linear baseline legitimately wins
+            // over a concurrent peer-authored move.
+            import(
+                &source,
+                "/source",
+                "target-baseline",
+                &export(&target, "/target"),
+            );
+            for (kind, owner, origin, provider) in associations {
+                source
+                    .associate_peer_planning(
+                        "/source",
+                        &PlanningObject {
+                            kind,
+                            id: origin.into(),
+                        },
+                        owner,
+                        provider,
+                    )
+                    .unwrap();
+            }
+            import(
+                &source,
+                "/source",
+                "accepted-baseline",
+                &export(&target, "/target"),
+            );
+            let mut source_observation = row.clone();
+            source_observation.snapshot.items[0].revision = Some("2026-10-08T11:00:00Z".into());
+            source_observation.synced_at += 1;
+            source.put_pm_snapshot(&source_observation).unwrap();
+            target.bind_project(&wave, "intermediate").unwrap();
+            target
+                .refile_unplaced_task(&local.id, &local.project_id, &intermediate)
+                .unwrap();
+            let uncertain = target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.field == "project_id")
+                .unwrap();
+            assert!(target
+                .attempt_planning_field(
+                    super::PlanningChanges::Task(&local.id),
+                    &uncertain,
+                    row.snapshot.items[0].revision.as_deref()
+                )
+                .unwrap());
+            source.bind_project(&wave, "destination").unwrap();
+            source
+                .refile_unplaced_task(&source_task, &source_project, &destination_project)
+                .unwrap();
+            // Retained serialization exercises composition, not held public exchange.
+            let after =
+                super::export_in(&source.conn.lock().unwrap(), "/source", &destination()).unwrap();
+            let after = PlanningSnapshot::from_bytes(&after.to_bytes().unwrap()).unwrap();
+            let snapshots = if reverse {
+                [&after, &before]
+            } else {
+                [&before, &after]
+            };
+            import(&target, "/target", "unassociated", snapshots[0]);
+            for (kind, origin, owner, provider) in associations {
+                for _ in 0..2 {
+                    target
+                        .associate_peer_planning(
+                            "/target",
+                            &PlanningObject {
+                                kind,
+                                id: origin.into(),
+                            },
+                            owner,
+                            provider,
+                        )
+                        .unwrap();
+                }
+            }
+            import(&target, "/target", "associated", snapshots[1]);
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().project_id,
+                local_destination
+            );
+            assert!(target.project(&destination_project).unwrap().is_none());
+            assert!(target.task(&source_task).unwrap().is_none());
+            let changes = target.pending_task_changes(&local.id).unwrap();
+            let change = changes
+                .iter()
+                .find(|c| c.field == "project_id")
+                .unwrap()
+                .clone();
+            assert_eq!(change.value, json!(destination_project));
+            assert_eq!(
+                change.base.as_ref().unwrap()["value"],
+                json!(source_project)
+            );
+            let (mutation, _) = after
+                .winners()
+                .find(|(_, c)| c.object.id == source_task.as_str() && c.field == "project_id")
+                .unwrap();
+            assert_eq!(change.id, format!("peer:{mutation}:project_id"));
+            let store = crate::store::Store::from_sqlite_for_test(target.clone());
+            assert_eq!(
+                crate::ops::planning_delivery::task_input(&store, &change).unwrap(),
+                json!({"projectId":"destination"})
+            );
+            preserve_execution(&target, &wave, &local.id);
+            let execution = execution_rows(&target);
+            // An unchanged provider baseline uses the associated identity for
+            // comparison, but never rewrites the saved value or baseline.
+            target.put_pm_snapshot(&row).unwrap();
+            assert_eq!(
+                target.task(&local.id).unwrap().unwrap().project_id,
+                local_destination
+            );
+            assert!(target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .contains(&change));
+            for snapshot in [&after, &before, &after] {
+                import(&target, "/target", "repeat", snapshot);
+                assert!(target
+                    .pending_task_changes(&local.id)
+                    .unwrap()
+                    .contains(&change));
+            }
+            // Exact readback settles only the earlier local attempt and rebases
+            // the later peer save whose baseline names the same Project by alias.
+            row.snapshot.items[0].project_id = Some("intermediate".into());
+            row.snapshot.items[0].project = Some("intermediate".into());
+            row.snapshot.items[0].revision = Some("2026-10-09T11:00:00Z".into());
+            row.synced_at += 1;
+            target.put_pm_snapshot(&row).unwrap();
+            let acknowledged: bool = target
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT acknowledged FROM task_changes WHERE id=?1",
+                    [&uncertain.id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(acknowledged);
+            let rebased = target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .into_iter()
+                .find(|c| c.id == change.id)
+                .unwrap();
+            assert_eq!(rebased.value, change.value);
+            assert_eq!(rebased.base.as_ref().unwrap()["value"], json!(intermediate));
+            assert_eq!(
+                rebased.base.as_ref().unwrap()["revision"],
+                "2026-10-09T11:00:00Z"
+            );
+            // Readback of the desired provider membership is not acknowledgement
+            // of an unattempted effect, and association cannot permit that effect.
+            row.snapshot.items[0].project_id = Some("destination".into());
+            row.snapshot.items[0].project = Some("destination".into());
+            row.snapshot.items[0].revision = Some("2026-10-09T12:00:00Z".into());
+            row.synced_at += 1;
+            target.put_pm_snapshot(&row).unwrap();
+            assert!(target
+                .pending_task_changes(&local.id)
+                .unwrap()
+                .contains(&rebased));
+            assert!(target
+                .attempt_planning_field(
+                    super::PlanningChanges::Task(&local.id),
+                    &change,
+                    row.snapshot.items[0].revision.as_deref()
+                )
+                .is_err());
+            assert_eq!(execution_rows(&target), execution);
+            assert!(!export(&target, "/target")
+                .objects()
+                .iter()
+                .any(|o| o.id == local.id.as_str() || o.id == source_task.as_str()));
         }
     }
 

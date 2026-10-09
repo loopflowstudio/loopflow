@@ -633,11 +633,11 @@ stays disabled. Omission is not convergence. Earlier proofs: `9dfb95451`, this h
 explicit correspondence. Causality precedes ranking; foreign ancestry never
 associates owners. Portable peer parents prove
 observation, not identity or authority. Private references hold groups.
-Focused checks pass, not public/installed acceptance. Membership projection
-resolves aliases; receipt delivery still needs physical IDs. Projection cannot
-release effect holds. Preserve captured inputs while composing relationship and
-non-creation receipts. Associated/mixed exchange stays disabled. Earlier proofs:
-`163362aad`, this heading. Plan: `scratch/work-on-another-machine-name.md`.
+Membership delivery/readback resolve aliases without rewriting inputs; exact
+readback rebases later saves. Order/deletion capture still needs original owners,
+not projected IDs. Association/mixed exchange stays disabled. Focused proofs are
+not public/installed acceptance. Earlier proofs: `163362aad`, this heading.
+Plan: `scratch/work-on-another-machine-name.md`.
 
 ## Driver recovery
 

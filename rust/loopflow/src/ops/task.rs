@@ -4662,12 +4662,16 @@ mod tests {
                 .unwrap()
                 .is_some(),
                 blocked,
+                "completed={completed}, provider={provider:?}, current_birth={:?}",
+                crate::journal::process_started_at(live_pid),
             );
             assert_eq!(
                 !super::lifecycle::associated_execution_blockers(&fixture.store, &fixture.task)
                     .unwrap()
                     .is_empty(),
                 blocked,
+                "completed={completed}, provider={provider:?}, current_birth={:?}",
+                crate::journal::process_started_at(live_pid),
             );
             // Administrative closure never invents a native completion receipt.
             assert!(fixture

@@ -65,7 +65,7 @@ fn task_management_fixture() {
     let input = home.path().join("fixture.json");
     std::fs::write(&input, serde_json::to_vec(&fixture).unwrap()).unwrap();
     let output = Command::new("uv")
-        .args(["run", "python"])
+        .args(["run", "--no-project", "--python", "python3", "python"])
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../tests/e2e/task_deletion.py"

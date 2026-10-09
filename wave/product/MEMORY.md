@@ -3,7 +3,7 @@
 Formerly `concerto` (2026-07-08); Product owns shared APIs across CLI, Mac,
 iOS, agents and workers. Older “Concerto” notes mean Mac.
 
-## Task delivery boundary (LOO-418, reconciled 2026-10-08)
+## Task delivery boundary (LOO-418, reconciled 2026-10-09)
 
 Jack Heart decided: zero or one PR per Task; dependencies use stacked Tasks.
 After merge, file follow-ups or record “none needed”, then complete. October 8:
@@ -18,7 +18,7 @@ unseen reopening despite matching readback, not an atomic-write guarantee.
 LOO-385 overlaps without closure authority. Full #1499 lifecycle proof precedes
 Jack’s demo; landing remains unauthorized.
 
-Task retains placement, PR history and unresolved scope.
+Placement, PR history and unresolved scope survive.
 Jack accepted normal delivery or the next Task/Wave pass finishing follow-through,
 without a watcher or wake. Common planning owns creation/status;
 foreground export owns optional issues and relations, even after completion.
@@ -33,13 +33,12 @@ execution/PR (`7671f8e9f`).
 
 Merged delivery can finish after Done without reopening (`1c4f10f96`). Resolved
 disposition blocks new scope; unresolved delivery retains its checkout (`0865e43a9`).
-Fixtures prove neither scheduled operation nor native acceptance.
+Fixtures prove no scheduled or native acceptance.
 
 Failed promotion retains confirmed copy; handoffs preserve child edits.
-Placement owns admission; Flow/Started commit atomically. Docker fixtures cover
-filing, independent completion, CLI/monitor arrival, reopening and end retry.
-Populated upgrades pass; combined gate and native acceptance remain. Settlement
-rechecks merge and disposition together.
+Flow/Started commit atomically after placement. Docker Rust and populated-upgrade
+checks pass: filing, completion, CLI/monitor arrival, reopening, end retry and stacked
+handoff. Swift/native proof and Jack's demo remain. Settlement rechecks merge/disposition.
 
 ## Terminal-host adoption (2026-10-07)
 
@@ -857,9 +856,9 @@ mechanics remain at `b1e3f623a:wave/product/MEMORY.md`, this heading.
   boundary, with navigation owned by the following decider. There is no agent
   exchange row, answer lane,
   or dedicated answer controller.
-- **Wave memory is file-only.** Applicable ancestor `MEMORY.md` files are read
-  oldest-first. There is no live memory stream, and recent Wave Chat is not
-  ambient Project/Task prompt context.
+- **LOO-406 supersedes file-only memory in source.** Saved Wave definitions
+  provide ancestor context; files are explicit import sources. This integration
+  authorizes no live migration. Recent Wave Chat is not ambient Task context.
 - **Environment configures a process; it never decides what the process is.**
   Work identity comes from durable state; execution and signal authority must
   be established at their owning boundary, never inferred from a Run id,

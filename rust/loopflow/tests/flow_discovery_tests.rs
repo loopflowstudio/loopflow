@@ -237,31 +237,20 @@ fn flow_and_workflow_catalogs_keep_same_name_sources_separate() {
         serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
         entry(&flows)
     );
-    for args in [
-        vec!["flow", "customize", "feature"],
-        vec!["project", "workflow", "customize", "feature"],
-    ] {
-        let output = run(&args);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let expected = if args[0] == "flow" {
-            ".lf/flows/feature.yaml"
-        } else {
-            ".lf/workflows/feature.yaml"
-        };
-        assert_eq!(
-            String::from_utf8(output.stdout).unwrap().trim(),
-            repo.path()
-                .canonicalize()
-                .unwrap()
-                .join(expected)
-                .to_str()
-                .unwrap()
-        );
-    }
+    let customized = run(&["flow", "customize", "feature"]);
+    assert!(customized.status.success());
+    assert_eq!(
+        String::from_utf8(customized.stdout).unwrap().trim(),
+        repo.path()
+            .canonicalize()
+            .unwrap()
+            .join(".lf/flows/feature.yaml")
+            .to_str()
+            .unwrap()
+    );
+    // Workflow edits are stored through project workflow set --file. Local
+    // definition discovery still reports malformed authored candidates.
+    std::fs::create_dir_all(repo.path().join(".lf/workflows")).unwrap();
     std::fs::write(
         repo.path().join(".lf/workflows/feature.yaml"),
         "invalid: true\n",

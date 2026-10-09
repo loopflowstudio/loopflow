@@ -81,7 +81,7 @@ fn checkout_hands_each_child_only_its_selected_design_with_source_receipt() {
         merge: None,
     });
     runtime
-        .block_on(parent.store.insert_task_pr(&parent_pr))
+        .block_on(parent.store.update_task_pr(&parent_pr))
         .unwrap();
     for (identifier, slug, content) in [
         (

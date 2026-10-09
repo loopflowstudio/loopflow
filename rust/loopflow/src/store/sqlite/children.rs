@@ -383,14 +383,17 @@ impl SqliteStore {
             .query_map(params![issue, local_prefix, repo], |row| {
                 Ok((
                     TaskId::from_raw(row.get::<_, String>(0)?),
-                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(1)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if tasks.len() > 1 {
             let candidates = tasks
                 .iter()
-                .map(|(id, title)| format!("  {id} ({title})"))
+                .map(|(id, title)| match title {
+                    Some(title) => format!("  {id} ({title})"),
+                    None => format!("  {id}"),
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
             return Err(StoreError::InvalidData(format!(

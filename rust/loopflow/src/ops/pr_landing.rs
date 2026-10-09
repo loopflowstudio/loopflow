@@ -300,7 +300,7 @@ fn admit_ci_fix(
             .into_iter()
             .next()
         {
-            return Err(repair_error(reason));
+            return Err(OpsError::CheckoutBusy(reason));
         }
         let config = load_config_or_default(Some(&landing.worktree));
         let retry = reservation.process.is_some();

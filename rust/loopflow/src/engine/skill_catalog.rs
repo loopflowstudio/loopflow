@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
+use crate::engine::definition_name::resolve_name;
 use crate::engine::{builtins, flow::split_frontmatter, LoadError, Skill};
 
 static RETIRED_INTERACTIVE_WARNING: AtomicBool = AtomicBool::new(false);
@@ -128,14 +129,30 @@ impl SkillCatalog {
         Ok(catalog)
     }
 
+    pub(crate) fn load_skill(&self, name: &str) -> Result<Skill, LoadError> {
+        self.resolve(name)?
+            .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?
+            .load()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = &SkillSource> {
         self.sources.values()
     }
 
-    pub fn resolve(&self, name: &str) -> Option<&SkillSource> {
-        self.sources
-            .get(name)
-            .or_else(|| builtins::resolve_builtin_skill(name).and_then(|key| self.sources.get(key)))
+    pub fn exact(&self, name: &str) -> Option<&SkillSource> {
+        self.sources.get(name)
+    }
+
+    pub fn resolve(&self, name: &str) -> Result<Option<&SkillSource>, LoadError> {
+        let selected =
+            resolve_name(name, self.sources.keys().map(String::as_str)).map_err(|names| {
+                LoadError::InvalidSkill(format!("ambiguous skill {name:?}: {}", names.join(", ")))
+            })?;
+        Ok(selected
+            .and_then(|name| self.sources.get(name))
+            .or_else(|| {
+                builtins::resolve_builtin_skill(name).and_then(|key| self.sources.get(key))
+            }))
     }
 
     fn collect_scope(&mut self, base: &Path, overrides: bool) -> Result<(), LoadError> {
@@ -157,7 +174,13 @@ impl SkillCatalog {
             (codex.join("skills"), SkillDialect::Codex, false),
             (codex.join("prompts"), SkillDialect::Codex, true),
         ] {
-            self.collect(&root, &root, dialect, files, &mut HashSet::new())?;
+            let mut scope = Self {
+                sources: BTreeMap::new(),
+            };
+            scope.collect(&root, &root, dialect, files, &mut HashSet::new())?;
+            for (key, source) in scope.sources {
+                self.sources.entry(key).or_insert(source);
+            }
         }
         Ok(())
     }
@@ -221,11 +244,22 @@ impl SkillCatalog {
         let name = name
             .to_string_lossy()
             .replace(std::path::MAIN_SEPARATOR, "/");
-        if self.sources.contains_key(&name) || is_generated(&path) {
+        if is_generated(&path) {
             return Ok(());
         }
         // Keep an absolute lexical path: a symlink's native name is part of its identity.
         let path = std::path::absolute(path)?;
+        if let Some(previous) = self.sources.get(&name) {
+            let previous = previous.path.as_ref().expect("scope contains file sources");
+            if fs::canonicalize(previous)? == fs::canonicalize(&path)? {
+                return Ok(());
+            }
+            return Err(LoadError::InvalidSkill(format!(
+                "ambiguous skill {name:?}: {} and {}",
+                previous.display(),
+                path.display()
+            )));
+        }
         self.sources.insert(
             name.clone(),
             SkillSource {
@@ -251,7 +285,6 @@ pub(crate) fn is_generated(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{SkillCatalog, SkillDialect};
-    use crate::engine::skill_invocation::SkillInvocation;
     use std::{fs, path::Path};
     use tempfile::TempDir;
 
@@ -259,6 +292,111 @@ mod tests {
         let path = root.join(relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn portable_literal_names_coexist_and_exact_names_win_across_scopes() {
+        let repo = TempDir::new().unwrap();
+        let home = TempDir::new().unwrap();
+        write(home.path(), ".lf/skills/team/session.md", "Personal slash");
+        write(home.path(), ".lf/skills/team-session.md", "Personal dash");
+        write(repo.path(), ".lf/skills/team-session.md", "Repository dash");
+        let catalog = SkillCatalog::load(Some(repo.path()), Some(home.path()), false).unwrap();
+        assert_eq!(
+            catalog
+                .resolve("team/session")
+                .unwrap()
+                .unwrap()
+                .read()
+                .unwrap(),
+            "Personal slash"
+        );
+        assert_eq!(
+            catalog
+                .resolve("team-session")
+                .unwrap()
+                .unwrap()
+                .read()
+                .unwrap(),
+            "Repository dash"
+        );
+        write(
+            repo.path(),
+            ".lf/skills/team/session.md",
+            "Repository slash",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), Some(home.path()), false).unwrap();
+        assert_eq!(
+            catalog
+                .resolve("team/session")
+                .unwrap()
+                .unwrap()
+                .read()
+                .unwrap(),
+            "Repository slash"
+        );
+        assert_eq!(
+            catalog
+                .resolve("team/session")
+                .unwrap()
+                .unwrap()
+                .load()
+                .unwrap()
+                .name,
+            "team/session"
+        );
+    }
+
+    #[test]
+    fn portable_fallback_is_unique_or_reports_candidates() {
+        let repo = TempDir::new().unwrap();
+        write(repo.path(), ".lf/skills/a/b-c.md", "First");
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        assert_eq!(catalog.resolve("a-b-c").unwrap().unwrap().name, "a/b-c");
+        write(repo.path(), ".lf/skills/a-b/c.md", "Second");
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let error = catalog.resolve("a-b-c").unwrap_err().to_string();
+        assert!(error.contains("a/b-c") && error.contains("a-b/c"));
+        assert_eq!(
+            catalog.resolve("a/b-c").unwrap().unwrap().read().unwrap(),
+            "First"
+        );
+    }
+
+    #[test]
+    fn portable_names_preserve_native_declarations_and_do_not_invent_shortcuts() {
+        let repo = TempDir::new().unwrap();
+        write(
+            repo.path(),
+            ".claude/skills/team/KeepCase/SKILL.md",
+            "---\nname: NativeName\nallowed-tools: Read\n---\nNative body",
+        );
+        let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
+        let skill = catalog
+            .resolve("team-KeepCase")
+            .unwrap()
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(skill.name, "team/KeepCase");
+        assert!(skill
+            .source
+            .unwrap()
+            .frontmatter
+            .unwrap()
+            .contains("NativeName"));
+        assert!(catalog.resolve("KeepCase").unwrap().is_none());
+        assert!(catalog.resolve("message").unwrap().is_none());
+        assert_eq!(
+            catalog
+                .resolve("operate")
+                .unwrap()
+                .unwrap()
+                .load()
+                .unwrap()
+                .name,
+            "repo-operate"
+        );
     }
 
     #[test]
@@ -290,20 +428,26 @@ mod tests {
         );
         for path in sources {
             let catalog = SkillCatalog::load(Some(repo.path()), Some(home.path()), false).unwrap();
-            let selected = catalog.resolve("audit").unwrap();
+            let selected = catalog.resolve("audit").unwrap().unwrap();
             assert_eq!(
                 selected.path.as_deref(),
                 Some(repo.path().join(path).as_path())
             );
             assert_eq!(selected.read().unwrap(), path);
             assert!(!catalog.entries().any(|entry| entry.name.contains("guide")));
-            assert!(catalog.resolve("implement").unwrap().path.is_none());
+            assert!(catalog
+                .resolve("implement")
+                .unwrap()
+                .unwrap()
+                .path
+                .is_none());
             fs::remove_file(repo.path().join(path)).unwrap();
         }
         assert_eq!(
             SkillCatalog::load(Some(repo.path()), Some(home.path()), false)
                 .unwrap()
                 .resolve("audit")
+                .unwrap()
                 .unwrap()
                 .path,
             Some(home.path().join(".lf/skills/audit.md"))
@@ -316,20 +460,13 @@ mod tests {
         let content = "---\nallowed-tools: [\n---\nRun this unfamiliar skill.";
         write(repo.path(), ".claude/skills/audit/SKILL.md", content);
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let skill = catalog.resolve("audit").unwrap().load().unwrap();
+        let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
         assert_eq!(skill.content.as_deref(), Some("Run this unfamiliar skill."));
-        assert_eq!(
-            SkillInvocation {
-                skill,
-                arguments: String::new(),
-            }
-            .source_text(),
-            content
-        );
+        assert_eq!(skill.source_text(), content);
         write(repo.path(), ".lf/skills/audit.md", content);
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         assert!(matches!(
-            catalog.resolve("audit").unwrap().load(),
+            catalog.resolve("audit").unwrap().unwrap().load(),
             Err(crate::engine::LoadError::InvalidSkill(_))
         ));
     }
@@ -351,7 +488,7 @@ mod tests {
         );
         let catalog = SkillCatalog::load(None, Some(home.path()), true).unwrap();
         assert_eq!(
-            catalog.resolve("audit").unwrap().read().unwrap(),
+            catalog.resolve("audit").unwrap().unwrap().read().unwrap(),
             "Override"
         );
     }
@@ -373,7 +510,7 @@ mod tests {
         .unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
         assert_eq!(
-            catalog.resolve("team/audit").unwrap().dialect,
+            catalog.resolve("team/audit").unwrap().unwrap().dialect,
             SkillDialect::Claude
         );
         assert!(!catalog

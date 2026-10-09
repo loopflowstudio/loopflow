@@ -339,7 +339,7 @@ fn list_preserves_kinds_overrides_sources_and_reserved_invocations() {
 }
 
 #[test]
-fn skill_catalog_preserves_namespace_discovery() {
+fn skill_catalog_lists_literal_names_from_nested_sources() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".lf/skills/team/nested")).unwrap();
@@ -352,10 +352,11 @@ fn skill_catalog_preserves_namespace_discovery() {
     }
 
     let catalog = json_entries(repo.path(), home.path(), &["list", "skill", "--json"]);
-    let namespace = catalog.iter().find(|row| row["name"] == "team").unwrap();
-    assert_eq!(namespace["kind"], "namespace");
-    assert_eq!(namespace["invocation"], "lf list skill team");
-    assert!(!catalog.iter().any(|row| row["kind"] == "flow"));
+    assert!(catalog
+        .iter()
+        .any(|row| row["name"] == "team/review" && row["kind"] == "skill"));
+    assert!(catalog.iter().any(|row| row["name"] == "team/nested/check"));
+    assert!(!catalog.iter().any(|row| row["kind"] == "namespace"));
     let scoped = json_entries(
         repo.path(),
         home.path(),
@@ -1142,4 +1143,30 @@ fn desktop_input_keeps_text_separate_from_keys_and_requires_surface_identity() {
         "arbitrary-bytes"
     ])
     .is_err());
+}
+
+#[test]
+fn portable_help_describes_exact_kind_selection() {
+    let repo = fixture();
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+    fs::write(repo.path().join(".lf/flows/team/check.yaml"), "- solo\n").unwrap();
+    fs::write(
+        repo.path().join(".lf/skills/team-check.md"),
+        "Explicit skill body",
+    )
+    .unwrap();
+    let help =
+        |args: &[&str]| String::from_utf8(success(run(repo.path(), home.path(), args))).unwrap();
+    let flow = help(&["help", "team/check"]);
+    assert!(flow.contains("team/check — flow"));
+    assert!(flow.contains("team-check"));
+    let skill = help(&["help", "team-check"]);
+    assert!(skill.contains("team-check — skill"));
+    assert!(!skill.contains("flow wins untyped lookup"));
+    assert!(!skill.contains("Untyped lookup selects"));
+    fs::write(repo.path().join(".lf/flows/team-check.yaml"), "- solo\n").unwrap();
+    assert!(help(&["help", "team-check"]).contains("team-check — flow"));
+    assert!(help(&["help", "skill", "team-check"])
+        .contains("Untyped lookup selects the same-named flow"));
 }

@@ -1,7 +1,7 @@
 # Planning
 
 ```bash
-lf --wave product wave/operate
+lf --wave product wave-operate
 lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
@@ -546,7 +546,7 @@ Task assigns work history without reopening it.
 
 ```bash
 lf comment INF-124 "keep the public name"
-lf --wave product wave/operate "review the current priorities"
+lf --wave product wave-operate "review the current priorities"
 ```
 
 SQLite owns every Task comment. A save records the comment and its stable delivery

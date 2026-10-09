@@ -2027,8 +2027,13 @@ fn execute_command(
         },
         Some(Commands::Machine { cmd }) => loopflow::lf::commands::machine::run(cmd, cli.batch),
         Some(Commands::Self_ {
-            cmd: loopflow::lf::SelfCommand::SyncSkills { yes, no_prune },
-        }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune),
+            cmd:
+                loopflow::lf::SelfCommand::SyncSkills {
+                    yes,
+                    no_prune,
+                    repo,
+                },
+        }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
             cmd:
                 loopflow::lf::WaveCommand::Cron {
@@ -2247,6 +2252,7 @@ fn execute_command(
                 name,
                 json,
                 processes: true,
+                ..
             } => loopflow::lf::commands::flow_inventory::inspect(name, *json),
             _ => anyhow::bail!("not a Flow inspection command: {cmd:?}"),
         },

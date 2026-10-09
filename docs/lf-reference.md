@@ -964,7 +964,7 @@ Internal command; invoked by the owning operation.
 
 ## lf self sync-skills
 
-Compile loopflow skills into your home vendor Skills directories
+Export skills and Flows into native vendor Skills directories
 
 Internal command; invoked by the owning operation.
 
@@ -972,6 +972,7 @@ Internal command; invoked by the owning operation.
 |---|---|
 | `--yes / -y` | Confirm writes under ~/ without prompting Default: false. |
 | `--no-prune` | Keep stale loopflow-generated skills Default: false. |
+| `--repo` | Export repository definitions into this checkout instead of home Default: false. |
 | `--verbose / -v` | Show context accounting and diagnostic logs Default: false. |
 | `--help / -h` | Print help |
 

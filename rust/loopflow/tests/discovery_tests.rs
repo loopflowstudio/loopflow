@@ -15,6 +15,7 @@ static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 struct HomeGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
     previous_home: Option<String>,
+    provider_homes: Vec<(&'static str, Option<std::ffi::OsString>)>,
     _temp: TempDir,
 }
 
@@ -27,7 +28,16 @@ impl HomeGuard {
         let temp = TempDir::new().expect("temp home");
         let previous_home = env::var("HOME").ok();
         env::set_var("HOME", temp.path());
+        let provider_homes = ["CODEX_HOME", "CLAUDE_CONFIG_DIR"]
+            .into_iter()
+            .map(|name| {
+                let previous = env::var_os(name);
+                env::remove_var(name);
+                (name, previous)
+            })
+            .collect();
         Self {
+            provider_homes,
             _lock: lock,
             previous_home,
             _temp: temp,
@@ -37,6 +47,12 @@ impl HomeGuard {
 
 impl Drop for HomeGuard {
     fn drop(&mut self) {
+        for (name, previous) in &self.provider_homes {
+            match previous {
+                Some(value) => env::set_var(name, value),
+                None => env::remove_var(name),
+            }
+        }
         if let Some(prev) = &self.previous_home {
             env::set_var("HOME", prev);
         } else {
@@ -50,23 +66,25 @@ fn discover_builtin_skills() {
     let _home = HomeGuard::new();
     let catalog = SkillCatalog::discover(None).unwrap();
     for skill in builtin_skill_names() {
-        assert!(catalog.resolve(skill).unwrap().path.is_none());
+        assert!(catalog.resolve(skill).unwrap().unwrap().path.is_none());
     }
 }
 
 #[test]
-fn builtin_catalog_uses_slashes_for_ownership_and_never_underscores() {
+fn builtin_catalog_uses_portable_dashes_and_never_slashes_or_underscores() {
     let skill_names = builtin_skill_names();
     for scope in ["repo", "wave", "task"] {
         for role in ["operate", "session"] {
-            let name = format!("{scope}/{role}");
+            let name = format!("{scope}-{role}");
             assert!(skill_names.contains(&name.as_str()), "{name}");
         }
     }
-    assert!(!skill_names.iter().any(|name| name.starts_with("project/")));
+    assert!(!skill_names.iter().any(|name| name.starts_with("project-")));
     assert!(skill_names.contains(&"implement"));
-    assert!(skill_names.iter().all(|name| !name.contains('_')));
-    assert!(builtin_flow_names().iter().all(|name| !name.contains('_')));
+    assert!(skill_names.iter().all(|name| !name.contains(['_', '/'])));
+    assert!(builtin_flow_names()
+        .iter()
+        .all(|name| !name.contains(['_', '/'])));
 }
 
 #[test]
@@ -82,7 +100,7 @@ fn discover_repo_skills() {
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     for name in ["custom", "team/review"] {
         assert_eq!(
-            catalog.resolve(name).unwrap().path,
+            catalog.resolve(name).unwrap().unwrap().path,
             Some(skills_dir.join(format!("{name}.md")))
         );
     }
@@ -163,7 +181,7 @@ fn repo_skill_shadows_builtin() {
 
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     assert_eq!(
-        catalog.resolve("qa").unwrap().path,
+        catalog.resolve("qa").unwrap().unwrap().path,
         Some(skills_dir.join("qa.md"))
     );
 }
@@ -305,10 +323,10 @@ fn installed_skills_share_listing_execution_and_flow_resolution() {
     }
     let catalog = SkillCatalog::discover(Some(repo.path())).unwrap();
     assert_eq!(
-        catalog.resolve("explain-code").unwrap().path,
+        catalog.resolve("explain-code").unwrap().unwrap().path,
         Some(skills.join("explain-code/SKILL.md"))
     );
-    assert!(catalog.resolve("design").unwrap().path.is_none());
+    assert!(catalog.resolve("design").unwrap().unwrap().path.is_none());
     assert_eq!(
         load_skill("explain-code", repo.path())
             .unwrap()

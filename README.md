@@ -45,8 +45,8 @@ conversation cannot dirty main.
 ```bash
 lf                         # follow the conversation wherever it goes
 lf operate                 # review and operate this repository’s work
-lf repo/operate            # canonical name for the same skill
-lf --wave designer wave/operate  # operate one Wave
+lf repo-operate             # canonical name for the same skill
+lf --wave designer wave-operate  # operate one Wave
 ```
 
 Give an external agent harness the Loopflow operating skill:
@@ -87,6 +87,18 @@ See [skill sources](docs/config.md#skill-sources) for precedence and export beha
 Flows invoke builtin commands with `cmd:`, for example `- cmd: pr land`.
 See [Authoring](docs/authoring.md) for composition and review boundaries.
 
+## Run a Flow in chat
+
+```bash
+lf sync-skills --yes        # export personal skills and builtin Flows
+lf sync-skills --repo       # export this repository’s skills and Flows locally
+```
+
+Select `/pursue` in Claude Code or `pursue` in Codex’s skill picker to follow
+its generated checklist: headless commands, conversational reviews, and loops.
+Flow exports yield to existing skills with the same name. See
+[chat Flows](docs/authoring.md#flows-in-chat) for boundaries.
+
 ## Keep work moving
 
 Author a Wave in the repo and open its conversation:
@@ -101,8 +113,8 @@ Task only after it has a Linear issue, and fold what changed into memory.
 ```
 
 ```bash
-lf --wave designer wave/operate        # one finite pass: keep started Tasks moving
-lf --wave designer wave/operate "ship the button audit first"
+lf --wave designer wave-operate        # one finite pass: keep started Tasks moving
+lf --wave designer wave-operate "ship the button audit first"
 lf session ensure -w designer          # the Wave's ongoing conversation, applying that pass on every return
 ```
 
@@ -120,8 +132,8 @@ lf interrupt INF-123                             # end this turn so fresh direct
 lf --task INF-123 research "write scratch/runtime.md"    # one independent Task conversation
 lf task run INF-123 --reason "reconcile all scratch first" # publish direction, then run fresh work
 lf task status INF-123 --json                         # inspect planning, even when sync is unavailable
-lf task/operate "INF-123"                           # advance until landed or blocked; link the blocking Session
-lf --task INF-123 skill task/session               # ongoing conversation that keeps applying task/operate
+lf task-operate "INF-123"                           # advance until landed or blocked; link the blocking Session
+lf --task INF-123 skill task-session               # ongoing conversation that keeps applying task-operate
 lf arm                                             # request exact-head auto-merge and return
 lf land                                            # complete the Task after verified merge
 lf pr reconcile                                      # check recorded deliveries once and settle merges

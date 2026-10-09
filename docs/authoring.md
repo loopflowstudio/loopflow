@@ -63,10 +63,13 @@ flow — with commits between them:
 - gate
 ```
 
-Bare names and `flow: NAME` prefer an authored flow, then a skill. Adding a
-same-named flow changes those references. Use `step: NAME` to select the skill
-explicitly; this also lets a flow call its own same-named skill without a cycle.
-An invalid flow reports its error instead of falling back to the skill.
+Bare names and `flow: NAME` select an exact literal name before considering
+slash/dash fallbacks. When a skill and Flow share that literal name, the Flow
+wins; an exact skill still wins over a fallback Flow. Use `step: NAME` to select
+the skill explicitly; this also lets a Flow call its own same-named skill
+without a cycle. An invalid selected Flow reports its error instead of falling
+back to the skill. Unlike YAML `flow: NAME`, CLI `lf flow show NAME` selects only
+Flows.
 
 Skills that need another Work's perspective launch it directly with
 `lf --task <task> : "<prompt>"`. Headless skills missing required input
@@ -90,6 +93,48 @@ Mechanical git/PR operations ride along as `cmd:` steps:
 `cmd:` invokes a builtin command with its arguments. Named skills and flows
 remain separate targets; `lf skill NAME` and `lf flow NAME` select their kind. Use
 `cmd:` in authored YAML; the former `op:` spelling is no longer accepted.
+
+### Flows in chat
+
+```bash
+lf sync-skills --repo
+```
+
+Select the Flow's name as a native skill. Its `SKILL.md` contains a direct
+checklist: ordinary steps run `lf -b implement` and wait for the result;
+`human: true` steps execute the skill in the current conversation and wait for
+the participant's response.
+
+```yaml
+- step: {name: implement, id: build}
+- loop: build
+- step: {name: demo, id: review, human: true}
+```
+
+Default loops use natural-language instructions: continue when this boundary's
+requirements are met, repeat the named range when useful work remains, or explain
+what prevents progress and stop. Custom decision skills execute in the
+conversation with their own criteria. XOR chooses one declared path and rejoins
+afterward. Reviews stay in the conversation; no substitute reviewer or assumed
+approval. Skill bodies and JSON verdict schemas are not bundled into recipes.
+
+Skills and Flows keep exact literal names. Slash and dash definitions can coexist;
+normalization is a fallback when the exact name is absent. Codex retains both
+names; Claude uses the literal dashed name when flattening would collide.
+Recipes retain source paths for conversational skills so a flattened name cannot
+silently select another definition. Native controls and resource bases still apply;
+a user-only native skill requires invocation by the participant. Loopflow skill
+exports allow model invocation; Flow entry points remain user-invoked in Claude.
+
+Headless commands retain normal LF execution records and agent settings. The
+coordinating conversation creates no outer Flow process or Task Workflow move.
+After interruption, inspect results before repeating a successful command.
+
+Native names have no Flow prefix. If a skill already owns the same native name,
+sync skips the Flow export and preserves the skill. Recipes capture topology at
+sync time: run `sync-skills --repo` after adding, editing or overriding a repository
+Flow. Repository recipes stay in the checkout; global sync exports builtin Flows.
+Headless commands load their skills normally when launched.
 
 ### Working notes and feedback
 

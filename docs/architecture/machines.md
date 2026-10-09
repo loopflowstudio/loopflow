@@ -58,7 +58,7 @@ lf ps --json                           # OS-live processes on this Machine
 lf wave status product                 # current plan, Task conditions and Session evidence
 
 lf --machine build-home history list   # run the same reader on build-home
-lf --machine build-home --wave product wave/operate
+lf --machine build-home --wave product wave-operate
 ```
 
 `lf --machine` is transport, not a second API. The target runs its own `lf`, verifies

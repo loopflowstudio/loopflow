@@ -27,8 +27,8 @@ A single prompt (`lf debug -c`, `lf : "..."`) needs only the first three.
 |---|---|
 | Try loopflow from terminal | `lf init` |
 | Run autonomous waves | Author `wave/<name>/GOAL.md`, open it in Loopflow (macOS) |
-| Steer and inspect from terminal | `lf --wave <name> wave/operate` → `lf wave status` |
-| Run on another machine | `lf --machine <machine-id> --wave <name> wave/operate` ([Go Remote](#go-remote)) |
+| Steer and inspect from terminal | `lf --wave <name> wave-operate` → `lf wave status` |
+| Run on another machine | `lf --machine <machine-id> --wave <name> wave-operate` ([Go Remote](#go-remote)) |
 
 ---
 
@@ -190,14 +190,14 @@ branch and Task PR record when present; they do not require a running Task Flow.
 ## Scale with Waves
 
 ```bash
-lf --wave shipper wave/operate "Review the release blockers"
+lf --wave shipper wave-operate "Review the release blockers"
 lf wave status shipper
 lf ps --json
 ```
 
 Author `wave/shipper/GOAL.md` with an objective and operating guidance. Optional
 `crons:` schedules recurring commands; `pm:` connects shared planning. Each
-`wave/operate` invocation reviews the plan and keeps every started Task moving.
+`wave-operate` invocation reviews the plan and keeps every started Task moving.
 Tasks own implementation in stable worktrees; `lf land` hands off delivery and
 `lf pr reconcile` settles verified merges; `lf ci watch` repairs failed CI
 while it runs.
@@ -219,7 +219,7 @@ lf machine add jack@mini.local --label mini
 lf machine list --json
 lf wave list --json
 lf wave place <wave-id> <machine-id>    # record origin-side planning state
-lf --machine mini --wave shipper wave/operate
+lf --machine mini --wave shipper wave-operate
 ```
 
 The target Machine proves its identity before running the command and keeps the

@@ -114,12 +114,12 @@ instruction), or **unknown** (the missing read or liveness evidence). “Ready�
 “needs reconciliation” and “its Wave owns this” are not dispositions. Unstarted
 backlog is listed and left alone: starting it is the person's selection.
 
-Operate each Wave that has started work with `wave/operate`: read its
+Operate each Wave that has started work with `wave-operate`: read its
 objective, memory, plan and current work, and give its started Tasks their
 dispositions. Do that here, or run
-`lf --wave <wave> wave/operate "<concrete direction>"` for a separate pass and
+`lf --wave <wave> wave-operate "<concrete direction>"` for a separate pass and
 read its result. Operate started Tasks outside any Wave with
-`lf task/operate <issue>`. Sending the user to another conversation is not
+`lf task-operate <issue>`. Sending the user to another conversation is not
 operating. The repository view connects outcomes and dependencies across
 Waves; the Wave pass owns the detailed judgment within each Wave.
 
@@ -293,14 +293,14 @@ for one Wave, and `lf roadmap --json` for the plan joined to runtime evidence.
 Do not reconstruct their state from processes, checkouts or Linear alone.
 
 A Work names a stable Machine authority. Placement changes through `lf wave place <wave-id> <machine-id>`.
-Use `lf id`, then `lf --wave <wave> wave/operate` locally or
-`lf --machine <machine-id> --wave <wave> wave/operate` at its placement. `lf --machine` runs the target's `lf`;
+Use `lf id`, then `lf --wave <wave> wave-operate` locally or
+`lf --machine <machine-id> --wave <wave> wave-operate` at its placement. `lf --machine` runs the target's `lf`;
 its SSH route may change without moving Work. Connect missing logins in the
 foreground with `lf machine connect`; work uses credentials resident on its Machine.
 
 Prepare a Task without launching it with `lf checkout <issue> --json`.
 For one bounded contribution use `lf --task <issue> research "<question>"` or
-`lf --wave <wave> wave/operate "<direction>"`. `--task TASK` / `--wave WAVE`
+`lf --wave <wave> wave-operate "<direction>"`. `--task TASK` / `--wave WAVE`
 attributes a skill, inline prompt, or Flow. Attribution resolves this command's
 `--task`, then the checkout's Task, then an ancestor's explicit `LF_AS` declaration.
 Process ancestry supplies no Work attribution. Every attributed contribution

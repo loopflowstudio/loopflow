@@ -1065,7 +1065,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(skill, "task/session");
+    assert_eq!(skill, "task-session");
     assert_eq!(
         Path::new(&cwd).canonicalize().unwrap(),
         empty_path.canonicalize().unwrap()

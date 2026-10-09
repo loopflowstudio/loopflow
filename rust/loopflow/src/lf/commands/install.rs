@@ -2652,7 +2652,7 @@ fn promote_published_from_installation(
         store_path.display()
     );
     if sync_skills {
-        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false) {
+        if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
             eprintln!(
                 "warning: skill sync failed ({error:#}); binaries installed, skills unchanged"
             );

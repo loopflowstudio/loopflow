@@ -535,7 +535,32 @@ source-file changes or removal: Claude uses a captured native definition, while
 Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.
 
-`lf sync-skills` exports personal sources and builtins, preserves third-party
-files at destination paths, and leaves repository skills local. Cross-harness
-exports retain declarations and report that native controls and argument syntax
-are not yet translated.
+```bash
+lf sync-skills --yes       # personal skills and builtin skills/Flows → home
+lf sync-skills --repo      # repository skills/Flows → this checkout
+```
+
+Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports
+go to the corresponding checkout directories, never home. Release promotion’s
+skill sync includes builtin Flows. Recipes capture Flow topology at sync time;
+sync again after adding, editing, removing or overriding repository definitions.
+Headless commands load their skills when launched.
+
+Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
+are distinct definitions. `lf skill wave/session` selects the first; `lf skill
+wave-session` selects the second. When no exact name exists, `/` → `-` provides a
+fallback. Multiple fallback candidates produce an ambiguity naming the candidates.
+The same rules apply to Flows. Repository, personal and provider-root precedence
+apply to identical literal names. Existing unique bare shortcuts remain; hyphen
+suffixes do not create new shortcuts. Untyped lookup checks exact names before
+fallbacks, with Flow-first precedence for the same literal name.
+
+Codex exports retain slash and dash names, plus dashed fallbacks where unoccupied.
+Claude exports are flat: a literal dashed name wins over a flattened hierarchical
+name, with unrepresentable exports reported as skipped. Flow exports have no
+prefix and yield to skills at each provider's projected name. Each recipe retains
+its original exact Flow name. Invalid provider names are reported, never silently
+rewritten. Third-party files and bundles are preserved. Sync prunes only generated
+exports after replacements are writable; desired nested Codex exports survive.
+Original native declarations and resource paths remain attached to each source;
+cross-harness exports do not claim to enforce or translate native controls.

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value;
 
+use crate::engine::definition_name::{portable_name, resolve_name};
 use crate::engine::error::LoadError;
 use crate::engine::skill_catalog::{SkillCatalog, SkillOrigin};
 use crate::engine::target::{resolve_definition, DefinitionKind, Target};
@@ -26,6 +27,18 @@ pub struct Skill {
 }
 
 impl Skill {
+    pub fn source_text(&self) -> String {
+        let body = self.content.as_deref().unwrap_or_default();
+        match self
+            .source
+            .as_ref()
+            .and_then(|source| source.frontmatter.as_ref())
+        {
+            Some(frontmatter) => format!("---{frontmatter}---\n{body}"),
+            None => body.to_string(),
+        }
+    }
+
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -299,9 +312,11 @@ pub fn load_flow(name: &str, repo: &Path) -> Result<FlowDefinition, LoadError> {
 
 /// Copy a builtin Flow only when the repository has no local definition.
 pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    if let Some(path) = find_flow_source_path(name, repo) {
+    if let Some(path) = find_flow_source_path(name, repo)? {
         return Ok(path);
     }
+    let name = crate::engine::builtins::resolve_builtin_flow(name)
+        .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
     let content = crate::engine::builtins::get_builtin_flow(name)
         .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
     let path = repo.join(format!(".lf/flows/{name}.yaml"));
@@ -322,29 +337,28 @@ pub fn available_flow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
 }
 
 pub(crate) fn repo_flow_names(repo: &Path) -> Result<Vec<String>, LoadError> {
-    let mut names = Vec::new();
-    collect_flow_names(&repo.join(".lf/flows"), None, &mut names)?;
-    names.sort();
-    names.dedup();
-    Ok(names)
+    Ok(repo_flow_sources(repo)?.into_keys().collect())
 }
 
 /// Load an authored flow without adapting a skill into a flow.
 pub fn load_authored_flow(name: &str, repo: &Path) -> Result<FlowDefinition, LoadError> {
-    DefinitionLoader::new(repo).load_flow(name)
+    let catalog = SkillCatalog::discover(Some(repo))?;
+    DefinitionLoader::new(Some(repo), &catalog).load_flow(name)
 }
 
 /// Retains the current composition path while resolving nested definitions.
 #[derive(Debug)]
 pub(super) struct DefinitionLoader<'a> {
-    repo: &'a Path,
+    repo: Option<&'a Path>,
+    catalog: &'a SkillCatalog,
     sources: Vec<String>,
 }
 
 impl<'a> DefinitionLoader<'a> {
-    pub(super) fn new(repo: &'a Path) -> Self {
+    pub(super) fn new(repo: Option<&'a Path>, catalog: &'a SkillCatalog) -> Self {
         Self {
             repo,
+            catalog,
             sources: Vec::new(),
         }
     }
@@ -354,21 +368,54 @@ impl<'a> DefinitionLoader<'a> {
         name: &str,
         kind: Option<DefinitionKind>,
     ) -> Result<Target, LoadError> {
+        if kind.is_none() {
+            let catalog = self.catalog;
+            let flows = match self.repo {
+                Some(repo) => available_flow_names(repo)?,
+                None => crate::engine::builtins::builtin_flow_names()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect(),
+            };
+            let names = flows
+                .iter()
+                .map(String::as_str)
+                .chain(catalog.entries().map(|source| source.name.as_str()));
+            if let Some(selected) = resolve_name(name, names).map_err(|names| {
+                LoadError::InvalidFlow(format!(
+                    "ambiguous definition {name:?}: {}",
+                    names.join(", ")
+                ))
+            })? {
+                // Kind precedence applies only after selecting the literal identity.
+                return if flows.iter().any(|name| name == selected) {
+                    self.load_flow(selected).map(Target::Flow)
+                } else {
+                    catalog
+                        .exact(selected)
+                        .expect("selected definition is a skill")
+                        .load()
+                        .map(Target::Skill)
+                };
+            }
+        }
         if kind != Some(DefinitionKind::Skill) {
             match self.load_flow(name) {
                 Ok(flow) => return Ok(Target::Flow(flow)),
                 Err(LoadError::FlowNotFound(_)) if kind.is_none() => {}
-                Err(LoadError::FlowNotFound(_)) if names_workflow(name, self.repo) => {
+                Err(LoadError::FlowNotFound(_))
+                    if self.repo.is_some_and(|repo| names_workflow(name, repo)) =>
+                {
                     return Err(LoadError::Workflow(name.to_string()))
                 }
                 Err(error) => return Err(error),
             }
         }
-        match load_skill(name, self.repo) {
+        match self.catalog.load_skill(name) {
             Ok(skill) => Ok(Target::Skill(skill)),
             // A name that is only a workflow is traversed, never run.
             Err(LoadError::SkillNotFound(_))
-                if kind.is_none() && names_workflow(name, self.repo) =>
+                if kind.is_none() && self.repo.is_some_and(|repo| names_workflow(name, repo)) =>
             {
                 Err(LoadError::Workflow(name.to_string()))
             }
@@ -379,26 +426,21 @@ impl<'a> DefinitionLoader<'a> {
         }
     }
 
-    fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
-        let (resolved_name, content) = match find_flow_path(name, self.repo) {
-            Ok(path) => (name.to_string(), fs::read_to_string(path)?),
-            Err(LoadError::FlowNotFound(_)) => {
+    pub(super) fn load_flow(&mut self, name: &str) -> Result<FlowDefinition, LoadError> {
+        let (resolved_name, content) = match self
+            .repo
+            .map(|repo| find_repo_flow(name, repo))
+            .transpose()?
+            .flatten()
+        {
+            Some((key, path)) => (key, fs::read_to_string(path)?),
+            None => {
                 let key = crate::engine::builtins::resolve_builtin_flow(name)
                     .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))?;
-                // A namespaced repository definition overrides its builtin even
-                // when the caller selected it through the unique bare name.
-                let content = match find_flow_path(key, self.repo) {
-                    Ok(path) => fs::read_to_string(path)?,
-                    Err(LoadError::FlowNotFound(_)) => {
-                        crate::engine::builtins::get_builtin_flow(key)
-                            .expect("resolved builtin flow exists")
-                            .to_string()
-                    }
-                    Err(error) => return Err(error),
-                };
-                (key.to_string(), content)
+                let content = crate::engine::builtins::get_builtin_flow(key)
+                    .expect("resolved builtin flow exists");
+                (key.to_string(), content.to_string())
             }
-            Err(error) => return Err(error),
         };
         let value: Value = serde_yaml_ng::from_str(&content)
             .map_err(|err| LoadError::InvalidFlow(err.to_string()))?;
@@ -421,11 +463,26 @@ pub fn compile_flow(flow: &FlowDefinition, repo: &Path) -> Result<Vec<ConcreteSt
     Ok(flatten_resolved(&resolve_flow(flow, repo)?))
 }
 
+pub(super) fn compile_flow_with_catalog(
+    flow: &FlowDefinition,
+    catalog: &SkillCatalog,
+) -> Result<Vec<ConcreteStep>, LoadError> {
+    Ok(flatten_resolved(&resolve_flow_with_catalog(flow, catalog)?))
+}
+
 pub(crate) fn resolve_flow(
     flow: &FlowDefinition,
     repo: &Path,
 ) -> Result<Vec<ResolvedFlowItem>, LoadError> {
-    let resolved = compile_with_sources(flow, repo, &[])?;
+    let catalog = SkillCatalog::discover(Some(repo))?;
+    resolve_flow_with_catalog(flow, &catalog)
+}
+
+fn resolve_flow_with_catalog(
+    flow: &FlowDefinition,
+    catalog: &SkillCatalog,
+) -> Result<Vec<ResolvedFlowItem>, LoadError> {
+    let resolved = compile_with_sources(flow, catalog, &[])?;
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
@@ -446,6 +503,10 @@ fn resolve_loop_target(preceding: &[ConcreteStep], target: &str) -> Result<usize
     let mut found = positions(&|skill| skill.id.as_deref() == Some(target));
     if found.is_empty() {
         found = positions(&|skill| skill.skill.name == target);
+    }
+    if found.is_empty() {
+        let target_key = portable_name(target);
+        found = positions(&|skill| portable_name(&skill.skill.name) == target_key);
     }
     match found[..] {
         [index] => Ok(preceding.len() - index),
@@ -526,11 +587,7 @@ pub fn human_occurrence_ids(flow: &FlowDefinition, repo: &Path) -> Result<Vec<St
 }
 
 pub fn load_skill(name: &str, repo: &Path) -> Result<Skill, LoadError> {
-    let catalog = SkillCatalog::discover(Some(repo))?;
-    let source = catalog
-        .resolve(name)
-        .ok_or_else(|| LoadError::SkillNotFound(name.to_string()))?;
-    source.load()
+    SkillCatalog::discover(Some(repo))?.load_skill(name)
 }
 
 pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
@@ -545,54 +602,65 @@ pub(crate) fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     Some((frontmatter, body))
 }
 
-fn collect_flow_names(
-    dir: &Path,
-    prefix: Option<&str>,
-    names: &mut Vec<String>,
-) -> Result<(), LoadError> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.into()),
-    };
-
-    for entry in entries {
-        let path = entry?.path();
-        if path.is_dir() && prefix.is_none() {
-            let Some(child_prefix) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            collect_flow_names(&path, Some(child_prefix), names)?;
-            continue;
-        }
-
-        if !path
-            .extension()
-            .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
+fn repo_flow_sources(repo: &Path) -> Result<BTreeMap<String, PathBuf>, LoadError> {
+    let root = repo.join(".lf/flows");
+    let mut sources = BTreeMap::<String, PathBuf>::new();
+    if !root.exists() {
+        return Ok(sources);
+    }
+    for entry in ignore::WalkBuilder::new(&root)
+        .standard_filters(false)
+        .follow_links(false)
+        .sort_by_file_path(|a, b| a.cmp(b))
+        .build()
+    {
+        let entry = entry.map_err(|error| LoadError::InvalidFlow(error.to_string()))?;
+        let path = entry.path();
+        if !path.is_file()
+            || !path
+                .extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml" || ext == "json")
         {
             continue;
         }
-        let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        match prefix {
-            Some(prefix) => names.push(format!("{prefix}/{stem}")),
-            None => names.push(stem.to_string()),
+        let name = path
+            .strip_prefix(&root)
+            .expect("source under root")
+            .with_extension("")
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        if let Some(previous) = sources.get(&name) {
+            if fs::canonicalize(previous)? == fs::canonicalize(path)? {
+                continue;
+            }
+            return Err(LoadError::InvalidFlow(format!(
+                "ambiguous flow {name:?}: {} and {}",
+                previous.display(),
+                path.display()
+            )));
         }
+        sources.insert(name, path.to_path_buf());
     }
-    Ok(())
+    Ok(sources)
 }
 
-pub fn find_flow_source_path(name: &str, repo: &Path) -> Option<PathBuf> {
-    find_flow_path(name, repo).ok()
+pub fn find_flow_source_path(name: &str, repo: &Path) -> Result<Option<PathBuf>, LoadError> {
+    Ok(find_repo_flow(name, repo)?.map(|(_, path)| path))
 }
 
-fn find_flow_path(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
-    ["yaml", "yml", "json"]
-        .map(|extension| repo.join(".lf/flows").join(format!("{name}.{extension}")))
-        .into_iter()
-        .find(|path| path.exists())
-        .ok_or_else(|| LoadError::FlowNotFound(name.to_string()))
+fn find_repo_flow(name: &str, repo: &Path) -> Result<Option<(String, PathBuf)>, LoadError> {
+    let mut sources = repo_flow_sources(repo)?;
+    let names = sources
+        .keys()
+        .map(String::as_str)
+        .chain(crate::engine::builtins::builtin_flow_names());
+    let selected = resolve_name(name, names)
+        .map_err(|names| {
+            LoadError::InvalidFlow(format!("ambiguous flow {name:?}: {}", names.join(", ")))
+        })?
+        .map(str::to_string)
+        .or_else(|| crate::engine::builtins::resolve_builtin_flow(name).map(str::to_string));
+    Ok(selected.and_then(|name| sources.remove_entry(&name)))
 }
 
 // -----------------------------------------------------------------------------
@@ -841,12 +909,12 @@ pub fn build_xor_routing_suffix(xor_def: &ConcreteXor) -> String {
 
 fn compile_branch(
     branch_def: &XorDef,
-    repo: &Path,
+    catalog: &SkillCatalog,
     sources: &[String],
 ) -> Result<ResolvedFlowItem, LoadError> {
     let router = match &branch_def.router {
-        Some(name) => load_skill(name, repo)?,
-        None => load_skill("xor-route", repo)?,
+        Some(name) => catalog.load_skill(name)?,
+        None => catalog.load_skill("xor-route")?,
     };
     let paths = branch_def
         .paths
@@ -856,7 +924,7 @@ fn compile_branch(
                 name.clone(),
                 ResolvedFlowPath {
                     description: path.description.clone(),
-                    items: compile_steps(&path.steps, repo, sources)?,
+                    items: compile_steps(&path.steps, catalog, sources)?,
                 },
             ))
         })
@@ -915,12 +983,12 @@ fn parse_optional_string(map: &serde_yaml_ng::Mapping, field: &str) -> Option<St
         .map(ToString::to_string)
 }
 
-fn resolve_skill_reference(skill: &Skill, repo: &Path) -> Result<Skill, LoadError> {
+fn resolve_skill_reference(skill: &Skill, catalog: &SkillCatalog) -> Result<Skill, LoadError> {
     if skill.content.is_some() {
         return Ok(skill.clone());
     }
 
-    let mut resolved = load_skill(&skill.name, repo)?;
+    let mut resolved = catalog.load_skill(&skill.name)?;
 
     if let Some(agent) = &skill.agent {
         resolved.agent = Some(agent.clone());
@@ -951,18 +1019,18 @@ fn validate_flow_nesting(sources: &[String], name: &str) -> Result<(), LoadError
 
 fn compile_with_sources(
     flow: &FlowDefinition,
-    repo: &Path,
+    catalog: &SkillCatalog,
     sources: &[String],
 ) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     validate_flow_nesting(sources, &flow.name)?;
     let mut sources = sources.to_vec();
     sources.push(flow.name.clone());
-    compile_steps(&flow.items, repo, &sources)
+    compile_steps(&flow.items, catalog, &sources)
 }
 
 fn compile_steps(
     steps: &[Step],
-    repo: &Path,
+    catalog: &SkillCatalog,
     sources: &[String],
 ) -> Result<Vec<ResolvedFlowItem>, LoadError> {
     let mut items = Vec::new();
@@ -982,11 +1050,11 @@ fn compile_steps(
             Target::Flow(flow) => {
                 items.push(ResolvedFlowItem::Group {
                     name: flow.name.clone(),
-                    items: compile_with_sources(flow, repo, sources)?,
+                    items: compile_with_sources(flow, catalog, sources)?,
                 });
             }
             Target::Skill(skill) => items.push(ResolvedFlowItem::Skill(ConcreteSkill {
-                skill: resolve_skill_reference(skill, repo)?,
+                skill: resolve_skill_reference(skill, catalog)?,
                 id: step.id.clone(),
                 human: step.human,
                 returns: step
@@ -996,7 +1064,7 @@ fn compile_steps(
                     .transpose()?,
                 sources: sources.to_vec(),
             })),
-            Target::Xor(branch) => items.push(compile_branch(branch, repo, sources)?),
+            Target::Xor(branch) => items.push(compile_branch(branch, catalog, sources)?),
         }
     }
     Ok(items)
@@ -1027,7 +1095,153 @@ mod tests {
             )
             .unwrap();
         }
-        super::parse_flow_items(value, &mut DefinitionLoader::new(tmp.path()))
+        super::parse_flow_items(
+            value,
+            &mut DefinitionLoader::new(
+                Some(tmp.path()),
+                &super::SkillCatalog::discover(Some(tmp.path())).unwrap(),
+            ),
+        )
+    }
+
+    #[test]
+    fn portable_flow_names_coexist_and_alias_cycles_fail() {
+        let repo = TempDir::new().unwrap();
+        let flows = repo.path().join(".lf/flows/team");
+        fs::create_dir_all(&flows).unwrap();
+        fs::write(flows.join("ship.yaml"), "- implement\n").unwrap();
+        for name in ["team/ship", "team-ship"] {
+            assert_eq!(
+                super::load_authored_flow(name, repo.path()).unwrap().name,
+                "team/ship"
+            );
+            assert_eq!(
+                super::customize(name, repo.path()).unwrap(),
+                flows.join("ship.yaml")
+            );
+        }
+        fs::write(flows.join("ship.yaml"), "- flow: team-ship\n").unwrap();
+        assert!(super::load_authored_flow("team/ship", repo.path())
+            .unwrap_err()
+            .to_string()
+            .contains("cycle detected"));
+        fs::write(repo.path().join(".lf/flows/team-ship.yml"), "- gate\n").unwrap();
+        let flow = super::load_authored_flow("team/ship", repo.path()).unwrap();
+        assert_eq!(flow.name, "team/ship");
+        let steps = compile_flow(&flow, repo.path()).unwrap();
+        assert!(matches!(&steps[..], [ConcreteStep::Skill(skill)] if skill.skill.name == "gate"));
+        assert_eq!(
+            super::load_authored_flow("team-ship", repo.path())
+                .unwrap()
+                .name,
+            "team-ship"
+        );
+        assert_eq!(
+            super::customize("team-ship", repo.path()).unwrap(),
+            repo.path().join(".lf/flows/team-ship.yml")
+        );
+    }
+
+    #[test]
+    fn portable_repository_flow_only_overrides_identical_builtin_name() {
+        let repo = TempDir::new().unwrap();
+        let path = repo.path().join(".lf/flows/task/design.yaml");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "- cmd: sync\n").unwrap();
+        assert_eq!(
+            super::load_authored_flow("task/design", repo.path())
+                .unwrap()
+                .name,
+            "task/design"
+        );
+        assert_eq!(
+            super::load_authored_flow("task-design", repo.path())
+                .unwrap()
+                .name,
+            "task-design"
+        );
+        assert_eq!(
+            super::find_flow_source_path("task-design", repo.path()).unwrap(),
+            None
+        );
+        let dashed = repo.path().join(".lf/flows/task-design.yaml");
+        fs::write(&dashed, "- cmd: sync\n").unwrap();
+        assert_eq!(
+            super::customize("task-design", repo.path()).unwrap(),
+            dashed
+        );
+    }
+
+    #[test]
+    fn portable_flow_fallback_reports_only_real_ambiguity() {
+        let repo = TempDir::new().unwrap();
+        for name in ["a/b-c", "a-b/c"] {
+            let path = repo.path().join(format!(".lf/flows/{name}.yaml"));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "- implement\n").unwrap();
+            assert_eq!(
+                super::load_authored_flow(name, repo.path()).unwrap().name,
+                name
+            );
+        }
+        let error = super::load_authored_flow("a-b-c", repo.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("a/b-c") && error.contains("a-b/c"));
+    }
+
+    #[test]
+    fn portable_untyped_lookup_prefers_exact_names_before_kind() {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows/team")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills/team")).unwrap();
+        let path = repo.path().join(".lf/flows/team/work.yaml");
+        fs::write(&path, "- implement\n").unwrap();
+        fs::write(repo.path().join(".lf/skills/team-work.md"), "Dash skill").unwrap();
+        assert_eq!(
+            load_flow("team/work", repo.path()).unwrap().name,
+            "team/work"
+        );
+        assert_eq!(
+            load_skill("team/work", repo.path()).unwrap().name,
+            "team-work"
+        );
+        assert!(matches!(
+            super::resolve_definition(repo.path(), "team-work", None).unwrap(),
+            super::Target::Skill(_)
+        ));
+        fs::write(repo.path().join(".lf/skills/team/work.md"), "Slash skill").unwrap();
+        assert!(matches!(
+            super::resolve_definition(repo.path(), "team/work", None).unwrap(),
+            super::Target::Flow(_)
+        ));
+        fs::write(&path, "broken: [").unwrap();
+        assert!(load_flow("team/work", repo.path()).is_err());
+        assert!(matches!(
+            super::resolve_definition(repo.path(), "team-work", None).unwrap(),
+            super::Target::Skill(_)
+        ));
+    }
+
+    #[test]
+    fn portable_loop_targets_prefer_ids_then_literal_names_then_fallback() {
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/flows")).unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills/team")).unwrap();
+        for name in ["team/check", "team-check"] {
+            fs::write(repo.path().join(format!(".lf/skills/{name}.md")), name).unwrap();
+        }
+        let path = repo.path().join(".lf/flows/proof.yaml");
+        for (body, target) in [
+            ("- step: {name: team/check, id: team-check}\n- step: team-check\n- loop: team-check\n", 0),
+            ("- step: team/check\n- step: team-check\n- loop: team-check\n", 1),
+            ("- step: team/check\n- step: team-check\n- loop: team/check\n", 0),
+            ("- step: team/check\n- loop: team-check\n", 0),
+        ] {
+            fs::write(&path, body).unwrap();
+            let steps = compile_flow(&super::load_authored_flow("proof", repo.path()).unwrap(), repo.path()).unwrap();
+            assert_eq!(super::return_target(&steps, steps.len() - 1), Some(target));
+        }
     }
 
     #[test]
@@ -1801,7 +2015,7 @@ Design the feature.
                     ),
                 ]),
             },
-            tmp.path(),
+            &super::SkillCatalog::discover(Some(tmp.path())).unwrap(),
             &[],
         )
         .unwrap();
@@ -1967,16 +2181,22 @@ Design the feature.
             "flow: pin-missing-flow-23952",
         ] {
             let value: Value = serde_yaml_ng::from_str(&format!("- xor:\n    paths:\n      empty:\n        description: Empty\n      missing:\n        description: Missing\n        {target}\n")).unwrap();
-            let result = super::parse_flow_items(&value, &mut DefinitionLoader::new(tmp.path()))
-                .and_then(|items| {
-                    compile_flow(
-                        &FlowDefinition {
-                            name: "pin-missing".into(),
-                            items,
-                        },
-                        tmp.path(),
-                    )
-                });
+            let result = super::parse_flow_items(
+                &value,
+                &mut DefinitionLoader::new(
+                    Some(tmp.path()),
+                    &super::SkillCatalog::discover(Some(tmp.path())).unwrap(),
+                ),
+            )
+            .and_then(|items| {
+                compile_flow(
+                    &FlowDefinition {
+                        name: "pin-missing".into(),
+                        items,
+                    },
+                    tmp.path(),
+                )
+            });
             assert!(result.unwrap_err().to_string().contains("not found"));
         }
     }

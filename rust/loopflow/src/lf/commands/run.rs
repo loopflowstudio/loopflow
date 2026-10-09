@@ -1,7 +1,7 @@
 use crate::engine::{
     check_cli_available, missing_agent_message, parse_agent, prepare_process_prompt, run_agent,
     AgentCapabilities, AgentConfig, ContextSourceOverrides, ProcessConfig, ProcessPromptInput,
-    PromptComponents, StreamFormat, Surface,
+    PromptComponents, Skill, StreamFormat, Surface,
 };
 use crate::lf::commands::util::launch_session;
 use crate::lf::output::{format_context_header, format_reproducible_command, Colors};
@@ -254,7 +254,10 @@ fn run_bound_prompt(
     binding: &crate::ops::WorkBinding,
 ) -> Result<Option<FinalAnswer>> {
     let mut scoped;
-    let binding = if skill == Some("wave/operate")
+    let binding = if resolve_skill(skill, cli, &binding.cwd)?
+        .as_ref()
+        .map(|skill| skill.name.as_str())
+        == Some("wave-operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()
         && cli.wt.is_none()
@@ -377,7 +380,10 @@ fn build_prompt(
 ) -> Result<PromptBuild> {
     let start = Instant::now();
     let repo_root = repo_root.to_path_buf();
-    let repo_root = if skill == Some("repo/operate")
+    let repo_root = if resolve_skill(skill, cli, &repo_root)?
+        .as_ref()
+        .map(|skill| skill.name.as_str())
+        == Some("repo-operate")
         && cli.bound_cwd.is_none()
         && cli.task.is_none()
         && cli.wt.is_none()
@@ -400,6 +406,16 @@ fn build_prompt(
         repo_root,
         None,
     )
+}
+
+/// Captured identity and body take precedence, including during scope selection.
+fn resolve_skill(name: Option<&str>, cli: &Cli, repo: &Path) -> Result<Option<Skill>> {
+    match &cli.resolved_invocation {
+        Some(invocation) => Ok(Some(invocation.skill.clone())),
+        None => Ok(name
+            .map(|name| crate::engine::load_skill(name, repo))
+            .transpose()?),
+    }
 }
 
 fn build_bound_prompt_at(
@@ -504,12 +520,7 @@ fn build_prompt_at(
 
     let discover_start = Instant::now();
     let invocation = cli.resolved_invocation.as_ref();
-    let discovered_skill = match invocation {
-        Some(invocation) => Some(invocation.skill.clone()),
-        None => skill
-            .map(|name| crate::engine::load_skill(name, &repo_root))
-            .transpose()?,
-    };
+    let discovered_skill = resolve_skill(skill, cli, &repo_root)?;
     let arguments = invocation.map_or(arguments, |invocation| invocation.arguments.as_str());
     debug!(
         elapsed_ms = discover_start.elapsed().as_millis(),
@@ -1232,7 +1243,7 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        attributed_context, begin_capture, build_bound_prompt, build_bound_prompt_at,
+        attributed_context, begin_capture, build_bound_prompt, build_bound_prompt_at, build_prompt,
         build_prompt_at, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
         run_prompt, PromptBuild,
     };
@@ -1771,12 +1782,8 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
         std::fs::create_dir_all(native.parent().unwrap()).unwrap();
         std::fs::write(&native, "Original audit instructions").unwrap();
         let catalog = SkillCatalog::load(Some(repo.path()), None, false).unwrap();
-        let skill = catalog.resolve("audit").unwrap().load().unwrap();
+        let skill = catalog.resolve("audit").unwrap().unwrap().load().unwrap();
         std::fs::remove_file(&native).unwrap();
-        let replacement = repo.path().join(".lf/skills/audit.md");
-        std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
-        std::fs::write(replacement, "Replacement instructions").unwrap();
-
         let invocation = crate::engine::skill_invocation::SkillInvocation {
             skill,
             arguments: "  exact \"arguments\"  ".into(),
@@ -1789,13 +1796,20 @@ printf '%s\n' '{"type":"result","subtype":"success","usage":{"input_tokens":7,"o
             resolved_invocation: Some(invocation.clone()),
             ..Cli::default()
         };
-        let built = build_prompt_at(
+        let missing = build_prompt(repo.path(), Some("audit"), None, &cli).unwrap();
+        assert_eq!(
+            missing.agent_config.skill_invocation,
+            Some(invocation.clone())
+        );
+
+        let replacement = repo.path().join(".lf/skills/audit.md");
+        std::fs::create_dir_all(replacement.parent().unwrap()).unwrap();
+        std::fs::write(replacement, "---\nagent: [\n---\nReplacement instructions").unwrap();
+        let built = build_prompt(
+            repo.path(),
             Some("audit"),
             Some("Retain this Work direction"),
-            "different caller arguments",
             &cli,
-            repo.path().into(),
-            None,
         )
         .unwrap();
         assert_eq!(built.agent_config.skill_invocation, Some(invocation));

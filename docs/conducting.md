@@ -122,7 +122,7 @@ much of CI repair happened without a person.
 Reading is half; the system stays steerable while it runs.
 
 ```bash
-lf --wave <wave> wave/operate "ship the parser fix first"
+lf --wave <wave> wave-operate "ship the parser fix first"
 lf session ensure -w <wave>                # the Wave's ongoing conversation and operator
 lf --wave <wave> : "Review this plan"          # start a conversation
 lf comment INF-123 "smaller PR"            # post a Linear comment; deliver to its running Flow

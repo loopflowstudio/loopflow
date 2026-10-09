@@ -638,10 +638,10 @@ separate savepoints; prepare validated histories before retries. Preserve origin
 ages and Team baselines; legacy ages stay unknown. Entity revisions cannot order
 relationships. Team and cold-list fixtures prove no composed partial-list acceptance.
 
-**Invalidation needs causal acknowledgement.** Detail retires observed notices,
-not unseen notices. Replay cannot reinvalidate that readback. The greatest retained revision
-sets the floor; clocks create no provider revision. Scalar/list replay cannot clear
-freshness; acknowledgement requires its accepted frontier.
+**Invalidation needs causal acknowledgement.** `6ccbbabe3` retires observed notices,
+never unseen ones. Replay preserves readback and the greatest revision floor;
+clocks invent no revisions. Scalar/list replay cannot clear freshness;
+acknowledgement requires its accepted frontier. Focused proof only.
 
 Acquisition/saves bypass effect locks; unreadable journals mean unknown pending.
 Private histories/dependents stay held until selection; omission is not convergence.

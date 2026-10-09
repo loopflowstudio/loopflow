@@ -621,29 +621,29 @@ acceptance remain at
 
 ## Tasks across machines (LOO-412, 2026-10-08)
 
-Jack Heart selected custom-ref sync: LOO-412 owns transport/machines, LOO-406
-storage/Linear; plan ownership above governs sharing/execution exclusion.
+Jack Heart selected custom-ref sync under Plan ownership above.
 Review-only publication; no landing or public-remote planning export.
 
-Malformed input aborts import;
-valid contradictions isolate objects. Entity revisions cannot order relationships.
+Malformed input aborts import; valid contradictions isolate objects.
+Entity revisions cannot order relationships.
 `a388ed425` shares disposition receipts without Workflow moves: a selected Linear
 winner retires losing intention; ordinary unchanged acquisition preserves it.
 
-Peer comments now share acquisition/delivery owners, stable comment IDs, raw
-provider observations and retained losing receipts. Import creates no steer or
-echo. Acquired migration rows await real observation before export, never inferred
-authorship. SQL passes; Rust/composed/installed acceptance remains unproved.
-Creation, Project/order, deletion, alternate acquisition, legacy association and
-Desktop remain. Design: `scratch/work-on-another-machine-name.md`; prior proofs:
-`ae6f392c2:wave/infrastructure/MEMORY.md`.
+Comments retain common owners, IDs, observations and losing receipts, without steer
+or echo. Migrated acquired rows await observed authorship. Creation, Project/order,
+deletion, alternate acquisition, legacy association and Desktop remain. Raw Markdown
+can replace independent KR/target edits even without Linear; replace it semantically.
+Design: `scratch/work-on-another-machine-name.md`; prior proofs:
+`ae6f392c2:wave/infrastructure/MEMORY.md`. SQL proves no executable acceptance;
+checkpoint CI skips product suites with scratch.
 
-Integrated parent `ffe986160` settles state from observations, not synthetic success.
-Joining publishes nothing; mixed Linear exchange stays disabled pending composition,
-not by policy. Fetch/import/publication stay separate; readback settles only the
-attempted save. Workers retain effect locks through cancellation without blocking
-saves/acquisition. Status now isolates damaged journals too: unknown local changes,
-retained receipts/conflicts, independent plans visible. Unverified.
+Parent `ffe986160` settles state from observations, not synthetic success.
+Joining publishes nothing; mixed Linear awaits composition, not policy.
+Fetch/import/publication stay separate; readback covers the attempted save.
+Workers retain effect locks through cancellation without blocking saves/acquisition.
+`de9470d5a` scopes conflict display and settlement to one destination. Damaged
+journals retain unknown pending state, receipts/conflicts and independent visibility.
+Rust/composed/installed acceptance remains unproved.
 
 Move counterexample `a43f3e2ea`, repairs `b5dafd918`/`7395cf3bb`: holds omit private
 history/dependents, including retained Git documents, until explicit selection.

@@ -30,7 +30,7 @@ at `b040c7c8d:scratch/questions.md`.
   failures still roll back the import. Legacy-provider association remains unfinished;
   conflicts preserve both IDs rather than guessing which execution history to use.
 
-Peer source is committed through `7e56c01fd`; this integrated cut remains unpublished. Current verification and
+Peer source is committed through `de9470d5a`; this integrated cut remains unpublished. Current verification and
 remaining integration are in the existing design; previous adoption-only evidence
 is retained at `5d336868f:scratch/questions.md`.
 
@@ -130,4 +130,5 @@ is retained at `5d336868f:scratch/questions.md`.
   the same transaction. Retained receipts/conflicts survive; unavailable sharing holds
   are not reported as empty convergence. Only malformed journal errors are isolated;
   database failures still fail status. This replaces the second global conflict reader,
-  not the journal or its validation. Public/DTO regressions remain unexecuted.
+  not the journal or its validation. `de9470d5a` also shares the destination-scoped
+  conflict query with import settlement. Public/DTO regressions remain unexecuted.

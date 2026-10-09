@@ -174,11 +174,13 @@ omission is not convergence. Remaining grouped owners and acceptance are below.
 
 ## Remaining integration — October 8
 
-Reconciled against `fcd83ffc5` on October 8. `a388ed425` adds peer Task
-disposition receipts through the common state owner; `fcd83ffc5` shares one
-borrowed field-keyed winner index across completeness, projection and delivery.
-The typed provider-conflict repair remains at `270019c8d`. These source cuts do
-not establish executable acceptance: the authored regressions remain unexecuted.
+Reconciled against `de9470d5a` on October 8, retaining parent `ffe986160`.
+`b9f88eafd` isolates damaged destination journals in status; `de9470d5a` uses
+one destination-scoped membership join for conflict display and settlement.
+The regression now resolves one destination while retaining another's conflicts.
+These cuts do not complete grouped Linear composition or establish executable
+acceptance. Earlier disposition/winner-index evidence remains at
+`e77d2d1c8:scratch/work-on-another-machine-name.md`, this heading.
 
 October 8 comment composition (`7e56c01fd`) replaces direct peer row writes with the common
 comment acquisition and authored-delivery owners. Raw provider observations and
@@ -186,10 +188,19 @@ original acquisition times travel in the journal; imported authorship creates no
 local steer. Authored regressions cover lost replies, later edits, conflicts,
 no echo, migration and execution preservation. Rust execution remains unavailable.
 
-Remaining implementation starts with creation, structured Project fields/order
-and deletion receipts, plus alternate acquisition paths; legacy association and
-Desktop presentation follow. Comments and Task disposition have source composition,
-not composed acceptance. Mixed-provider exchange remains disabled.
+The next bounded implementation is semantic Project content: journal workflow,
+KRs and metric targets through the existing common owner, replacing the raw
+Markdown winner and separately ordered workflow in the same diff. This gap affects
+local-only concurrent edits too; independent KR and target changes can currently
+replace each other. Acceptance needs two stores retaining both changes and the
+losing same-field edit, plus common receipts when Linear is connected. This is an
+implementation order, not new product scope or completed behavior.
+
+Creation/link, order and deletion receipts, alternate acquisition paths, legacy
+association and Desktop presentation still follow. Comments and Task disposition
+have source composition, not composed acceptance. Mixed-provider exchange remains
+disabled until these owners compose; the existing common writer is available and
+is not a dependency blocker.
 
 The owned October 8 sync integrates pinned parent `ffe986160`, including
 `078a6642e`'s gate fixture/DTO repairs and reported Linux migration, native/public
@@ -405,6 +416,11 @@ provenance gap; revise it with the completed composition, not as a product limit
    `TESTING.md` assigns it to Linux because macOS ignores the fixture CA setting.
    That public lifetime coverage is reusable without a second Linear harness;
    it neither exercises Git peers nor replaces the two-store/disposable-ref cases.
+   Ordinary checkpoint PR CI skips product suites while scratch is present
+   (`TESTING.md`); publication alone cannot supply the deferred checks. A capable
+   isolated gate must execute the peer candidate, or CI must demonstrably run its
+   suites. No scratch deletion, landing or installation is authorized just to obtain
+   a green check. Headless Desktop tests remain distinct from review judgment.
    No publication, landing or installation has occurred in this implementation pass.
 
 ## Committed integration boundary — 2026-10-08
@@ -464,15 +480,13 @@ Infrastructure child memory exists in this checkout.
 7. Replace PR copy and create a walkthrough of final behavior and evidence;
    publish #1491 for Jack Heart's review and stop without landing.
 
-Check (October 8 conflict-reader reduction): `cargo fmt --all -- --check`, `git diff --check` and the source-extracted conflict query against released SQL + both drafts pass; `cargo test -p loopflow --lib importing_one_destination_does_not_clear_another_destinations_conflicts` and `cargo clippy --all-targets -- -D warnings` each time out at 120 seconds before test/lint results; capable gate/CI owns executable acceptance. Prior public-status, comment SQL and timeout evidence: `b9f88eafd:scratch/work-on-another-machine-name.md`.
+Check (October 8 realign, prose only): `git diff --check` and `lf context --skill realign` pass; Rust execution remains deferred to a capable isolated gate/CI, not rerun after unchanged build-script startup timeouts.
 
-Both build-script children again stalled at `_dyld_start` with 96 KiB footprints,
-not at a Cargo lock or in Rust compilation. Samples:
-`/tmp/loo412-destination-build-sample.txt` and
-`/tmp/loo412-destination-clippy-sample.txt`. Earlier fresh-inode reproduction and
-successful codesign verification are retained in the same Git reference. This
-identifies the stall boundary, not its cause; no security settings or installed
-binaries changed.
+Prior fmt and source-extracted SQL passes, focused-test/Clippy timeouts and their
+startup samples are preserved at `e77d2d1c8:scratch/work-on-another-machine-name.md`.
+They locate the stall before build-script entry, not its cause or a Rust failure.
+The locally available upstream `04a4a296b` records the same startup boundary in
+unrelated installer verification; it supplies no repair or passing peer result.
 Historical Flow `93d4d4f6-4723-4027-951b-b3aee2e696a2` still retains realign
 step `e94edd38-2a26-4047-9650-41a65ab814f7` without a recorded exit, confirmed
 by `lf flow show --processes` on October 8. No exit or replacement authority is
